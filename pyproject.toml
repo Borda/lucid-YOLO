@@ -85,7 +85,7 @@ max-returns = 6
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src"]
+files = ["src", "scripts"]
 mypy_path = "src"
 warn_unreachable = true
 
