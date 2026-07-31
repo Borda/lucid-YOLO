@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """lit-yolo: independent PyTorch Lightning reproduction of the YOLO26 methods.
 
 Implements the detection, instance-segmentation, and oriented-detection methods

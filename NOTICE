@@ -1,0 +1,19 @@
+lit-yolo
+Copyright 2026 Jirka Borovec
+
+This product is an independent, from-scratch implementation of the real-time
+detection, instance-segmentation, and oriented-detection methods described in
+the Ultralytics YOLO26 paper (arXiv:2606.03748), built on PyTorch Lightning
+and licensed under the Apache License, Version 2.0.
+
+"YOLO" refers to the family of real-time object detectors originated by
+Joseph Redmon et al., "You Only Look Once: Unified, Real-Time Object
+Detection" (arXiv:1506.02640, CVPR 2016), whose original Darknet
+implementation is MIT-licensed. The term is used here as a model-family
+category name, consistent with a decade of multi-party usage (YOLOX, YOLOv6,
+YOLOv7/v9, PP-YOLOE, YOLO-NAS, and others).
+
+This project is not affiliated with, endorsed by, or derived from Ultralytics
+or its codebase. No Ultralytics source code, configuration files, or model
+weights were consulted or used at any point. The clean-room provenance record
+lives in docs/PROVENANCE.md.
