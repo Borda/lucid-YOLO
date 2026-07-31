@@ -1,0 +1,109 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lit-yolo"
+version = "0.0.1.dev0"
+description = "Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, and oriented-detection methods described in the YOLO26 paper (arXiv:2606.03748)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Jirka Borovec" }]
+keywords = ["object-detection", "instance-segmentation", "oriented-detection", "pytorch-lightning", "reproduction"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "torch>=2.4",
+  "lightning[pytorch-extra]>=2.4",
+  "torchvision>=0.19",
+  "pycocotools>=2.0.7",
+  "pyyaml>=6.0",
+  "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "fvcore>=0.1.5",
+  "shapely>=2.0",
+  "pre-commit>=3.7",
+  "types-PyYAML",
+  "fuse-augmentations @ git+https://github.com/Borda/fuse-augmentations.git@5834dc5ed5a245f9a7477ab326c307fc1a279c2b",
+]
+
+[project.urls]
+Homepage = "https://github.com/Borda/lit-YOLOs"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+lit_yolo = ["py.typed"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W",    # pycodestyle
+  "F",         # pyflakes
+  "I",         # isort
+  "UP",        # pyupgrade
+  "B",         # bugbear
+  "SIM",       # simplify
+  "PL",        # pylint
+  "C90",       # mccabe complexity
+  "RUF",       # ruff-specific
+]
+ignore = [
+  "PLR2004",   # magic values in tests / tensor shapes are idiomatic
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.pylint]
+max-args = 12
+max-branches = 12
+max-statements = 50
+max-returns = 6
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR0913"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+mypy_path = "src"
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["pycocotools.*", "fvcore.*", "torchvision.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+  "gpu: needs an accelerator (MPS/CUDA); excluded from offline unit gate",
+  "data: needs a generated or real dataset on disk",
+]
+
+[tool.coverage.run]
+source = ["lit_yolo"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
