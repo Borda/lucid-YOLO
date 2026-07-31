@@ -14,10 +14,8 @@ setup:
 	$(UV) pip install --python $(PY) -e ".[dev]"
 	$(VENV)/bin/pre-commit install
 
-lint:
-	$(VENV)/bin/ruff check src tests
-	$(VENV)/bin/ruff format --check src tests
-	$(PY) -m mypy
+# All linters (ruff check/format, mypy, hygiene hooks) run through pre-commit.
+lint: precommit
 
 # Offline unit suite: no network, no dataset, no GPU (gpu/data marks excluded).
 test:
@@ -31,7 +29,7 @@ precommit:
 golden:
 	@if [ -f scripts/check_goldens.py ]; then $(PY) scripts/check_goldens.py; else echo "golden harness not yet installed (WP-005) — skipping"; fi
 
-gate: lint precommit test golden
+gate: precommit test golden
 
 # Release-time snapshot of the current goldens (release WPs only, D10).
 freeze-goldens:
