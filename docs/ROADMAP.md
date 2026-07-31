@@ -53,7 +53,7 @@ requires `make gate` green. Status: `todo` · `in-progress` · `done` ·
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 |---|---|---|---|---|---|
-| 024 | `feat(losses): CIoU` | CIoU per R10 (A1), batched, autograd-safe | `test_ciou.py::test_against_closed_form` | 003 | todo |
+| 024 | `feat(losses): CIoU` | CIoU per R10 (A1), batched, autograd-safe | `test_ciou.py::test_against_closed_form` | 003 | done |
 | 025 | `feat(assign): anchor grid and Task-Aligned Assigner` | Centers at (i+0.5)*stride (A11); t = s^1 * u^6 (A2); topk selection | `test_tal.py::test_alignment_and_topk` | 024 | todo |
 | 026 | `feat(assign): STAL surrogate candidate filtering` | Eq. 4–6; per-dimension clamp d<8 -> 16; original box preserved for scoring/regression | `test_stal.py::test_tiny_box_gains_candidates`, `::test_per_dim_clamp`, `::test_targets_unchanged` | 025 | todo |
 | 027 | `feat(losses): detection branch loss` | CIoU + L1 (dfl-gain field, A13) + BCE, TAL-weighted | `test_detection_loss.py::test_components` | 026 | todo |
