@@ -27,7 +27,7 @@ requires `make gate` green. Status: `todo` · `in-progress` · `done` ·
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 |---|---|---|---|---|---|
-| 008 | `feat(data): target containers and type-generic transform API` | `Targets` dataclass (boxes, labels, masks, rboxes); transform protocol over every target type | `tests/data/test_targets.py` | 007 | todo |
+| 008 | `feat(data): target containers and type-generic transform API` | `Targets` dataclass (boxes, labels, masks, rboxes); transform protocol over every target type | `tests/data/test_targets.py` | 007 | done |
 | 009 | `feat(data): letterbox resize with exact inverse` | Aspect-preserving pad/resize + inverse map (A10) | `test_letterbox.py::test_roundtrip_subpixel` | 008 | todo |
 | 010 | `feat(data): random affine for boxes and masks` | scale/translate/shear/degrees per Table S3; joint box+polygon transform, clipping | `test_affine.py::test_box_mask_consistency` | 009 | todo |
 | 011 | `feat(data): mosaic assembly` | 4-image mosaic (R9), border handling, target remap | `test_mosaic.py::test_bounds_and_counts` | 010 | todo |
