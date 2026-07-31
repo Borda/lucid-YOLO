@@ -1,0 +1,19 @@
+{
+  "producer": "scripts.golden_producers:fixture_checksums",
+  "tolerances": {
+    "detseg_num_images": 0.0,
+    "detseg_num_annotations": 0.0,
+    "detseg_annotation_sha": 0.0,
+    "obb_num_images": 0.0,
+    "obb_num_annotations": 0.0,
+    "obb_annotation_sha": 0.0
+  },
+  "values": {
+    "detseg_num_images": 16.0,
+    "detseg_num_annotations": 93.0,
+    "detseg_annotation_sha": 3732643919.0,
+    "obb_num_images": 8.0,
+    "obb_num_annotations": 44.0,
+    "obb_annotation_sha": 1156023354.0
+  }
+}
