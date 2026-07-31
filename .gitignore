@@ -36,6 +36,9 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Generated synthetic test fixtures (WP-007, A26) — regenerated on demand, never committed
+tests/fixtures/_generated/
+
 # Unit test / coverage reports
 htmlcov/
 .tox/
