@@ -7,7 +7,7 @@ UV        := uv
 MINOR     ?=
 TASK      ?= det
 
-.PHONY: setup lint test gate golden freeze-goldens overfit check-data clean
+.PHONY: setup lint test precommit gate golden freeze-goldens overfit check-data clean
 
 setup:
 	$(UV) venv --python 3.11 $(VENV)
@@ -24,11 +24,14 @@ test:
 	@$(PY) -m pytest -m "not gpu and not data" --cov=lit_yolo --cov-report=term; \
 	status=$$?; if [ $$status -eq 5 ]; then echo "no tests collected yet — passing (pre WP-002)"; exit 0; else exit $$status; fi
 
+precommit:
+	$(VENV)/bin/pre-commit run --all-files
+
 # Golden gate suite + frozen-golden regression (harness lands in WP-005).
 golden:
 	@if [ -f scripts/check_goldens.py ]; then $(PY) scripts/check_goldens.py; else echo "golden harness not yet installed (WP-005) — skipping"; fi
 
-gate: lint test golden
+gate: lint precommit test golden
 
 # Release-time snapshot of the current goldens (release WPs only, D10).
 freeze-goldens:
