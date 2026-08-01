@@ -17,7 +17,7 @@ Status legend: `open` = code not yet landed · `active` = in the codebase ·
 | A3 | C3k2/C2PSA sub-block internals beyond Fig. S2 | Bottleneck/PSA internals per YOLO11 lineage | R11, R1 Fig. S2 | Param/FLOP gate (Phase 2) | open |
 | A4 | SPPF shortcut exact form | Input added to output of pooling stack | R3 sec. 4 | Param gate; ablate if mismatch | open |
 | A5 | Newton–Schulz iteration count | 5 | R7, R8 | Orthogonality unit test | open |
-| A6 | Muon step scaling | Shape-based scaling per public write-up | R8 | Toy convergence test | open |
+| A6 | Muon step scaling | 0.2 * sqrt(max(A,B)) update-RMS scaling | R7 Eq. 4 (verbatim: 0.2 * O * sqrt(max(A,B))) | Toy convergence test | active |
 | A7 | muon_w+sgd_w != 1 semantics | Independent additive gains | R1 Tables S4/S7 | Documented; sensitivity note | open |
 | A8 | LR schedule shape (lrf semantics) | Linear decay to final LR = lr0*lrf | gap; convention widely restated in third-party YOLO-application literature | Trend-neutral by construction — identical schedule in all paired B-tier runs | open |
 | A9 | One-to-one output tuple (...,6) | [x1,y1,x2,y2,score,class]; seg appends K coefficients | R1 sec. 3.2.1 | Eval round-trip test | open |
@@ -38,6 +38,7 @@ Status legend: `open` = code not yet landed · `active` = in the codebase ·
 | A24 | Rotated eval IoU | Exact polygon intersection (val protocol) | R18 devkit convention | Oracle test vs brute force | open |
 | A25 | STAL/TAL containment for rotated GT | Point-in-rotated-rect; clamp on rotated (w,h) | R1 sec. 3.3.3 (generic formulation) | Synthetic rotated assignment cases | open |
 | A26 | Blueprint prescribes hand-annotated permissive fixture images; none exist | Test fixtures AND [DATA]-WP stand-ins are generated synthetically with fuse-augmentations (R21), seeded, byte-identical per seed; det/seg 16 scenes with boxes+polygons, OBB rotated scenes. Real COCO/DOTA remain required for tier runs (Phases 6–8); synthetic stand-ins never substitute for tier acceptance | R21 | `tests/fixtures/test_fixtures_load.py`; determinism test (same seed = identical bytes) | active |
+| A27 | MuSGD hybrid: momentum-state sharing and Nesterov placement unspecified | one momentum buffer per param; both branch updates derived from Nesterov-adjusted g + mu*m; Muon branch per R7 Eq. 4 scaling | R1 3.3.1; R7 Eq. 4; R8 | WP-033 toy convergence golden; Tier B MuSGD-vs-SGD trend | active |
 
 ## Deviation notes
 
