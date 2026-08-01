@@ -34,7 +34,7 @@ same commit that completes its WP.
 | 011 | `feat(data): mosaic assembly` | 4-image mosaic (R9), border handling, target remap | `test_mosaic.py::test_bounds_and_counts` | 010 | ✅ |
 | 012 | `feat(data): mixup and copy-paste` | Table S3 probabilities, scale-aware policy | `test_mixup_copypaste.py` | 011 | ✅ |
 | 013 | `feat(data): HSV jitter and horizontal flip` | hsv_h/s/v, fliplr=0.5 with target mirroring | `test_photometric.py` | 010 | ✅ |
-| 014 | `feat(data): COCO dataset and LightningDataModule` [DATA] | Detection + polygon parsing, scale-aware augmentation policy, `make check-data` | `test_coco.py` (fixture-backed) + `check-data` on real COCO | 012,013 | ⬜ |
+| 014 | `feat(data): COCO dataset and LightningDataModule` [DATA] | Detection + polygon parsing, scale-aware augmentation policy, `make check-data` | `test_coco.py` (fixture-backed) + `check-data` on real COCO | 012,013 | ✅ |
 | 015 | `test(data): round-trip goldens and debug visualizer` | Augmented-batch checksums; annotated grid dump script | `goldens/data_checksums.json` frozen | 014 | ⬜ |
 
 ## Phase 2 — Architecture (WP-016…023)

@@ -6,6 +6,7 @@ PY        := $(VENV)/bin/python
 UV        := uv
 MINOR     ?=
 TASK      ?= det
+DATA_ROOT ?=
 
 .PHONY: setup lint test precommit gate golden freeze-goldens overfit check-data clean
 
@@ -44,7 +45,8 @@ overfit:
 
 # Real-dataset layout validation (WP-014; synthetic stand-in per docs/ASSUMPTIONS.md A26).
 check-data:
-	@echo "check-data lands with WP-014"; exit 1
+	@test -n "$(DATA_ROOT)" || { echo "usage: make check-data DATA_ROOT=/path/to/coco"; exit 1; }
+	$(PY) scripts/check_data.py --data-root $(DATA_ROOT)
 
 clean:
 	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache .coverage build dist src/*.egg-info
