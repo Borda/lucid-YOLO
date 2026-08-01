@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Release
+
+# Fires only on a 0.x version tag (ADR-002 — no 1.0 is ever tagged). The guard
+# below re-runs the full gate and refuses the tag if it is red, if the tag is
+# not a v0.MINOR.PATCH string, or if CHANGELOG.md lacks its version section.
+#
+# Golden freezing (`make freeze-goldens MINOR=0.N`) is performed by the release
+# work-package commit itself, not by this workflow — the frozen snapshot must be
+# reviewed and committed before the tag is pushed. Publication to PyPI is a
+# [HUMAN] decision and is deliberately absent here: this workflow only builds and
+# uploads the distributions as inspectable artifacts.
+
+on:
+  push:
+    tags:
+      - "v0.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: Create venv and install dev extras
+        run: |
+          uv venv --python 3.11 .venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+      - name: Release guard (re-runs the full gate)
+        run: .venv/bin/python scripts/release_guard.py --tag "${{ github.ref_name }}"
+      - name: Build sdist and wheel
+        run: uv build --out-dir dist
+      - name: Upload distributions as artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lit-yolo-${{ github.ref_name }}
+          path: dist/*
+          if-no-files-found: error

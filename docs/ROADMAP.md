@@ -20,7 +20,7 @@ requires `make gate` green. Status: `todo` · `in-progress` · `done` ·
 | 003 | `docs(policy): seed PROVENANCE, ASSUMPTIONS, DECISIONS, AGENTS, ROADMAP` | Source allowlist, register A1–A26, D1–D12 + ADR-001/002/003, AGENTS.md, this file | `tests/meta/test_docs_present.py` | 001 | done |
 | 004 | `ci(pr): lint, types, tests, coverage, license audit` | PR workflow; dependency-license audit; commit-trailer validator | Workflow green; negative test: AGPL dev-dep rejected | 002,003 | done |
 | 005 | `ci(gates): golden harness and frozen-golden regression` | `goldens/` loader, tolerance comparison, `make gate`, `goldens/frozen/` semantics | `tests/meta/test_golden_harness.py`; tampered golden fails | 004 | done |
-| 006 | `ci(release): tag-gated release workflow and CHANGELOG` | `release.yml`; CHANGELOG scaffold; `make freeze-goldens` | Negative test: tag on red commit refused | 005 | todo |
+| 006 | `ci(release): tag-gated release workflow and CHANGELOG` | `release.yml`; CHANGELOG scaffold; `make freeze-goldens` | Negative test: tag on red commit refused | 005 | done |
 | 007 | `test(fixtures): micro dataset with boxes, polygons, rotated scenes` | Seeded synthetic scenes via fuse-augmentations (A26): det/seg boxes+polygons, rotated scenes; loaders | `tests/fixtures/test_fixtures_load.py` | 003 | done |
 
 ## Phase 1 — Data pipeline (WP-008…015)
