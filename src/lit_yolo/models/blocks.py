@@ -17,8 +17,10 @@ Provenance: R11 (arXiv:2501.13400), R1 Fig. S2. Assumptions: A3.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import cast
 
+import torch
 from torch import Tensor, nn
 
 
@@ -213,3 +215,162 @@ class Bottleneck(nn.Module):
         """
         y = cast(Tensor, self.cv2(self.cv1(x)))
         return x + y if self.add_shortcut else y
+
+
+class C3k(nn.Module):
+    """CSP block with three 1x1 fusion convolutions and ``n`` inner bottlenecks.
+
+    The heavier CSP variant used for the deeper backbone/neck stages. Two 1x1
+    convolutions (``cv1``, ``cv2``) split the input into two ``hidden``-channel
+    streams; ``cv1``'s stream is refined by ``n`` sequential :class:`Bottleneck`
+    blocks (kernel sizes ``(3, 3)``, internal expansion ``1.0`` so the bottleneck
+    keeps full width), then the two streams are concatenated and fused back to
+    ``out_channels`` by a third 1x1 convolution (``cv3``).
+
+    Args:
+        in_channels: Number of input channels.
+        out_channels: Number of output channels.
+        n: Number of inner bottlenecks on the refined stream. Defaults to 1.
+        shortcut: Enable the residual identity inside each inner bottleneck.
+            Defaults to ``True``.
+        expansion: Hidden-channel ratio ``int(out_channels * expansion)`` for the
+            two split streams. Defaults to ``0.5``.
+
+    Examples:
+        >>> import torch
+        >>> block = C3k(64, 64, n=2).eval()
+        >>> block(torch.zeros(1, 64, 8, 8)).shape
+        torch.Size([1, 64, 8, 8])
+        >>> len(block.blocks)  # n inner bottlenecks
+        2
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        n: int = 1,
+        shortcut: bool = True,
+        expansion: float = 0.5,
+    ) -> None:
+        super().__init__()
+        hidden_channels = int(out_channels * expansion)
+        self.cv1 = ConvBNAct(in_channels, hidden_channels, 1)
+        self.cv2 = ConvBNAct(in_channels, hidden_channels, 1)
+        self.blocks = nn.Sequential(
+            *(
+                Bottleneck(hidden_channels, hidden_channels, shortcut=shortcut, kernel_sizes=(3, 3), expansion=1.0)
+                for _ in range(n)
+            )
+        )
+        self.cv3 = ConvBNAct(2 * hidden_channels, out_channels, 1)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Split into two streams, refine one, then concatenate and fuse.
+
+        Args:
+            x: Input tensor of shape ``(N, in_channels, H, W)``.
+
+        Returns:
+            Tensor of shape ``(N, out_channels, H, W)``.
+        """
+        refined = cast(Tensor, self.blocks(self.cv1(x)))
+        return cast(Tensor, self.cv3(torch.cat((refined, self.cv2(x)), dim=1)))
+
+
+class C3k2(nn.Module):
+    """Fast CSP block with densely chained inner units (YOLO11 lineage).
+
+    The workhorse composite of the backbone and neck. A single 1x1 convolution
+    (``cv1``) lifts the input to ``2 * hidden`` channels, split into two
+    ``hidden``-channel halves. The second half is fed through ``n`` inner units
+    with dense CSP chaining: each unit consumes the most recent tensor and its
+    output is appended, so the pre-fusion concatenation accumulates
+    ``(2 + n) * hidden`` channels (both original halves plus every unit output).
+    A final 1x1 convolution (``cv2``) fuses that stack to ``out_channels``.
+
+    The inner-unit type is selected by ``c3k``: a plain :class:`Bottleneck`
+    (internal expansion ``1.0``) when ``False``, or a nested :class:`C3k`
+    (``n=2``, ``expansion=0.5``) when ``True``. ``inner_block_factory`` overrides
+    this selection entirely — the seam by which the attention-augmented neck
+    variant (a bottleneck followed by a ``PSABlock``) is introduced without
+    touching this class.
+
+    Args:
+        in_channels: Number of input channels.
+        out_channels: Number of output channels.
+        n: Number of densely chained inner units. Defaults to 1.
+        e: Hidden-channel ratio ``int(out_channels * e)``; early backbone stages
+            use ``0.25``. Defaults to ``0.5``.
+        c3k: Use nested :class:`C3k` inner units instead of :class:`Bottleneck`.
+            Defaults to ``False``.
+        shortcut: Enable the residual identity inside each inner unit. Defaults
+            to ``True``.
+        inner_block_factory: Optional ``(hidden_channels, shortcut) -> Module``
+            builder that replaces the default ``c3k`` selection for every inner
+            unit. Defaults to ``None`` (use the built-in selection).
+
+    Examples:
+        >>> import torch
+        >>> block = C3k2(64, 128, n=2, c3k=False).eval()
+        >>> block(torch.zeros(1, 64, 8, 8)).shape
+        torch.Size([1, 128, 8, 8])
+        >>> block.cv2.conv.in_channels  # (2 + n) * hidden, hidden = int(128 * 0.5)
+        256
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        n: int = 1,
+        e: float = 0.5,
+        c3k: bool = False,
+        shortcut: bool = True,
+        inner_block_factory: Callable[[int, bool], nn.Module] | None = None,
+    ) -> None:
+        super().__init__()
+        hidden_channels = int(out_channels * e)
+        self.hidden_channels = hidden_channels
+        self.cv1 = ConvBNAct(in_channels, 2 * hidden_channels, 1)
+        make_inner = inner_block_factory or self._default_inner_factory(c3k)
+        self.blocks = nn.ModuleList(make_inner(hidden_channels, shortcut) for _ in range(n))
+        self.cv2 = ConvBNAct((2 + n) * hidden_channels, out_channels, 1)
+
+    @staticmethod
+    def _default_inner_factory(c3k: bool) -> Callable[[int, bool], nn.Module]:
+        """Return the built-in inner-unit builder selected by ``c3k``.
+
+        Args:
+            c3k: Select nested :class:`C3k` units when ``True``, otherwise plain
+                :class:`Bottleneck` units.
+
+        Returns:
+            A ``(hidden_channels, shortcut) -> Module`` factory.
+
+        Examples:
+            >>> factory = C3k2._default_inner_factory(c3k=False)
+            >>> type(factory(32, True)).__name__
+            'Bottleneck'
+        """
+
+        def factory(hidden_channels: int, shortcut: bool) -> nn.Module:
+            if c3k:
+                return C3k(hidden_channels, hidden_channels, n=2, shortcut=shortcut, expansion=0.5)
+            return Bottleneck(hidden_channels, hidden_channels, shortcut=shortcut, expansion=1.0)
+
+        return factory
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Split, densely chain the inner units, then concatenate and fuse.
+
+        Args:
+            x: Input tensor of shape ``(N, in_channels, H, W)``.
+
+        Returns:
+            Tensor of shape ``(N, out_channels, H, W)``.
+        """
+        y: list[Tensor] = list(self.cv1(x).chunk(2, dim=1))
+        for block in self.blocks:
+            y.append(cast(Tensor, block(y[-1])))
+        return cast(Tensor, self.cv2(torch.cat(y, dim=1)))
