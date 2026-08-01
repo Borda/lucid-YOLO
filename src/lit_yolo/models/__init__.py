@@ -13,6 +13,12 @@ from lit_yolo.models.blocks import (
     PSABlock,
     SpatialAttention,
 )
+from lit_yolo.models.heads import (
+    DualDetectionHead,
+    DualHeadOutput,
+    decode_ltrb,
+    o2o_topk,
+)
 from lit_yolo.models.neck import DetectionNeck
 
 __all__ = [
@@ -25,6 +31,10 @@ __all__ = [
     "DepthwiseConv",
     "DetectionBackbone",
     "DetectionNeck",
+    "DualDetectionHead",
+    "DualHeadOutput",
     "PSABlock",
     "SpatialAttention",
+    "decode_ltrb",
+    "o2o_topk",
 ]
