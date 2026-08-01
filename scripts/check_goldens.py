@@ -13,6 +13,11 @@ Frozen files travel the identical comparison path, so a release's frozen goldens
 staying green *is* the frozen-golden regression: current code must still satisfy
 every value snapshotted at every past release.
 
+The ``goldens/gpu/`` subtree is **not** part of the default discovery: those
+goldens' producers retrain a model on an accelerator over a generated dataset, so
+they would break an offline run. They are recomputed only with ``--include-gpu``
+(see :func:`discover_gpu_goldens`), which the default ``make gate`` never passes.
+
 Golden file schema::
 
     {
@@ -123,6 +128,36 @@ def discover_goldens(goldens_dir: Path) -> list[Path]:
     top = goldens_dir.glob("*.json")
     frozen = (goldens_dir / "frozen").rglob("*.json")
     return sorted(set(top) | set(frozen))
+
+
+def discover_gpu_goldens(goldens_dir: Path) -> list[Path]:
+    """Discover the accelerator-gated goldens under ``goldens_dir/gpu``.
+
+    These live in a ``gpu/`` subdirectory that :func:`discover_goldens` deliberately
+    does **not** glob, so the default offline harness never recomputes them (their
+    producers need an accelerator and a generated dataset). They are checked only
+    when the caller explicitly opts in via ``--include-gpu``.
+
+    Args:
+        goldens_dir: The directory holding the ``gpu/`` subtree (typically
+            ``<repo>/goldens``).
+
+    Returns:
+        Sorted list of ``gpu/*.json`` golden paths; empty if the subdirectory is
+        absent.
+
+    Examples:
+        ```pycon
+        >>> from scripts.check_goldens import discover_gpu_goldens, DEFAULT_GOLDENS_DIR
+        >>> all(p.parent.name == "gpu" for p in discover_gpu_goldens(DEFAULT_GOLDENS_DIR))
+        True
+
+        ```
+    """
+    gpu_dir = goldens_dir / "gpu"
+    if not gpu_dir.is_dir():
+        return []
+    return sorted(gpu_dir.glob("*.json"))
 
 
 def resolve_producer(spec: str) -> Producer:
@@ -257,11 +292,18 @@ def check_golden(path: Path) -> GoldenResult:
     return GoldenResult(path, passed=all(c.passed for c in comparisons), comparisons=comparisons)
 
 
-def check_all(goldens_dir: Path = DEFAULT_GOLDENS_DIR) -> list[GoldenResult]:
+def check_all(goldens_dir: Path = DEFAULT_GOLDENS_DIR, include_gpu: bool = False) -> list[GoldenResult]:
     """Discover and check every golden under ``goldens_dir``.
+
+    By default only the offline goldens (top-level and ``frozen/``) are checked, so
+    a run on a machine with no accelerator and no generated dataset stays green.
+    With ``include_gpu`` the ``gpu/`` subtree is appended — those producers retrain a
+    model on the local accelerator (see :func:`discover_gpu_goldens`).
 
     Args:
         goldens_dir: The directory to scan (defaults to ``<repo>/goldens``).
+        include_gpu: Also check the accelerator-gated ``gpu/*.json`` goldens.
+            Defaults to ``False``.
 
     Returns:
         One :class:`GoldenResult` per discovered golden, in discovery order.
@@ -274,7 +316,10 @@ def check_all(goldens_dir: Path = DEFAULT_GOLDENS_DIR) -> list[GoldenResult]:
 
         ```
     """
-    return [check_golden(path) for path in discover_goldens(goldens_dir)]
+    paths = discover_goldens(goldens_dir)
+    if include_gpu:
+        paths = paths + discover_gpu_goldens(goldens_dir)
+    return [check_golden(path) for path in paths]
 
 
 def format_result(result: GoldenResult, goldens_dir: Path) -> str:
@@ -317,9 +362,14 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_GOLDENS_DIR,
         help="directory holding goldens and the frozen/ subtree (default: <repo>/goldens)",
     )
+    parser.add_argument(
+        "--include-gpu",
+        action="store_true",
+        help="also recompute the accelerator-gated goldens/gpu/*.json (retrains models; needs an accelerator)",
+    )
     args = parser.parse_args(argv)
 
-    results = check_all(args.goldens_dir)
+    results = check_all(args.goldens_dir, include_gpu=args.include_gpu)
     if not results:
         print(f"no goldens found under {args.goldens_dir}")
         return 1

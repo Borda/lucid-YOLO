@@ -80,7 +80,7 @@ same commit that completes its WP.
 | 037 | `feat(ptl): EMA callback` | Decay schedule, checkpointed, used for eval | `test_ema.py::test_shadow_updates` | 034 | ✅ |
 | 038 | `feat(ptl): LightningCLI entry and experiment configs` | `configs/` tier matrix (ADR-001); resolved config logged per run | `test_cli.py::test_yaml_roundtrip`; all configs dry-parse | 035,036,037 | ✅ |
 | 039 | `feat(ptl): deterministic checkpoint and resume` | Seeded resume reproduces the loss trajectory within tolerance | `test_resume.py::test_trajectory_match` | 038 | ✅ |
-| 040 | `test(lit): overfit-100 integration golden` [GPU] | n-scale on a 100-image subset -> >=0.95 recall at IoU 0.5 on train | `goldens/overfit_micro_det.json` frozen | 039 | ⬜ |
+| 040 | `test(lit): overfit-100 integration golden` [GPU] | n-scale on a 100-image subset -> >=0.95 recall at IoU 0.5 on train | `goldens/overfit_micro_det.json` frozen | 039 | ✅ |
 
 ## Phase 6 — Evaluation, release 0.1.0 (WP-041…046)
 

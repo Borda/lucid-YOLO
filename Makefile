@@ -40,8 +40,10 @@ freeze-goldens:
 	cp goldens/*.json goldens/frozen/$(MINOR)/
 
 # Overfit-100 integration goldens (WP-040/054/064; needs accelerator).
+# Trains an n-scale detector on a fixed ~100-image synthetic slice and gates on
+# train recall@0.5 >= 0.95; add FREEZE=1 to (re)write goldens/gpu/overfit_micro_det.json.
 overfit:
-	@echo "overfit-$(TASK) integration entry lands with WP-040"; exit 1
+	$(PY) scripts/overfit_micro.py --task $(TASK) $(if $(FREEZE),--freeze,)
 
 # Real-dataset layout validation (WP-014; synthetic stand-in per docs/ASSUMPTIONS.md A26).
 check-data:
