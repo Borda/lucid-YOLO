@@ -47,11 +47,11 @@ def test_roadmap_wp_ids_unique_and_complete() -> None:
 
 
 def test_roadmap_statuses_valid() -> None:
-    """Every roadmap row ends in a recognized status value."""
+    """Every roadmap row ends in a recognized status icon."""
     text = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")
     rows = re.findall(r"^\| (\d{3}) \|.*\| (\S+) \|$", text, flags=re.MULTILINE)
     assert len(rows) == 67
-    bad = [(wp, status) for wp, status in rows if status not in {"todo", "in-progress", "done", "blocked"}]
+    bad = [(wp, status) for wp, status in rows if status not in {"⬜", "🔄", "✅", "⛔"}]
     assert not bad, f"invalid status values: {bad}"
 
 
