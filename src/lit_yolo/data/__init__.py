@@ -6,6 +6,7 @@ from __future__ import annotations
 from lit_yolo.data.affine import AffineParams, RandomAffine
 from lit_yolo.data.augment import HorizontalFlip, HSVJitter, hsv_to_rgb, rgb_to_hsv
 from lit_yolo.data.coco import CocoDetectionDataset, build_scale_policy
+from lit_yolo.data.download import download_coco
 from lit_yolo.data.letterbox import Letterbox
 from lit_yolo.data.mixup import CopyPaste, Mixup
 from lit_yolo.data.mosaic import MosaicAssembly
@@ -33,6 +34,7 @@ __all__ = [
     "apply_affine_to_points",
     "boxes_from_polygons",
     "build_scale_policy",
+    "download_coco",
     "hsv_to_rgb",
     "rgb_to_hsv",
 ]

@@ -42,6 +42,7 @@ dev = [
 
 [project.scripts]
 lit-yolo = "lit_yolo.ptl.cli:main"
+lit-yolo-download = "lit_yolo.data.download:main"
 
 [project.urls]
 Homepage = "https://github.com/Borda/lit-YOLOs"
