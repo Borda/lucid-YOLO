@@ -4,5 +4,6 @@
 from __future__ import annotations
 
 from lit_yolo.ptl.datamodule import DetectionDataModule, collate_detection
+from lit_yolo.ptl.module import DetectionLitModule, pad_targets
 
-__all__ = ["DetectionDataModule", "collate_detection"]
+__all__ = ["DetectionDataModule", "DetectionLitModule", "collate_detection", "pad_targets"]
