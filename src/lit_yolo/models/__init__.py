@@ -13,6 +13,7 @@ from lit_yolo.models.blocks import (
     PSABlock,
     SpatialAttention,
 )
+from lit_yolo.models.neck import DetectionNeck
 
 __all__ = [
     "C2PSA",
@@ -23,6 +24,7 @@ __all__ = [
     "ConvBNAct",
     "DepthwiseConv",
     "DetectionBackbone",
+    "DetectionNeck",
     "PSABlock",
     "SpatialAttention",
 ]
