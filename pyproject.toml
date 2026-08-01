@@ -40,6 +40,9 @@ dev = [
   "fuse-augmentations @ git+https://github.com/Borda/fuse-augmentations.git@5834dc5ed5a245f9a7477ab326c307fc1a279c2b",
 ]
 
+[project.scripts]
+lit-yolo = "lit_yolo.ptl.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/Borda/lit-YOLOs"
 
