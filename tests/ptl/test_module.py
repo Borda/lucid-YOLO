@@ -26,7 +26,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import torch
-from lightning.pytorch import Trainer
+from pytorch_lightning import Trainer
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 

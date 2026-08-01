@@ -24,7 +24,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import torch
-from lightning.pytorch import Callback, LightningModule, Trainer
+from pytorch_lightning import Callback, LightningModule, Trainer
 from torch import Tensor, nn
 
 from lit_yolo.ptl.callbacks import CloseMosaicCallback

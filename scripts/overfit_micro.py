@@ -49,7 +49,7 @@ import torch
 import yaml
 from fuse_augmentations.data import generate_dataset  # type: ignore[import-untyped]
 from fuse_augmentations.data.config import SplitRatios  # type: ignore[import-untyped]
-from lightning.pytorch import Trainer, seed_everything
+from pytorch_lightning import Trainer, seed_everything
 from torch import Tensor
 
 from lit_yolo.assign import make_anchor_points

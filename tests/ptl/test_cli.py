@@ -104,7 +104,7 @@ def test_yaml_roundtrip(config_path: Path) -> None:
     """Resolved config -> YAML -> re-parse -> YAML is a fixed point for each config.
 
     The dumped config is the reproducibility artifact
-    (:class:`~lightning.pytorch.cli.SaveConfigCallback` writes it per run); parsing
+    (:class:`~pytorch_lightning.cli.SaveConfigCallback` writes it per run); parsing
     it back through the same parser and re-dumping must reproduce it byte-for-byte.
     """
     cli = _config_cli(config_path)

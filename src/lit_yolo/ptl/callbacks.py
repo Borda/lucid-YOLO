@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Training-schedule Lightning callbacks for the detection loop (WP-036, WP-037).
 
-This module hosts the :class:`~lightning.pytorch.callbacks.Callback` s that shape
+This module hosts the :class:`~pytorch_lightning.callbacks.Callback` s that shape
 the training *schedule* rather than the model or the data:
 
 - :class:`CloseMosaicCallback` disables mosaic augmentation for the final
@@ -20,15 +20,15 @@ import math
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import torch
-from lightning.pytorch import Callback
-from lightning.pytorch.utilities import rank_zero_info
+from pytorch_lightning import Callback
+from pytorch_lightning.utilities import rank_zero_info
 
 from lit_yolo.ptl.datamodule import DetectionDataModule
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from lightning.pytorch import LightningModule, Trainer
+    from pytorch_lightning import LightningModule, Trainer
     from torch import Tensor
 
 __all__ = ["CloseMosaicCallback", "EMACallback"]

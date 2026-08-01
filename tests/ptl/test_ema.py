@@ -17,7 +17,7 @@ The module under test is a tiny ``Linear``-free stub carrying one flat parameter
 and a :class:`~torch.nn.BatchNorm1d` so both the parameter and buffer paths are
 exercised; the unit tests drive the callback hooks directly with a dummy trainer
 (the hooks discard the trainer argument), and the integration test wires a real
-:class:`~lightning.pytorch.Trainer` over a synthetic in-memory dataset.
+:class:`~pytorch_lightning.Trainer` over a synthetic in-memory dataset.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import torch
-from lightning.pytorch import LightningModule, Trainer
+from pytorch_lightning import LightningModule, Trainer
 from torch import Tensor, nn
 from torch.utils.data import DataLoader, Dataset
 

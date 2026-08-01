@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """LightningCLI entry for detection experiments (WP-038).
 
-:func:`main` builds a :class:`~lightning.pytorch.cli.LightningCLI` over
+:func:`main` builds a :class:`~pytorch_lightning.cli.LightningCLI` over
 :class:`~lit_yolo.ptl.module.DetectionLitModule` and
 :class:`~lit_yolo.ptl.datamodule.DetectionDataModule`, so a run is launched
 entirely from YAML::
@@ -11,7 +11,7 @@ entirely from YAML::
 or, once the package is installed, through the ``lit-yolo`` console script.
 
 Reproducibility contract:
-    The default :class:`~lightning.pytorch.cli.SaveConfigCallback` is left
+    The default :class:`~pytorch_lightning.cli.SaveConfigCallback` is left
     enabled, so every run writes its **fully resolved** config (``config.yaml``)
     next to the checkpoints — the config that reproduces the run byte-for-byte,
     including the values the ``variant`` link expands (below). Trainer defaults
@@ -38,7 +38,7 @@ Provenance: D9/ADR-001, D12c. Assumptions: A8.
 
 from __future__ import annotations
 
-from lightning.pytorch.cli import ArgsType, LightningArgumentParser, LightningCLI
+from pytorch_lightning.cli import ArgsType, LightningArgumentParser, LightningCLI
 
 from lit_yolo.models.registry import scale_spec
 from lit_yolo.ptl.datamodule import DetectionDataModule

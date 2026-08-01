@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Detection :class:`~lightning.pytorch.LightningModule` with task-conditional losses (WP-034).
+"""Detection :class:`~pytorch_lightning.LightningModule` with task-conditional losses (WP-034).
 
 :class:`DetectionLitModule` composes the WP-020…022 model stack (backbone, neck,
 dual detection head) with the WP-028 :class:`~lit_yolo.losses.dual_loss.DualBranchLoss`
@@ -52,7 +52,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 import torch
-from lightning.pytorch import LightningModule
+from pytorch_lightning import LightningModule
 from torch import Tensor
 
 from lit_yolo.assign import make_anchor_points

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""COCO detection :class:`~lightning.pytorch.LightningDataModule` (WP-014).
+"""COCO detection :class:`~pytorch_lightning.LightningDataModule` (WP-014).
 
 :class:`DetectionDataModule` wires the WP-014 :class:`~lit_yolo.data.coco.CocoDetectionDataset`
 into the Phase 1 augmentation pipeline and exposes train/val
@@ -48,7 +48,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-from lightning.pytorch import LightningDataModule
+from pytorch_lightning import LightningDataModule
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 

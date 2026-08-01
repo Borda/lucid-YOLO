@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 import torch
-from lightning.pytorch import Callback, Trainer
+from pytorch_lightning import Callback, Trainer
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
@@ -29,7 +29,7 @@ from lit_yolo.losses import ProgressiveLossSchedule, progressive_alpha
 from lit_yolo.ptl import DetectionLitModule, collate_detection
 
 if TYPE_CHECKING:
-    from lightning.pytorch import LightningModule
+    from pytorch_lightning import LightningModule
 
 #: Class count of the tiny test head.
 _NUM_CLASSES = 4

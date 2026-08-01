@@ -20,7 +20,7 @@ classifiers = [
 ]
 dependencies = [
   "torch>=2.4",
-  "lightning[pytorch-extra]>=2.4",
+  "pytorch-lightning[extra]>=2.4",
   "torchvision>=0.19",
   "pycocotools>=2.0.7",
   "pyyaml>=6.0",

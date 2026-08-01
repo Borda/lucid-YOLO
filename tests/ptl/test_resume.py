@@ -2,7 +2,7 @@
 """Deterministic checkpoint-and-resume tests for the detection loop (WP-039).
 
 Covers the DoD ``test_trajectory_match`` — a seeded, uninterrupted four-epoch
-:meth:`~lightning.pytorch.Trainer.fit` and a seeded run interrupted at a
+:meth:`~pytorch_lightning.Trainer.fit` and a seeded run interrupted at a
 two-epoch checkpoint then resumed to four epochs produce the **same** per-step
 training-loss trajectory over the post-resume epochs — plus the supporting
 continuity contracts: after resume the trainer's ``global_step`` and
@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 import torch
-from lightning.pytorch import Callback, Trainer, seed_everything
+from pytorch_lightning import Callback, Trainer, seed_everything
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
