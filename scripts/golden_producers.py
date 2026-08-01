@@ -54,6 +54,7 @@ from lit_yolo.assign import (
     surrogate_boxes,
 )
 from lit_yolo.data.coco import CocoDetectionDataset, build_scale_policy
+from lit_yolo.models.build import build_detector, count_flops, count_params
 from lit_yolo.optim import MuSGD
 from lit_yolo.ptl.datamodule import _TrainPipeline
 
@@ -729,3 +730,61 @@ def assignment_cases() -> dict[str, float]:
         ```
     """
     return {**_run_tiny(), **_run_per_dim(), **_run_multi_gt()}
+
+
+#: The five published scale variants, in Table 7 row order.
+_DET_VARIANTS = ("n", "s", "m", "l", "x")
+
+#: Detection class count and input side for the fidelity metrics (R1 Table 7).
+_DET_NUM_CLASSES = 80
+_DET_IMG_SIZE = 640
+
+#: Decimal places the per-variant GFLOP values are rounded to before freezing;
+#: fvcore's MAC trace is deterministic, so this only trims float noise below the
+#: golden's 0.5%-of-value tolerance.
+_DET_GFLOP_DECIMALS = 4
+
+
+def det_params_flops() -> dict[str, float]:
+    """Frozen per-variant parameter and GFLOP metrics for the detector (WP-023).
+
+    Builds each of the five scale variants
+    (:func:`~lit_yolo.models.build.build_detector`) with 80 classes and records,
+    per variant, the exact parameter count of the full model
+    (:func:`~lit_yolo.models.build.count_params`) and the conventional GFLOPs of
+    the deployed NMS-free inference model
+    (:func:`~lit_yolo.models.build.count_flops` on
+    :meth:`~lit_yolo.models.build.Detector.deploy`) at a 640-pixel input. Params
+    are the full checkpoint (both dual-head branches); GFLOPs exclude the
+    training-only one-to-many branch — the R6/YOLOv10 reporting convention that
+    lands all five scales within R1 Table 7 tolerance (see
+    :mod:`lit_yolo.models.build`).
+
+    Every value is produced by building and measuring the live modules — never
+    hand-written — so the golden re-derives from the actual architecture. Param
+    counts are exact integers (byte-stable across platforms); GFLOPs come from
+    fvcore's deterministic MAC trace and are pinned with a small golden tolerance.
+
+    Returns:
+        A mapping of ten metrics: ``<variant>_params`` (exact) and
+        ``<variant>_gflops`` (tolerance-pinned) for each variant ``n``…``x``.
+
+    Examples:
+        ```pycon
+        >>> metrics = det_params_flops()
+        >>> metrics["n_params"]
+        2437552.0
+        >>> metrics["m_gflops"] > 0
+        True
+        >>> det_params_flops() == metrics
+        True
+
+        ```
+    """
+    metrics: dict[str, float] = {}
+    for variant in _DET_VARIANTS:
+        model = build_detector(variant, _DET_NUM_CLASSES)
+        metrics[f"{variant}_params"] = float(count_params(model))
+        gflops = count_flops(model.deploy(), img_size=_DET_IMG_SIZE)
+        metrics[f"{variant}_gflops"] = round(gflops, _DET_GFLOP_DECIMALS)
+    return metrics

@@ -23,6 +23,13 @@ from typing import cast
 import torch
 from torch import Tensor, nn
 
+#: Inner-bottleneck count of the nested :class:`C3k` used by ``C3k2`` when
+#: ``c3k=True`` (assumption A3). Reduced from 2 to 1 by the WP-023 parameter/FLOP
+#: fidelity gate: the depth-2 (``l``/``x``) variants carry two of these nested
+#: units per stage, and ``n=2`` overshot the R1 Table 7 FLOP budget at those
+#: scales — ``n=1`` lands all five within tolerance. See docs/ASSUMPTIONS.md A3.
+_C3K_INNER_UNITS = 1
+
 
 def _same_padding(kernel_size: int, dilation: int = 1) -> int:
     """Return the symmetric padding that keeps spatial size fixed at stride 1.
@@ -332,7 +339,8 @@ class C3k2(nn.Module):
 
     The inner-unit type is selected by ``c3k``: a plain :class:`Bottleneck`
     (internal expansion ``1.0``) when ``False``, or a nested :class:`C3k`
-    (``n=2``, ``expansion=0.5``) when ``True``. ``inner_block_factory`` overrides
+    (``n=`` :data:`_C3K_INNER_UNITS`, ``expansion=0.5``) when ``True``.
+    ``inner_block_factory`` overrides
     this selection entirely — the seam by which the attention-augmented neck
     variant (a bottleneck followed by a ``PSABlock``) is introduced without
     touching this class.
@@ -397,7 +405,7 @@ class C3k2(nn.Module):
 
         def factory(hidden_channels: int, shortcut: bool) -> nn.Module:
             if c3k:
-                return C3k(hidden_channels, hidden_channels, n=2, shortcut=shortcut, expansion=0.5)
+                return C3k(hidden_channels, hidden_channels, n=_C3K_INNER_UNITS, shortcut=shortcut, expansion=0.5)
             return Bottleneck(hidden_channels, hidden_channels, shortcut=shortcut, expansion=1.0)
 
         return factory

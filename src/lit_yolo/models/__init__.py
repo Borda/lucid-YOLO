@@ -13,6 +13,7 @@ from lit_yolo.models.blocks import (
     PSABlock,
     SpatialAttention,
 )
+from lit_yolo.models.build import Detector, build_detector, count_flops, count_params
 from lit_yolo.models.heads import (
     DualDetectionHead,
     DualHeadOutput,
@@ -20,10 +21,12 @@ from lit_yolo.models.heads import (
     o2o_topk,
 )
 from lit_yolo.models.neck import DetectionNeck
+from lit_yolo.models.registry import VARIANTS, ScaleSpec, scale_spec
 
 __all__ = [
     "C2PSA",
     "SPPF",
+    "VARIANTS",
     "Bottleneck",
     "C3k",
     "C3k2",
@@ -31,10 +34,16 @@ __all__ = [
     "DepthwiseConv",
     "DetectionBackbone",
     "DetectionNeck",
+    "Detector",
     "DualDetectionHead",
     "DualHeadOutput",
     "PSABlock",
+    "ScaleSpec",
     "SpatialAttention",
+    "build_detector",
+    "count_flops",
+    "count_params",
     "decode_ltrb",
     "o2o_topk",
+    "scale_spec",
 ]

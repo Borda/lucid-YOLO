@@ -14,13 +14,23 @@ score map and a box-distance map per level:
 
 The two branches share the neck features but own **disjoint** prediction stems;
 neither reads the other's parameters. Each branch, at each of the three levels,
-carries the Fig. S2 stem pair:
+carries the Fig. S2 stem pair — both **depthwise-separable** for a lightweight
+head (the box/cls symmetry is the WP-023 A28 revision; see below):
 
-- **box stem** — ``ConvBNAct(c, c_box, 3)`` -> ``ConvBNAct(c_box, c_box, 3)`` ->
-  a 1x1 convolution to 4 outputs;
-- **class stem** — two depthwise-separable units
+- **box stem** — two depthwise-separable units
   (``DepthwiseConv(·, ·, 3)`` + ``ConvBNAct(·, ·, 1)``) followed by a 1x1
-  convolution to ``num_classes`` outputs.
+  convolution to 4 outputs;
+- **class stem** — two depthwise-separable units followed by a 1x1 convolution
+  to ``num_classes`` outputs.
+
+The stem hidden width is ``max(16, channels // 3)`` for both stems (WP-023
+fidelity gate — see :func:`_stem_width`). The box stem was originally two full
+``3x3`` convolutions at ``channels // 4``, which made it ~3.7x heavier than the
+depthwise-separable class stem despite emitting 4 vs ``num_classes`` channels;
+the WP-023 parameter gate flagged the resulting head as ~7-16x the reference
+budget, so the box stem was rebuilt depthwise-separable and the class stem's
+``max(num_classes, channels // 2)`` floor (which bloated the ``n``/``s`` head)
+was dropped. See docs/ASSUMPTIONS.md A28.
 
 **No DFL** (R1 3.2.2): the box 1x1 emits 4 raw scalars per location — the
 ``ltrb`` distances (left, top, right, bottom) from the anchor centre in stride
@@ -40,7 +50,7 @@ score-ranked ``(B, 300, 6)`` detection tuple ``[x1, y1, x2, y2, score, class]``
 (A9). The full NMS-free E2E decode module lands in WP-041 and reuses
 :func:`o2o_topk`.
 
-Provenance: R1 sec. 3.2.1, R1 sec. 3.2.2, R1 Fig. S2, R6. Assumptions: A3, A9.
+Provenance: R1 sec. 3.2.1, R1 sec. 3.2.2, R1 Fig. S2, R6. Assumptions: A3, A9, A28.
 """
 
 from __future__ import annotations
@@ -61,81 +71,38 @@ _BOX_OUTPUTS = 4
 _DEFAULT_TOPK = 300
 
 
-def _box_stem_width(channels: int) -> int:
-    """Return the box-stem hidden width for a level of ``channels`` inputs.
+def _stem_width(channels: int) -> int:
+    """Return the shared hidden width for a prediction stem of ``channels`` inputs.
 
-    The width ``max(16, channels // 4)`` (assumptions A3/A9): a quarter of the
-    level width, floored at 16 so the smallest scales keep a usable box stem. The
-    convention is unpublished — the WP-023 parameter/FLOP gate validates it, and
-    this is the first knob to turn if that gate misses.
-
-    Args:
-        channels: Input channel count of the level.
-
-    Returns:
-        The box-stem hidden channel width.
-
-    Examples:
-        >>> _box_stem_width(64)
-        16
-        >>> _box_stem_width(256)
-        64
-    """
-    return max(16, channels // 4)
-
-
-def _cls_stem_width(channels: int, num_classes: int) -> int:
-    """Return the class-stem hidden width for a level of ``channels`` inputs.
-
-    The width ``max(num_classes, channels // 2)`` (assumptions A3/A9): half the
-    level width, floored at ``num_classes`` so the stem never narrows below the
-    number of scores it must emit. Unpublished convention — validated by the
-    WP-023 parameter/FLOP gate.
-
-    Args:
-        channels: Input channel count of the level.
-        num_classes: Number of object classes.
-
-    Returns:
-        The class-stem hidden channel width.
-
-    Examples:
-        >>> _cls_stem_width(64, 80)
-        80
-        >>> _cls_stem_width(512, 80)
-        256
-    """
-    return max(num_classes, channels // 2)
-
-
-def _build_box_stem(channels: int) -> nn.Sequential:
-    """Build one level's box stem: two 3x3 units then a 1x1 to 4 ltrb outputs.
+    The width ``max(16, channels // 3)`` (assumptions A3/A9): a third of the level
+    width, floored at 16 so the smallest scales keep a usable stem. Both the box
+    and class stems use this one width — the WP-023 parameter/FLOP gate selected
+    ``channels // 3`` (from the original box ``channels // 4`` / class
+    ``max(num_classes, channels // 2)``) as the value that lands all five scales
+    within the R1 Table 7 tolerance. The convention is unpublished; the gate
+    validates it, and this is the first knob to turn if that gate misses.
 
     Args:
         channels: Input channel count of the level.
 
     Returns:
-        The box-regression stem for a single level, emitting ``(B, 4, H, W)``.
+        The stem hidden channel width.
 
     Examples:
-        >>> import torch
-        >>> stem = _build_box_stem(64).eval()
-        >>> stem(torch.zeros(1, 64, 8, 8)).shape
-        torch.Size([1, 4, 8, 8])
+        >>> _stem_width(64)
+        21
+        >>> _stem_width(256)
+        85
     """
-    hidden = _box_stem_width(channels)
-    return nn.Sequential(
-        ConvBNAct(channels, hidden, 3),
-        ConvBNAct(hidden, hidden, 3),
-        nn.Conv2d(hidden, _BOX_OUTPUTS, 1),
-    )
+    return max(16, channels // 3)
 
 
 def _depthwise_separable(in_channels: int, out_channels: int) -> nn.Sequential:
     """Build a depthwise-separable unit: a 3x3 depthwise then a 1x1 pointwise.
 
-    The Fig. S2 class-stem building block — spatial mixing by the depthwise
-    convolution, channel projection by the pointwise :class:`ConvBNAct`.
+    The Fig. S2 stem building block — spatial mixing by the depthwise
+    convolution, channel projection by the pointwise :class:`ConvBNAct`. Shared by
+    both the box and class stems (assumption A9).
 
     Args:
         in_channels: Input channel count (also the depthwise group count).
@@ -156,11 +123,40 @@ def _depthwise_separable(in_channels: int, out_channels: int) -> nn.Sequential:
     )
 
 
+def _build_box_stem(channels: int) -> nn.Sequential:
+    """Build one level's box stem: two depthwise-separable units then a 1x1 to 4.
+
+    The box stem mirrors the class stem's depthwise-separable structure
+    (assumption A9, WP-023): two depthwise-separable units project the level width
+    to the stem hidden width and keep it, then a 1x1 convolution maps to the 4
+    ltrb outputs. This lightweight form replaced the original two full ``3x3``
+    convolutions, which the WP-023 parameter gate flagged as far too heavy.
+
+    Args:
+        channels: Input channel count of the level.
+
+    Returns:
+        The box-regression stem for a single level, emitting ``(B, 4, H, W)``.
+
+    Examples:
+        >>> import torch
+        >>> stem = _build_box_stem(64).eval()
+        >>> stem(torch.zeros(1, 64, 8, 8)).shape
+        torch.Size([1, 4, 8, 8])
+    """
+    hidden = _stem_width(channels)
+    return nn.Sequential(
+        _depthwise_separable(channels, hidden),
+        _depthwise_separable(hidden, hidden),
+        nn.Conv2d(hidden, _BOX_OUTPUTS, 1),
+    )
+
+
 def _build_cls_stem(channels: int, num_classes: int) -> nn.Sequential:
     """Build one level's class stem: two depthwise-separable units then a 1x1.
 
     Per Fig. S2 the stem stacks two depthwise-separable units; the first
-    projects the level width to the class-stem hidden width, the second keeps it,
+    projects the level width to the stem hidden width, the second keeps it,
     then a 1x1 convolution maps to ``num_classes`` score logits.
 
     Args:
@@ -177,7 +173,7 @@ def _build_cls_stem(channels: int, num_classes: int) -> nn.Sequential:
         >>> stem(torch.zeros(1, 64, 8, 8)).shape
         torch.Size([1, 80, 8, 8])
     """
-    hidden = _cls_stem_width(channels, num_classes)
+    hidden = _stem_width(channels)
     return nn.Sequential(
         _depthwise_separable(channels, hidden),
         _depthwise_separable(hidden, hidden),

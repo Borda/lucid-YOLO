@@ -48,7 +48,7 @@ same commit that completes its WP.
 | 020 | `feat(models): backbone` | Backbone stack with P3/P4/P5 taps | `test_backbone.py::test_tap_shapes` | 017,018,019 | ✅ |
 | 021 | `feat(models): neck with attention tail` | Top-down/bottom-up; final C3k2 n=1 e=0.5 attn=True | `test_neck.py::test_output_shapes` | 020 | ✅ |
 | 022 | `feat(models): dual detection head, reg_max=1` | o2o (300x6) + o2m (nc+4, 8400) branches, DFL-free ltrb regression (A9) | `test_head.py::test_dual_head_shapes` | 021 | ✅ |
-| 023 | `feat(models): scale registry, builder, param/FLOP fidelity gate` | 5-row dataclass registry, typed builders (ADR-001), fvcore counting | `test_param_flops.py::test_det_vs_table7` — plus/minus 2% params / 5% FLOPs, all 5 scales; **golden frozen** | 022 | ⬜ |
+| 023 | `feat(models): scale registry, builder, param/FLOP fidelity gate` | 5-row dataclass registry, typed builders (ADR-001), fvcore counting | `test_param_flops.py::test_det_vs_table7` — plus/minus 2% params / 5% FLOPs, all 5 scales; **golden frozen** | 022 | ✅ |
 
 ## Phase 3 — Assignment and losses (WP-024…030)
 
