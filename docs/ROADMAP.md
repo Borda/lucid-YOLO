@@ -86,7 +86,7 @@ same commit that completes its WP.
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 |---|---|---|---|---|---|
-| 041 | `feat(decode): score-based top-k E2E decoding` | No IoU, no NMS, cap 300 (R3 sec. 4, A9) | `test_topk_e2e.py::test_no_nms_path` | 022 | ⬜ |
+| 041 | `feat(decode): score-based top-k E2E decoding` | No IoU, no NMS, cap 300 (R3 sec. 4, A9) | `test_topk_e2e.py::test_no_nms_path` | 022 | ✅ |
 | 042 | `feat(decode): NMS path for the dense branch` | Conf threshold + class-wise NMS (torchvision) | `test_nms_path.py` | 041 | ⬜ |
 | 043 | `feat(eval): pycocotools bbox evaluator, both paths` | One command evaluates E2E and non-E2E from one checkpoint | `test_coco_eval.py::test_dual_path_report` | 042 | ⬜ |
 | 044 | `test(eval): oracle round-trip` | Perfect predictions -> mAP 1.0; shuffled classes -> approx 0 | `test_coco_eval.py::test_oracle` | 043 | ⬜ |
