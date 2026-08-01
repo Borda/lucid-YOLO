@@ -17,8 +17,8 @@ Multi-image augmentation composition:
     that, for each requested index, draws the extra source indices it needs from a
     single seeded :class:`torch.Generator` and assembles the sample:
 
-        1. geometric base — with probability ``mosaic`` a four-image
-           :class:`~lit_yolo.data.mosaic.MosaicAssembly` (else the single image),
+        1. geometric base — with probability :attr:`_TrainPipeline.mosaic_p` a
+           four-image :class:`~lit_yolo.data.mosaic.MosaicAssembly` (else the single image),
            then :class:`~lit_yolo.data.affine.RandomAffine`, then
            :class:`~lit_yolo.data.letterbox.Letterbox` down to ``img_size``;
         2. with probability ``mixup`` a second full geometric sample is blended in
@@ -65,8 +65,10 @@ if TYPE_CHECKING:
 
 __all__ = ["DetectionDataModule", "collate_detection"]
 
-#: Mosaic runs every training sample (blueprint sec. 5.9: ``mosaic p=1.0``); the
-#: ``close_mosaic`` late-epoch disable is a training-schedule concern (Phase 4+).
+#: Default mosaic probability: every training sample (blueprint sec. 5.9: ``mosaic
+#: p=1.0``). The ``close_mosaic`` late-epoch disable flips the per-pipeline
+#: :attr:`_TrainPipeline.mosaic_p` seam to ``0`` via
+#: :meth:`DetectionDataModule.set_mosaic_prob` (driven by ``CloseMosaicCallback``, WP-036).
 _MOSAIC_PROB = 1.0
 #: Standard YOLO-lineage affine translate fraction ([R1] Table S3; scale is size-aware).
 _AFFINE_TRANSLATE = 0.1
@@ -112,6 +114,13 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
     order reproduce an epoch byte-for-byte. Every produced sample is letterboxed to
     ``img_size`` so the collate can stack the batch.
 
+    Attributes:
+        mosaic_p: Probability that a sample is built from a four-image mosaic rather
+            than its single base image (default :data:`_MOSAIC_PROB`). A mutable seam:
+            the ``close_mosaic`` schedule sets it to ``0`` for the final epochs via
+            :meth:`DetectionDataModule.set_mosaic_prob`. Consulted per draw, so a
+            change takes effect on the next sample assembled.
+
     Args:
         base: The raw (untransformed) :class:`~lit_yolo.data.coco.CocoDetectionDataset`.
         img_size: Target square side for the letterboxed output.
@@ -124,6 +133,7 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
     def __init__(self, base: CocoDetectionDataset, img_size: int, policy: dict[str, float], seed: int) -> None:
         self._base = base
         self._img_size = int(img_size)
+        self.mosaic_p = float(_MOSAIC_PROB)
         self._mixup_prob = policy["mixup"]
         self._copy_paste_prob = policy["copy_paste"]
         self._generator = torch.Generator().manual_seed(seed)
@@ -149,7 +159,7 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
 
     def _geometric(self, index: int) -> tuple[Tensor, Targets]:
         """Build the geometric base: optional mosaic, then affine, then letterbox."""
-        if self._draw() < _MOSAIC_PROB:
+        if self._draw() < self.mosaic_p:
             items = [self._base[i] for i in self._mosaic_indices(index)]
             image, targets = self._mosaic(items)
         else:
@@ -290,3 +300,52 @@ class DetectionDataModule(LightningDataModule):
             collate_fn=collate_detection,
             persistent_workers=self._num_workers > 0,
         )
+
+    @property
+    def mosaic_prob(self) -> float:
+        """Return the training pipeline's current mosaic probability.
+
+        Returns:
+            The probability with which each training sample is built from a
+            four-image mosaic (``1.0`` until the ``close_mosaic`` schedule flips it).
+
+        Raises:
+            RuntimeError: If :meth:`setup` has not built the training pipeline yet.
+
+        Examples:
+            ```pycon
+            >>> DetectionDataModule.mosaic_prob  # doctest: +SKIP
+            >>> # dm.setup("fit"); dm.mosaic_prob
+            >>> # 1.0
+
+            ```
+        """
+        if self._train is None:
+            raise RuntimeError("setup() must be called before reading mosaic_prob")
+        return self._train.mosaic_p
+
+    def set_mosaic_prob(self, prob: float) -> None:
+        """Set the training pipeline's mosaic probability.
+
+        This is the seam ``CloseMosaicCallback`` (WP-036) drives to disable mosaic
+        for the final training epochs: it sets ``prob=0``. The change is consulted
+        on the next sample the pipeline assembles. Repeat calls are harmless.
+
+        Args:
+            prob: The new mosaic probability, forwarded to
+                :attr:`_TrainPipeline.mosaic_p`.
+
+        Raises:
+            RuntimeError: If :meth:`setup` has not built the training pipeline yet.
+
+        Examples:
+            ```pycon
+            >>> DetectionDataModule.set_mosaic_prob  # doctest: +SKIP
+            >>> # dm.setup("fit"); dm.set_mosaic_prob(0.0); dm.mosaic_prob
+            >>> # 0.0
+
+            ```
+        """
+        if self._train is None:
+            raise RuntimeError("setup() must be called before set_mosaic_prob()")
+        self._train.mosaic_p = float(prob)

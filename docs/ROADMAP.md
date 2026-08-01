@@ -75,8 +75,8 @@ same commit that completes its WP.
 | WP | Commit subject | Scope | DoD | Dep | Status |
 |---|---|---|---|---|---|
 | 034 | `feat(ptl): LightningModule with task-conditional losses` | Automatic optimization; det losses active, seg/obb hooks inert | `test_module.py::test_training_step` | 030,032 | ✅ |
-| 035 | `feat(ptl): ProgressiveLossSchedule hook` | Eq. 3 in `on_train_epoch_start`, (0.8,0.2)->(0.1,0.9) | `test_proglos.py::test_alpha_at_t0_mid_end` | 034 | ⬜ |
-| 036 | `feat(ptl): CloseMosaic callback` | Disables mosaic for final `close_mosaic` epochs | `test_close_mosaic.py::test_flip_epoch` | 034 | ⬜ |
+| 035 | `feat(ptl): ProgressiveLossSchedule hook` | Eq. 3 in `on_train_epoch_start`, (0.8,0.2)->(0.1,0.9) | `test_proglos.py::test_alpha_at_t0_mid_end` | 034 | ✅ |
+| 036 | `feat(ptl): CloseMosaic callback` | Disables mosaic for final `close_mosaic` epochs | `test_close_mosaic.py::test_flip_epoch` | 034 | ✅ |
 | 037 | `feat(ptl): EMA callback` | Decay schedule, checkpointed, used for eval | `test_ema.py::test_shadow_updates` | 034 | ⬜ |
 | 038 | `feat(ptl): LightningCLI entry and experiment configs` | `configs/` tier matrix (ADR-001); resolved config logged per run | `test_cli.py::test_yaml_roundtrip`; all configs dry-parse | 035,036,037 | ⬜ |
 | 039 | `feat(ptl): deterministic checkpoint and resume` | Seeded resume reproduces the loss trajectory within tolerance | `test_resume.py::test_trajectory_match` | 038 | ⬜ |
