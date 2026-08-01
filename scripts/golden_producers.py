@@ -6,14 +6,18 @@ result the golden harness (``scripts/check_goldens.py``) recomputes and compares
 against a frozen ``goldens/*.json`` file. Every metric here is deterministic so
 that an unchanged codebase reproduces byte-identical values on every run.
 
-Two real producers live here. :func:`fixture_checksums` derives its metrics from
+Three real producers live here. :func:`fixture_checksums` derives its metrics from
 the seeded WP-007 synthetic fixtures. Because those fixtures live under
 ``tests/fixtures/`` (not an importable package), they are loaded by file path via
 ``importlib.util`` — the same trick ``tests/meta/test_license_audit.py`` uses.
 :func:`optim_toy` (WP-033) runs a fully seeded toy training task and reports how
 many optimization steps :class:`~lit_yolo.optim.MuSGD` and momentum-SGD each need
 to reach a fixed loss threshold — a directional convergence claim mirroring R1
-Table 4 at toy scale.
+Table 4 at toy scale. :func:`assignment_cases` (WP-029) freezes the Phase-3 label
+-assignment behavior: it runs the Task-Aligned, Small-Target-Aware, and one-to-one
+assigners on hand-placed synthetic scenes (no RNG) and records integer candidate
+and positive counts — every value produced by running an assigner, never
+hand-written.
 
 Examples:
     ```pycon
@@ -36,6 +40,13 @@ import torch
 from torch import Tensor, nn
 from torch.optim import Optimizer
 
+from lit_yolo.assign import (
+    SmallTargetAssigner,
+    TaskAlignedAssigner,
+    UniqueAssigner,
+    make_anchor_points,
+    surrogate_boxes,
+)
 from lit_yolo.optim import MuSGD
 
 #: Repository root (``scripts/`` is one level below it).
@@ -139,7 +150,7 @@ def fixture_checksums() -> dict[str, float]:
         >>> metrics = fixture_checksums()
         >>> metrics["obb_num_images"]
         8.0
-        >>> metrics["detseg_annotation_sha"] == fixture_checksums()["detseg_annotation_sha"]
+        >>> metrics["detseg_bbox_area_sum"] == fixture_checksums()["detseg_bbox_area_sum"]
         True
 
         ```
@@ -329,3 +340,281 @@ def optim_toy() -> dict[str, float]:
         "final_loss_musgd": round(musgd_loss, 6),
         "final_loss_sgd": round(sgd_loss, 6),
     }
+
+
+#: Column count of an ``xyxy`` box; the assign scenes are all axis-aligned.
+_BOX_COLUMNS = 4
+
+#: Uniform class score placed at every anchor so alignment ordering is IoU-driven.
+_SCENE_SCORE = 0.9
+
+#: STAL surrogate thresholds at a 640-pixel input: inflate a side below ``s_min``
+#: (the smallest stride) up to ``s_ref`` (the next stride).
+_S_MIN = 8.0
+_S_REF = 16.0
+
+#: Tiny-target scene (scenario i): a 4x4 stride-8 grid (anchor centres at 4, 12,
+#: 20, 28) and a 6x6 ground truth centred at (8, 8) — no anchor centre lies inside
+#: it, so vanilla TAL yields zero candidates while STAL's 16x16 surrogate admits
+#: four. ``topk`` exceeds the candidate count so every candidate becomes positive.
+_TINY_FEATURE_SIZES = [(4, 4)]
+_TINY_STRIDES = [8]
+_TINY_GT = torch.tensor([[[5.0, 5.0, 11.0, 11.0]]])
+_TINY_TOPK = 4
+
+#: Per-dimension scene (scenario ii): an 8x8 stride-8 grid (64-pixel input) and a
+#: ground truth centred at (24, 24). The 6-wide/20-tall variant inflates only its
+#: width (6 -> 16) and the 20-wide/6-tall variant only its height, so the surrogate
+#: clamp is exercised independently on each axis.
+_PERDIM_FEATURE_SIZES = [(8, 8)]
+_PERDIM_STRIDES = [8]
+_PERDIM_GT_6X20 = torch.tensor([[[21.0, 14.0, 27.0, 34.0]]])
+_PERDIM_GT_20X6 = torch.tensor([[[14.0, 21.0, 34.0, 27.0]]])
+_PERDIM_TOPK = 4
+
+#: Multi-ground-truth scene (scenario iii): a stride-8/16/32 grid at a 128-pixel
+#: input holding three well-separated 24x24 ground truths (all above ``s_min``, so
+#: no surrogate inflation). The one-to-one assigner collapses each to a single
+#: positive; the one-to-many assigner keeps ``topk`` per ground truth.
+_MULTI_FEATURE_SIZES = [(16, 16), (8, 8), (4, 4)]
+_MULTI_STRIDES = [8, 16, 32]
+_MULTI_GTS = torch.tensor([[[12.0, 12.0, 36.0, 36.0], [52.0, 52.0, 76.0, 76.0], [92.0, 92.0, 116.0, 116.0]]])
+_MULTI_LABELS = torch.tensor([[0, 1, 2]])
+_MULTI_MASK = torch.tensor([[True, True, True]])
+_O2M_TOPK = 10
+_O2O_TOPK = 7
+
+
+def _uniform_scene(anchor_points: Tensor, gt_boxes: Tensor, num_classes: int) -> Tensor:
+    """Predicted boxes that make alignment IoU-driven: each anchor predicts its ground truth.
+
+    Every anchor whose centre lies inside a ground-truth box is given that box as
+    its prediction (IoU 1 with the ground truth it is a candidate for); anchors
+    inside no box keep a zero prediction and stay background. With uniform class
+    scores this leaves the alignment metric ``t = s * u**6`` flat across a ground
+    truth's candidates, so top-k keeps exactly ``min(topk, candidate_count)`` of
+    them regardless of tie ordering — the property that keeps the counts
+    deterministic across platforms.
+
+    Args:
+        anchor_points: ``(A, 2)`` anchor centres in input pixels.
+        gt_boxes: ``(1, N, 4)`` ground-truth boxes in ``xyxy`` pixels.
+        num_classes: Unused width hint kept for signature symmetry with callers
+            that pass their score channel count; see :func:`_run_multi_gt`.
+
+    Returns:
+        A ``(1, A, 4)`` tensor of per-anchor predicted boxes.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> pts = torch.tensor([[8.0, 8.0], [40.0, 40.0]])
+        >>> gts = torch.tensor([[[0.0, 0.0, 16.0, 16.0]]])
+        >>> _uniform_scene(pts, gts, 1)[0, 0].tolist()
+        [0.0, 0.0, 16.0, 16.0]
+
+        ```
+    """
+    del num_classes
+    num_anchors = anchor_points.shape[0]
+    preds = torch.zeros(1, num_anchors, _BOX_COLUMNS)
+    px = anchor_points[:, 0]
+    py = anchor_points[:, 1]
+    for gt in gt_boxes[0]:
+        x1, y1, x2, y2 = gt
+        inside = (px >= x1) & (px <= x2) & (py >= y1) & (py <= y2)
+        preds[0, inside] = gt
+    return preds
+
+
+def _count_positives(result: object) -> int:
+    """Total number of positive (foreground) anchors in an assignment result.
+
+    Args:
+        result: An :class:`~lit_yolo.assign.AssignResult` for a single-image batch.
+
+    Returns:
+        The count of ``True`` entries in the result's foreground mask.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> from lit_yolo.assign import TaskAlignedAssigner, make_anchor_points
+        >>> pts, _ = make_anchor_points([(2, 2)], [8])
+        >>> gt = torch.tensor([[[0.0, 0.0, 16.0, 16.0]]])
+        >>> out = TaskAlignedAssigner(topk=1)(
+        ...     torch.full((1, 4, 1), 0.9), gt.expand(1, 4, 4).contiguous(),
+        ...     pts, gt, torch.tensor([[0]]), torch.tensor([[True]]))
+        >>> _count_positives(out)
+        1
+
+        ```
+    """
+    return int(result.fg_mask.sum())  # type: ignore[attr-defined]
+
+
+def _max_positives_per_gt(result: object, num_gt: int) -> int:
+    """Largest number of positive anchors assigned to any single ground truth.
+
+    Args:
+        result: An :class:`~lit_yolo.assign.AssignResult` for a single-image batch.
+        num_gt: Number of real ground truths in the scene.
+
+    Returns:
+        The maximum per-ground-truth positive count, or ``0`` when no anchor is
+        positive.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> from lit_yolo.assign import UniqueAssigner, make_anchor_points
+        >>> pts, _ = make_anchor_points([(4, 4)], [8])
+        >>> gt = torch.tensor([[[0.0, 0.0, 32.0, 32.0]]])
+        >>> out = UniqueAssigner(topk=7)(
+        ...     torch.full((1, 16, 1), 0.9), gt.expand(1, 16, 4).contiguous(),
+        ...     pts, gt, torch.tensor([[0]]), torch.tensor([[True]]))
+        >>> _max_positives_per_gt(out, 1)
+        1
+
+        ```
+    """
+    gt_index = result.gt_index  # type: ignore[attr-defined]
+    assigned = gt_index[gt_index >= 0]
+    if assigned.numel() == 0:
+        return 0
+    return int(torch.bincount(assigned, minlength=num_gt).max())
+
+
+def _candidates_inside(anchor_points: Tensor, boxes: Tensor) -> int:
+    """Count anchor centres that fall inside any of the given boxes.
+
+    Mirrors the assigners' centre-inside candidate test. Passing the original
+    ground truth reproduces the vanilla-TAL candidate set; passing
+    :func:`~lit_yolo.assign.surrogate_boxes` output reproduces the STAL set.
+
+    Args:
+        anchor_points: ``(A, 2)`` anchor centres in input pixels.
+        boxes: ``(1, N, 4)`` boxes in ``xyxy`` pixels to test containment against.
+
+    Returns:
+        The number of ``(box, anchor)`` centre-inside pairs.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> from lit_yolo.assign import make_anchor_points, surrogate_boxes
+        >>> pts, _ = make_anchor_points([(4, 4)], [8])
+        >>> gt = torch.tensor([[[5.0, 5.0, 11.0, 11.0]]])  # 6x6, no centre inside
+        >>> _candidates_inside(pts, gt)
+        0
+        >>> _candidates_inside(pts, surrogate_boxes(gt, 8.0, 16.0))
+        4
+
+        ```
+    """
+    px = anchor_points[:, 0]
+    py = anchor_points[:, 1]
+    x1 = boxes[..., 0].unsqueeze(-1)
+    y1 = boxes[..., 1].unsqueeze(-1)
+    x2 = boxes[..., 2].unsqueeze(-1)
+    y2 = boxes[..., 3].unsqueeze(-1)
+    inside = (px >= x1) & (px <= x2) & (py >= y1) & (py <= y2)
+    return int(inside.sum())
+
+
+def _run_tiny() -> dict[str, float]:
+    """Scenario (i): a 6x6 ground truth gets zero TAL candidates and four STAL positives."""
+    points, _ = make_anchor_points(_TINY_FEATURE_SIZES, _TINY_STRIDES)
+    num_anchors = points.shape[0]
+    scores = torch.full((1, num_anchors, 1), _SCENE_SCORE)
+    preds = _TINY_GT.expand(1, num_anchors, _BOX_COLUMNS).contiguous()
+    labels = torch.tensor([[0]])
+    mask = torch.tensor([[True]])
+    tal = TaskAlignedAssigner(topk=_TINY_TOPK)(scores, preds, points, _TINY_GT, labels, mask)
+    stal = SmallTargetAssigner(topk=_TINY_TOPK)(scores, preds, points, _TINY_GT, labels, mask)
+    surrogate = surrogate_boxes(_TINY_GT, _S_MIN, _S_REF)
+    return {
+        "tal_positives_tiny": float(_count_positives(tal)),
+        "stal_positives_tiny": float(_count_positives(stal)),
+        "tal_candidates_tiny": float(_candidates_inside(points, _TINY_GT)),
+        "stal_candidates_tiny": float(_candidates_inside(points, surrogate)),
+    }
+
+
+def _run_per_dim() -> dict[str, float]:
+    """Scenario (ii): the surrogate clamp inflates width and height independently."""
+    points, _ = make_anchor_points(_PERDIM_FEATURE_SIZES, _PERDIM_STRIDES)
+    num_anchors = points.shape[0]
+    scores = torch.full((1, num_anchors, 1), _SCENE_SCORE)
+    labels = torch.tensor([[0]])
+    mask = torch.tensor([[True]])
+    preds = _PERDIM_GT_6X20.expand(1, num_anchors, _BOX_COLUMNS).contiguous()
+    stal = SmallTargetAssigner(topk=_PERDIM_TOPK)(scores, preds, points, _PERDIM_GT_6X20, labels, mask)
+    surrogate_6x20 = surrogate_boxes(_PERDIM_GT_6X20, _S_MIN, _S_REF)[0, 0]
+    surrogate_20x6 = surrogate_boxes(_PERDIM_GT_20X6, _S_MIN, _S_REF)
+    return {
+        "stal_positives_6x20": float(_count_positives(stal)),
+        "stal_candidates_6x20": float(_candidates_inside(points, surrogate_boxes(_PERDIM_GT_6X20, _S_MIN, _S_REF))),
+        "tal_candidates_6x20": float(_candidates_inside(points, _PERDIM_GT_6X20)),
+        "stal_candidates_20x6": float(_candidates_inside(points, surrogate_20x6)),
+        "tal_candidates_20x6": float(_candidates_inside(points, _PERDIM_GT_20X6)),
+        "stal_surrogate_6x20_width": float(surrogate_6x20[2] - surrogate_6x20[0]),
+        "stal_surrogate_6x20_height": float(surrogate_6x20[3] - surrogate_6x20[1]),
+    }
+
+
+def _run_multi_gt() -> dict[str, float]:
+    """Scenario (iii): one-to-one yields one positive per ground truth, one-to-many yields more."""
+    points, _ = make_anchor_points(_MULTI_FEATURE_SIZES, _MULTI_STRIDES)
+    num_anchors = points.shape[0]
+    num_gt = _MULTI_GTS.shape[1]
+    scores = torch.full((1, num_anchors, num_gt), _SCENE_SCORE)
+    preds = _uniform_scene(points, _MULTI_GTS, num_gt)
+    o2o = UniqueAssigner(topk=_O2O_TOPK)(scores, preds, points, _MULTI_GTS, _MULTI_LABELS, _MULTI_MASK)
+    o2m = SmallTargetAssigner(topk=_O2M_TOPK)(scores, preds, points, _MULTI_GTS, _MULTI_LABELS, _MULTI_MASK)
+    surrogate = surrogate_boxes(_MULTI_GTS, _S_MIN, _S_REF)
+    return {
+        "unique_positives_per_gt_max": float(_max_positives_per_gt(o2o, num_gt)),
+        "unique_total_positives": float(_count_positives(o2o)),
+        "o2m_positives_per_gt_max": float(_max_positives_per_gt(o2m, num_gt)),
+        "o2m_total_positives": float(_count_positives(o2m)),
+        "multi_gt_candidates_total": float(_candidates_inside(points, surrogate)),
+    }
+
+
+def assignment_cases() -> dict[str, float]:
+    """Frozen Phase-3 label-assignment metrics over hand-placed synthetic scenes (WP-029).
+
+    Runs the Task-Aligned (:class:`~lit_yolo.assign.TaskAlignedAssigner`),
+    Small-Target-Aware (:class:`~lit_yolo.assign.SmallTargetAssigner`), and
+    one-to-one (:class:`~lit_yolo.assign.UniqueAssigner`) assigners on three
+    deterministic scenes built from literal tensors (no RNG) and reports the
+    blueprint's Phase-3 exit-gate quantities as integer-valued floats:
+
+    * **Tiny target** — a sub-8x8 ground truth on a stride-8 grid receives zero
+      vanilla-TAL candidates and at least one STAL positive.
+    * **Per-dimension clamp** — the STAL surrogate inflates width and height
+      independently, so a 6-wide/20-tall box widens only along ``x``.
+    * **Multi ground truth** — the one-to-one assigner collapses each of three
+      ground truths to a single positive, while the one-to-many assigner keeps
+      several, so its total strictly exceeds the one-to-one total.
+
+    Every value is produced by running an assigner (or its centre-inside candidate
+    test), never hand-written, so the golden re-derives from live behavior.
+
+    Returns:
+        A mapping of sixteen integer-valued metrics across the three scenes.
+
+    Examples:
+        ```pycon
+        >>> metrics = assignment_cases()
+        >>> metrics["tal_positives_tiny"], metrics["stal_positives_tiny"] >= 1
+        (0.0, True)
+        >>> metrics["o2m_total_positives"] > metrics["unique_total_positives"]
+        True
+        >>> assignment_cases() == metrics
+        True
+
+        ```
+    """
+    return {**_run_tiny(), **_run_per_dim(), **_run_multi_gt()}
