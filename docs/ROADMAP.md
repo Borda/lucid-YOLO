@@ -30,7 +30,7 @@ same commit that completes its WP.
 |---|---|---|---|---|---|
 | 008 | `feat(data): target containers and type-generic transform API` | `Targets` dataclass (boxes, labels, masks, rboxes); transform protocol over every target type | `tests/data/test_targets.py` | 007 | ✅ |
 | 009 | `feat(data): letterbox resize with exact inverse` | Aspect-preserving pad/resize + inverse map (A10) | `test_letterbox.py::test_roundtrip_subpixel` | 008 | ✅ |
-| 010 | `feat(data): random affine for boxes and masks` | scale/translate/shear/degrees per Table S3; joint box+polygon transform, clipping | `test_affine.py::test_box_mask_consistency` | 009 | ⬜ |
+| 010 | `feat(data): random affine for boxes and masks` | scale/translate/shear/degrees per Table S3; joint box+polygon transform, clipping | `test_affine.py::test_box_mask_consistency` | 009 | ✅ |
 | 011 | `feat(data): mosaic assembly` | 4-image mosaic (R9), border handling, target remap | `test_mosaic.py::test_bounds_and_counts` | 010 | ⬜ |
 | 012 | `feat(data): mixup and copy-paste` | Table S3 probabilities, scale-aware policy | `test_mixup_copypaste.py` | 011 | ⬜ |
 | 013 | `feat(data): HSV jitter and horizontal flip` | hsv_h/s/v, fliplr=0.5 with target mirroring | `test_photometric.py` | 010 | ⬜ |
@@ -56,7 +56,7 @@ same commit that completes its WP.
 |---|---|---|---|---|---|
 | 024 | `feat(losses): CIoU` | CIoU per R10 (A1), batched, autograd-safe | `test_ciou.py::test_against_closed_form` | 003 | ✅ |
 | 025 | `feat(assign): anchor grid and Task-Aligned Assigner` | Centers at (i+0.5)*stride (A11); t = s^1 * u^6 (A2); topk selection | `test_tal.py::test_alignment_and_topk` | 024 | ✅ |
-| 026 | `feat(assign): STAL surrogate candidate filtering` | Eq. 4–6; per-dimension clamp d<8 -> 16; original box preserved for scoring/regression | `test_stal.py::test_tiny_box_gains_candidates`, `::test_per_dim_clamp`, `::test_targets_unchanged` | 025 | ⬜ |
+| 026 | `feat(assign): STAL surrogate candidate filtering` | Eq. 4–6; per-dimension clamp d<8 -> 16; original box preserved for scoring/regression | `test_stal.py::test_tiny_box_gains_candidates`, `::test_per_dim_clamp`, `::test_targets_unchanged` | 025 | ✅ |
 | 027 | `feat(losses): detection branch loss` | CIoU + L1 (dfl-gain field, A13) + BCE, TAL-weighted | `test_detection_loss.py::test_components` | 026 | ⬜ |
 | 028 | `feat(losses): dual-branch composition` | o2m topk=10 / o2o topk=7->1 wiring; static alpha combination (schedule lands WP-035) | `test_dual_loss.py::test_one_positive_per_gt` | 027 | ⬜ |
 | 029 | `test(assign): synthetic assignment goldens` | 6x6 px GT: STAL >=1 candidate, vanilla TAL exactly 0 at stride 8 | `goldens/assignment_cases.json` frozen | 028 | ⬜ |

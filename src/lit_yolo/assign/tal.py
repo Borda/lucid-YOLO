@@ -197,9 +197,14 @@ class TaskAlignedAssigner:
             mask_pos = self._resolve_conflicts(mask_pos, align_metric)
             return self._build_result(mask_pos, align_metric, iou, gt_boxes, gt_labels)
 
-    @staticmethod
-    def _candidate_mask(anchor_points: Tensor, gt_boxes: Tensor, gt_mask: Tensor) -> Tensor:
-        """Eligibility mask ``(B, N, A)``: anchor centre inside a real GT box."""
+    def _candidate_mask(self, anchor_points: Tensor, gt_boxes: Tensor, gt_mask: Tensor) -> Tensor:
+        """Eligibility mask ``(B, N, A)``: anchor centre inside a real GT box.
+
+        Subclasses (see :class:`lit_yolo.assign.stal.SmallTargetAssigner`) override
+        this single step to filter against a surrogate box while leaving every
+        downstream stage on the original ground truth; the base implementation is
+        stateless and ignores ``self``.
+        """
         px = anchor_points[:, 0]  # (A,)
         py = anchor_points[:, 1]  # (A,)
         x1 = gt_boxes[..., 0].unsqueeze(-1)  # (B, N, 1)
