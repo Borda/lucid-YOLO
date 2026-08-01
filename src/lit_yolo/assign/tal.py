@@ -195,6 +195,7 @@ class TaskAlignedAssigner:
             align_metric, iou = self._alignment_metric(pred_scores, pred_boxes, gt_boxes, gt_labels, candidate_mask)
             mask_pos = self._select_topk(align_metric, candidate_mask)
             mask_pos = self._resolve_conflicts(mask_pos, align_metric)
+            mask_pos = self._finalize_mask(mask_pos, align_metric)
             return self._build_result(mask_pos, align_metric, iou, gt_boxes, gt_labels)
 
     def _candidate_mask(self, anchor_points: Tensor, gt_boxes: Tensor, gt_mask: Tensor) -> Tensor:
@@ -261,6 +262,28 @@ class TaskAlignedAssigner:
         best_gt = masked_align.argmax(dim=1)  # (B, A) — a GT that selected the anchor
         is_best = F.one_hot(best_gt, num_gt).permute(0, 2, 1).bool()  # (B, N, A)
         return torch.where(contested, is_best & mask_pos, mask_pos)
+
+    def _finalize_mask(self, mask_pos: Tensor, align_metric: Tensor) -> Tensor:
+        """Post-conflict hook on the positive mask; base assigner is a no-op.
+
+        Runs after conflict resolution and immediately before the targets are
+        gathered, so it sees a mask in which every anchor already belongs to at
+        most one ground truth. The base implementation returns ``mask_pos``
+        unchanged and ignores ``self``; subclasses override this single seam to
+        reduce the mask further (see :class:`lit_yolo.assign.one_to_one.UniqueAssigner`,
+        which keeps a single positive per ground truth for the one-to-one branch).
+
+        Args:
+            mask_pos: ``(B, N, A)`` bool positive mask after conflict resolution.
+            align_metric: ``(B, N, A)`` candidate-masked alignment metric ``t``,
+                non-negative at candidates and zero elsewhere.
+
+        Returns:
+            The ``(B, N, A)`` positive mask to gather targets from; the base
+            assigner returns its input untouched.
+        """
+        del align_metric
+        return mask_pos
 
     def _build_result(
         self,
