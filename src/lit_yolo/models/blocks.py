@@ -417,6 +417,67 @@ class C3k2(nn.Module):
         return cast(Tensor, self.cv2(torch.cat(y, dim=1)))
 
 
+class SPPF(nn.Module):
+    """Spatial Pyramid Pooling - Fast, with a YOLO26 input-to-output shortcut.
+
+    The multi-scale pooling tail of the backbone. A 1x1 :class:`ConvBNAct`
+    (``cv1``) squeezes the input to ``in_channels // 2`` hidden channels; a single
+    ``pool_kernel`` max-pool is applied three times in sequence, so the chained
+    receptive fields grow to the same coverage as one pool of size
+    ``3 * (pool_kernel - 1) + 1`` (a 13x13 field for the default 5x5 kernel) while
+    reusing one small kernel. The hidden stream and its three pooled copies are
+    concatenated (``4 * hidden`` channels) and fused back to ``out_channels`` by a
+    second 1x1 :class:`ConvBNAct` (``cv2``).
+
+    The YOLO26 refinement (assumption A4) adds the block input to the ``cv2``
+    output — an input-to-output shortcut around the whole pooling stack. As in
+    :class:`Bottleneck`, the identity is added only when ``in_channels ==
+    out_channels`` (the backbone always uses SPPF this way); a widening SPPF with
+    mismatched channels is purely feed-forward. Max-pool uses stride 1 and
+    symmetric ``pool_kernel // 2`` padding so spatial resolution is preserved.
+
+    Args:
+        in_channels: Number of input channels.
+        out_channels: Number of output channels.
+        pool_kernel: Kernel size of the repeated max-pool. Defaults to 5.
+
+    Examples:
+        >>> import torch
+        >>> block = SPPF(64, 64).eval()
+        >>> block(torch.zeros(1, 64, 8, 8)).shape
+        torch.Size([1, 64, 8, 8])
+        >>> block.cv1.conv.out_channels  # hidden = in_channels // 2
+        32
+        >>> block.add_shortcut
+        True
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, pool_kernel: int = 5) -> None:
+        super().__init__()
+        hidden_channels = in_channels // 2
+        self.cv1 = ConvBNAct(in_channels, hidden_channels, 1)
+        self.pool = nn.MaxPool2d(pool_kernel, stride=1, padding=pool_kernel // 2)
+        self.cv2 = ConvBNAct(4 * hidden_channels, out_channels, 1)
+        self.add_shortcut = in_channels == out_channels
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Pool at three chained scales, fuse, then add the optional shortcut.
+
+        Args:
+            x: Input tensor of shape ``(N, in_channels, H, W)``.
+
+        Returns:
+            Tensor of shape ``(N, out_channels, H, W)``; the input is added when
+            the shortcut is active.
+        """
+        x1 = cast(Tensor, self.cv1(x))
+        y1 = self.pool(x1)
+        y2 = self.pool(y1)
+        y3 = self.pool(y2)
+        y = cast(Tensor, self.cv2(torch.cat((x1, y1, y2, y3), dim=1)))
+        return x + y if self.add_shortcut else y
+
+
 class SpatialAttention(nn.Module):
     """Multi-head self-attention over the spatial positions of a feature map.
 

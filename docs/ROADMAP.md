@@ -44,7 +44,7 @@ same commit that completes its WP.
 | 016 | `feat(models): Conv, DWConv, Bottleneck primitives` | Conv-BN-SiLU, depthwise variant, residual bottleneck | `test_blocks.py::test_primitives` | 003 | ✅ |
 | 017 | `feat(models): C3k2 block` | CSP split, n inner blocks, e ratio, c3k switch (A3) | `test_blocks.py::test_c3k2_shapes` | 016 | ✅ |
 | 018 | `feat(models): PSABlock and C2PSA` | Attention + FFN block; split/concat wrapper (A3) | `test_blocks.py::test_c2psa` | 016 | ✅ |
-| 019 | `feat(models): SPPF with shortcut` | 1x1 -> 3x MaxPool(5) -> concat -> 1x1, plus input-output shortcut (A4) | `test_blocks.py::test_sppf_shortcut` | 016 | ⬜ |
+| 019 | `feat(models): SPPF with shortcut` | 1x1 -> 3x MaxPool(5) -> concat -> 1x1, plus input-output shortcut (A4) | `test_blocks.py::test_sppf_shortcut` | 016 | ✅ |
 | 020 | `feat(models): backbone` | Backbone stack with P3/P4/P5 taps | `test_backbone.py::test_tap_shapes` | 017,018,019 | ⬜ |
 | 021 | `feat(models): neck with attention tail` | Top-down/bottom-up; final C3k2 n=1 e=0.5 attn=True | `test_neck.py::test_output_shapes` | 020 | ⬜ |
 | 022 | `feat(models): dual detection head, reg_max=1` | o2o (300x6) + o2m (nc+4, 8400) branches, DFL-free ltrb regression (A9) | `test_head.py::test_dual_head_shapes` | 021 | ⬜ |

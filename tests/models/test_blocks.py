@@ -13,6 +13,7 @@ import torch
 
 from lit_yolo.models import (
     C2PSA,
+    SPPF,
     Bottleneck,
     C3k,
     C3k2,
@@ -220,3 +221,48 @@ def test_c2psa_param_count_increases_with_depth() -> None:
     """Parameter count strictly increases as more PSABlocks are stacked."""
     counts = [sum(p.numel() for p in C2PSA(128, 128, n=n).parameters()) for n in (1, 2, 3)]
     assert counts[0] < counts[1] < counts[2], "each additional PSABlock must add parameters"
+
+
+def test_sppf_shortcut() -> None:
+    """SPPF honours its channel accounting, pooling chain, and gated input shortcut."""
+    # --- hidden channel accounting: cv1 squeezes to in // 2, cv2 fuses 4 * hidden ---
+    block = SPPF(64, 64, pool_kernel=5).eval()
+    assert block.cv1.conv.out_channels == 64 // 2, "cv1 must squeeze to in_channels // 2"
+    assert block.cv2.conv.in_channels == 4 * (64 // 2), "cv2 fuses the hidden stream plus three pooled copies"
+
+    # --- receptive-field sanity: three chained 5-pools equal one 13-pool ---
+    z = torch.randn(2, 16, 12, 12)
+    pool5 = torch.nn.MaxPool2d(5, stride=1, padding=2)
+    pool13 = torch.nn.MaxPool2d(13, stride=1, padding=6)
+    with torch.no_grad():
+        chained = pool5(pool5(pool5(z)))
+        single = pool13(z)
+    assert torch.allclose(chained, single), "chained 5-pools must cover the same 13x13 receptive field"
+
+    # --- shortcut proof: with in == out, output is the plain path plus the input exactly ---
+    x = torch.randn(2, 64, 8, 8)
+    assert block.add_shortcut is True
+    with torch.no_grad():
+        x1 = block.cv1(x)
+        y1 = block.pool(x1)
+        y2 = block.pool(y1)
+        y3 = block.pool(y2)
+        plain = block.cv2(torch.cat((x1, y1, y2, y3), dim=1))  # the no-shortcut path
+        actual = block(x)
+    assert actual.shape == (2, 64, 8, 8), "SPPF must preserve spatial resolution"
+    assert torch.allclose(actual, plain + x), "active shortcut must add the identity"
+    assert not torch.allclose(actual, plain), "output must differ from the no-shortcut path"
+
+    # --- no shortcut when channels differ, matching the Bottleneck gating pattern ---
+    widen = SPPF(64, 128, pool_kernel=5).eval()
+    assert widen.add_shortcut is False, "shortcut requires matching in/out channels"
+    w = torch.randn(2, 64, 8, 8)
+    with torch.no_grad():
+        w1 = widen.cv1(w)
+        p1 = widen.pool(w1)
+        p2 = widen.pool(p1)
+        p3 = widen.pool(p2)
+        widen_plain = widen.cv2(torch.cat((w1, p1, p2, p3), dim=1))
+        widen_out = widen(w)
+    assert widen_out.shape == (2, 128, 8, 8), "widening SPPF preserves spatial resolution"
+    assert torch.allclose(widen_out, widen_plain), "mismatched channels must skip the shortcut"

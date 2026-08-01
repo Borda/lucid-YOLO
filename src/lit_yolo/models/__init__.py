@@ -3,6 +3,7 @@
 
 from lit_yolo.models.blocks import (
     C2PSA,
+    SPPF,
     Bottleneck,
     C3k,
     C3k2,
@@ -14,6 +15,7 @@ from lit_yolo.models.blocks import (
 
 __all__ = [
     "C2PSA",
+    "SPPF",
     "Bottleneck",
     "C3k",
     "C3k2",
