@@ -6,10 +6,16 @@ result the golden harness (``scripts/check_goldens.py``) recomputes and compares
 against a frozen ``goldens/*.json`` file. Every metric here is deterministic so
 that an unchanged codebase reproduces byte-identical values on every run.
 
-Three real producers live here. :func:`fixture_checksums` derives its metrics from
+Four real producers live here. :func:`fixture_checksums` derives its metrics from
 the seeded WP-007 synthetic fixtures. Because those fixtures live under
 ``tests/fixtures/`` (not an importable package), they are loaded by file path via
 ``importlib.util`` — the same trick ``tests/meta/test_license_audit.py`` uses.
+:func:`data_pipeline_metrics` (WP-015) draws a fixed set of samples through the
+Phase-1 augmentation pipeline (mosaic/affine/letterbox/mixup/copy-paste/photometric)
+over those fixtures with a fixed seed and records platform-stable batch metrics:
+exact integer counts (drawn samples, total instances, polygon rings, image shape)
+plus tolerance-pinned float aggregates (image mean/std sums, bbox area/coord sums),
+which drift only within libm/``interpolate`` rounding across OS and architecture.
 :func:`optim_toy` (WP-033) runs a fully seeded toy training task and reports how
 many optimization steps :class:`~lit_yolo.optim.MuSGD` and momentum-SGD each need
 to reach a fixed loss threshold — a directional convergence claim mirroring R1
@@ -47,7 +53,9 @@ from lit_yolo.assign import (
     make_anchor_points,
     surrogate_boxes,
 )
+from lit_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lit_yolo.optim import MuSGD
+from lit_yolo.ptl.datamodule import _TrainPipeline
 
 #: Repository root (``scripts/`` is one level below it).
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -164,6 +172,109 @@ def fixture_checksums() -> dict[str, float]:
             **_dataset_metrics("detseg", detseg_dir),
             **_dataset_metrics("obb", obb_dir),
         }
+
+
+#: Fixed seed for the WP-015 pipeline draw; a fresh :class:`_TrainPipeline` built
+#: with this seed reproduces the same augmented samples on every call.
+_PIPELINE_SEED = 20260731
+
+#: Augmentation-strength policy variant for the pipeline draw (mildest recipe).
+_PIPELINE_VARIANT = "n"
+
+#: Square letterbox side for every drawn sample; small keeps the golden fast while
+#: still exercising mosaic assembly and box/polygon warping.
+_PIPELINE_IMG_SIZE = 128
+
+#: Base-dataset indices drawn through the pipeline, in this fixed order (the seeded
+#: generator advances as samples are drawn, so the order is part of the contract).
+_PIPELINE_SAMPLE_INDICES = tuple(range(8))
+
+
+def _pipeline_metrics(pipeline: _TrainPipeline) -> dict[str, float]:
+    """Draw the fixed sample set through ``pipeline`` and aggregate stable metrics.
+
+    Walks :data:`_PIPELINE_SAMPLE_INDICES` in order (the seeded generator advances
+    with each draw, so the order is load-bearing) and accumulates: exact integer
+    counts (drawn samples, total instances, polygon rings, the shared image shape)
+    and float aggregates (image mean/std sums, bounding-box area/coordinate sums).
+    The counts compare exactly across platforms; the float aggregates drift only
+    within ``interpolate``/libm rounding and are pinned with a golden tolerance.
+
+    Args:
+        pipeline: The train-time augmentation pipeline to draw from.
+
+    Returns:
+        A ten-entry metric mapping: ``num_samples``, ``total_instances``,
+        ``polygon_ring_count``, ``image_channels``/``image_height``/``image_width``,
+        ``image_mean_sum``/``image_std_sum`` (rounded 4) and
+        ``bbox_area_sum``/``bbox_coord_sum`` (rounded 3).
+    """
+    total_instances = 0
+    polygon_rings = 0
+    image_mean_sum = 0.0
+    image_std_sum = 0.0
+    bbox_area_sum = 0.0
+    bbox_coord_sum = 0.0
+    channels = height = width = 0
+    for index in _PIPELINE_SAMPLE_INDICES:
+        image, targets = pipeline[index]
+        channels, height, width = image.shape
+        image_mean_sum += float(image.mean())
+        image_std_sum += float(image.std())
+        total_instances += int(targets.boxes.shape[0])
+        polygon_rings += len(targets.polygons)
+        boxes = targets.boxes
+        bbox_area_sum += float(((boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])).sum())
+        bbox_coord_sum += float(boxes.sum())
+    return {
+        "num_samples": float(len(_PIPELINE_SAMPLE_INDICES)),
+        "total_instances": float(total_instances),
+        "polygon_ring_count": float(polygon_rings),
+        "image_channels": float(channels),
+        "image_height": float(height),
+        "image_width": float(width),
+        "image_mean_sum": round(image_mean_sum, 4),
+        "image_std_sum": round(image_std_sum, 4),
+        "bbox_area_sum": round(bbox_area_sum, 3),
+        "bbox_coord_sum": round(bbox_coord_sum, 3),
+    }
+
+
+def data_pipeline_metrics() -> dict[str, float]:
+    """Platform-stable augmented-batch metrics over the WP-015 train pipeline.
+
+    Regenerates the seeded WP-007 detection/segmentation fixtures into a throwaway
+    directory, builds the Phase-1 augmentation pipeline
+    (:class:`~lit_yolo.ptl.datamodule._TrainPipeline`: mosaic, affine, letterbox,
+    mixup, copy-paste, HSV jitter, flip) over them with a fixed seed and the
+    ``"n"`` strength policy, and draws :data:`_PIPELINE_SAMPLE_INDICES` in order.
+    Every value is produced by *running* the pipeline — never hand-written — so the
+    golden re-derives from live augmentation behavior. Counts are exact across
+    platforms; image-statistic and bounding-box aggregates drift only within
+    ``interpolate``/libm rounding and carry a small golden tolerance.
+
+    Returns:
+        The mapping from :func:`_pipeline_metrics` for the fixed draw.
+
+    Examples:
+        ```pycon
+        >>> metrics = data_pipeline_metrics()
+        >>> metrics["num_samples"]
+        8.0
+        >>> metrics["image_channels"], metrics["image_height"], metrics["image_width"]
+        (3.0, 128.0, 128.0)
+        >>> data_pipeline_metrics() == metrics
+        True
+
+        ```
+    """
+    synthetic = _load_synthetic()
+    with tempfile.TemporaryDirectory() as tmp:
+        dataset_dir = synthetic.generate_detseg_fixtures(Path(tmp))
+        split_dir = dataset_dir / _SPLIT
+        base = CocoDetectionDataset(split_dir, split_dir / _COCO_ANNOTATION)
+        pipeline = _TrainPipeline(base, _PIPELINE_IMG_SIZE, build_scale_policy(_PIPELINE_VARIANT), _PIPELINE_SEED)
+        return _pipeline_metrics(pipeline)
 
 
 #: Shared learning rate for the toy convergence experiment; tuned so both
