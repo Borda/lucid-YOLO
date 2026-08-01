@@ -45,6 +45,8 @@ before first use; denylisted surfaces are never admissible.
 | R12 | Lin, T.-Y. et al., *Microsoft COCO*, arXiv:1405.0312 (ECCV 2014); cocodataset.org | Dataset and eval protocol (bbox + segm) |
 | R18 | Xia, G.-S. et al., *DOTA: A Large-scale Dataset for Object Detection in Aerial Images*, arXiv:1711.10398 (CVPR 2018) + official devkit | Dataset, crop convention, val evaluation protocol, license terms |
 | R21 | fuse-augmentations, github.com/Borda/fuse-augmentations, commit 5834dc5ed5a245f9a7477ab326c307fc1a279c2b, Apache-2.0 | Synthetic scene generator for test fixtures and dataset stand-ins (A26). No YOLO-implementation lineage; verified Apache-2.0 |
+| R22 | torchmetrics, Lightning AI, github.com/Lightning-AI/torchmetrics, Apache-2.0 | `MeanAveragePrecision` bbox mAP engine for the detection acceptance instrument (WP-069). Apache-2.0 verified from the installed 1.9.0 wheel dist-info `licenses/LICENSE` |
+| R23 | faster-coco-eval, github.com/MiXaiLL76/faster_coco_eval, Apache-2.0 | COCOeval-faithful, pycocotools-free backend for `MeanAveragePrecision` (WP-069). Apache-2.0 verified from the installed 1.7.2 wheel dist-info `licenses/LICENSE` (PyPI metadata omits the license field) |
 
 ### Placeholders
 
@@ -84,3 +86,4 @@ arXiv id; access dates recorded per session.
 | 2026-07-31 | R20 | NOTICE attribution, README disclaimer (WP-002) |
 | 2026-08-01 | R1–R20 | Policy docs seeded from the blueprint (WP-003) |
 | 2026-08-01 | R21 | Synthetic fixture/dataset generator decision (A26, D12) |
+| 2026-08-02 | R22, R23 | torchmetrics `MeanAveragePrecision` + `faster_coco_eval` backend replace pycocotools in the bbox evaluator (WP-069) |

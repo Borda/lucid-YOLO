@@ -1,6 +1,6 @@
 # Work-Package Roadmap
 
-The agent's work queue: 68 work packages, one commit each, executed in
+The agent's work queue: 69 work packages, one commit each, executed in
 dependency order per the AGENTS.md loop. Transcribed from the governing
 blueprint (sec. 15) with a live status column.
 
@@ -91,6 +91,7 @@ same commit that completes its WP.
 | 043 | `feat(eval): pycocotools bbox evaluator, both paths` | One command evaluates E2E and non-E2E from one checkpoint | `test_coco_eval.py::test_dual_path_report` | 042 | ✅ |
 | 044 | `test(eval): oracle round-trip` | Perfect predictions -> mAP 1.0; shuffled classes -> approx 0 | `test_coco_eval.py::test_oracle` | 043 | ✅ |
 | 068 | `feat(data): COCO 2017 downloader module and CLI` | Official-host download into `check_data.py` layout; val-only default; `lit-yolo-download` + `python -m lit_yolo.data.download` (added 2026-08-02, user request) | `tests/data/test_download.py` offline suite | 014 | ✅ |
+| 069 | `refactor(eval): torchmetrics MAP with faster-coco-eval backend` | Replace pycocotools evaluator internals with `torchmetrics.detection.MeanAveragePrecision(backend="faster_coco_eval")`; `DualPathEvaluator` API preserved; pycocotools dep dropped (added 2026-08-02, user request) | WP-044 oracle ladder green on new backend | 043,044 | ✅ |
 | 045 | `exp(det): Det-A smoke tier and report section` [GPU][HUMAN] | n-scale ~50 epochs; Det-A criteria; report + model card | Det-A acceptance met; artifacts archived with seeds/configs | 044,040 | ⬜ |
 | 046 | `release: v0.1.0 detector` [HUMAN] | O3 cleared; CHANGELOG; weights published; goldens frozen to `0.1` | `release.yml` green on tag `v0.1.0` | 045 | ⬜ |
 
