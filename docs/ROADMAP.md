@@ -68,7 +68,7 @@ same commit that completes its WP.
 |---|---|---|---|---|---|
 | 031 | `feat(optim): Newton-Schulz orthogonalization` | Pure function from R7/R8, 5 iterations (A5), fp32 under AMP | `test_newton_schulz.py::test_orthogonality` | 003 | ✅ |
 | 032 | `feat(optim): MuSGD with parameter-type split` | >=2D: w_muon*Muon + w_sgd*SGD (A6, A7); 1D: pure SGD, no weight decay (A12) | `test_musgd.py::test_param_split`, `::test_step_shapes` | 031 | ✅ |
-| 033 | `test(optim): toy convergence golden vs SGD` | Fixed synthetic regression + micro-CNN; MuSGD reaches threshold in fewer steps | `goldens/optim_toy.json` frozen | 032 | ⬜ |
+| 033 | `test(optim): toy convergence golden vs SGD` | Fixed synthetic regression + micro-CNN; MuSGD reaches threshold in fewer steps | `goldens/optim_toy.json` frozen | 032 | ✅ |
 
 ## Phase 5 — Lightning training loop (WP-034…040)
 
