@@ -34,12 +34,17 @@ Learning-rate schedule (A8 deferral):
     hyperparameters (blueprint sec. 5.7-5.8: ``lr0 = 0.01``, ``momentum ~ 0.95``,
     ``weight_decay = 5e-4``) but the schedule itself is out of scope for this WP.
 
-Progressive-loss seam:
+Progressive-loss schedule (WP-035):
     :attr:`DetectionLitModule.alpha` delegates to the underlying
-    :class:`DualBranchLoss` branch weight. It is static here (default ``0.5``); the
-    WP-035 ``ProgressiveLossSchedule`` hook writes it per epoch.
+    :class:`DualBranchLoss` branch weight. The constructor ``alpha`` seeds it, and
+    :meth:`DetectionLitModule.on_train_epoch_start` overwrites it once per epoch
+    from a :class:`~lit_yolo.losses.progressive.ProgressiveLossSchedule` — the
+    linear ramp ``(0.8, 0.2) -> (0.1, 0.9)`` of R1 Eq. 2-3 (endpoints
+    ``alpha_init``/``alpha_final``). When ``trainer.max_epochs`` is unset
+    (``None`` or ``<= 0``, e.g. a step-bounded or ``fast_dev_run`` run) the ramp
+    denominator is undefined, so the hook leaves ``alpha`` at its seeded value.
 
-Provenance: R1 sec. 3.2, R1 Tables S2/S5. Assumptions: A8.
+Provenance: R1 sec. 3.2, R1 Eq. 2-3, R1 Tables S2/S5. Assumptions: A8.
 """
 
 from __future__ import annotations
@@ -52,6 +57,7 @@ from torch import Tensor
 
 from lit_yolo.assign import make_anchor_points
 from lit_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
+from lit_yolo.losses.progressive import ProgressiveLossSchedule
 from lit_yolo.models.backbone import DetectionBackbone
 from lit_yolo.models.heads.detect import DualDetectionHead, DualHeadOutput, decode_ltrb
 from lit_yolo.models.neck import DetectionNeck
@@ -149,8 +155,13 @@ class DetectionLitModule(LightningModule):
         box_gain: CIoU-term gain shared by both loss branches. Defaults to ``7.5``.
         cls_gain: Classification-term gain shared by both branches. Defaults to ``0.5``.
         l1_gain: L1-box-term gain shared by both branches. Defaults to ``6.0``.
-        alpha: Initial one-to-many branch weight for the dual loss combination.
+        alpha: Initial one-to-many branch weight seeding the dual loss (used
+            before training and whenever the epoch schedule is inactive).
             Defaults to ``0.5``.
+        alpha_init: One-to-many branch weight the progressive schedule sets on the
+            first epoch (branch weights ``(0.8, 0.2)``). Defaults to ``0.8``.
+        alpha_final: One-to-many branch weight the schedule ramps to on the last
+            epoch (branch weights ``(0.1, 0.9)``). Defaults to ``0.1``.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``.
@@ -183,6 +194,8 @@ class DetectionLitModule(LightningModule):
         cls_gain: float = 0.5,
         l1_gain: float = 6.0,
         alpha: float = 0.5,
+        alpha_init: float = 0.8,
+        alpha_final: float = 0.1,
     ) -> None:
         super().__init__()
         if task not in _TASKS:
@@ -199,6 +212,7 @@ class DetectionLitModule(LightningModule):
         self.neck = DetectionNeck(self.backbone.channels, depth=depth, width=width, max_channels=max_channels)
         self.head = DualDetectionHead(self.neck.channels, num_classes=num_classes)
         self.loss = DualBranchLoss(box_gain=box_gain, cls_gain=cls_gain, l1_gain=l1_gain, alpha=alpha)
+        self._loss_schedule = ProgressiveLossSchedule(alpha_init=alpha_init, alpha_final=alpha_final)
 
         #: Per-image-size cache of ``(anchor_points, stride_per_anchor)`` on CPU.
         self._anchor_cache: dict[tuple[int, int], tuple[Tensor, Tensor]] = {}
@@ -222,6 +236,27 @@ class DetectionLitModule(LightningModule):
     @alpha.setter
     def alpha(self, value: float) -> None:
         self.loss.alpha = value
+
+    def on_train_epoch_start(self) -> None:
+        """Ramp the dual-loss branch weight for the epoch about to start (WP-035).
+
+        Sets :attr:`alpha` to
+        :meth:`~lit_yolo.losses.progressive.ProgressiveLossSchedule.alpha_at`
+        evaluated at the current 0-based epoch and the trainer's total epoch
+        count — the linear R1 Eq. 2-3 ramp updated once per epoch. When
+        ``trainer.max_epochs`` is unset (``None`` or ``<= 0``, as for a
+        step-bounded or ``fast_dev_run`` run) the ramp denominator is undefined,
+        so ``alpha`` is left at its seeded value.
+
+        Examples:
+            >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4)
+            >>> module.alpha  # seeded value before any epoch starts
+            0.5
+        """
+        max_epochs = self.trainer.max_epochs
+        if max_epochs is None or max_epochs <= 0:
+            return
+        self.alpha = self._loss_schedule.alpha_at(self.current_epoch, max_epochs)
 
     def forward(self, images: Tensor) -> DualHeadOutput:
         """Run the backbone, neck, and dual head over an image batch.
