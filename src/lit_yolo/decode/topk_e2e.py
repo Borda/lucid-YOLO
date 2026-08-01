@@ -31,19 +31,10 @@ from __future__ import annotations
 import torch
 from torch import Tensor, nn
 
-from lit_yolo.data.letterbox import Letterbox
+from lit_yolo.decode.common import SCORE_COLUMN, pad_detections
 from lit_yolo.models.heads.detect import decode_ltrb, o2o_topk
 
-__all__ = ["TopKDecoder", "to_letterboxed_original"]
-
-#: Width of the A9 detection tuple ``[x1, y1, x2, y2, score, class]``.
-_DET_WIDTH = 6
-
-#: Number of box-coordinate columns (the ``xyxy`` corners) of a detection tuple.
-_BOX_CORNERS = 4
-
-#: Column index of the confidence score within the A9 detection tuple.
-_SCORE_COLUMN = 4
+__all__ = ["TopKDecoder"]
 
 #: Default per-image detection cap (R1 sec. 3.2.1, R3 sec. 4, A9).
 _DEFAULT_TOPK = 300
@@ -126,7 +117,9 @@ class TopKDecoder(nn.Module):
         :func:`o2o_topk` returns ``min(k, A)`` rows; when the anchor count ``A``
         is below ``k`` the shortfall is filled with all-zero rows (score 0)
         appended after the ranked detections, so the output length is always
-        ``k`` and the descending-score ordering is preserved.
+        ``k`` and the descending-score ordering is preserved. Delegates to the
+        shared :func:`~lit_yolo.decode.common.pad_detections` so both decode
+        paths pad identically.
 
         Args:
             detections: Ranked detections of shape ``(B, min(k, A), 6)``.
@@ -134,11 +127,7 @@ class TopKDecoder(nn.Module):
         Returns:
             Detections of shape ``(B, k, 6)``.
         """
-        batch, kept, _ = detections.shape
-        if kept >= self.k:
-            return detections
-        padding = detections.new_zeros(batch, self.k - kept, _DET_WIDTH)
-        return torch.cat((detections, padding), dim=1)
+        return pad_detections(detections, self.k)
 
     def _zero_below_threshold(self, detections: Tensor) -> Tensor:
         """Zero the score of detections below :attr:`conf_threshold`.
@@ -155,57 +144,10 @@ class TopKDecoder(nn.Module):
         Returns:
             Detections of shape ``(B, k, 6)`` with sub-threshold scores set to 0.
         """
-        scores = detections[..., _SCORE_COLUMN : _SCORE_COLUMN + 1]
+        scores = detections[..., SCORE_COLUMN : SCORE_COLUMN + 1]
         kept = (scores >= self.conf_threshold).to(scores.dtype)
         masked_scores = scores * kept
         return torch.cat(
-            (detections[..., :_SCORE_COLUMN], masked_scores, detections[..., _SCORE_COLUMN + 1 :]),
+            (detections[..., :SCORE_COLUMN], masked_scores, detections[..., SCORE_COLUMN + 1 :]),
             dim=-1,
         )
-
-
-def to_letterboxed_original(
-    detections: Tensor,
-    orig_size: tuple[int, int],
-    letterboxed_size: tuple[int, int],
-    allow_upscale: bool = True,
-) -> Tensor:
-    """Un-letterbox detection boxes back to original-image coordinates (A10).
-
-    Eval-time hook: maps the ``xyxy`` box corners of each detection from the
-    letterboxed canvas the model saw back to the original image via the exact
-    analytic inverse of :class:`~lit_yolo.data.letterbox.Letterbox`. The score
-    and class columns pass through untouched. Padding / sub-threshold rows
-    (score 0) are mapped like any other row; they are identified downstream by
-    their zero score, not by their coordinates.
-
-    Args:
-        detections: Detections of shape ``(B, N, 6)`` with the A9 tuple
-            ``[x1, y1, x2, y2, score, class]`` in letterboxed-canvas pixels.
-        orig_size: Original image ``(height, width)``.
-        letterboxed_size: Letterboxed canvas ``(height, width)`` the boxes live
-            in.
-        allow_upscale: The letterbox ``allow_upscale`` setting used at resize
-            time; must match so the inverse recovers the exact geometry.
-            Defaults to ``True`` (the transform default).
-
-    Returns:
-        Detections of shape ``(B, N, 6)`` with box corners in original-image
-        coordinates and score/class unchanged.
-
-    Examples:
-        >>> import torch
-        >>> # A 2x4 image letterboxed into a 4x4 canvas gains 1px top/bottom pads.
-        >>> boxes = torch.tensor([[[0.0, 1.0, 4.0, 3.0, 0.9, 0.0]]])
-        >>> mapped = to_letterboxed_original(boxes, orig_size=(2, 4), letterboxed_size=(4, 4))
-        >>> mapped[0, 0, :4]
-        tensor([0., 0., 4., 2.])
-        >>> mapped[0, 0, 4:]  # score and class survive the round trip
-        tensor([0.9000, 0.0000])
-    """
-    batch, num_det, _ = detections.shape
-    letterbox = Letterbox(letterboxed_size, allow_upscale=allow_upscale)
-    corner_points = detections[..., :_BOX_CORNERS].reshape(-1, 2)
-    mapped_points = letterbox.inverse_map(corner_points, orig_size, letterboxed_size)
-    mapped_boxes = mapped_points.reshape(batch, num_det, _BOX_CORNERS)
-    return torch.cat((mapped_boxes, detections[..., _BOX_CORNERS:]), dim=-1)
