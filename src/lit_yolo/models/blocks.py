@@ -49,6 +49,47 @@ def _same_padding(kernel_size: int, dilation: int = 1) -> int:
     return dilation * (kernel_size - 1) // 2
 
 
+def _conv_bn(in_channels: int, out_channels: int, kernel_size: int, groups: int = 1) -> nn.Sequential:
+    """Return a bias-free convolution folded into BatchNorm, with no activation.
+
+    The convolutional unit used inside the attention block: unlike
+    :class:`ConvBNAct` it omits the SiLU. The attention projections (qkv, the
+    depthwise positional term, and the output projection) are left unactivated so
+    the non-linearity does not distort the attention logits or the residual
+    stream — a choice recorded under assumption A3.
+
+    Args:
+        in_channels: Number of input channels.
+        out_channels: Number of output channels.
+        kernel_size: Convolution kernel size (odd for "same" padding).
+        groups: Number of blocked connections; ``in_channels`` yields a depthwise
+            convolution. Defaults to 1.
+
+    Returns:
+        An ``nn.Sequential`` of a bias-free :class:`~torch.nn.Conv2d` followed by
+        :class:`~torch.nn.BatchNorm2d`.
+
+    Examples:
+        >>> import torch
+        >>> unit = _conv_bn(16, 16, 3, groups=16).eval()
+        >>> unit(torch.zeros(1, 16, 8, 8)).shape
+        torch.Size([1, 16, 8, 8])
+        >>> len(unit)  # conv + batchnorm, no activation
+        2
+    """
+    return nn.Sequential(
+        nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            padding=_same_padding(kernel_size),
+            groups=groups,
+            bias=False,
+        ),
+        nn.BatchNorm2d(out_channels),
+    )
+
+
 class ConvBNAct(nn.Module):
     """Fused convolution + BatchNorm + SiLU activation.
 
@@ -374,3 +415,169 @@ class C3k2(nn.Module):
         for block in self.blocks:
             y.append(cast(Tensor, block(y[-1])))
         return cast(Tensor, self.cv2(torch.cat(y, dim=1)))
+
+
+class SpatialAttention(nn.Module):
+    """Multi-head self-attention over the spatial positions of a feature map.
+
+    The attention half of a :class:`PSABlock`. Each of the ``H * W`` positions of
+    a ``(N, C, H, W)`` map attends to every other position. A single 1x1
+    convolution produces the packed query/key/value projection; per head the
+    channels split into ``key_dim`` for the query, ``key_dim`` for the key, and
+    ``head_dim`` for the value. Scaled dot-product attention over the flattened
+    spatial axis mixes the values, a depthwise 3x3 convolution on the values adds
+    a local positional term, and a final 1x1 projection restores ``C`` channels.
+
+    Head geometry follows the YOLO11 lineage (assumption A3): ``num_heads =
+    max(1, C // 64)``, ``head_dim = C // num_heads``, and ``key_dim = head_dim //
+    2``, so the attention logits are scaled by ``key_dim ** -0.5``. The qkv,
+    positional, and output convolutions are :func:`_conv_bn` units (convolution +
+    BatchNorm, **no** activation) so the non-linearity never distorts the
+    attention logits or the residual stream.
+
+    ``C`` must be divisible by ``num_heads`` (always true for the channel counts
+    used by the family, which are multiples of 64).
+
+    Args:
+        channels: Number of input and output channels ``C``.
+
+    Examples:
+        >>> import torch
+        >>> attn = SpatialAttention(128).eval()
+        >>> attn.num_heads  # max(1, 128 // 64)
+        2
+        >>> attn(torch.zeros(1, 128, 8, 8)).shape
+        torch.Size([1, 128, 8, 8])
+    """
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        num_heads = max(1, channels // 64)
+        if channels % num_heads != 0:
+            raise ValueError(f"channels ({channels}) must be divisible by num_heads ({num_heads})")
+        self.num_heads = num_heads
+        self.head_dim = channels // num_heads
+        self.key_dim = self.head_dim // 2
+        self.scale = self.key_dim**-0.5
+        qkv_channels = num_heads * (2 * self.key_dim + self.head_dim)
+        self.qkv = _conv_bn(channels, qkv_channels, 1)
+        self.pe = _conv_bn(channels, channels, 3, groups=channels)
+        self.proj = _conv_bn(channels, channels, 1)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Mix spatial positions by scaled dot-product attention.
+
+        Args:
+            x: Input tensor of shape ``(N, C, H, W)``.
+
+        Returns:
+            Tensor of shape ``(N, C, H, W)``, the projected attention output.
+        """
+        n, c, h, w = x.shape
+        hw = h * w
+        qkv = cast(Tensor, self.qkv(x)).view(n, self.num_heads, 2 * self.key_dim + self.head_dim, hw)
+        q = qkv[:, :, : self.key_dim]
+        k = qkv[:, :, self.key_dim : 2 * self.key_dim]
+        v = qkv[:, :, 2 * self.key_dim :]
+        attn = (q.transpose(-2, -1) @ k) * self.scale  # (N, num_heads, HW, HW)
+        attn = attn.softmax(dim=-1)
+        out = (v @ attn.transpose(-2, -1)).reshape(n, c, h, w)
+        out = out + cast(Tensor, self.pe(v.reshape(n, c, h, w)))
+        return cast(Tensor, self.proj(out))
+
+
+class PSABlock(nn.Module):
+    """Position-sensitive attention block: attention followed by a feed-forward.
+
+    The inner unit of :class:`C2PSA`. It applies a residual :class:`SpatialAttention`
+    then a residual feed-forward network, mirroring a transformer encoder layer
+    adapted to convolutional feature maps (assumption A3):
+
+    - ``x = x + attention(x)``
+    - ``x = x + ffn(x)``
+
+    The feed-forward network expands to ``2 * C`` channels through a
+    :class:`ConvBNAct` (convolution + BatchNorm + SiLU) and projects back to ``C``
+    through a :func:`_conv_bn` unit (convolution + BatchNorm, no activation) so the
+    residual branch stays linear at its output. Both residual adds require
+    matching channel counts, which the block preserves throughout.
+
+    Args:
+        channels: Number of input and output channels ``C``.
+
+    Examples:
+        >>> import torch
+        >>> block = PSABlock(128).eval()
+        >>> block(torch.zeros(1, 128, 8, 8)).shape
+        torch.Size([1, 128, 8, 8])
+    """
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.attn = SpatialAttention(channels)
+        self.ffn = nn.Sequential(
+            ConvBNAct(channels, 2 * channels, 1),
+            _conv_bn(2 * channels, channels, 1),
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Apply residual attention then residual feed-forward.
+
+        Args:
+            x: Input tensor of shape ``(N, C, H, W)``.
+
+        Returns:
+            Tensor of shape ``(N, C, H, W)``.
+        """
+        x = x + self.attn(x)
+        return cast(Tensor, x + self.ffn(x))
+
+
+class C2PSA(nn.Module):
+    """CSP wrapper around ``n`` stacked :class:`PSABlock` attention units.
+
+    The attention tail of the detection neck. A single 1x1 :class:`ConvBNAct`
+    (``cv1``) lifts the input to ``2 * hidden`` channels (``hidden = int(out_channels
+    * e)``) and splits it into two ``hidden``-channel halves. The first half is
+    carried through unchanged; the second is refined by ``n`` sequential
+    :class:`PSABlock` units. The two halves are concatenated and fused back to
+    ``out_channels`` by a final 1x1 :class:`ConvBNAct` (``cv2``). In the neck it is
+    used with ``in_channels == out_channels`` (assumption A3).
+
+    Args:
+        in_channels: Number of input channels.
+        out_channels: Number of output channels.
+        n: Number of stacked :class:`PSABlock` units on the refined half. Defaults
+            to 1.
+        e: Hidden-channel ratio ``int(out_channels * e)`` for each split half.
+            Defaults to ``0.5``.
+
+    Examples:
+        >>> import torch
+        >>> block = C2PSA(256, 256, n=2).eval()
+        >>> block(torch.zeros(1, 256, 8, 8)).shape
+        torch.Size([1, 256, 8, 8])
+        >>> len(block.blocks)  # n stacked PSABlocks
+        2
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, n: int = 1, e: float = 0.5) -> None:
+        super().__init__()
+        hidden_channels = int(out_channels * e)
+        self.hidden_channels = hidden_channels
+        self.cv1 = ConvBNAct(in_channels, 2 * hidden_channels, 1)
+        self.blocks = nn.Sequential(*(PSABlock(hidden_channels) for _ in range(n)))
+        self.cv2 = ConvBNAct(2 * hidden_channels, out_channels, 1)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Split, refine one half with attention, then concatenate and fuse.
+
+        Args:
+            x: Input tensor of shape ``(N, in_channels, H, W)``.
+
+        Returns:
+            Tensor of shape ``(N, out_channels, H, W)``.
+        """
+        a, b = self.cv1(x).chunk(2, dim=1)
+        refined = cast(Tensor, self.blocks(b))
+        return cast(Tensor, self.cv2(torch.cat((a, refined), dim=1)))

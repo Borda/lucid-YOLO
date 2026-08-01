@@ -11,7 +11,16 @@ from __future__ import annotations
 import pytest
 import torch
 
-from lit_yolo.models import Bottleneck, C3k, C3k2, ConvBNAct, DepthwiseConv
+from lit_yolo.models import (
+    C2PSA,
+    Bottleneck,
+    C3k,
+    C3k2,
+    ConvBNAct,
+    DepthwiseConv,
+    PSABlock,
+    SpatialAttention,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -131,3 +140,83 @@ def test_c3k2_param_count_increases_with_depth() -> None:
     """Parameter count strictly increases as more inner units are added."""
     counts = [sum(p.numel() for p in C3k2(64, 64, n=n).parameters()) for n in (1, 2, 3)]
     assert counts[0] < counts[1] < counts[2], "each additional inner unit must add parameters"
+
+
+@pytest.mark.parametrize(
+    ("channels", "num_heads"),
+    [
+        pytest.param(64, 1, id="c64-h1"),
+        pytest.param(128, 2, id="c128-h2"),
+        pytest.param(256, 4, id="c256-h4"),
+    ],
+)
+def test_spatial_attention_head_convention(channels: int, num_heads: int) -> None:
+    """num_heads follows max(1, C // 64); head_dim and key_dim split C evenly."""
+    attn = SpatialAttention(channels)
+    assert attn.num_heads == num_heads, "num_heads must be max(1, C // 64)"
+    assert attn.head_dim == channels // num_heads, "head_dim must split channels across heads"
+    assert attn.key_dim == (channels // num_heads) // 2, "key_dim must be head_dim // 2"
+
+
+@pytest.mark.parametrize(
+    ("channels", "size"),
+    [
+        pytest.param(64, 8, id="c64-s8"),
+        pytest.param(128, 16, id="c128-s16"),
+        pytest.param(256, 4, id="c256-s4"),
+    ],
+)
+def test_psablock_preserves_shape(channels: int, size: int) -> None:
+    """PSABlock preserves (C, H, W) in a clean eval-mode forward pass."""
+    block = PSABlock(channels).eval()
+    x = torch.randn(2, channels, size, size)
+    with torch.no_grad():
+        out = block(x)
+    assert out.shape == (2, channels, size, size), "PSABlock must preserve channel and spatial dims"
+
+
+def test_psablock_residual_reduces_to_identity() -> None:
+    """Zeroing both branch output BatchNorms reduces the block to the identity.
+
+    Each residual branch (attention output projection and the FFN output) ends in
+    a conv+BN unit; a zeroed BN affine makes that branch emit zeros, so both
+    ``x + attn(x)`` and ``x + ffn(x)`` collapse to ``x``.
+    """
+    block = PSABlock(128).eval()
+    for batchnorm in (block.attn.proj[1], block.ffn[1][1]):
+        torch.nn.init.zeros_(batchnorm.weight)
+        torch.nn.init.zeros_(batchnorm.bias)
+    x = torch.randn(2, 128, 8, 8)
+    with torch.no_grad():
+        out = block(x)
+    assert torch.allclose(out, x), "vanishing attention and FFN branches must leave the input unchanged"
+
+
+@pytest.mark.parametrize(
+    ("in_channels", "out_channels", "n", "e", "size"),
+    [
+        pytest.param(128, 128, 1, 0.5, 8, id="square-n1"),
+        pytest.param(256, 256, 2, 0.5, 4, id="square-n2"),
+        pytest.param(128, 256, 1, 0.5, 8, id="widen-n1"),
+        pytest.param(256, 256, 2, 0.25, 8, id="narrow-e025-n2"),
+    ],
+)
+def test_c2psa(in_channels: int, out_channels: int, n: int, e: float, size: int) -> None:
+    """C2PSA preserves spatial size, honours the split/fuse channel contract, and stacks n PSABlocks."""
+    block = C2PSA(in_channels, out_channels, n=n, e=e).eval()
+    hidden = int(out_channels * e)
+    # --- cv1 lifts to two hidden-channel halves; cv2 fuses both halves back ---
+    assert block.cv1.conv.out_channels == 2 * hidden, "cv1 must produce two hidden-channel halves"
+    assert block.cv2.conv.in_channels == 2 * hidden, "cv2 fuses the two hidden-channel halves"
+    assert len(block.blocks) == n, "refined half must hold n stacked PSABlocks"
+    assert all(isinstance(unit, PSABlock) for unit in block.blocks), "inner units must be PSABlocks"
+    x = torch.randn(2, in_channels, size, size)
+    with torch.no_grad():
+        out = block(x)
+    assert out.shape == (2, out_channels, size, size), "C2PSA must preserve spatial resolution"
+
+
+def test_c2psa_param_count_increases_with_depth() -> None:
+    """Parameter count strictly increases as more PSABlocks are stacked."""
+    counts = [sum(p.numel() for p in C2PSA(128, 128, n=n).parameters()) for n in (1, 2, 3)]
+    assert counts[0] < counts[1] < counts[2], "each additional PSABlock must add parameters"
