@@ -103,8 +103,8 @@ def _raise_if_called(*_args: object, **_kwargs: object) -> Any:
 
 
 def test_url_constants_use_official_https_host() -> None:
-    assert dl.COCO_ZIP_BASE == "https://images.cocodataset.org/zips"
-    assert dl.COCO_ANNOTATION_BASE == "https://images.cocodataset.org/annotations"
+    assert dl.COCO_ZIP_BASE == "https://s3.amazonaws.com/images.cocodataset.org/zips"
+    assert dl.COCO_ANNOTATION_BASE == "https://s3.amazonaws.com/images.cocodataset.org/annotations"
     assert dl.SPLIT_ARCHIVES == {"train": "train2017.zip", "val": "val2017.zip"}
     assert dl.ANNOTATIONS_ARCHIVE == "annotations_trainval2017.zip"
 
@@ -115,8 +115,8 @@ def test_plan_archives_val_only_default() -> None:
     sentinels = [a.sentinel for a in archives]
     assert names == ["val2017.zip", "annotations_trainval2017.zip"]
     assert sentinels == ["val2017", "annotations"]
-    assert archives[0].url == "https://images.cocodataset.org/zips/val2017.zip"
-    assert archives[1].url == "https://images.cocodataset.org/annotations/annotations_trainval2017.zip"
+    assert archives[0].url == "https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip"
+    assert archives[1].url == "https://s3.amazonaws.com/images.cocodataset.org/annotations/annotations_trainval2017.zip"
 
 
 def test_plan_archives_train_and_val() -> None:
@@ -218,7 +218,7 @@ def test_verify_checksum_mismatch_raises(tmp_path: Path) -> None:
 
 def test_download_coco_produces_check_data_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     val_bytes = _val_archive_bytes(num_images=2)
-    mapping = {"https://images.cocodataset.org/zips/val2017.zip": val_bytes}
+    mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": val_bytes}
     monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
 
     root = dl.download_coco(tmp_path / "coco", ["val"], annotations=False, progress=False)
@@ -233,14 +233,14 @@ def test_download_coco_produces_check_data_layout(tmp_path: Path, monkeypatch: p
 
 
 def test_download_coco_removes_archive_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    mapping = {"https://images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
+    mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
     monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
     root = dl.download_coco(tmp_path / "coco", ["val"], annotations=False, progress=False)
     assert not (root / "val2017.zip").exists()
 
 
 def test_download_coco_keeps_archive_when_requested(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    mapping = {"https://images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
+    mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
     monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
     root = dl.download_coco(tmp_path / "coco", ["val"], annotations=False, keep_archives=True, progress=False)
     assert (root / "val2017.zip").is_file()
@@ -249,7 +249,7 @@ def test_download_coco_keeps_archive_when_requested(tmp_path: Path, monkeypatch:
 def test_download_coco_verifies_checksum(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     payload = _val_archive_bytes()
-    mapping = {"https://images.cocodataset.org/zips/val2017.zip": payload}
+    mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": payload}
     monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
     good = hashlib.sha256(payload).hexdigest()
     root = dl.download_coco(
@@ -274,7 +274,7 @@ def test_download_coco_skips_extracted_split_without_network(tmp_path: Path, mon
 def test_download_coco_force_redownloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "coco"
     (root / "val2017").mkdir(parents=True)
-    mapping = {"https://images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
+    mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
     monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
     dl.download_coco(root, ["val"], annotations=False, force=True, progress=False)
     assert (root / "val2017" / "000000000000.jpg").is_file()
@@ -286,7 +286,7 @@ def test_download_resumes_partial_file(tmp_path: Path, monkeypatch: pytest.Monke
     root.mkdir()
     # Seed a partial .part with the first 10 bytes already fetched.
     (root / "val2017.zip.part").write_bytes(payload[:10])
-    mapping = {"https://images.cocodataset.org/zips/val2017.zip": payload}
+    mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": payload}
     monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
     dl.download_coco(root, ["val"], annotations=False, progress=False)
     # Resume path reconstructs the full archive and extracts it.
@@ -341,14 +341,14 @@ def test_cli_rejects_unknown_split() -> None:
 
 
 def test_main_returns_zero_on_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    mapping = {"https://images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
+    mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
     monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
     code = dl.main(["--data-root", str(tmp_path / "coco"), "--splits", "val", "--no-annotations", "--quiet"])
     assert code == 0
 
 
 def test_main_returns_one_on_checksum_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    mapping = {"https://images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
+    mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
     monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
     code = dl.main(
         [

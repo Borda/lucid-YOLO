@@ -58,10 +58,13 @@ from typing import Any
 
 __all__ = ["download_coco", "main"]
 
-#: Official public COCO 2017 image host (blueprint sec. 14.3); no mirrors.
-COCO_ZIP_BASE = "https://images.cocodataset.org/zips"
-#: Official public COCO 2017 annotation host.
-COCO_ANNOTATION_BASE = "https://images.cocodataset.org/annotations"
+#: Official public COCO 2017 image host (blueprint sec. 14.3); no mirrors. The
+#: S3 path-style form is used because the ``images.cocodataset.org`` CNAME is an
+#: S3 bucket whose TLS certificate does not cover that hostname (the official
+#: site links plain http); path-style keeps the same bucket behind a valid cert.
+COCO_ZIP_BASE = "https://s3.amazonaws.com/images.cocodataset.org/zips"
+#: Official public COCO 2017 annotation host (same bucket, path-style TLS).
+COCO_ANNOTATION_BASE = "https://s3.amazonaws.com/images.cocodataset.org/annotations"
 
 #: Per-split image archive file names; each extracts to ``<split>2017/``.
 SPLIT_ARCHIVES: dict[str, str] = {
