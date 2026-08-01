@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from lit_yolo.data.letterbox import Letterbox
 from lit_yolo.data.targets import Targets
 from lit_yolo.data.transforms import (
     Compose,
@@ -14,6 +15,7 @@ from lit_yolo.data.transforms import (
 __all__ = [
     "Compose",
     "GeometricTransform",
+    "Letterbox",
     "Targets",
     "apply_affine_to_points",
     "boxes_from_polygons",
