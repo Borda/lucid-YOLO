@@ -12,6 +12,7 @@ matching and the mismatching path, without spawning a subprocess).
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import json
 import os
@@ -26,7 +27,13 @@ import torch
 from lucid_yolo.data import Targets, boxes_from_polygons
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.ptl import datamodule as dm
-from lucid_yolo.ptl.datamodule import DetectionDataModule, collate_detection
+from lucid_yolo.ptl.datamodule import (
+    DetectionDataModule,
+    PackedTargets,
+    collate_detection,
+    pack_targets,
+    unpack_targets,
+)
 
 _CHECK_DATA_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_data.py"
 
@@ -136,12 +143,76 @@ def test_scale_policy_rejects_unknown_variant() -> None:
         build_scale_policy("z")
 
 
-def test_collate_stacks_images_and_keeps_ragged_targets() -> None:
-    """Collate stacks equal-size images and returns a per-image target list."""
-    batch = [(torch.zeros(3, 8, 8), Targets.empty()) for _ in range(3)]
-    images, targets = collate_detection(batch)
+def _ragged_targets() -> list[Targets]:
+    """Build a mixed batch: an image with boxes+polygons+rbox, an empty one, a box-only image."""
+    with_polys = Targets(
+        boxes=torch.tensor([[0.0, 0.0, 4.0, 4.0], [1.0, 1.0, 2.0, 2.0]]),
+        labels=torch.tensor([3, 7]),
+        polygons=[torch.rand(5, 2), torch.rand(3, 2)],
+        rboxes=torch.tensor([[1.0, 1.0, 3.0, 2.0, 0.1]]),
+    )
+    box_only = Targets(
+        boxes=torch.tensor([[2.0, 2.0, 6.0, 6.0], [3.0, 3.0, 5.0, 5.0], [0.0, 0.0, 1.0, 1.0]]),
+        labels=torch.tensor([0, 1, 2]),
+        rboxes=torch.tensor([[2.0, 2.0, 4.0, 3.0, 0.2], [5.0, 5.0, 6.0, 4.0, -0.1]]),
+    )
+    return [with_polys, Targets.empty(), box_only]
+
+
+def _assert_targets_identical(actual: list[Targets], expected: list[Targets]) -> None:
+    """Assert two target lists match tensor-for-tensor (dtype, shape and value)."""
+    assert len(actual) == len(expected)
+    for got, want in zip(actual, expected, strict=True):
+        for field in ("boxes", "labels", "rboxes"):
+            a, b = getattr(got, field), getattr(want, field)
+            assert a.dtype == b.dtype and a.shape == b.shape and torch.equal(a, b)
+        assert len(got.polygons) == len(want.polygons)
+        for ring_a, ring_b in zip(got.polygons, want.polygons, strict=True):
+            assert ring_a.dtype == ring_b.dtype and ring_a.shape == ring_b.shape and torch.equal(ring_a, ring_b)
+
+
+def test_collate_returns_packed_transport() -> None:
+    """Collate stacks equal-size images and packs the ragged targets into a PackedTargets."""
+    images, packed = collate_detection([(torch.zeros(3, 8, 8), target) for target in _ragged_targets()])
     assert images.shape == (3, 3, 8, 8)
-    assert isinstance(targets, list) and len(targets) == 3
+    assert isinstance(packed, PackedTargets)
+    assert packed.boxes_per_image.tolist() == [2, 0, 3]
+    assert packed.rings_per_image.tolist() == [2, 0, 0]
+    assert packed.rboxes_per_image.tolist() == [1, 0, 2]
+
+
+def test_collate_batch_is_a_small_constant_segment_count() -> None:
+    """The packed batch is a handful of tensors regardless of instance count (IPC segment cap)."""
+    _images, packed = collate_detection([(torch.zeros(3, 8, 8), target) for target in _ragged_targets()])
+    packed_tensors = sum(isinstance(getattr(packed, field.name), torch.Tensor) for field in dataclasses.fields(packed))
+    segment_count = 1 + packed_tensors  # the stacked images tensor plus the packed target tensors
+    assert segment_count == 9
+    assert segment_count < 12
+
+
+@pytest.mark.parametrize(
+    "targets",
+    [
+        pytest.param(_ragged_targets(), id="ragged"),
+        pytest.param(
+            [Targets(boxes=torch.tensor([[0.0, 0.0, 4.0, 4.0]]), labels=torch.tensor([1])), Targets.empty()],
+            id="one-empty",
+        ),
+        pytest.param([Targets.empty(), Targets.empty()], id="all-empty"),
+    ],
+)
+def test_pack_unpack_round_trip_is_byte_identical(targets: list[Targets]) -> None:
+    """Unpacking a packed batch reproduces the input targets tensor-for-tensor."""
+    _assert_targets_identical(unpack_targets(pack_targets(targets)), targets)
+
+
+def test_on_after_batch_transfer_leaves_unpacked_batch_untouched(detseg_fixture_dir: Path) -> None:
+    """An already-unpacked (list) batch passes through the hook defensively unchanged."""
+    datamodule = _datamodule(detseg_fixture_dir)
+    targets = _ragged_targets()
+    images, passed = datamodule.on_after_batch_transfer((torch.zeros(2, 3, 8, 8), targets), 0)
+    assert images.shape == (2, 3, 8, 8)
+    assert passed is targets
 
 
 def _datamodule(
@@ -170,22 +241,27 @@ def _datamodule(
 
 
 def test_datamodule_train_batch_smoke(detseg_fixture_dir: Path) -> None:
-    """One training batch stacks letterboxed images and lists per-image targets."""
+    """One training batch, through the transfer hook, stacks images and lists per-image targets."""
     datamodule = _datamodule(detseg_fixture_dir)
     datamodule.setup("fit")
-    images, targets = next(iter(datamodule.train_dataloader()))
+    batch = next(iter(datamodule.train_dataloader()))
+    assert isinstance(batch[1], PackedTargets)  # the loader emits the packed transport form
+    images, targets = datamodule.on_after_batch_transfer(batch, 0)
     assert images.shape == (2, 3, _SMOKE_IMG_SIZE, _SMOKE_IMG_SIZE)
     assert len(targets) == 2
     assert all(isinstance(target, Targets) for target in targets)
 
 
 def test_datamodule_val_batch_letterboxed(detseg_fixture_dir: Path) -> None:
-    """One validation batch is letterbox-only and stacks to the target size."""
+    """One validation batch, through the transfer hook, is letterbox-only and stacks to size."""
     datamodule = _datamodule(detseg_fixture_dir)
     datamodule.setup("validate")
-    images, targets = next(iter(datamodule.val_dataloader()))
+    batch = next(iter(datamodule.val_dataloader()))
+    assert isinstance(batch[1], PackedTargets)  # the loader emits the packed transport form
+    images, targets = datamodule.on_after_batch_transfer(batch, 0)
     assert images.shape == (2, 3, _SMOKE_IMG_SIZE, _SMOKE_IMG_SIZE)
     assert len(targets) == 2
+    assert all(isinstance(target, Targets) for target in targets)
 
 
 def test_datamodule_train_batch_is_deterministic(detseg_fixture_dir: Path) -> None:

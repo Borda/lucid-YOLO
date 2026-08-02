@@ -433,7 +433,8 @@ def evaluate_recall(module: DetectionLitModule, datamodule: DetectionDataModule)
     matched_total = 0
     instance_total = 0
     with torch.no_grad():
-        for images, targets in datamodule.val_dataloader():
+        for batch in datamodule.val_dataloader():
+            images, targets = datamodule.on_after_batch_transfer(batch, 0)
             head_out: DualHeadOutput = module(images.to(device))
             dets = decoder(head_out.o2o_cls, head_out.o2o_box, anchor_points, strides).cpu()
             for image_dets, target in zip(dets, targets, strict=True):

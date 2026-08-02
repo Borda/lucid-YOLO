@@ -8,6 +8,15 @@ training loop. It runs under Lightning **automatic optimization** (blueprint D4)
 ``training_step`` returns the scalar total and Lightning owns the
 backward/step/zero-grad cycle.
 
+Batch contract:
+    Every step consumes ``(images, list[Targets])`` — the images stacked into one
+    ``(B, C, H, W)`` float32 tensor and the ragged per-image
+    :class:`~lucid_yolo.data.targets.Targets` as a length-``B`` list. The
+    datamodule ships the batch across the DataLoader worker boundary in a packed
+    transport form and restores this list in its ``on_after_batch_transfer`` hook
+    (see :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule`), so the module
+    never sees the packed form — it always receives the ragged list unchanged.
+
 Forward and loss wiring:
     The head emits raw ``ltrb`` distances per anchor; the module derives the
     anchor grid for the batch's feature sizes (image size divided by the level

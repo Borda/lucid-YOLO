@@ -35,17 +35,28 @@ Multi-image augmentation composition:
     (``num_workers=0``) give byte-identical epochs.
 
 Batch contract:
-    :func:`collate_detection` stacks the equal-sized (letterboxed) images into a
-    single ``(B, C, img_size, img_size)`` float32 tensor and returns the per-image
-    :class:`~lucid_yolo.data.targets.Targets` **as a list** of length ``B`` — targets
-    are ragged (each image has its own instance count), so they are deliberately
-    not padded into a dense tensor here. A batch is the pair
-    ``(images, list[Targets])``.
+    Two forms, split by the DataLoader worker boundary:
+
+    * **Transport form** (what :func:`collate_detection` returns): the equal-sized
+      (letterboxed) images stacked into a single ``(B, C, img_size, img_size)``
+      float32 tensor, paired with a :class:`PackedTargets` — the batch's ragged
+      per-image :class:`~lucid_yolo.data.targets.Targets` flattened into a fixed
+      set of eight dense tensors. A worker ships each distinct tensor as its own
+      shared-memory segment, so the natural ``list[Targets]`` (with its per-image
+      *list* of polygon rings) would explode into hundreds of tiny segments and
+      exhaust the consumer's mmap budget; packing bounds the batch to a handful.
+    * **Consumer form** (what every downstream step sees): the pair
+      ``(images, list[Targets])``. :meth:`DetectionDataModule.on_after_batch_transfer`
+      unpacks the transport form on the destination device, so the module and
+      everything downstream keep consuming a ragged length-``B`` target list
+      exactly as before. A direct (non-Lightning) consumer converts with
+      :func:`unpack_targets`.
 """
 
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
@@ -61,7 +72,16 @@ from lucid_yolo.data.mixup import CopyPaste, Mixup
 from lucid_yolo.data.mosaic import MosaicAssembly
 from lucid_yolo.data.targets import Targets
 
-__all__ = ["DetectionDataModule", "collate_detection"]
+__all__ = [
+    "DetectionDataModule",
+    "PackedTargets",
+    "collate_detection",
+    "pack_targets",
+    "unpack_targets",
+]
+
+#: Column count of a polygon point ``(x, y)`` — the width of a packed ring row.
+_POINT_DIM = 2
 
 #: Default mosaic probability: every training sample (blueprint sec. 5.9: ``mosaic
 #: p=1.0``). The ``close_mosaic`` late-epoch disable flips the per-pipeline
@@ -138,34 +158,194 @@ def _limit_worker_threads(worker_id: int) -> None:
     torch.set_num_threads(1)
 
 
-def collate_detection(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list[Targets]]:
-    """Collate ``(image, Targets)`` samples into ``(images, list[Targets])``.
+@dataclass
+class PackedTargets:
+    """Batch of per-image :class:`~lucid_yolo.data.targets.Targets` flattened for IPC.
+
+    A DataLoader worker ships every distinct tensor as its own shared-memory
+    segment, so the natural ``list[Targets]`` batch — a per-image list whose every
+    image also carries a *list* of per-instance polygon rings — explodes into
+    hundreds of tiny segments and exhausts the consumer's mmap budget
+    (``vm.max_map_count``) at realistic worker counts. This container collapses the
+    whole ragged batch into a **fixed set of eight dense tensors**: the modality
+    rows are concatenated along their instance/ring/point axes and paired with the
+    per-image (and per-ring) counts needed to split them back apart. The tensor
+    count is constant regardless of how many instances the batch holds, so the
+    transport costs a handful of segments instead of hundreds.
+
+    This is a *transport* form only: :func:`unpack_targets` reconstructs the exact
+    ``list[Targets]`` consumers expect (see :meth:`DetectionDataModule.on_after_batch_transfer`).
+    The dataclass is deliberately **not frozen** — PyTorch Lightning moves batches
+    across devices with ``apply_to_collection``, which rejects frozen dataclasses.
+
+    Attributes:
+        boxes_cat: ``(sum_N, 4)`` float32 ``xyxy`` boxes of every image, concatenated.
+        labels_cat: ``(sum_N,)`` int64 class ids aligned with ``boxes_cat``.
+        boxes_per_image: ``(B,)`` int64 instance count per image; splits
+            ``boxes_cat``/``labels_cat`` back into ``B`` images.
+        rboxes_cat: ``(sum_M, 5)`` float32 long-edge rotated boxes, concatenated.
+        rboxes_per_image: ``(B,)`` int64 rotated-box count per image; splits
+            ``rboxes_cat``.
+        polygon_points_cat: ``(sum_P, 2)`` float32 polygon points of every ring of
+            every image, concatenated.
+        points_per_ring: ``(R,)`` int64 point count per ring; splits
+            ``polygon_points_cat`` into ``R`` rings.
+        rings_per_image: ``(B,)`` int64 ring count per image (``0`` when an image
+            carries no polygons, else its instance count); groups the ``R`` rings
+            back into per-image lists.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> from lucid_yolo.data.targets import Targets
+        >>> t = Targets(boxes=torch.tensor([[0.0, 0.0, 4.0, 4.0]]), labels=torch.tensor([3]))
+        >>> packed = pack_targets([t, Targets.empty()])
+        >>> packed.boxes_per_image.tolist()
+        [1, 0]
+
+        ```
+    """
+
+    boxes_cat: Tensor
+    labels_cat: Tensor
+    boxes_per_image: Tensor
+    rboxes_cat: Tensor
+    rboxes_per_image: Tensor
+    polygon_points_cat: Tensor
+    points_per_ring: Tensor
+    rings_per_image: Tensor
+
+
+def pack_targets(targets: list[Targets]) -> PackedTargets:
+    """Flatten a ragged ``list[Targets]`` into a :class:`PackedTargets` transport.
+
+    Every modality is concatenated along its own axis and paired with the counts
+    that split it back per image (and per ring). The inverse is
+    :func:`unpack_targets`; ``unpack_targets(pack_targets(x))`` reproduces ``x``
+    tensor-for-tensor (same dtypes, shapes and values).
+
+    Args:
+        targets: The non-empty length-``B`` per-image target list to pack. All
+            tensors must share one device.
+
+    Returns:
+        A :class:`PackedTargets` holding the batch as eight dense tensors on the
+        inputs' device.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> from lucid_yolo.data.targets import Targets
+        >>> a = Targets(boxes=torch.zeros((2, 4)), labels=torch.tensor([1, 2]))
+        >>> packed = pack_targets([a, Targets.empty()])
+        >>> packed.boxes_cat.shape, packed.boxes_per_image.tolist()
+        (torch.Size([2, 4]), [2, 0])
+
+        ```
+    """
+    boxes_cat = torch.cat([target.boxes for target in targets], dim=0)
+    labels_cat = torch.cat([target.labels for target in targets], dim=0)
+    rboxes_cat = torch.cat([target.rboxes for target in targets], dim=0)
+    rings = [ring for target in targets for ring in target.polygons]
+    polygon_points_cat = torch.cat(rings, dim=0) if rings else boxes_cat.new_zeros((0, _POINT_DIM))
+
+    def counts(values: list[int]) -> Tensor:
+        return torch.tensor(values, dtype=torch.int64, device=boxes_cat.device)
+
+    return PackedTargets(
+        boxes_cat=boxes_cat,
+        labels_cat=labels_cat,
+        boxes_per_image=counts([int(target.boxes.shape[0]) for target in targets]),
+        rboxes_cat=rboxes_cat,
+        rboxes_per_image=counts([int(target.rboxes.shape[0]) for target in targets]),
+        polygon_points_cat=polygon_points_cat,
+        points_per_ring=counts([int(ring.shape[0]) for ring in rings]),
+        rings_per_image=counts([len(target.polygons) for target in targets]),
+    )
+
+
+def unpack_targets(packed: PackedTargets) -> list[Targets]:
+    """Reconstruct the ``list[Targets]`` a :class:`PackedTargets` transports.
+
+    The exact inverse of :func:`pack_targets`: each modality is split back along
+    its axis by the packed counts and the per-ring polygons are regrouped into the
+    per-image lists. The reconstructed tensors live on the packed tensors' device
+    (so calling this in :meth:`DetectionDataModule.on_after_batch_transfer` yields
+    on-device targets), and equal the originals tensor-for-tensor.
+
+    Args:
+        packed: The transport container to expand.
+
+    Returns:
+        The length-``B`` per-image target list, identical to the one
+        :func:`pack_targets` consumed.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> from lucid_yolo.data.targets import Targets
+        >>> a = Targets(boxes=torch.zeros((2, 4)), labels=torch.tensor([1, 2]))
+        >>> restored = unpack_targets(pack_targets([a, Targets.empty()]))
+        >>> [len(t.labels) for t in restored]
+        [2, 0]
+
+        ```
+    """
+    boxes_per_image = [int(count) for count in packed.boxes_per_image.tolist()]
+    rboxes_per_image = [int(count) for count in packed.rboxes_per_image.tolist()]
+    rings_per_image = [int(count) for count in packed.rings_per_image.tolist()]
+    points_per_ring = [int(count) for count in packed.points_per_ring.tolist()]
+
+    boxes = torch.split(packed.boxes_cat, boxes_per_image)
+    labels = torch.split(packed.labels_cat, boxes_per_image)
+    rboxes = torch.split(packed.rboxes_cat, rboxes_per_image)
+    rings = list(torch.split(packed.polygon_points_cat, points_per_ring)) if points_per_ring else []
+
+    targets: list[Targets] = []
+    ring_cursor = 0
+    for index, ring_count in enumerate(rings_per_image):
+        image_rings = rings[ring_cursor : ring_cursor + ring_count]
+        ring_cursor += ring_count
+        targets.append(
+            Targets(boxes=boxes[index], labels=labels[index], polygons=list(image_rings), rboxes=rboxes[index])
+        )
+    return targets
+
+
+def collate_detection(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, PackedTargets]:
+    """Collate ``(image, Targets)`` samples into ``(images, PackedTargets)``.
 
     All images are letterboxed to a common ``img_size`` upstream, so they stack
-    into one dense tensor; the per-image :class:`~lucid_yolo.data.targets.Targets`
-    are ragged and kept as a list (never padded into a dense target tensor).
+    into one dense tensor. The ragged per-image
+    :class:`~lucid_yolo.data.targets.Targets` are flattened into a
+    :class:`PackedTargets` (:func:`pack_targets`) so the whole batch crosses the
+    DataLoader worker boundary as a handful of shared-memory segments rather than
+    hundreds of tiny ones. The datamodule restores the ``list[Targets]`` consumer
+    contract on the destination device in
+    :meth:`DetectionDataModule.on_after_batch_transfer`; a direct caller converts
+    with :func:`unpack_targets`.
 
     Args:
         batch: The per-sample ``(image, Targets)`` pairs from the dataset.
 
     Returns:
-        A ``(images, targets)`` pair: ``images`` is ``(B, C, H, W)`` float32 and
-        ``targets`` is a length-``B`` list of :class:`~lucid_yolo.data.targets.Targets`.
+        A ``(images, packed)`` pair: ``images`` is ``(B, C, H, W)`` float32 and
+        ``packed`` is the batch's targets as a :class:`PackedTargets`.
 
     Examples:
         ```pycon
         >>> import torch
         >>> from lucid_yolo.data.targets import Targets
         >>> batch = [(torch.zeros(3, 4, 4), Targets.empty()) for _ in range(2)]
-        >>> images, targets = collate_detection(batch)
-        >>> images.shape, len(targets)
-        (torch.Size([2, 3, 4, 4]), 2)
+        >>> images, packed = collate_detection(batch)
+        >>> images.shape, packed.boxes_per_image.tolist()
+        (torch.Size([2, 3, 4, 4]), [0, 0])
 
         ```
     """
     images = torch.stack([image for image, _ in batch], dim=0)
-    targets = [target for _, target in batch]
-    return images, targets
+    packed = pack_targets([target for _, target in batch])
+    return images, packed
 
 
 class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
@@ -365,6 +545,41 @@ class DetectionDataModule(LightningDataModule):
         base = CocoDetectionDataset(self._train_images_dir, self._train_ann_file)
         self._train = _TrainPipeline(base, self._img_size, self._policy, self._seed)
         self._val = CocoDetectionDataset(self._val_images_dir, self._val_ann_file, transforms=Letterbox(self._img_size))
+
+    def on_after_batch_transfer(
+        self, batch: tuple[Tensor, PackedTargets] | tuple[Tensor, list[Targets]], dataloader_idx: int
+    ) -> tuple[Tensor, list[Targets]]:
+        """Restore the ``list[Targets]`` consumer contract on the destination device.
+
+        Lightning calls this after moving the batch to the accelerator, so the
+        :class:`PackedTargets` tensor fields are already on-device when they are
+        unpacked — the reconstructed per-image targets land on the same device the
+        module trains on, with no extra host-to-device hop. A batch whose targets
+        are already a list (a non-packed direct feed) is passed through untouched,
+        so the hook is safe to run over either form. Both the train and val loaders
+        share this single conversion.
+
+        Args:
+            batch: The transferred ``(images, PackedTargets)`` transport batch, or
+                an already-unpacked ``(images, list[Targets])`` batch.
+            dataloader_idx: The loader index (unused; the conversion is uniform).
+
+        Returns:
+            The ``(images, list[Targets])`` consumer batch — the exact contract the
+            module and every downstream step expect.
+
+        Examples:
+            ```pycon
+            >>> DetectionDataModule.on_after_batch_transfer  # doctest: +SKIP
+            >>> # images, targets = dm.on_after_batch_transfer(next(iter(dm.val_dataloader())), 0)
+
+            ```
+        """
+        del dataloader_idx
+        images, targets = batch
+        if isinstance(targets, PackedTargets):
+            return images, unpack_targets(targets)
+        return images, targets
 
     def _loader_kwargs(self) -> dict[str, object]:
         """Return the streaming DataLoader kwargs shared by both loaders.

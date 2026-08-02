@@ -26,7 +26,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.losses import ProgressiveLossSchedule, progressive_alpha
-from lucid_yolo.ptl import DetectionLitModule, collate_detection
+from lucid_yolo.ptl import DetectionLitModule, collate_detection, unpack_targets
 
 if TYPE_CHECKING:
     from pytorch_lightning import LightningModule
@@ -104,11 +104,22 @@ class _SingleSampleDataset(Dataset[tuple[Tensor, Targets]]):
         return torch.randn(3, _IMG_SIZE, _IMG_SIZE), Targets(boxes=boxes, labels=labels)
 
 
+def _collate_unpacked(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list[Targets]]:
+    """Collate, then restore the ``list[Targets]`` the module consumes.
+
+    No datamodule is attached here, so the transfer hook that unpacks the transport
+    form never fires; this wrapper runs the same pack -> unpack round-trip the
+    datamodule performs in production so the module receives its ragged target list.
+    """
+    images, packed = collate_detection(batch)
+    return images, unpack_targets(packed)
+
+
 def test_module_alpha_steps_through_schedule() -> None:
     """A three-epoch run drives module.alpha through the exact ramp values epoch by epoch."""
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=_NUM_CLASSES)
     loader: DataLoader[tuple[Tensor, Targets]] = DataLoader(
-        _SingleSampleDataset(), batch_size=1, collate_fn=collate_detection
+        _SingleSampleDataset(), batch_size=1, collate_fn=_collate_unpacked
     )
     recorder = _AlphaRecorder()
     trainer = Trainer(

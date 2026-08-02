@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.optim.musgd import MuSGD
-from lucid_yolo.ptl import DetectionLitModule, collate_detection, pad_targets
+from lucid_yolo.ptl import DetectionLitModule, collate_detection, pad_targets, unpack_targets
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -81,6 +81,17 @@ def _synthetic_batch() -> tuple[Tensor, list[Targets]]:
     images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
     targets = [_synthetic_targets(2), _synthetic_targets(1)]
     return images, targets
+
+
+def _collate_unpacked(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list[Targets]]:
+    """Collate, then restore the ``list[Targets]`` the module consumes.
+
+    Without a datamodule the transfer hook that unpacks the transport form never
+    fires, so this loader-side wrapper reproduces the same pack -> unpack round-trip
+    the datamodule runs in production, handing the module its ragged target list.
+    """
+    images, packed = collate_detection(batch)
+    return images, unpack_targets(packed)
 
 
 class _SyntheticDetectionDataset(Dataset[tuple[Tensor, Targets]]):
@@ -204,7 +215,7 @@ def test_fast_dev_run_smoke() -> None:
     """A fast_dev_run Trainer drives one train and one val batch end to end."""
     module = _tiny_module()
     loader: DataLoader[tuple[Tensor, Targets]] = DataLoader(
-        _SyntheticDetectionDataset(_BATCH_SIZE), batch_size=_BATCH_SIZE, collate_fn=collate_detection
+        _SyntheticDetectionDataset(_BATCH_SIZE), batch_size=_BATCH_SIZE, collate_fn=_collate_unpacked
     )
     trainer = Trainer(fast_dev_run=True, accelerator="cpu", logger=False, enable_progress_bar=False)
     trainer.fit(module, train_dataloaders=loader, val_dataloaders=loader)

@@ -4,7 +4,13 @@
 from __future__ import annotations
 
 from lucid_yolo.ptl.callbacks import CloseMosaicCallback, EMACallback
-from lucid_yolo.ptl.datamodule import DetectionDataModule, collate_detection
+from lucid_yolo.ptl.datamodule import (
+    DetectionDataModule,
+    PackedTargets,
+    collate_detection,
+    pack_targets,
+    unpack_targets,
+)
 from lucid_yolo.ptl.module import DetectionLitModule, pad_targets
 
 __all__ = [
@@ -12,6 +18,9 @@ __all__ = [
     "DetectionDataModule",
     "DetectionLitModule",
     "EMACallback",
+    "PackedTargets",
     "collate_detection",
+    "pack_targets",
     "pad_targets",
+    "unpack_targets",
 ]

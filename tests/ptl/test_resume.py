@@ -47,7 +47,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from lucid_yolo.data.targets import Targets
-from lucid_yolo.ptl import DetectionLitModule, collate_detection
+from lucid_yolo.ptl import DetectionLitModule, collate_detection, unpack_targets
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -134,6 +134,18 @@ def _build_samples() -> list[tuple[Tensor, Targets]]:
     return samples
 
 
+def _collate_unpacked(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list[Targets]]:
+    """Collate, then restore the ``list[Targets]`` the module consumes.
+
+    No datamodule is attached to these bare-loader ``Trainer.fit`` runs, so the
+    transfer hook that unpacks the transport form never fires; this wrapper runs
+    the same pack -> unpack round-trip the datamodule performs in production so the
+    module receives its ragged target list.
+    """
+    images, packed = collate_detection(batch)
+    return images, unpack_targets(packed)
+
+
 @pytest.fixture
 def train_loader() -> DataLoader[tuple[Tensor, Targets]]:
     """Return an unshuffled loader over the fixed dataset — identical stream every run."""
@@ -142,7 +154,7 @@ def train_loader() -> DataLoader[tuple[Tensor, Targets]]:
         batch_size=_BATCH_SIZE,
         shuffle=False,
         num_workers=0,
-        collate_fn=collate_detection,
+        collate_fn=_collate_unpacked,
     )
 
 
