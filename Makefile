@@ -8,7 +8,7 @@ MINOR     ?=
 TASK      ?= det
 DATA_ROOT ?=
 
-.PHONY: setup lint test precommit gate golden freeze-goldens overfit check-data clean
+.PHONY: setup lint test precommit gate golden freeze-goldens overfit check-data build clean
 
 setup:
 	$(UV) venv --python 3.11 $(VENV)
@@ -49,6 +49,11 @@ overfit:
 check-data:
 	@test -n "$(DATA_ROOT)" || { echo "usage: make check-data DATA_ROOT=/path/to/coco"; exit 1; }
 	$(PY) scripts/check_data.py --data-root $(DATA_ROOT)
+
+# Standard PEP 517 build (setuptools backend): sdist + wheel into dist/.
+build:
+	rm -rf dist
+	$(PY) -m build
 
 clean:
 	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache .coverage build dist src/*.egg-info

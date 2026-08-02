@@ -24,14 +24,15 @@ from pathlib import Path
 import pytest
 import torch
 
+import lit_yolo
 from lit_yolo.data.coco import build_scale_policy
 from lit_yolo.models.registry import scale_spec
 from lit_yolo.ptl.cli import DetectionCLI, default_determinism
 from lit_yolo.ptl.datamodule import DetectionDataModule
 from lit_yolo.ptl.module import DetectionLitModule
 
-#: Repository ``configs/`` tree (tests/ptl/test_cli.py -> repo root -> configs).
-_CONFIGS_DIR = Path(__file__).resolve().parents[2] / "configs"
+#: Packaged configs tree (``lit_yolo/configs``; the repo-root ``configs`` symlinks here).
+_CONFIGS_DIR = Path(lit_yolo.__file__).resolve().parent / "configs"
 #: Every experiment config, sorted for stable parametrization ids.
 _CONFIG_PATHS = sorted(_CONFIGS_DIR.glob("*.yaml"))
 

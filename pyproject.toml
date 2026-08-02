@@ -37,6 +37,7 @@ dev = [
   "fvcore>=0.1.5",
   "shapely>=2.0",
   "pre-commit>=3.7",
+  "build>=1.2",
   "types-PyYAML",
   "fuse-augmentations @ git+https://github.com/Borda/fuse-augmentations.git@5834dc5ed5a245f9a7477ab326c307fc1a279c2b",
 ]
@@ -52,7 +53,7 @@ Homepage = "https://github.com/Borda/lit-YOLOs"
 where = ["src"]
 
 [tool.setuptools.package-data]
-lit_yolo = ["py.typed"]
+lit_yolo = ["py.typed", "configs/*.yaml"]
 
 [tool.ruff]
 line-length = 120

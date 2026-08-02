@@ -52,6 +52,7 @@ from fuse_augmentations.data.config import SplitRatios  # type: ignore[import-un
 from pytorch_lightning import Trainer, seed_everything
 from torch import Tensor
 
+import lit_yolo
 from lit_yolo.assign import make_anchor_points
 from lit_yolo.data.coco import CocoDetectionDataset
 from lit_yolo.decode.topk_e2e import TopKDecoder
@@ -64,8 +65,9 @@ from lit_yolo.ptl.module import DetectionLitModule
 #: Repository root (``scripts/`` is one level below it).
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-#: The recipe whose hyperparameters this run reuses (single source of truth).
-_RECIPE_PATH = REPO_ROOT / "configs" / "overfit_100.yaml"
+#: The recipe whose hyperparameters this run reuses (single source of truth);
+#: read from the packaged configs tree (``lit_yolo/configs``).
+_RECIPE_PATH = Path(lit_yolo.__file__).resolve().parent / "configs" / "overfit_100.yaml"
 
 #: The frozen golden written by ``--freeze``; under ``gpu/`` so the offline harness skips it.
 _GOLDEN_PATH = REPO_ROOT / "goldens" / "gpu" / "overfit_micro_det.json"
