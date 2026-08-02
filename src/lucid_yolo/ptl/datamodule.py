@@ -46,7 +46,7 @@ Batch contract:
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import torch
 from pytorch_lightning import LightningDataModule
@@ -60,9 +60,6 @@ from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.mixup import CopyPaste, Mixup
 from lucid_yolo.data.mosaic import MosaicAssembly
 from lucid_yolo.data.targets import Targets
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 __all__ = ["DetectionDataModule", "collate_detection"]
 
@@ -82,6 +79,47 @@ _FLIP_PROB = 0.5
 #: worker count and ENOMEMs containerized runs (Colab) at large batches; raise
 #: it per run via ``--data.prefetch_factor`` only when shm headroom allows.
 _PREFETCH_FACTOR = 2
+
+
+#: Fraction of currently-free ``/dev/shm`` the worker queue may claim. Worker
+#: batches travel to the main process as shared-memory segments, so the queue's
+#: worst case — ``num_workers x prefetch_factor`` stacked image batches — must
+#: fit the shm tmpfs with headroom for the ragged target tensors and everything
+#: else sharing it, or workers die mid-epoch with tiny-mmap ENOMEM.
+_SHM_BUDGET_FRACTION = 0.5
+
+
+def _shm_capped_workers(workers: int, batch_size: int, img_size: int, prefetch: int) -> int:
+    """Cap a worker count so the prefetch queue fits the free ``/dev/shm`` budget.
+
+    On Linux every batch a worker hands over is backed by shared memory, so the
+    in-flight queue claims about ``workers x prefetch x batch_bytes`` of the shm
+    tmpfs; a many-core host with a large batch fills it before the first step
+    (observed: 64-vCPU Colab, batch 64 -> 30+ GB queued -> ``unable to mmap ...
+    Cannot allocate memory``). The cap bounds the queue to
+    :data:`_SHM_BUDGET_FRACTION` of the *currently free* shm space. Hosts
+    without ``/dev/shm`` (macOS, Windows) are returned unchanged.
+
+    Args:
+        workers: The worker count before the cap.
+        batch_size: Loader batch size (stacked-image bytes scale linearly).
+        img_size: Square letterbox side of every emitted image.
+        prefetch: Per-worker prefetched batch count.
+
+    Returns:
+        ``workers`` bounded below by 1 and above by the shm budget.
+    """
+    shm = Path("/dev/shm")
+    if not shm.exists():
+        return workers
+    try:
+        stat = os.statvfs(shm)
+    except OSError:
+        return workers
+    free_bytes = stat.f_bavail * stat.f_frsize
+    batch_bytes = 4 * 3 * batch_size * img_size * img_size
+    budget = int(free_bytes * _SHM_BUDGET_FRACTION)
+    return max(1, min(workers, budget // max(1, prefetch * batch_bytes)))
 
 
 def _limit_worker_threads(worker_id: int) -> None:
@@ -241,10 +279,12 @@ class DetectionDataModule(LightningDataModule):
             ``annotations``).
         batch_size: Samples per batch for both loaders.
         num_workers: DataLoader worker processes. ``None`` (default) resolves
-            to ``min(batch_size, cpu count)`` — scale workers with the batch a
-            step consumes, but never beyond the cores that can actually run
-            them. Determinism of the seeded pipeline is guaranteed only at an
-            explicit ``0`` (a single in-process generator).
+            to ``min(batch_size, cpu count)``, further capped so the in-flight
+            worker queue fits the free ``/dev/shm`` budget on Linux
+            (:func:`_shm_capped_workers`) — a many-core host with a large batch
+            otherwise fills the shm tmpfs before the first step. Determinism of
+            the seeded pipeline is guaranteed only at an explicit ``0`` (a
+            single in-process generator).
         variant: Model size letter selecting the augmentation strength policy
             (``"n"``…``"x"``); validated at construction.
         img_size: Square letterbox side for every emitted sample. Defaults to 640.
@@ -292,13 +332,18 @@ class DetectionDataModule(LightningDataModule):
     ) -> None:
         super().__init__()
         self._batch_size = int(batch_size)
-        if num_workers is None:
-            num_workers = min(self._batch_size, os.cpu_count() or 1)
-        self._num_workers = int(num_workers)
         self._img_size = int(img_size)
+        self._prefetch_factor = int(prefetch_factor)
+        if num_workers is None:
+            num_workers = _shm_capped_workers(
+                min(self._batch_size, os.cpu_count() or 1),
+                self._batch_size,
+                self._img_size,
+                self._prefetch_factor,
+            )
+        self._num_workers = int(num_workers)
         self._seed = int(seed)
         self._pin_memory = torch.cuda.is_available() if pin_memory is None else bool(pin_memory)
-        self._prefetch_factor = int(prefetch_factor)
         self._policy = build_scale_policy(variant)
         self._train_images_dir = train_images_dir or data_root / "train2017"
         self._train_ann_file = train_ann_file or data_root / "annotations" / "instances_train2017.json"

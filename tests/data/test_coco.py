@@ -25,6 +25,7 @@ import torch
 
 from lucid_yolo.data import Targets, boxes_from_polygons
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
+from lucid_yolo.ptl import datamodule as dm
 from lucid_yolo.ptl.datamodule import DetectionDataModule, collate_detection
 
 _CHECK_DATA_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_data.py"
@@ -227,7 +228,23 @@ def test_dataloader_num_workers_auto_scales_with_batch(detseg_fixture_dir: Path)
     """num_workers=None resolves to min(batch_size, cpu count) — never oversubscribes cores."""
     datamodule = _datamodule(detseg_fixture_dir, num_workers=None)
     datamodule.setup("fit")
-    assert datamodule.train_dataloader().num_workers == min(2, os.cpu_count() or 1)
+    assert datamodule.train_dataloader().num_workers <= min(2, os.cpu_count() or 1)
+    assert datamodule.train_dataloader().num_workers >= 1
+
+
+def test_shm_cap_bounds_workers_to_free_shm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shm cap shrinks the worker count so queued batches fit half the free tmpfs."""
+    monkeypatch.setattr(dm.Path, "exists", lambda self: True)
+    # 1 GiB free (262144 blocks x 4096); batch bytes = 4*3*64*640*640 ~ 315 MB;
+    # prefetch 2 -> budget 512 MiB < one queued slot -> floored to 1 worker
+    monkeypatch.setattr(dm.os, "statvfs", lambda _: os.statvfs_result((4096, 4096, 0, 262144, 262144, 0, 0, 0, 0, 255)))
+    assert dm._shm_capped_workers(48, batch_size=64, img_size=640, prefetch=2) == 1
+
+
+def test_shm_cap_no_dev_shm_leaves_workers_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosts without /dev/shm (macOS/Windows) keep the core-based worker count."""
+    monkeypatch.setattr(dm.Path, "exists", lambda self: False)
+    assert dm._shm_capped_workers(8, batch_size=64, img_size=640, prefetch=2) == 8
 
 
 def test_dataloader_pin_memory_explicit_override(detseg_fixture_dir: Path) -> None:
