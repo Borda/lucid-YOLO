@@ -17,8 +17,8 @@ from collections.abc import Iterator
 import pytest
 import torch
 
-from lit_yolo.data import CopyPaste, Mixup, Targets
-from lit_yolo.data.mixup import _rasterize_polygon
+from open_yolos.data import CopyPaste, Mixup, Targets
+from open_yolos.data.mixup import _rasterize_polygon
 
 #: Square image side used across the suite.
 _SIDE = 8

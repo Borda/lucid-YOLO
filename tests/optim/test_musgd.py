@@ -17,7 +17,7 @@ from collections.abc import Iterator
 import pytest
 import torch
 
-from lit_yolo.optim import MuSGD, orthogonalize
+from open_yolos.optim import MuSGD, orthogonalize
 
 
 @pytest.fixture(autouse=True)

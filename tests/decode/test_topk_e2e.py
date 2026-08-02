@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-041 score-based top-k end-to-end decoder (test_topk_e2e.py).
 
-Covers :class:`lit_yolo.decode.TopKDecoder` and
-:func:`lit_yolo.decode.to_letterboxed_original`: that the suppression-free path
+Covers :class:`open_yolos.decode.TopKDecoder` and
+:func:`open_yolos.decode.to_letterboxed_original`: that the suppression-free path
 keeps two heavily overlapping high-score boxes (``test_no_nms_path`` — the
 defining property, no IoU, no non-maximum suppression); that the output is a
 fixed ``(B, 300, 6)`` shape with score-zero padding rows when fewer anchors
@@ -22,10 +22,10 @@ import pytest
 import torch
 from torch import Tensor
 
-from lit_yolo.assign.grid import make_anchor_points
-from lit_yolo.data.letterbox import Letterbox
-from lit_yolo.data.targets import Targets
-from lit_yolo.decode import TopKDecoder, to_letterboxed_original, topk_e2e
+from open_yolos.assign.grid import make_anchor_points
+from open_yolos.data.letterbox import Letterbox
+from open_yolos.data.targets import Targets
+from open_yolos.decode import TopKDecoder, to_letterboxed_original, topk_e2e
 
 _DET_CAP = 300
 

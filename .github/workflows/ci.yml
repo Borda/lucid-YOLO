@@ -44,7 +44,7 @@ jobs:
           uv venv --python 3.11 .venv
           uv pip install --python .venv/bin/python -e ".[dev]"
       - name: Offline unit suite with coverage
-        run: .venv/bin/python -m pytest -m "not gpu and not data" --cov=lit_yolo --cov-report=term
+        run: .venv/bin/python -m pytest -m "not gpu and not data" --cov=open_yolos --cov-report=term
 
   license-audit:
     runs-on: ubuntu-latest

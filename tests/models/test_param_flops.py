@@ -10,7 +10,7 @@ clean-room block/head assumptions (A3/A4/A9) that the papers leave underspecifie
 
 Params count the full checkpoint (both dual-head branches); GFLOPs exclude the
 training-only one-to-many branch — the R6/YOLOv10 reporting convention (see
-:mod:`lit_yolo.models.build`).
+:mod:`open_yolos.models.build`).
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import pytest
 import torch
 from scripts.check_goldens import DEFAULT_GOLDENS_DIR, check_golden
 
-from lit_yolo.models import build_detector, count_flops, count_params
+from open_yolos.models import build_detector, count_flops, count_params
 
 #: Published detection numbers at a 640-pixel input, R1 Table 7 (verified verbatim
 #: against the arXiv HTML): (params in millions, conventional GFLOPs). Rounded to

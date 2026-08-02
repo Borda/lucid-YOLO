@@ -17,8 +17,8 @@ import pytest
 import torch
 from torch import Tensor
 
-from lit_yolo.assign.tal import AssignResult
-from lit_yolo.losses import DetectionBranchLoss, DetectionLossOutput
+from open_yolos.assign.tal import AssignResult
+from open_yolos.losses import DetectionBranchLoss, DetectionLossOutput
 
 _LN2 = math.log(2.0)
 

@@ -17,7 +17,7 @@ exact integer counts (drawn samples, total instances, polygon rings, image shape
 plus tolerance-pinned float aggregates (image mean/std sums, bbox area/coord sums),
 which drift only within libm/``interpolate`` rounding across OS and architecture.
 :func:`optim_toy` (WP-033) runs a fully seeded toy training task and reports how
-many optimization steps :class:`~lit_yolo.optim.MuSGD` and momentum-SGD each need
+many optimization steps :class:`~open_yolos.optim.MuSGD` and momentum-SGD each need
 to reach a fixed loss threshold — a directional convergence claim mirroring R1
 Table 4 at toy scale. :func:`assignment_cases` (WP-029) freezes the Phase-3 label
 -assignment behavior: it runs the Task-Aligned, Small-Target-Aware, and one-to-one
@@ -46,17 +46,17 @@ import torch
 from torch import Tensor, nn
 from torch.optim import Optimizer
 
-from lit_yolo.assign import (
+from open_yolos.assign import (
     SmallTargetAssigner,
     TaskAlignedAssigner,
     UniqueAssigner,
     make_anchor_points,
     surrogate_boxes,
 )
-from lit_yolo.data.coco import CocoDetectionDataset, build_scale_policy
-from lit_yolo.models.build import build_detector, count_flops, count_params
-from lit_yolo.optim import MuSGD
-from lit_yolo.ptl.datamodule import _TrainPipeline
+from open_yolos.data.coco import CocoDetectionDataset, build_scale_policy
+from open_yolos.models.build import build_detector, count_flops, count_params
+from open_yolos.optim import MuSGD
+from open_yolos.ptl.datamodule import _TrainPipeline
 
 #: Repository root (``scripts/`` is one level below it).
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -246,7 +246,7 @@ def data_pipeline_metrics() -> dict[str, float]:
 
     Regenerates the seeded WP-007 detection/segmentation fixtures into a throwaway
     directory, builds the Phase-1 augmentation pipeline
-    (:class:`~lit_yolo.ptl.datamodule._TrainPipeline`: mosaic, affine, letterbox,
+    (:class:`~open_yolos.ptl.datamodule._TrainPipeline`: mosaic, affine, letterbox,
     mixup, copy-paste, HSV jitter, flip) over them with a fixed seed and the
     ``"n"`` strength policy, and draws :data:`_PIPELINE_SAMPLE_INDICES` in order.
     Every value is produced by *running* the pipeline — never hand-written — so the
@@ -340,7 +340,7 @@ def _build_toy_model() -> nn.Sequential:
     Seeds torch immediately before construction so both optimizer runs start from
     byte-identical parameters. The network is two ``3x3`` convolutions (each
     followed by ReLU) and a linear head — a few thousand parameters whose matrix
-    weights exercise the Muon branch of :class:`~lit_yolo.optim.MuSGD`.
+    weights exercise the Muon branch of :class:`~open_yolos.optim.MuSGD`.
 
     Returns:
         A freshly initialized :class:`torch.nn.Sequential` mapping an image batch
@@ -387,7 +387,7 @@ def _steps_to_threshold(model: nn.Module, optimizer: Optimizer, inputs: Tensor, 
 
     Examples:
         ```pycon
-        >>> from lit_yolo.optim import MuSGD
+        >>> from open_yolos.optim import MuSGD
         >>> model = _build_toy_model()
         >>> inputs, targets = _toy_batch()
         >>> opt = MuSGD(model.parameters(), lr=_TOY_LR, momentum=_TOY_MOMENTUM)
@@ -417,7 +417,7 @@ def optim_toy() -> dict[str, float]:
 
     Trains two byte-identical copies of the micro-CNN (:func:`_build_toy_model`)
     on the same fixed regression task (:func:`_toy_batch`) — one with
-    :class:`~lit_yolo.optim.MuSGD`, one with :class:`torch.optim.SGD` at the same
+    :class:`~open_yolos.optim.MuSGD`, one with :class:`torch.optim.SGD` at the same
     learning rate and momentum — and reports how many optimizer steps each needs
     to drive the MSE loss to :data:`_TOY_LOSS_THRESHOLD`. This mirrors R1 Table
     4's MuSGD-beats-SGD result at toy scale. Every stochastic draw is seeded
@@ -543,7 +543,7 @@ def _count_positives(result: object) -> int:
     """Total number of positive (foreground) anchors in an assignment result.
 
     Args:
-        result: An :class:`~lit_yolo.assign.AssignResult` for a single-image batch.
+        result: An :class:`~open_yolos.assign.AssignResult` for a single-image batch.
 
     Returns:
         The count of ``True`` entries in the result's foreground mask.
@@ -551,7 +551,7 @@ def _count_positives(result: object) -> int:
     Examples:
         ```pycon
         >>> import torch
-        >>> from lit_yolo.assign import TaskAlignedAssigner, make_anchor_points
+        >>> from open_yolos.assign import TaskAlignedAssigner, make_anchor_points
         >>> pts, _ = make_anchor_points([(2, 2)], [8])
         >>> gt = torch.tensor([[[0.0, 0.0, 16.0, 16.0]]])
         >>> out = TaskAlignedAssigner(topk=1)(
@@ -569,7 +569,7 @@ def _max_positives_per_gt(result: object, num_gt: int) -> int:
     """Largest number of positive anchors assigned to any single ground truth.
 
     Args:
-        result: An :class:`~lit_yolo.assign.AssignResult` for a single-image batch.
+        result: An :class:`~open_yolos.assign.AssignResult` for a single-image batch.
         num_gt: Number of real ground truths in the scene.
 
     Returns:
@@ -579,7 +579,7 @@ def _max_positives_per_gt(result: object, num_gt: int) -> int:
     Examples:
         ```pycon
         >>> import torch
-        >>> from lit_yolo.assign import UniqueAssigner, make_anchor_points
+        >>> from open_yolos.assign import UniqueAssigner, make_anchor_points
         >>> pts, _ = make_anchor_points([(4, 4)], [8])
         >>> gt = torch.tensor([[[0.0, 0.0, 32.0, 32.0]]])
         >>> out = UniqueAssigner(topk=7)(
@@ -602,7 +602,7 @@ def _candidates_inside(anchor_points: Tensor, boxes: Tensor) -> int:
 
     Mirrors the assigners' centre-inside candidate test. Passing the original
     ground truth reproduces the vanilla-TAL candidate set; passing
-    :func:`~lit_yolo.assign.surrogate_boxes` output reproduces the STAL set.
+    :func:`~open_yolos.assign.surrogate_boxes` output reproduces the STAL set.
 
     Args:
         anchor_points: ``(A, 2)`` anchor centres in input pixels.
@@ -614,7 +614,7 @@ def _candidates_inside(anchor_points: Tensor, boxes: Tensor) -> int:
     Examples:
         ```pycon
         >>> import torch
-        >>> from lit_yolo.assign import make_anchor_points, surrogate_boxes
+        >>> from open_yolos.assign import make_anchor_points, surrogate_boxes
         >>> pts, _ = make_anchor_points([(4, 4)], [8])
         >>> gt = torch.tensor([[[5.0, 5.0, 11.0, 11.0]]])  # 6x6, no centre inside
         >>> _candidates_inside(pts, gt)
@@ -697,9 +697,9 @@ def _run_multi_gt() -> dict[str, float]:
 def assignment_cases() -> dict[str, float]:
     """Frozen Phase-3 label-assignment metrics over hand-placed synthetic scenes (WP-029).
 
-    Runs the Task-Aligned (:class:`~lit_yolo.assign.TaskAlignedAssigner`),
-    Small-Target-Aware (:class:`~lit_yolo.assign.SmallTargetAssigner`), and
-    one-to-one (:class:`~lit_yolo.assign.UniqueAssigner`) assigners on three
+    Runs the Task-Aligned (:class:`~open_yolos.assign.TaskAlignedAssigner`),
+    Small-Target-Aware (:class:`~open_yolos.assign.SmallTargetAssigner`), and
+    one-to-one (:class:`~open_yolos.assign.UniqueAssigner`) assigners on three
     deterministic scenes built from literal tensors (no RNG) and reports the
     blueprint's Phase-3 exit-gate quantities as integer-valued floats:
 
@@ -749,16 +749,16 @@ def det_params_flops() -> dict[str, float]:
     """Frozen per-variant parameter and GFLOP metrics for the detector (WP-023).
 
     Builds each of the five scale variants
-    (:func:`~lit_yolo.models.build.build_detector`) with 80 classes and records,
+    (:func:`~open_yolos.models.build.build_detector`) with 80 classes and records,
     per variant, the exact parameter count of the full model
-    (:func:`~lit_yolo.models.build.count_params`) and the conventional GFLOPs of
+    (:func:`~open_yolos.models.build.count_params`) and the conventional GFLOPs of
     the deployed NMS-free inference model
-    (:func:`~lit_yolo.models.build.count_flops` on
-    :meth:`~lit_yolo.models.build.Detector.deploy`) at a 640-pixel input. Params
+    (:func:`~open_yolos.models.build.count_flops` on
+    :meth:`~open_yolos.models.build.Detector.deploy`) at a 640-pixel input. Params
     are the full checkpoint (both dual-head branches); GFLOPs exclude the
     training-only one-to-many branch — the R6/YOLOv10 reporting convention that
     lands all five scales within R1 Table 7 tolerance (see
-    :mod:`lit_yolo.models.build`).
+    :mod:`open_yolos.models.build`).
 
     Every value is produced by building and measuring the live modules — never
     hand-written — so the golden re-derives from the actual architecture. Param

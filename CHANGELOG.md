@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to lit-yolo are documented here, following the Keep a
+All notable changes to open-yolos are documented here, following the Keep a
 Changelog convention; versioning is a perpetual 0.x release train — no 1.0 is
 ever planned, promised, or tagged — per ADR-002 (docs/DECISIONS.md).
 

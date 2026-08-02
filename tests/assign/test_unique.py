@@ -20,7 +20,7 @@ import pytest
 import torch
 from torch import Tensor
 
-from lit_yolo.assign import SmallTargetAssigner, UniqueAssigner, make_anchor_points
+from open_yolos.assign import SmallTargetAssigner, UniqueAssigner, make_anchor_points
 
 #: The anchor whose centre (12, 12) is the lone stride-8 candidate of an 8x8 GT.
 _CENTRE_ANCHOR = 5

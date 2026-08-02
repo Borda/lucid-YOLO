@@ -24,15 +24,15 @@ from pathlib import Path
 import pytest
 import torch
 
-import lit_yolo
-from lit_yolo.data.coco import build_scale_policy
-from lit_yolo.models.registry import scale_spec
-from lit_yolo.ptl.cli import DetectionCLI, default_determinism
-from lit_yolo.ptl.datamodule import DetectionDataModule
-from lit_yolo.ptl.module import DetectionLitModule
+import open_yolos
+from open_yolos.data.coco import build_scale_policy
+from open_yolos.models.registry import scale_spec
+from open_yolos.ptl.cli import DetectionCLI, default_determinism
+from open_yolos.ptl.datamodule import DetectionDataModule
+from open_yolos.ptl.module import DetectionLitModule
 
-#: Packaged configs tree (``lit_yolo/configs``; the repo-root ``configs`` symlinks here).
-_CONFIGS_DIR = Path(lit_yolo.__file__).resolve().parent / "configs"
+#: Packaged configs tree (``open_yolos/configs``; the repo-root ``configs`` symlinks here).
+_CONFIGS_DIR = Path(open_yolos.__file__).resolve().parent / "configs"
 #: Every experiment config, sorted for stable parametrization ids.
 _CONFIG_PATHS = sorted(_CONFIGS_DIR.glob("*.yaml"))
 
@@ -40,7 +40,7 @@ _CONFIG_PATHS = sorted(_CONFIGS_DIR.glob("*.yaml"))
 def _build_cli(*args: str) -> DetectionCLI:
     """Build the detection CLI in non-running mode with the given extra args.
 
-    Mirrors :func:`lit_yolo.ptl.cli.main` (same ``deterministic``/seed defaults)
+    Mirrors :func:`open_yolos.ptl.cli.main` (same ``deterministic``/seed defaults)
     but forces ``run=False`` so the model and datamodule are instantiated without
     launching ``fit``.
     """

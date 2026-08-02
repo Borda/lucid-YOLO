@@ -22,9 +22,9 @@ from types import ModuleType
 import pytest
 import torch
 
-from lit_yolo.data import Targets, boxes_from_polygons
-from lit_yolo.data.coco import CocoDetectionDataset, build_scale_policy
-from lit_yolo.ptl.datamodule import DetectionDataModule, collate_detection
+from open_yolos.data import Targets, boxes_from_polygons
+from open_yolos.data.coco import CocoDetectionDataset, build_scale_policy
+from open_yolos.ptl.datamodule import DetectionDataModule, collate_detection
 
 _CHECK_DATA_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_data.py"
 

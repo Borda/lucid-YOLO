@@ -2,7 +2,7 @@
 """Debug visualizer: dump an annotated grid of augmented training samples (WP-015).
 
 Draws ``--samples`` samples through the Phase-1 augmentation pipeline
-(:class:`~lit_yolo.ptl.datamodule._TrainPipeline`: mosaic, affine, letterbox,
+(:class:`~open_yolos.ptl.datamodule._TrainPipeline`: mosaic, affine, letterbox,
 mixup, copy-paste, HSV jitter, flip) over a fixture-style COCO directory and
 writes a single annotated grid PNG: axis-aligned boxes as rectangles (via
 :func:`torchvision.utils.draw_bounding_boxes`) and instance polygons as outlines
@@ -32,9 +32,9 @@ from PIL import Image, ImageDraw
 from torch import Tensor
 from torchvision.utils import draw_bounding_boxes, make_grid
 
-from lit_yolo.data.coco import CocoDetectionDataset, build_scale_policy
-from lit_yolo.data.targets import Targets
-from lit_yolo.ptl.datamodule import _TrainPipeline
+from open_yolos.data.coco import CocoDetectionDataset, build_scale_policy
+from open_yolos.data.targets import Targets
+from open_yolos.ptl.datamodule import _TrainPipeline
 
 #: Per-split COCO annotation filename emitted by the fixture generator's CocoWriter.
 _COCO_ANNOTATION = "_annotations.coco.json"
@@ -97,7 +97,7 @@ def build_pipeline(data_root: Path, seed: int, img_size: int, variant: str) -> _
         variant: Model-size letter selecting the augmentation-strength policy.
 
     Returns:
-        A ready-to-draw :class:`~lit_yolo.ptl.datamodule._TrainPipeline`.
+        A ready-to-draw :class:`~open_yolos.ptl.datamodule._TrainPipeline`.
 
     Examples:
         ```pycon
@@ -152,7 +152,7 @@ def render_sample(image: Tensor, targets: Targets) -> Tensor:
     Examples:
         ```pycon
         >>> import torch
-        >>> from lit_yolo.data.targets import Targets
+        >>> from open_yolos.data.targets import Targets
         >>> img = torch.zeros(3, 8, 8)
         >>> t = Targets(boxes=torch.tensor([[1.0, 1.0, 6.0, 6.0]]), labels=torch.tensor([0]))
         >>> render_sample(img, t).shape

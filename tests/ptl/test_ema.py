@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for :class:`~lit_yolo.ptl.callbacks.EMACallback` (WP-037).
+"""Tests for :class:`~open_yolos.ptl.callbacks.EMACallback` (WP-037).
 
 Covers the DoD ``test_shadow_updates`` — after a run of manual
-:meth:`~lit_yolo.ptl.callbacks.EMACallback.on_train_batch_end` calls against a
+:meth:`~open_yolos.ptl.callbacks.EMACallback.on_train_batch_end` calls against a
 hand-mutated tiny module the shadow equals the EMA recursion recomputed in the
 test with the same warmup-ramp formula — plus the supporting contracts: the
 warmup ramp starts far below the nominal decay; the validation swap loads the
@@ -32,7 +32,7 @@ from pytorch_lightning import LightningModule, Trainer
 from torch import Tensor, nn
 from torch.utils.data import DataLoader, Dataset
 
-from lit_yolo.ptl import EMACallback
+from open_yolos.ptl import EMACallback
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

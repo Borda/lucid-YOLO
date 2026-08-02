@@ -58,7 +58,7 @@ before first use; denylisted surfaces are never admissible.
 
 ## Naming evidence record
 
-Package name `lit-yolo` uses "YOLO" as a model-family/category term. Evidence:
+Package name `open-yolos` uses "YOLO" as a model-family/category term. Evidence:
 
 1. **Origin**: "YOLO" coined by Redmon et al. (2016) [R20]; the original Darknet
    implementations are MIT-licensed.
@@ -75,7 +75,7 @@ Usage discipline: "YOLO26", "YOLO11", "Ultralytics", and their logos never
 appear in package names, module paths, class names, or model identifiers.
 Nominative references to the paper ("the YOLO26 paper, arXiv:2606.03748") are
 the only usage. The YOLO26 method implementation is exposed under the feature
-name `e2e` (variants `lit-yolo-e2e-{n,s,m,l,x}`), never a version number.
+name `e2e` (variants `open-yolos-e2e-{n,s,m,l,x}`), never a version number.
 
 ## Audit record
 

@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-043/WP-069 torchmetrics bbox evaluator and its WP-044 oracle.
 
-Covers the three pieces of :mod:`lit_yolo.eval.coco_eval`, now driven by
+Covers the three pieces of :mod:`open_yolos.eval.coco_eval`, now driven by
 :class:`torchmetrics.detection.MeanAveragePrecision` on its ``faster_coco_eval``
 backend (WP-069):
 
 - :func:`test_dual_path_report` (the WP-043 DoD) — a **real** tiny untrained
-  detector is run through :class:`~lit_yolo.eval.coco_eval.DualPathEvaluator`
+  detector is run through :class:`~open_yolos.eval.coco_eval.DualPathEvaluator`
   over a few detseg fixture images with ground-truth target dicts built from the
   fixture annotation JSON; the report must carry both ``"e2e"`` and ``"nms"``
   keys, each a full 12-metric dict of finite values (an untrained mAP near zero
@@ -40,13 +40,13 @@ import pytest
 import torch
 from torchvision.io import ImageReadMode, read_image
 
-from lit_yolo.data.coco import CocoDetectionDataset
-from lit_yolo.data.letterbox import Letterbox
-from lit_yolo.data.targets import Targets
-from lit_yolo.decode import NMSDecoder, TopKDecoder
-from lit_yolo.eval import DualPathEvaluator, detections_to_predictions, evaluate_bbox
-from lit_yolo.eval.coco_eval import _METRIC_KEYS
-from lit_yolo.ptl.module import DetectionLitModule
+from open_yolos.data.coco import CocoDetectionDataset
+from open_yolos.data.letterbox import Letterbox
+from open_yolos.data.targets import Targets
+from open_yolos.decode import NMSDecoder, TopKDecoder
+from open_yolos.eval import DualPathEvaluator, detections_to_predictions, evaluate_bbox
+from open_yolos.eval.coco_eval import _METRIC_KEYS
+from open_yolos.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -97,7 +97,7 @@ def _eval_batch(
     Reads the first ``num_images`` images named in the fixture COCO JSON, scales
     each to ``[0, 1]``, letterboxes it onto the canvas, and stacks them with their
     COCO image ids and original ``(height, width)`` sizes — the batch contract the
-    :class:`~lit_yolo.eval.coco_eval.DualPathEvaluator` consumes.
+    :class:`~open_yolos.eval.coco_eval.DualPathEvaluator` consumes.
     """
     split_dir = fixture_dir / _SPLIT
     doc = json.loads((split_dir / _ANNOTATION).read_text(encoding="utf-8"))

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-021 detection neck (test_neck.py).
 
-Covers :class:`lit_yolo.models.DetectionNeck`: that the three outputs preserve the
+Covers :class:`open_yolos.models.DetectionNeck`: that the three outputs preserve the
 stride-8/16/32 resolution of the backbone taps with width-scaled channel counts for
 the ``n``/``s`` multipliers, that the attention tail carries exactly one PSABlock
 inner unit regardless of the depth multiplier, that a backbone+neck pass on a small
@@ -15,7 +15,7 @@ import pytest
 import torch
 from torch import nn
 
-from lit_yolo.models import DetectionBackbone, DetectionNeck, PSABlock
+from open_yolos.models import DetectionBackbone, DetectionNeck, PSABlock
 
 # (depth, width, max_channels, backbone taps (P3, P4, P5), neck outputs (N3, N4, N5))
 _N_SCALE = (0.50, 0.25, 1024, (128, 128, 256), (64, 128, 256))

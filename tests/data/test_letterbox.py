@@ -14,7 +14,7 @@ from collections.abc import Iterator
 import pytest
 import torch
 
-from lit_yolo.data import Letterbox, Targets, apply_affine_to_points, boxes_from_polygons
+from open_yolos.data import Letterbox, Targets, apply_affine_to_points, boxes_from_polygons
 
 #: Non-square source and square target used across the suite; r = 0.8 on both axes.
 _ORIG_H = 500

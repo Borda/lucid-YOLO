@@ -10,7 +10,7 @@ coordinates are enumerated by hand, not lifted from any reference.
 import pytest
 import torch
 
-from lit_yolo.assign import make_anchor_points
+from open_yolos.assign import make_anchor_points
 
 
 def test_single_level_centers_are_row_major() -> None:

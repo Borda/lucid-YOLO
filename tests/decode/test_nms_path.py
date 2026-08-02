@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-042 confidence-threshold + class-wise NMS decoder.
 
-Covers :class:`lit_yolo.decode.NMSDecoder`, the non-E2E path over the dense
+Covers :class:`open_yolos.decode.NMSDecoder`, the non-E2E path over the dense
 one-to-many branch, as the suppression contrast to the WP-041 one-to-one path:
 two heavily overlapping same-class high-score boxes collapse to exactly one
 survivor (``test_overlapping_same_class_collapses_to_one`` — the mirror of the
@@ -18,8 +18,8 @@ import pytest
 import torch
 from torch import Tensor
 
-from lit_yolo.assign.grid import make_anchor_points
-from lit_yolo.decode import NMSDecoder
+from open_yolos.assign.grid import make_anchor_points
+from open_yolos.decode import NMSDecoder
 
 _DET_CAP = 300
 

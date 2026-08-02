@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+# Det-B trends tier (blueprint sec. 10): s-scale, ~120-epoch paired runs.
+# Acceptance: sign-matching against R1 Tables 2/3/5/6 (STAL -> dAP_S > 0;
+# ProgLoss beats fixed (0.5, 0.5); MuSGD >= SGD at equal epochs; -DFL >= +DFL
+# within +/-0.2). Same recipe as Det-A but s-scale and longer. ADR-001: topology
+# is named by `variant` only and lives in open_yolos/models/registry.py.
+seed_everything: 0
+
+# Registry row, not a topology (ADR-001). Expands via scale_spec() onto the
+# module's depth/width/max_channels and the datamodule augmentation policy.
+variant: s
+
+trainer:
+  max_epochs: 120 # blueprint sec. 10 Det-B: ~100-150-epoch runs
+  # determinism: CLI default (default_determinism) — strict on CPU/CUDA, warn_only on MPS
+  gradient_clip_val: 10.0 # A31: bounds the violent opening steps of the from-scratch recipe
+  callbacks:
+    # Disable mosaic for the final epochs (blueprint sec. 5.9, R1 Table S3: close_mosaic 8-10).
+    - class_path: open_yolos.ptl.callbacks.CloseMosaicCallback
+      init_args:
+        close_mosaic: 10
+    # EMA weights, used for eval (blueprint D4).
+    - class_path: open_yolos.ptl.callbacks.EMACallback
+
+model:
+  num_classes: 80 # COCO 2017 (R12)
+  lr: 0.01 # blueprint sec. 5.8 (R1 Tables S2/S5): lr0
+  momentum: 0.95 # blueprint sec. 5.8: momentum ~0.94-0.95
+  weight_decay: 0.0005 # blueprint sec. 5.8: weight_decay 5e-4
+  box_gain: 7.5 # blueprint sec. 5.7 (R1 Tables S2/S5): pretrain-style box gain
+  cls_gain: 0.5 # blueprint sec. 5.7: cls gain
+  l1_gain: 6.0 # blueprint sec. 5.7: L1 gain (the legacy dfl field scales L1)
+  alpha_init: 0.8 # blueprint sec. 5.7 (R1 Eq. 2-3): ProgLoss ramp start, weights (0.8, 0.2)
+  alpha_final: 0.1 # blueprint sec. 5.7: ProgLoss ramp end, weights (0.1, 0.9)
+
+data:
+  data_root: /path/to/coco # PLACEHOLDER -- COCO 2017 root (AGENTS.md sec. 3; never downloaded)
+  batch_size: 16 # PLACEHOLDER -- tune to accelerator memory
+  num_workers: 8 # PLACEHOLDER -- 0 forces byte-identical deterministic epochs

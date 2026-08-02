@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Offline unit gate for the COCO 2017 downloader (``lit_yolo.data.download``).
+"""Offline unit gate for the COCO 2017 downloader (``open_yolos.data.download``).
 
 Every test here runs without network: the transfer path is exercised by
 monkeypatching ``urllib.request.urlopen`` with an in-memory zip server, and the
@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from lit_yolo.data import download as dl
+from open_yolos.data import download as dl
 
 _CHECK_DATA_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_data.py"
 
