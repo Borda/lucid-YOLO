@@ -23,9 +23,9 @@ from types import ModuleType
 import pytest
 import torch
 
-from open_yolos.data import Targets, boxes_from_polygons
-from open_yolos.data.coco import CocoDetectionDataset, build_scale_policy
-from open_yolos.ptl.datamodule import DetectionDataModule, collate_detection
+from lucid_yolo.data import Targets, boxes_from_polygons
+from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
+from lucid_yolo.ptl.datamodule import DetectionDataModule, collate_detection
 
 _CHECK_DATA_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_data.py"
 

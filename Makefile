@@ -1,4 +1,4 @@
-# open-yolos developer entry points (blueprint section 14.2).
+# lucid-yolo developer entry points (blueprint section 14.2).
 # `make gate` is the single command that decides whether a commit may land.
 
 VENV      := .venv
@@ -20,7 +20,7 @@ lint: precommit
 
 # Offline unit suite: no network, no dataset, no GPU (gpu/data marks excluded).
 test:
-	@$(PY) -m pytest -m "not gpu and not data" --cov=open_yolos --cov-report=term; \
+	@$(PY) -m pytest -m "not gpu and not data" --cov=lucid_yolo --cov-report=term; \
 	status=$$?; if [ $$status -eq 5 ]; then echo "no tests collected yet — passing (pre WP-002)"; exit 0; else exit $$status; fi
 
 precommit:

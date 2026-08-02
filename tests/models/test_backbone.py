@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-020 detection backbone (test_backbone.py).
 
-Covers :class:`open_yolos.models.DetectionBackbone`: that the three taps land at
+Covers :class:`lucid_yolo.models.DetectionBackbone`: that the three taps land at
 strides 8/16/32 with width-scaled channel counts for the ``n``/``s`` multipliers,
 that the ``m`` multiplier's ``max_channels`` cap clamps the P5 tap, that inner-unit
 repeat counts track the depth multiplier, and that a forward pass on a small input
@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from open_yolos.models import DetectionBackbone
+from lucid_yolo.models import DetectionBackbone
 
 # (depth, width, max_channels, expected tap channels (P3, P4, P5))
 _N_SCALE = (0.50, 0.25, 1024, (128, 128, 256))

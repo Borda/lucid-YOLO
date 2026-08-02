@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for :class:`~open_yolos.ptl.callbacks.CloseMosaicCallback` (WP-036).
+"""Tests for :class:`~lucid_yolo.ptl.callbacks.CloseMosaicCallback` (WP-036).
 
 Covers the DoD ``test_flip_epoch``: a 5-epoch dry run over the real
-:class:`~open_yolos.ptl.datamodule.DetectionDataModule` (wired to the synthetic
+:class:`~lucid_yolo.ptl.datamodule.DetectionDataModule` (wired to the synthetic
 detseg fixture, one batch per epoch) with ``close_mosaic=2`` disables mosaic from
 epoch ``E - close_mosaic`` on and leaves it untouched before. A probe callback
 records the pipeline's mosaic probability at the end of every epoch (after the
@@ -27,14 +27,14 @@ import torch
 from pytorch_lightning import Callback, LightningModule, Trainer
 from torch import Tensor, nn
 
-from open_yolos.ptl.callbacks import CloseMosaicCallback
-from open_yolos.ptl.datamodule import DetectionDataModule
+from lucid_yolo.ptl.callbacks import CloseMosaicCallback
+from lucid_yolo.ptl.datamodule import DetectionDataModule
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from open_yolos.data.targets import Targets
+    from lucid_yolo.data.targets import Targets
 
 #: Small square input so the fixture pipeline runs in a fraction of a second.
 _IMG_SIZE = 64

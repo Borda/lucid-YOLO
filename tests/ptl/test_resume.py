@@ -7,7 +7,7 @@ two-epoch checkpoint then resumed to four epochs produce the **same** per-step
 training-loss trajectory over the post-resume epochs — plus the supporting
 continuity contracts: after resume the trainer's ``global_step`` and
 ``current_epoch`` continue from the checkpoint rather than restarting, and the
-:class:`~open_yolos.optim.musgd.MuSGD` momentum buffers are restored (the
+:class:`~lucid_yolo.optim.musgd.MuSGD` momentum buffers are restored (the
 optimizer state is non-empty), so the resumed run continues the same momentum
 rather than re-warming from zero.
 
@@ -46,8 +46,8 @@ from pytorch_lightning import Callback, Trainer, seed_everything
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from open_yolos.data.targets import Targets
-from open_yolos.ptl import DetectionLitModule, collate_detection
+from lucid_yolo.data.targets import Targets
+from lucid_yolo.ptl import DetectionLitModule, collate_detection
 
 if TYPE_CHECKING:
     from pathlib import Path

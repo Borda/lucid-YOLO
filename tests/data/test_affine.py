@@ -15,7 +15,7 @@ from collections.abc import Iterator
 import pytest
 import torch
 
-from open_yolos.data import RandomAffine, Targets, boxes_from_polygons
+from lucid_yolo.data import RandomAffine, Targets, boxes_from_polygons
 
 #: Square canvas used across the suite.
 _CANVAS = 64

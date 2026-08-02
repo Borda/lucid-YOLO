@@ -13,7 +13,7 @@ from collections.abc import Iterator
 import pytest
 import torch
 
-from open_yolos.optim import orthogonalize
+from lucid_yolo.optim import orthogonalize
 
 
 @pytest.fixture(autouse=True)

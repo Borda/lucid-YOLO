@@ -2,8 +2,8 @@
 """Phase 3 exit gate: the assignment + loss stack is optimizable end to end (WP-030).
 
 This is the Phase 3 sign-off that the STAL / one-to-one assigners
-(:mod:`open_yolos.assign`) and the dual-branch loss
-(:class:`~open_yolos.losses.dual_loss.DualBranchLoss`) compose into a stack that a
+(:mod:`lucid_yolo.assign`) and the dual-branch loss
+(:class:`~lucid_yolo.losses.dual_loss.DualBranchLoss`) compose into a stack that a
 plain optimizer can drive downhill. The detection head (WP-022) lands
 concurrently and is deliberately *not* used here: instead of a network we
 optimize two learnable prediction tensors directly, so a failure localizes to
@@ -45,16 +45,16 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from open_yolos.assign import make_anchor_points
-from open_yolos.data.coco import CocoDetectionDataset
-from open_yolos.data.letterbox import Letterbox
-from open_yolos.losses.dual_loss import DualBranchLoss, DualLossOutput
+from lucid_yolo.assign import make_anchor_points
+from lucid_yolo.data.coco import CocoDetectionDataset
+from lucid_yolo.data.letterbox import Letterbox
+from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from open_yolos.data.targets import Targets
+    from lucid_yolo.data.targets import Targets
 
 #: Images per overfit batch (kept small so the 200-step run stays a few seconds).
 _BATCH_SIZE = 2

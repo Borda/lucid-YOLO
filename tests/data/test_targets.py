@@ -13,7 +13,7 @@ import math
 import pytest
 import torch
 
-from open_yolos.data import (
+from lucid_yolo.data import (
     Compose,
     GeometricTransform,
     Targets,

@@ -15,8 +15,8 @@ from collections.abc import Iterator
 import pytest
 import torch
 
-from open_yolos.data import Targets
-from open_yolos.data.augment import HorizontalFlip, HSVJitter, hsv_to_rgb, rgb_to_hsv
+from lucid_yolo.data import Targets
+from lucid_yolo.data.augment import HorizontalFlip, HSVJitter, hsv_to_rgb, rgb_to_hsv
 
 
 @pytest.fixture(autouse=True)

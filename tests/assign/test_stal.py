@@ -17,7 +17,7 @@ reference implementation.
 import pytest
 import torch
 
-from open_yolos.assign import (
+from lucid_yolo.assign import (
     SmallTargetAssigner,
     TaskAlignedAssigner,
     make_anchor_points,

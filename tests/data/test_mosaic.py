@@ -15,8 +15,8 @@ from collections.abc import Callable, Iterator
 import pytest
 import torch
 
-from open_yolos.data import Targets, boxes_from_polygons
-from open_yolos.data.mosaic import MosaicAssembly
+from lucid_yolo.data import Targets, boxes_from_polygons
+from lucid_yolo.data.mosaic import MosaicAssembly
 
 #: Base size ``S``; the assembled canvas is ``2S x 2S``.
 _TARGET = 32

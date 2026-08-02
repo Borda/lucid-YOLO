@@ -13,7 +13,7 @@ lifted from a reference implementation.
 
 import torch
 
-from open_yolos.assign import AssignResult, TaskAlignedAssigner, make_anchor_points
+from lucid_yolo.assign import AssignResult, TaskAlignedAssigner, make_anchor_points
 
 
 def _build_dual_gt_scene() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:

@@ -12,7 +12,7 @@ import math
 
 import torch
 
-from open_yolos.losses import box_iou_aligned, ciou_loss, complete_iou
+from lucid_yolo.losses import box_iou_aligned, ciou_loss, complete_iou
 
 
 def test_against_closed_form() -> None:

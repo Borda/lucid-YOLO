@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-016 convolutional primitives (test_blocks.py).
 
-Covers the three blocks in ``open_yolos.models.blocks``: stride-1/stride-2 spatial
+Covers the three blocks in ``lucid_yolo.models.blocks``: stride-1/stride-2 spatial
 behaviour for odd kernels, the depthwise group count, the bottleneck channel
 expansion ratio, the residual add, and a clean eval-mode forward pass.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from open_yolos.models import (
+from lucid_yolo.models import (
     C2PSA,
     SPPF,
     Bottleneck,

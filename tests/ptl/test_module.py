@@ -3,9 +3,9 @@
 
 Covers the DoD ``test_training_step`` (a forward + dual loss over a synthetic
 batch returns a finite scalar carrying gradients and logs every per-component
-term), the :func:`~open_yolos.ptl.module.pad_targets` ragged-to-dense contract
+term), the :func:`~lucid_yolo.ptl.module.pad_targets` ragged-to-dense contract
 (including empty and all-empty batches), ``configure_optimizers`` building a
-:class:`~open_yolos.optim.musgd.MuSGD` over every parameter, the constant-LR /
+:class:`~lucid_yolo.optim.musgd.MuSGD` over every parameter, the constant-LR /
 automatic-optimization wiring proved by a ``fast_dev_run`` Lightning smoke run,
 the ``alpha`` delegation seam (WP-035), and the task conditioning: an invalid
 task is rejected, the ``_task_extra_loss`` stub is an inert zero for every task,
@@ -13,7 +13,7 @@ and a ``segment`` module trains identically to a ``detect`` module.
 
 The module is built at n-scale multipliers with a low channel cap and a 160-px
 input so the real backbone/neck/head stack runs in a couple of seconds on CPU.
-Batches are synthetic tensors plus hand-built :class:`~open_yolos.data.targets.Targets`
+Batches are synthetic tensors plus hand-built :class:`~lucid_yolo.data.targets.Targets`
 (no dataset fixture needed). Direct ``training_step`` calls monkeypatch
 ``module.log`` because Lightning's ``self.log`` requires trainer attachment; the
 ``fast_dev_run`` test exercises the real logging path.
@@ -30,9 +30,9 @@ from pytorch_lightning import Trainer
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from open_yolos.data.targets import Targets
-from open_yolos.optim.musgd import MuSGD
-from open_yolos.ptl import DetectionLitModule, collate_detection, pad_targets
+from lucid_yolo.data.targets import Targets
+from lucid_yolo.optim.musgd import MuSGD
+from lucid_yolo.ptl import DetectionLitModule, collate_detection, pad_targets
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

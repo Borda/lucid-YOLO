@@ -20,8 +20,8 @@ import pytest
 import torch
 from torch import Tensor
 
-from open_yolos.assign import make_anchor_points
-from open_yolos.losses import DualBranchLoss, DualLossOutput
+from lucid_yolo.assign import make_anchor_points
+from lucid_yolo.losses import DualBranchLoss, DualLossOutput
 
 
 @pytest.fixture(autouse=True)

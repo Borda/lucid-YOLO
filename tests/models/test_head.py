@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the WP-022 dual detection head (test_head.py).
 
-Covers :class:`open_yolos.models.DualDetectionHead` and its helpers: that both the
+Covers :class:`lucid_yolo.models.DualDetectionHead` and its helpers: that both the
 one-to-one and one-to-many branches emit dense ``(B, 8400, nc)`` scores and
 ``(B, 8400, 4)`` raw ltrb distances at a 640 input; that :func:`o2o_topk` reduces
 the one-to-one branch to a valid ``(B, 300, 6)`` detection tuple; that the dense
 anchor axis aligns position-for-position with
-:func:`~open_yolos.assign.grid.make_anchor_points`; that :func:`decode_ltrb` matches
+:func:`~lucid_yolo.assign.grid.make_anchor_points`; that :func:`decode_ltrb` matches
 a hand-computed box; that the two branches own disjoint parameters and both
 receive gradient; and that a small 128-pixel forward runs clean.
 """
@@ -16,9 +16,9 @@ from __future__ import annotations
 import pytest
 import torch
 
-from open_yolos.assign.grid import make_anchor_points
-from open_yolos.models import DualDetectionHead, DualHeadOutput, decode_ltrb, o2o_topk
-from open_yolos.models.heads.detect import _flatten_level
+from lucid_yolo.assign.grid import make_anchor_points
+from lucid_yolo.models import DualDetectionHead, DualHeadOutput, decode_ltrb, o2o_topk
+from lucid_yolo.models.heads.detect import _flatten_level
 
 _STRIDES = [8, 16, 32]
 _N_SCALE_CHANNELS = (64, 128, 256)

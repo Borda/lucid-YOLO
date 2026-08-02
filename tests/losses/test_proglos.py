@@ -5,9 +5,9 @@ Covers the DoD ``alpha(t)`` unit test reproducing R1 Eq. 3 exactly at
 ``t in {0, E/2, E-1}`` for ``E in {2, 10, 100}`` (plus the hand-computed midpoint
 of an odd-``E`` run and the ``E == 1`` max-guard degenerate case), the
 monotone-non-increasing shape of the ramp across every epoch, the
-:class:`~open_yolos.losses.progressive.ProgressiveLossSchedule` delegating to the
+:class:`~lucid_yolo.losses.progressive.ProgressiveLossSchedule` delegating to the
 pure function, and the module wiring: a three-epoch ``Trainer`` run steps
-:attr:`~open_yolos.ptl.module.DetectionLitModule.alpha` through the exact schedule
+:attr:`~lucid_yolo.ptl.module.DetectionLitModule.alpha` through the exact schedule
 values ``[0.8, 0.45, 0.1]`` epoch by epoch, captured by a callback that reads
 ``alpha`` on the first batch of each epoch (after the module's
 ``on_train_epoch_start`` hook has run).
@@ -24,9 +24,9 @@ from pytorch_lightning import Callback, Trainer
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from open_yolos.data.targets import Targets
-from open_yolos.losses import ProgressiveLossSchedule, progressive_alpha
-from open_yolos.ptl import DetectionLitModule, collate_detection
+from lucid_yolo.data.targets import Targets
+from lucid_yolo.losses import ProgressiveLossSchedule, progressive_alpha
+from lucid_yolo.ptl import DetectionLitModule, collate_detection
 
 if TYPE_CHECKING:
     from pytorch_lightning import LightningModule

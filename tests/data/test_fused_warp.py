@@ -16,14 +16,14 @@ from collections.abc import Iterator
 import pytest
 import torch
 
-from open_yolos.data import (
+from lucid_yolo.data import (
     FusedAffineLetterbox,
     Letterbox,
     RandomAffine,
     Targets,
     boxes_from_polygons,
 )
-from open_yolos.data.transforms import GeometricTransform
+from lucid_yolo.data.transforms import GeometricTransform
 
 
 @pytest.fixture(autouse=True)

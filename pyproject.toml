@@ -3,8 +3,8 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "open-yolos"
-version = "0.0.1.dev5"
+name = "lucid-yolo"
+version = "0.0.1.dev1"
 description = "Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, and oriented-detection methods described in the YOLO26 paper (arXiv:2606.03748)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,8 +43,8 @@ dev = [
 ]
 
 [project.scripts]
-open-yolos = "open_yolos.ptl.cli:main"
-open-yolos-download = "open_yolos.data.download:main"
+lucid-yolo = "lucid_yolo.ptl.cli:main"
+lucid-download = "lucid_yolo.data.download:main"
 
 [project.urls]
 Homepage = "https://github.com/Borda/lit-YOLOs"
@@ -53,7 +53,7 @@ Homepage = "https://github.com/Borda/lit-YOLOs"
 where = ["src"]
 
 [tool.setuptools.package-data]
-open_yolos = ["py.typed", "configs/*.yaml"]
+lucid_yolo = ["py.typed", "configs/*.yaml"]
 
 [tool.ruff]
 line-length = 120
@@ -108,7 +108,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["open_yolos"]
+source = ["lucid_yolo"]
 branch = true
 
 [tool.coverage.report]
