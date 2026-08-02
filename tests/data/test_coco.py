@@ -207,7 +207,7 @@ def test_dataloader_streaming_kwargs_with_workers(detseg_fixture_dir: Path, load
     datamodule = _datamodule(detseg_fixture_dir, num_workers=2)
     datamodule.setup("fit")
     loader = getattr(datamodule, loader_name)()
-    assert loader.prefetch_factor == 4
+    assert loader.prefetch_factor == 2
     assert loader.worker_init_fn is not None
     assert loader.persistent_workers
     assert loader.pin_memory == torch.cuda.is_available()

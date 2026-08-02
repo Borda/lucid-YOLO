@@ -76,11 +76,12 @@ _AFFINE_TRANSLATE = 0.1
 #: Standard YOLO-lineage horizontal-flip probability ([R1] Table S3: ``fliplr=0.5``).
 _FLIP_PROB = 0.5
 
-#: Default per-worker prefetched batches. The augmentation pipeline is CPU-heavy
-#: (a mosaic sample alone decodes four images), so a deeper prefetch queue than
-#: the DataLoader default of 2 keeps the accelerator fed across the per-sample
-#: cost variance (mosaic vs. mosaic+mixup+copy-paste).
-_PREFETCH_FACTOR = 4
+#: Default per-worker prefetched batches (the DataLoader default). The whole
+#: queue — ``num_workers x prefetch_factor`` batches — lives in POSIX shared
+#: memory, so a deeper default multiplies /dev/shm pressure by batch size and
+#: worker count and ENOMEMs containerized runs (Colab) at large batches; raise
+#: it per run via ``--data.prefetch_factor`` only when shm headroom allows.
+_PREFETCH_FACTOR = 2
 
 
 def _limit_worker_threads(worker_id: int) -> None:
