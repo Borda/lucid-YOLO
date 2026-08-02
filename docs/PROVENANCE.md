@@ -77,6 +77,16 @@ Nominative references to the paper ("the YOLO26 paper, arXiv:2606.03748") are
 the only usage. The YOLO26 method implementation is exposed under the feature
 name `e2e` (variants `lit-yolo-e2e-{n,s,m,l,x}`), never a version number.
 
+## Audit record
+
+Periodic audits of the clean-room contract (AGENTS.md denylist) against the
+full execution record. Method and detailed findings live in the project's
+design document (sec. 12); this table is the versioned summary.
+
+| Date | Scope | Evidence layers | Verdict |
+|---|---|---|---|
+| 2026-08-02 | WP-001–WP-069, 56 commits, audited at `4dd18ba` | codebase/dependency sweep · commit provenance trail (55/56 trailers, all allowlist-cited) · complete session fetch log (only R1, R7, R8, R12, R21 endpoints; zero denylisted domains) · delegated-work hand-over records · persistent agent memory | Upheld — no Ultralytics code, config, weights, or docs consulted at any point; every design input traces to R1–R24 or a registered assumption |
+
 ## Usage log
 
 First-use log of sources consulted during implementation. Papers are cited by
