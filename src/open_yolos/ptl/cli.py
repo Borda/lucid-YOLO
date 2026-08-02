@@ -45,8 +45,11 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import torch
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import ProgressBar, RichProgressBar, TQDMProgressBar
 from pytorch_lightning.cli import ArgsType, LightningArgumentParser, LightningCLI
 
 from open_yolos.models.registry import scale_spec
@@ -84,6 +87,13 @@ _DEFAULT_VARIANT = "n"
 #: (the Det-A reference recipe); any user config or CLI flag overrides per key.
 _DEFAULT_CONFIG = "det_tier_a_n"
 
+#: Default progress-bar flavour. ``tqdm`` — not Lightning's rich-when-available
+#: auto-pick — because :class:`~pytorch_lightning.callbacks.TQDMProgressBar` goes
+#: through ``tqdm.auto`` (an ipywidgets widget in notebooks), while
+#: :class:`~pytorch_lightning.callbacks.RichProgressBar`'s live rendering prints
+#: one line per refresh in Colab/Jupyter cell output.
+_DEFAULT_PROGRESS_BAR = "tqdm"
+
 
 class DetectionCLI(LightningCLI):
     """LightningCLI wiring the detection module/datamodule with a ``variant`` link.
@@ -108,6 +118,13 @@ class DetectionCLI(LightningCLI):
             parser: The CLI parser to extend (populated by LightningCLI with the
                 ``model``/``data``/``trainer`` argument groups already added).
         """
+        parser.add_argument(
+            "--progress_bar",
+            type=str,
+            default=_DEFAULT_PROGRESS_BAR,
+            choices=("tqdm", "rich", "none"),
+            help="Progress bar flavour: tqdm (notebook-safe default), rich (terminal live view), none.",
+        )
         parser.add_argument("--variant", type=str, default=_DEFAULT_VARIANT)
         parser.link_arguments("variant", "model.depth", compute_fn=lambda variant: scale_spec(variant).depth)
         parser.link_arguments("variant", "model.width", compute_fn=lambda variant: scale_spec(variant).width)
@@ -115,6 +132,37 @@ class DetectionCLI(LightningCLI):
             "variant", "model.max_channels", compute_fn=lambda variant: scale_spec(variant).max_channels
         )
         parser.link_arguments("variant", "data.variant")
+
+    def instantiate_trainer(self, **kwargs: Any) -> Trainer:
+        """Instantiate the trainer with the ``--progress_bar`` choice applied.
+
+        Lightning's own default is rich-when-available, whose live rendering
+        prints one line per refresh in notebook cell output (Colab/Jupyter), so
+        the choice is made explicit here: the selected bar is appended through
+        ``trainer_defaults["callbacks"]`` — the only injection channel that
+        *extends* the config's callback list instead of replacing it — and
+        ``none`` disables the bar entirely. A ``ProgressBar`` instance placed
+        directly in ``trainer.callbacks`` by a user config still wins: Lightning
+        rejects two bars, so the default injection is skipped in that case.
+
+        Args:
+            kwargs: Extra trainer arguments forwarded to LightningCLI.
+
+        Returns:
+            The configured :class:`~pytorch_lightning.Trainer`.
+        """
+        choice = str(self._get(self.config_init, "progress_bar", default=_DEFAULT_PROGRESS_BAR))
+        trainer_config = self._get(self.config_init, "trainer", default={})
+        user_bar = any(isinstance(callback, ProgressBar) for callback in trainer_config.get("callbacks") or [])
+        if choice == "none":
+            kwargs.setdefault("enable_progress_bar", False)
+        elif not user_bar:
+            bar: ProgressBar = RichProgressBar() if choice == "rich" else TQDMProgressBar()
+            defaults_callbacks = self.trainer_defaults.get("callbacks", [])
+            if not isinstance(defaults_callbacks, list):
+                defaults_callbacks = [defaults_callbacks]
+            self.trainer_defaults = {**self.trainer_defaults, "callbacks": [*defaults_callbacks, bar]}
+        return super().instantiate_trainer(**kwargs)
 
 
 def packaged_config(name: str) -> Path:

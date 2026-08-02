@@ -54,6 +54,21 @@ def _build_cli(*args: str) -> DetectionCLI:
     )
 
 
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [
+        pytest.param((), "TQDMProgressBar", id="default-tqdm"),
+        pytest.param(("--progress_bar", "rich"), "RichProgressBar", id="rich"),
+        pytest.param(("--progress_bar", "none"), None, id="none"),
+    ],
+)
+def test_progress_bar_choice_selects_callback(flags: tuple[str, ...], expected: str | None) -> None:
+    """--progress_bar picks the bar flavour; the default is the notebook-safe tqdm bar."""
+    cli = _build_cli("--config", str(packaged_config("det_tier_a_n")), *flags)
+    bar = cli.trainer.progress_bar_callback
+    assert (None if bar is None else type(bar).__name__) == expected
+
+
 def test_default_determinism_matches_accelerator() -> None:
     """Strict determinism everywhere except MPS, which only supports warn_only."""
 
