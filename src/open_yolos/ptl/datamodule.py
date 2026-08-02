@@ -75,6 +75,28 @@ _AFFINE_TRANSLATE = 0.1
 #: Standard YOLO-lineage horizontal-flip probability ([R1] Table S3: ``fliplr=0.5``).
 _FLIP_PROB = 0.5
 
+#: Default per-worker prefetched batches. The augmentation pipeline is CPU-heavy
+#: (a mosaic sample alone decodes four images), so a deeper prefetch queue than
+#: the DataLoader default of 2 keeps the accelerator fed across the per-sample
+#: cost variance (mosaic vs. mosaic+mixup+copy-paste).
+_PREFETCH_FACTOR = 4
+
+
+def _limit_worker_threads(worker_id: int) -> None:
+    """DataLoader ``worker_init_fn`` capping each worker to one torch CPU thread.
+
+    Without the cap every worker process inherits torch's default intra-op
+    thread pool (one thread per core), so ``num_workers`` workers oversubscribe
+    the CPU by that factor and the tensor ops inside the augmentation pipeline
+    (affine warps, HSV jitter, blends) thrash instead of running in parallel.
+    One thread per worker makes worker throughput scale with ``num_workers``.
+
+    Args:
+        worker_id: The worker index (unused; required by the DataLoader API).
+    """
+    del worker_id
+    torch.set_num_threads(1)
+
 
 def collate_detection(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list[Targets]]:
     """Collate ``(image, Targets)`` samples into ``(images, list[Targets])``.
@@ -222,6 +244,13 @@ class DetectionDataModule(LightningDataModule):
         val_ann_file: Override for the val annotation JSON. Defaults to
             ``data_root/"annotations"/"instances_val2017.json"``.
         seed: Seed for the training pipeline's generator and loader shuffling.
+        pin_memory: Whether loader batches land in page-locked host memory for
+            async host-to-device copies. ``None`` (default) resolves to ``True``
+            exactly when CUDA is available — MPS and CPU runs get ``False``
+            (pinning buys nothing there and MPS warns on it).
+        prefetch_factor: Batches each worker keeps prefetched (defaults to
+            :data:`_PREFETCH_FACTOR`); ignored at ``num_workers=0`` where the
+            DataLoader forbids it.
 
     Examples:
         ```pycon
@@ -245,12 +274,16 @@ class DetectionDataModule(LightningDataModule):
         val_images_dir: Path | None = None,
         val_ann_file: Path | None = None,
         seed: int = 0,
+        pin_memory: bool | None = None,
+        prefetch_factor: int = _PREFETCH_FACTOR,
     ) -> None:
         super().__init__()
         self._batch_size = int(batch_size)
         self._num_workers = int(num_workers)
         self._img_size = int(img_size)
         self._seed = int(seed)
+        self._pin_memory = torch.cuda.is_available() if pin_memory is None else bool(pin_memory)
+        self._prefetch_factor = int(prefetch_factor)
         self._policy = build_scale_policy(variant)
         self._train_images_dir = train_images_dir or data_root / "train2017"
         self._train_ann_file = train_ann_file or data_root / "annotations" / "instances_train2017.json"
@@ -273,6 +306,25 @@ class DetectionDataModule(LightningDataModule):
         self._train = _TrainPipeline(base, self._img_size, self._policy, self._seed)
         self._val = CocoDetectionDataset(self._val_images_dir, self._val_ann_file, transforms=Letterbox(self._img_size))
 
+    def _loader_kwargs(self) -> dict[str, object]:
+        """Return the streaming DataLoader kwargs shared by both loaders.
+
+        Accelerator-aware: ``pin_memory`` is on only where it helps (resolved in
+        the constructor — CUDA yes, MPS/CPU no), ``prefetch_factor`` and the
+        one-thread-per-worker cap (:func:`_limit_worker_threads`) apply only
+        with workers, so the deterministic ``num_workers=0`` path is untouched.
+        """
+        workers = self._num_workers > 0
+        return {
+            "batch_size": self._batch_size,
+            "num_workers": self._num_workers,
+            "collate_fn": collate_detection,
+            "persistent_workers": workers,
+            "pin_memory": self._pin_memory,
+            "prefetch_factor": self._prefetch_factor if workers else None,
+            "worker_init_fn": _limit_worker_threads if workers else None,
+        }
+
     def train_dataloader(self) -> DataLoader[tuple[Tensor, Targets]]:
         """Return the shuffled training loader over the augmentation pipeline."""
         if self._train is None:
@@ -280,12 +332,9 @@ class DetectionDataModule(LightningDataModule):
         shuffle_generator = torch.Generator().manual_seed(self._seed)
         return DataLoader(
             self._train,
-            batch_size=self._batch_size,
             shuffle=True,
-            num_workers=self._num_workers,
-            collate_fn=collate_detection,
             generator=shuffle_generator,
-            persistent_workers=self._num_workers > 0,
+            **self._loader_kwargs(),  # type: ignore[arg-type]
         )
 
     def val_dataloader(self) -> DataLoader[tuple[Tensor, Targets]]:
@@ -294,11 +343,8 @@ class DetectionDataModule(LightningDataModule):
             raise RuntimeError("setup() must be called before val_dataloader()")
         return DataLoader(
             self._val,
-            batch_size=self._batch_size,
             shuffle=False,
-            num_workers=self._num_workers,
-            collate_fn=collate_detection,
-            persistent_workers=self._num_workers > 0,
+            **self._loader_kwargs(),  # type: ignore[arg-type]
         )
 
     @property

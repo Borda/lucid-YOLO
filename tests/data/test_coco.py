@@ -142,14 +142,20 @@ def test_collate_stacks_images_and_keeps_ragged_targets() -> None:
     assert isinstance(targets, list) and len(targets) == 3
 
 
-def _datamodule(fixture_dir: Path, variant: str = "m", seed: int = 0) -> DetectionDataModule:
+def _datamodule(
+    fixture_dir: Path,
+    variant: str = "m",
+    seed: int = 0,
+    num_workers: int = 0,
+    pin_memory: bool | None = None,
+) -> DetectionDataModule:
     """Build a datamodule pointing both splits at the fixture's single split."""
     split = fixture_dir / "train"
     annotation = split / "_annotations.coco.json"
     return DetectionDataModule(
         data_root=fixture_dir,
         batch_size=2,
-        num_workers=0,
+        num_workers=num_workers,
         variant=variant,
         img_size=_SMOKE_IMG_SIZE,
         train_images_dir=split,
@@ -157,6 +163,7 @@ def _datamodule(fixture_dir: Path, variant: str = "m", seed: int = 0) -> Detecti
         val_images_dir=split,
         val_ann_file=annotation,
         seed=seed,
+        pin_memory=pin_memory,
     )
 
 
@@ -188,6 +195,38 @@ def test_datamodule_train_batch_is_deterministic(detseg_fixture_dir: Path) -> No
     images_a, _ = next(iter(first.train_dataloader()))
     images_b, _ = next(iter(second.train_dataloader()))
     assert torch.equal(images_a, images_b)
+
+
+@pytest.mark.parametrize(
+    "loader_name",
+    [pytest.param("train_dataloader", id="train"), pytest.param("val_dataloader", id="val")],
+)
+def test_dataloader_streaming_kwargs_with_workers(detseg_fixture_dir: Path, loader_name: str) -> None:
+    """Worker loaders prefetch deeper, cap worker threads, and auto-resolve pin_memory."""
+    datamodule = _datamodule(detseg_fixture_dir, num_workers=2)
+    datamodule.setup("fit")
+    loader = getattr(datamodule, loader_name)()
+    assert loader.prefetch_factor == 4
+    assert loader.worker_init_fn is not None
+    assert loader.persistent_workers
+    assert loader.pin_memory == torch.cuda.is_available()
+
+
+def test_dataloader_zero_workers_keeps_deterministic_path(detseg_fixture_dir: Path) -> None:
+    """The num_workers=0 loader skips prefetch and the worker thread cap entirely."""
+    datamodule = _datamodule(detseg_fixture_dir)
+    datamodule.setup("fit")
+    loader = datamodule.train_dataloader()
+    assert loader.num_workers == 0
+    assert loader.prefetch_factor is None
+    assert loader.worker_init_fn is None
+
+
+def test_dataloader_pin_memory_explicit_override(detseg_fixture_dir: Path) -> None:
+    """An explicit pin_memory value wins over the CUDA auto-resolution."""
+    datamodule = _datamodule(detseg_fixture_dir, pin_memory=True)
+    datamodule.setup("fit")
+    assert datamodule.train_dataloader().pin_memory
 
 
 def _write_fake_split(images_dir: Path, annotation_file: Path, count: int) -> None:
