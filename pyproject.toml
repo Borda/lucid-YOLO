@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "open-yolos"
-version = "0.0.1.dev0"
+version = "0.0.1.dev1"
 description = "Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, and oriented-detection methods described in the YOLO26 paper (arXiv:2606.03748)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,7 @@ dependencies = [
   "torchvision>=0.19",
   "torchmetrics>=1.9",
   "faster-coco-eval>=1.7",
+  "fvcore>=0.1.5",
   "pyyaml>=6.0",
   "numpy>=1.26",
 ]
@@ -34,12 +35,11 @@ dev = [
   "mypy>=1.11",
   "pytest>=8.0",
   "pytest-cov>=5.0",
-  "fvcore>=0.1.5",
   "shapely>=2.0",
   "pre-commit>=3.7",
   "build>=1.2",
   "types-PyYAML",
-  "fuse-augmentations @ git+https://github.com/Borda/fuse-augmentations.git@5834dc5ed5a245f9a7477ab326c307fc1a279c2b",
+  "fuse-augmentations",
 ]
 
 [project.scripts]

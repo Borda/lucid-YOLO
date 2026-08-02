@@ -27,7 +27,7 @@ import torch
 import open_yolos
 from open_yolos.data.coco import build_scale_policy
 from open_yolos.models.registry import scale_spec
-from open_yolos.ptl.cli import DetectionCLI, default_determinism
+from open_yolos.ptl.cli import DetectionCLI, _resolve_config_args, default_determinism, main, packaged_config
 from open_yolos.ptl.datamodule import DetectionDataModule
 from open_yolos.ptl.module import DetectionLitModule
 
@@ -140,3 +140,45 @@ def test_direct_multiplier_override_is_rejected() -> None:
     """A link-computed multiplier cannot be set directly; ``variant`` is the seam."""
     with pytest.raises(SystemExit):
         _config_cli(_CONFIGS_DIR / "det_tier_a_n.yaml", "--model.depth=0.9")
+
+
+def test_packaged_config_resolves_name_with_and_without_suffix() -> None:
+    """packaged_config maps bare names onto the installed configs tree."""
+    with_suffix = packaged_config("det_tier_a_n.yaml")
+    without_suffix = packaged_config("det_tier_a_n")
+    assert with_suffix == without_suffix
+    assert with_suffix.is_file()
+    assert with_suffix.parent == _CONFIGS_DIR
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected_value"),
+    [
+        pytest.param(["fit", "--config", "det_tier_a_n.yaml"], None, id="separate-token"),
+        pytest.param(["fit", "--config", "det_tier_a_n"], None, id="bare-name"),
+        pytest.param(["fit", "--config=det_tier_a_n"], None, id="equals-form"),
+    ],
+)
+def test_resolve_config_args_rewrites_packaged_names(argv, expected_value) -> None:
+    """A --config value naming a packaged config is rewritten onto its real path."""
+    del expected_value
+    resolved = " ".join(_resolve_config_args(argv))
+    assert str(packaged_config("det_tier_a_n")) in resolved
+
+
+def test_resolve_config_args_leaves_existing_and_unknown_paths_alone(tmp_path) -> None:
+    """Existing local paths and unknown names pass through untouched."""
+    local = tmp_path / "det_tier_a_n.yaml"
+    local.write_text("variant: n\n", encoding="utf-8")
+    assert _resolve_config_args(["fit", "--config", str(local)]) == ["fit", "--config", str(local)]
+    assert _resolve_config_args(["fit", "--config", "no_such_config"]) == ["fit", "--config", "no_such_config"]
+
+
+def test_fit_without_config_defaults_to_packaged_recipe(capsys) -> None:
+    """Bare fit (no --config) loads the packaged Det-A recipe as parser defaults."""
+    with pytest.raises(SystemExit):
+        main(["fit", "--print_config"])
+    out = capsys.readouterr().out
+    assert "max_epochs: 50" in out
+    assert "gradient_clip_val: 10.0" in out
+    assert "variant: n" in out

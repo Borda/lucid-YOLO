@@ -43,6 +43,9 @@ Provenance: D9/ADR-001, D12c. Assumptions: A8.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import torch
 from pytorch_lightning.cli import ArgsType, LightningArgumentParser, LightningCLI
 
@@ -77,6 +80,10 @@ def default_determinism() -> bool | str:
 #: Default scale variant when a config omits ``variant`` (the n-scale debug row, D3).
 _DEFAULT_VARIANT = "n"
 
+#: Packaged config loaded as the parser's defaults when no ``--config`` is given
+#: (the Det-A reference recipe); any user config or CLI flag overrides per key.
+_DEFAULT_CONFIG = "det_tier_a_n"
+
 
 class DetectionCLI(LightningCLI):
     """LightningCLI wiring the detection module/datamodule with a ``variant`` link.
@@ -110,6 +117,59 @@ class DetectionCLI(LightningCLI):
         parser.link_arguments("variant", "data.variant")
 
 
+def packaged_config(name: str) -> Path:
+    """Return the path of a config shipped inside the installed package.
+
+    Args:
+        name: Config file name with or without the ``.yaml`` suffix
+            (e.g. ``"det_tier_a_n"`` or ``"det_tier_a_n.yaml"``).
+
+    Returns:
+        Absolute path of ``open_yolos/configs/<name>.yaml``. The path is
+        returned without an existence check — the CLI parser reports a missing
+        file with its usual error.
+
+    Examples:
+        >>> packaged_config("det_tier_a_n").name
+        'det_tier_a_n.yaml'
+    """
+    if not name.endswith((".yaml", ".yml")):
+        name = f"{name}.yaml"
+    return Path(__file__).resolve().parents[1] / "configs" / name
+
+
+def _resolve_config_args(args: list[str]) -> list[str]:
+    """Rewrite ``--config`` values naming packaged configs onto their real paths.
+
+    A value following ``--config``/``-c`` (or embedded as ``--config=NAME``)
+    that does not exist on disk but matches a file under the packaged
+    ``open_yolos/configs`` tree is replaced by that packaged path, so an
+    installed wheel runs ``open-yolos fit --config det_tier_a_n.yaml`` with no
+    checkout and no absolute path. Existing paths always win untouched, and
+    unknown names pass through unchanged for the parser's normal error.
+    """
+    resolved: list[str] = []
+    expect_value = False
+    for token in args:
+        if expect_value:
+            expect_value = False
+            candidate = packaged_config(token)
+            resolved.append(str(candidate) if not Path(token).exists() and candidate.is_file() else token)
+            continue
+        if token in ("--config", "-c"):
+            expect_value = True
+            resolved.append(token)
+            continue
+        if token.startswith("--config="):
+            value = token.removeprefix("--config=")
+            candidate = packaged_config(value)
+            rewritten = f"--config={candidate}" if not Path(value).exists() and candidate.is_file() else token
+            resolved.append(rewritten)
+            continue
+        resolved.append(token)
+    return resolved
+
+
 def main(args: ArgsType = None) -> DetectionCLI:
     """Run the detection LightningCLI.
 
@@ -117,6 +177,12 @@ def main(args: ArgsType = None) -> DetectionCLI:
     of ``0``; every other setting comes from the CLI/config. With no ``args`` the
     CLI reads ``sys.argv`` (the console-script and ``python -m`` path), so a
     subcommand such as ``fit`` and a ``--config`` are supplied there.
+
+    ``--config`` values that name a **packaged** config (with or without the
+    ``.yaml`` suffix) are resolved onto the installed ``open_yolos/configs``
+    tree when no such file exists locally, so a bare
+    ``open-yolos fit --config det_tier_a_n.yaml`` works from a wheel install
+    (see :func:`packaged_config`).
 
     Args:
         args: Explicit arguments to parse instead of ``sys.argv`` — a list of
@@ -129,15 +195,21 @@ def main(args: ArgsType = None) -> DetectionCLI:
 
     Examples:
         >>> from open_yolos.ptl.cli import main
-        >>> cli = main(  # doctest: +SKIP
-        ...     ["fit", "--config", "configs/det_tier_a_n.yaml"]
-        ... )
+        >>> cli = main(["fit", "--config", "det_tier_a_n"])  # doctest: +SKIP
     """
+    if args is None:
+        args = sys.argv[1:]
+    if isinstance(args, list) and all(isinstance(token, str) for token in args):
+        args = _resolve_config_args(args)
     return DetectionCLI(
         DetectionLitModule,
         DetectionDataModule,
         trainer_defaults={"deterministic": default_determinism()},
         seed_everything_default=0,
+        parser_kwargs={
+            subcommand: {"default_config_files": [str(packaged_config(_DEFAULT_CONFIG))]}
+            for subcommand in ("fit", "validate", "test", "predict")
+        },
         args=args,
     )
 
