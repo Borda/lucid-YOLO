@@ -13,7 +13,7 @@ variant: n
 
 trainer:
   max_epochs: 40 # tiny budget: enough steps to memorize the fixed slice
-  deterministic: true
+  # determinism: CLI default (default_determinism) — strict on CPU/CUDA, warn_only on MPS
   num_sanity_val_steps: 0
   callbacks:
     # close_mosaic == max_epochs disables mosaic from epoch 0: overfit needs a

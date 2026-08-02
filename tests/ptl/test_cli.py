@@ -22,10 +22,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import torch
 
 from lit_yolo.data.coco import build_scale_policy
 from lit_yolo.models.registry import scale_spec
-from lit_yolo.ptl.cli import DetectionCLI
+from lit_yolo.ptl.cli import DetectionCLI, default_determinism
 from lit_yolo.ptl.datamodule import DetectionDataModule
 from lit_yolo.ptl.module import DetectionLitModule
 
@@ -45,11 +46,24 @@ def _build_cli(*args: str) -> DetectionCLI:
     return DetectionCLI(
         DetectionLitModule,
         DetectionDataModule,
-        trainer_defaults={"deterministic": True},
+        trainer_defaults={"deterministic": default_determinism()},
         seed_everything_default=0,
         run=False,
         args=list(args),
     )
+
+
+def test_default_determinism_matches_accelerator() -> None:
+    """Strict determinism everywhere except MPS, which only supports warn_only."""
+
+    expected = "warn_only" if torch.backends.mps.is_available() else True
+    assert default_determinism() == expected
+
+
+def test_configs_leave_determinism_to_cli_default() -> None:
+    """No shipped config pins trainer.deterministic; the accelerator-aware default rules."""
+    for path in _CONFIG_PATHS:
+        assert "deterministic:" not in path.read_text(encoding="utf-8")
 
 
 def _config_cli(path: Path, *extra: str) -> DetectionCLI:

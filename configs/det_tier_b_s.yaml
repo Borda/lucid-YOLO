@@ -12,7 +12,7 @@ variant: s
 
 trainer:
   max_epochs: 120 # blueprint sec. 10 Det-B: ~100-150-epoch runs
-  deterministic: true
+  # determinism: CLI default (default_determinism) — strict on CPU/CUDA, warn_only on MPS
   callbacks:
     # Disable mosaic for the final epochs (blueprint sec. 5.9, R1 Table S3: close_mosaic 8-10).
     - class_path: lit_yolo.ptl.callbacks.CloseMosaicCallback

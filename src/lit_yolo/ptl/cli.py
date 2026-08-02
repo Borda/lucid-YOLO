@@ -15,9 +15,14 @@ Reproducibility contract:
     enabled, so every run writes its **fully resolved** config (``config.yaml``)
     next to the checkpoints — the config that reproduces the run byte-for-byte,
     including the values the ``variant`` link expands (below). Trainer defaults
-    are kept minimal and accelerator-agnostic: only ``deterministic=True`` is
-    forced (D12c leaves accelerator selection to Lightning's auto-detection), and
-    ``seed_everything`` defaults to ``0``.
+    are kept minimal and accelerator-agnostic: accelerator selection stays with
+    Lightning's auto-detection (D12c — the best available device is picked
+    automatically), ``seed_everything`` defaults to ``0``, and determinism is
+    :func:`default_determinism`: strict ``True`` on CPU/CUDA, ``"warn_only"``
+    when MPS is the auto-picked accelerator, because MPS lacks deterministic
+    kernels for some backward ops (``index_put_with_accumulate``) and strict
+    mode would abort the run. A config or CLI flag can still override it
+    explicitly.
 
 Variant link (ADR-001):
     The module constructor takes the three raw compound-scaling multipliers
@@ -38,13 +43,36 @@ Provenance: D9/ADR-001, D12c. Assumptions: A8.
 
 from __future__ import annotations
 
+import torch
 from pytorch_lightning.cli import ArgsType, LightningArgumentParser, LightningCLI
 
 from lit_yolo.models.registry import scale_spec
 from lit_yolo.ptl.datamodule import DetectionDataModule
 from lit_yolo.ptl.module import DetectionLitModule
 
-__all__ = ["DetectionCLI", "main"]
+__all__ = ["DetectionCLI", "default_determinism", "main"]
+
+
+def default_determinism() -> bool | str:
+    """Return the strictest determinism setting the auto-picked accelerator supports.
+
+    Lightning's ``accelerator="auto"`` prefers MPS on Apple silicon, and MPS is
+    missing deterministic implementations for some backward kernels (for example
+    ``index_put_with_accumulate``, hit by the assignment/loss backward), so
+    strict ``deterministic=True`` aborts mid-step there. ``"warn_only"`` keeps
+    every op deterministic where a deterministic kernel exists and downgrades
+    the rest to a warning; CPU and CUDA runs keep strict ``True``.
+
+    Returns:
+        ``"warn_only"`` when MPS is available (and therefore auto-picked),
+        ``True`` otherwise.
+
+    Examples:
+        >>> default_determinism() in (True, "warn_only")
+        True
+    """
+    return "warn_only" if torch.backends.mps.is_available() else True
+
 
 #: Default scale variant when a config omits ``variant`` (the n-scale debug row, D3).
 _DEFAULT_VARIANT = "n"
@@ -85,7 +113,7 @@ class DetectionCLI(LightningCLI):
 def main(args: ArgsType = None) -> DetectionCLI:
     """Run the detection LightningCLI.
 
-    Builds a :class:`DetectionCLI` with ``deterministic=True`` and a default seed
+    Builds a :class:`DetectionCLI` with :func:`default_determinism` and a default seed
     of ``0``; every other setting comes from the CLI/config. With no ``args`` the
     CLI reads ``sys.argv`` (the console-script and ``python -m`` path), so a
     subcommand such as ``fit`` and a ``--config`` are supplied there.
@@ -108,7 +136,7 @@ def main(args: ArgsType = None) -> DetectionCLI:
     return DetectionCLI(
         DetectionLitModule,
         DetectionDataModule,
-        trainer_defaults={"deterministic": True},
+        trainer_defaults={"deterministic": default_determinism()},
         seed_everything_default=0,
         args=args,
     )
