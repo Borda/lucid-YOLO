@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -146,7 +147,7 @@ def _datamodule(
     fixture_dir: Path,
     variant: str = "m",
     seed: int = 0,
-    num_workers: int = 0,
+    num_workers: int | None = 0,
     pin_memory: bool | None = None,
 ) -> DetectionDataModule:
     """Build a datamodule pointing both splits at the fixture's single split."""
@@ -220,6 +221,13 @@ def test_dataloader_zero_workers_keeps_deterministic_path(detseg_fixture_dir: Pa
     assert loader.num_workers == 0
     assert loader.prefetch_factor is None
     assert loader.worker_init_fn is None
+
+
+def test_dataloader_num_workers_auto_scales_with_batch(detseg_fixture_dir: Path) -> None:
+    """num_workers=None resolves to min(batch_size, cpu count) — never oversubscribes cores."""
+    datamodule = _datamodule(detseg_fixture_dir, num_workers=None)
+    datamodule.setup("fit")
+    assert datamodule.train_dataloader().num_workers == min(2, os.cpu_count() or 1)
 
 
 def test_dataloader_pin_memory_explicit_override(detseg_fixture_dir: Path) -> None:

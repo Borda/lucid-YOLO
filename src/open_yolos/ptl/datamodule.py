@@ -45,6 +45,7 @@ Batch contract:
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 import torch
@@ -230,8 +231,11 @@ class DetectionDataModule(LightningDataModule):
         data_root: COCO 2017 root directory (holds ``train2017``, ``val2017``,
             ``annotations``).
         batch_size: Samples per batch for both loaders.
-        num_workers: DataLoader worker processes. Determinism of the seeded
-            pipeline is guaranteed at ``0`` (a single in-process generator).
+        num_workers: DataLoader worker processes. ``None`` (default) resolves
+            to ``min(batch_size, cpu count)`` — scale workers with the batch a
+            step consumes, but never beyond the cores that can actually run
+            them. Determinism of the seeded pipeline is guaranteed only at an
+            explicit ``0`` (a single in-process generator).
         variant: Model size letter selecting the augmentation strength policy
             (``"n"``…``"x"``); validated at construction.
         img_size: Square letterbox side for every emitted sample. Defaults to 640.
@@ -265,7 +269,7 @@ class DetectionDataModule(LightningDataModule):
         self,
         data_root: Path,
         batch_size: int,
-        num_workers: int,
+        num_workers: int | None,
         variant: str,
         img_size: int = 640,
         *,
@@ -279,6 +283,8 @@ class DetectionDataModule(LightningDataModule):
     ) -> None:
         super().__init__()
         self._batch_size = int(batch_size)
+        if num_workers is None:
+            num_workers = min(self._batch_size, os.cpu_count() or 1)
         self._num_workers = int(num_workers)
         self._img_size = int(img_size)
         self._seed = int(seed)

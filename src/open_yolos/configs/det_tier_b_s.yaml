@@ -36,4 +36,4 @@ model:
 data:
   data_root: /path/to/coco # PLACEHOLDER -- COCO 2017 root (AGENTS.md sec. 3; never downloaded)
   batch_size: 16 # PLACEHOLDER -- tune to accelerator memory
-  num_workers: 8 # PLACEHOLDER -- 0 forces byte-identical deterministic epochs
+  # num_workers: auto (min(batch_size, cpu count)); set 0 for byte-identical deterministic epochs
