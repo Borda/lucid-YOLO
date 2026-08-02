@@ -19,8 +19,8 @@
     "image_channels": 3.0,
     "image_height": 128.0,
     "image_width": 128.0,
-    "image_mean_sum": 3.3865,
-    "image_std_sum": 0.9969,
+    "image_mean_sum": 3.392,
+    "image_std_sum": 1.0084,
     "bbox_area_sum": 32923.115,
     "bbox_coord_sum": 44082.663
   }

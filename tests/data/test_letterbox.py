@@ -150,6 +150,37 @@ class TestRotatedBoxes:
         assert torch.equal(out_targets.rboxes[:, 4], rboxes[:, 4])
 
 
+class TestForwardAffine:
+    """The exposed forward affine matches the mapping applied by ``__call__``."""
+
+    def test_forward_affine_reports_matrix_and_output_size(self) -> None:
+        """forward_affine returns the source->canvas matrix and the target size."""
+        letterbox = Letterbox(_TARGET)
+
+        matrix, out_h, out_w = letterbox.forward_affine(_ORIG_H, _ORIG_W)
+
+        pad_top = (_TARGET - round(_ORIG_H * _EXPECTED_R)) // 2
+        expected = _forward_matrix(_EXPECTED_R, pad_top).to(torch.float64)
+        assert (out_h, out_w) == (_TARGET, _TARGET)
+        assert torch.allclose(matrix, expected, atol=1e-6)
+
+
+class TestWarpTargetsWithoutImage:
+    """warp_targets reproduces the target half of ``__call__`` from a source size."""
+
+    def test_warp_targets_matches_call(self) -> None:
+        """Warping targets by source size equals the targets ``__call__`` produces."""
+        targets = _targets_with_polygons()
+        letterbox = Letterbox(_TARGET)
+
+        _, call_targets = letterbox(_image(), targets.clone())
+        warp_targets = letterbox.warp_targets(targets.clone(), orig_h=_ORIG_H, orig_w=_ORIG_W)
+
+        assert torch.equal(warp_targets.boxes, call_targets.boxes)
+        for got, want in zip(warp_targets.polygons, call_targets.polygons, strict=True):
+            assert torch.equal(got, want)
+
+
 class TestDeterminism:
     """Identical inputs produce byte-identical outputs."""
 

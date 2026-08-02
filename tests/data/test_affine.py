@@ -179,6 +179,35 @@ class TestRotatedBoxesGuard:
             affine(_image(), targets)
 
 
+class TestWarpTo:
+    """warp_to composes a post-affine into the image warp, leaving targets at canvas scale."""
+
+    def test_identity_post_matrix_matches_call_targets(self) -> None:
+        """An identity post-affine to the same canvas reproduces __call__'s targets."""
+        image = _image()
+        targets = _polygon_targets()
+        identity = torch.eye(3, dtype=torch.float64)
+        call_affine = RandomAffine(degrees=12.0, translate=0.1, scale=0.2, shear=3.0, generator=_generator(5))
+        warp_affine = RandomAffine(degrees=12.0, translate=0.1, scale=0.2, shear=3.0, generator=_generator(5))
+
+        _, call_targets = call_affine(image.clone(), targets.clone())
+        _, warp_targets = warp_affine.warp_to(image.clone(), targets.clone(), identity, _CANVAS, _CANVAS)
+
+        assert torch.equal(warp_targets.boxes, call_targets.boxes)
+        for got, want in zip(warp_targets.polygons, call_targets.polygons, strict=True):
+            assert torch.equal(got, want)
+
+    def test_post_matrix_downscales_image_to_output_size(self) -> None:
+        """A half-scale post-affine emits a half-size image in one resample."""
+        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        half = torch.tensor([[0.5, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 1.0]])
+        out = _CANVAS // 2
+
+        out_image, _ = affine.warp_to(_image(), Targets.empty(), half, out, out)
+
+        assert out_image.shape == (3, out, out)
+
+
 class TestDeterminism:
     """Two seeded generators with the same seed give byte-identical outputs."""
 

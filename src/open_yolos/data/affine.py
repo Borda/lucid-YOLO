@@ -44,6 +44,16 @@ Testability:
     :class:`AffineParams` and the resulting forward matrix are stashed on
     :attr:`RandomAffine.last_params` / :attr:`RandomAffine.last_matrix` for
     introspection (recovering the sampled translation, asserting determinism, etc.).
+
+Fused letterbox (WP-070):
+    Training warps a source canvas by this random affine and then letterboxes it
+    down to ``img_size`` — two bilinear resamples. :class:`FusedAffineLetterbox`
+    composes the letterbox's pure scale-and-translation affine into the random one
+    so the image is resampled **once** (via :meth:`RandomAffine.warp_to`, which
+    warps to a differently-sized output canvas under a caller-supplied post-affine).
+    Targets are still clipped and filtered at the source canvas and then mapped
+    through the letterbox affine, so boxes and polygons are byte-identical to the
+    two-transform path; only the image resampling differs.
 """
 
 from __future__ import annotations
@@ -55,10 +65,11 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
+from open_yolos.data.letterbox import Letterbox
 from open_yolos.data.targets import Targets
 from open_yolos.data.transforms import apply_affine_to_points, boxes_from_polygons
 
-__all__ = ["AffineParams", "RandomAffine"]
+__all__ = ["AffineParams", "FusedAffineLetterbox", "RandomAffine"]
 
 #: Default pad colour: mid-grey ``114/255`` per the YOLO-lineage convention (matches letterbox).
 _DEFAULT_PAD_VALUE = 114.0 / 255.0
@@ -263,19 +274,78 @@ class RandomAffine:
 
             ```
         """
+        self._reject_rboxes(targets)
+        _, height, width = image.shape
+        matrix = self._sample_matrix(height, width)
+        out_image = self._warp_image(image, matrix, height, width)
+        out_targets = self._warp_targets(targets, matrix, height, width)
+        return out_image, out_targets
+
+    def warp_to(
+        self, image: Tensor, targets: Targets, post_matrix: Tensor, out_h: int, out_w: int
+    ) -> tuple[Tensor, Targets]:
+        """Sample one affine and warp to ``(out_h, out_w)`` composed with ``post_matrix``.
+
+        The image is resampled **once**: the freshly-sampled affine (source canvas
+        to source canvas) is composed with ``post_matrix`` (source canvas to output
+        canvas) into a single source-to-output matrix and applied with one
+        ``grid_sample``. Targets are warped, clipped and filtered at the source
+        canvas exactly as :meth:`__call__` does; ``post_matrix`` is **not** applied
+        to them here, so the caller composes the output-canvas mapping onto the
+        returned canvas-scale targets (see :class:`FusedAffineLetterbox`). The
+        sampled :attr:`last_params` / :attr:`last_matrix` are the source-canvas
+        affine, unchanged by ``post_matrix``.
+
+        Args:
+            image: CHW image tensor (float, in the grey-fill value range ``[0, 1]``).
+            targets: Geometry to warp alongside the image. ``rboxes`` must be empty.
+            post_matrix: ``(3, 3)`` affine mapping source-canvas pixels to the
+                output canvas, composed after the random affine for the image warp.
+            out_h: Output canvas height in pixels.
+            out_w: Output canvas width in pixels.
+
+        Returns:
+            The warped ``(C, out_h, out_w)`` image and the canvas-scale warped,
+            clipped and filtered targets (before ``post_matrix``).
+
+        Raises:
+            NotImplementedError: If ``targets.rboxes`` is non-empty (WP-058).
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from open_yolos.data.targets import Targets
+            >>> aff = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+            >>> half = torch.tensor([[0.5, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 1.0]])
+            >>> out_image, _ = aff.warp_to(torch.rand(3, 16, 16), Targets.empty(), half, 8, 8)
+            >>> out_image.shape
+            torch.Size([3, 8, 8])
+
+            ```
+        """
+        self._reject_rboxes(targets)
+        _, in_h, in_w = image.shape
+        matrix = self._sample_matrix(in_h, in_w)
+        image_matrix = post_matrix.to(matrix.dtype) @ matrix
+        out_image = self._warp_image(image, image_matrix, out_h, out_w)
+        out_targets = self._warp_targets(targets, matrix, in_h, in_w)
+        return out_image, out_targets
+
+    def _reject_rboxes(self, targets: Targets) -> None:
+        """Raise if ``targets`` carries rotated boxes (rotated-aware warp is WP-058)."""
         if targets.rboxes.shape[0] > 0:
             raise NotImplementedError(
                 "RandomAffine does not support rotated boxes; rotated-aware augmentation "
                 "with long-edge re-canonicalisation lands in Phase 8 (WP-058)."
             )
-        _, height, width = image.shape
+
+    def _sample_matrix(self, height: int, width: int) -> Tensor:
+        """Sample one affine, stash it on ``last_params``/``last_matrix``, return the matrix."""
         params = self._sample(height, width)
         matrix = params.matrix(height, width)
         self.last_params = params
         self.last_matrix = matrix
-        out_image = self._warp_image(image, matrix, height, width)
-        out_targets = self._warp_targets(targets, matrix, height, width)
-        return out_image, out_targets
+        return matrix
 
     def _sample(self, height: int, width: int) -> AffineParams:
         """Draw one :class:`AffineParams` from the configured ranges."""
@@ -295,30 +365,41 @@ class RandomAffine:
             translate_y=translate_y,
         )
 
-    def _warp_image(self, image: Tensor, matrix: Tensor, height: int, width: int) -> Tensor:
-        """Resample ``image`` under ``matrix`` with grey-filled out-of-canvas borders."""
-        theta = self._theta_from_pixel_matrix(matrix, height, width).to(image.dtype)
-        grid = F.affine_grid(theta.unsqueeze(0), [1, image.shape[0], height, width], align_corners=False)
+    def _warp_image(self, image: Tensor, matrix: Tensor, out_h: int, out_w: int) -> Tensor:
+        """Resample ``image`` under ``matrix`` into an ``(out_h, out_w)`` canvas.
+
+        ``matrix`` is the forward source-to-output pixel map; when it composes a
+        downscaling letterbox (see :meth:`warp_to`) the output canvas differs from
+        the input, and the letterbox padding region — mapping outside the source —
+        is grey-filled by the same subtract-pad / zero-pad-sample / add-pad trick
+        that fills the affine's out-of-canvas borders.
+        """
+        _, in_h, in_w = image.shape
+        theta = self._theta_from_pixel_matrix(matrix, in_h, in_w, out_h, out_w).to(image.dtype)
+        grid = F.affine_grid(theta.unsqueeze(0), [1, image.shape[0], out_h, out_w], align_corners=False)
         shifted = image.unsqueeze(0) - _DEFAULT_PAD_VALUE
         sampled = F.grid_sample(shifted, grid, mode="bilinear", padding_mode="zeros", align_corners=False)
         return sampled.squeeze(0) + _DEFAULT_PAD_VALUE
 
     @staticmethod
-    def _theta_from_pixel_matrix(matrix: Tensor, height: int, width: int) -> Tensor:
+    def _theta_from_pixel_matrix(matrix: Tensor, in_h: int, in_w: int, out_h: int, out_w: int) -> Tensor:
         """Convert a forward pixel matrix to an ``affine_grid`` ``theta`` (2x3, normalised).
 
         ``affine_grid`` needs the output→input normalised map, i.e. the inverse of
         the forward pixel matrix conjugated by the pixel↔normalised change of basis
         for ``align_corners=False`` (pixel ``p`` on an axis of size ``L`` maps to
-        ``g = (2p + 1) / L - 1``).
+        ``g = (2p + 1) / L - 1``). Input and output sizes may differ: the output
+        pixels are de-normalised with ``(out_h, out_w)`` and the resulting source
+        pixels re-normalised with ``(in_h, in_w)``, so the same routine serves both
+        the same-size affine warp and the fused affine+letterbox downscale.
         """
         inverse = torch.inverse(matrix)
         to_norm = torch.tensor(
-            [[2.0 / width, 0.0, 1.0 / width - 1.0], [0.0, 2.0 / height, 1.0 / height - 1.0], [0.0, 0.0, 1.0]],
+            [[2.0 / in_w, 0.0, 1.0 / in_w - 1.0], [0.0, 2.0 / in_h, 1.0 / in_h - 1.0], [0.0, 0.0, 1.0]],
             dtype=matrix.dtype,
         )
         from_norm = torch.tensor(
-            [[width / 2.0, 0.0, (width - 1.0) / 2.0], [0.0, height / 2.0, (height - 1.0) / 2.0], [0.0, 0.0, 1.0]],
+            [[out_w / 2.0, 0.0, (out_w - 1.0) / 2.0], [0.0, out_h / 2.0, (out_h - 1.0) / 2.0], [0.0, 0.0, 1.0]],
             dtype=matrix.dtype,
         )
         return (to_norm @ inverse @ from_norm)[:2, :]
@@ -397,3 +478,129 @@ class RandomAffine:
         clipped[:, 0] = ring[:, 0].clamp(0.0, float(width))
         clipped[:, 1] = ring[:, 1].clamp(0.0, float(height))
         return clipped
+
+
+class FusedAffineLetterbox:
+    """Random affine and letterbox composed into a single image resample (WP-070).
+
+    The training geometric base warps a source canvas (a mosaic assembly or a
+    single base image) by a random affine and then letterboxes it down to a fixed
+    square. Done as two transforms that is two full bilinear resamples per sample;
+    this composes the letterbox's pure scale-and-translate affine into the random
+    affine so the image is resampled **once**, straight from the source canvas to
+    the ``target_size`` output. The letterbox padding region is grey-filled by the
+    same ``114/255`` border trick the affine already uses.
+
+    Geometry stays split by responsibility: a :class:`RandomAffine` owns the
+    random sampling and the canvas-scale box/polygon clip-and-filter, and a
+    :class:`~open_yolos.data.letterbox.Letterbox` owns the aspect-preserving
+    geometry (ratio and symmetric padding) resolved per sample from the source
+    size. Targets are warped, clipped and filtered at the source canvas by the
+    affine, then mapped through the letterbox affine — identical arithmetic to the
+    two-transform path, so boxes and polygons are unchanged; only the image
+    resampling differs (one bilinear pass instead of two).
+
+    The single ``grid_sample`` pass is **not antialiased** (``grid_sample`` has no
+    antialias mode), unlike the standalone :class:`~open_yolos.data.letterbox.Letterbox`,
+    whose downscale uses ``antialias=True`` and which remains the validation/eval
+    path. This is a recorded train-time deviation (A32): cv2-lineage training
+    resizes are conventionally non-antialiased, and dropping the antialias pass is
+    a large part of the measured speedup.
+
+    Rotated boxes are rejected (the affine raises :class:`NotImplementedError`;
+    rotated-aware augmentation is Phase 8, WP-058).
+
+    Args:
+        target_size: Output square side (a single ``int``) or explicit
+            ``(height, width)`` pair the source canvas is letterboxed into.
+        degrees: Maximum absolute rotation in degrees. Defaults to ``0.0``.
+        translate: Maximum absolute translation as a fraction of the source canvas
+            size (per axis). Defaults to ``0.1``.
+        scale: Half-width of the uniform scale range ``[1 - scale, 1 + scale]``.
+            Defaults to ``0.5``.
+        shear: Maximum absolute shear in degrees, sampled per axis. Defaults to
+            ``0.0``.
+        generator: Optional :class:`torch.Generator` for seeded sampling. Defaults
+            to ``None`` (global RNG).
+        min_box_size: Minimum clipped side length in pixels (source canvas) for an
+            instance to be kept. Defaults to ``2.0``.
+        min_visibility: Minimum kept-area fraction for an instance to be kept.
+            Defaults to ``0.1``.
+        allow_upscale: Whether the letterbox may enlarge content beyond native
+            size when the target is larger than the source. Defaults to ``True``.
+
+    Attributes:
+        affine: The wrapped :class:`RandomAffine`; its ``last_params`` /
+            ``last_matrix`` expose the most recently sampled source-canvas affine.
+        letterbox: The wrapped :class:`~open_yolos.data.letterbox.Letterbox`
+            supplying the per-sample aspect-preserving geometry.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> from open_yolos.data.targets import Targets
+        >>> from open_yolos.data.transforms import GeometricTransform
+        >>> isinstance(FusedAffineLetterbox(32), GeometricTransform)
+        True
+        >>> fused = FusedAffineLetterbox(32, degrees=0.0, translate=0.0, scale=0.0)
+        >>> out_image, _ = fused(torch.rand(3, 20, 40), Targets.empty())
+        >>> out_image.shape
+        torch.Size([3, 32, 32])
+
+        ```
+    """
+
+    def __init__(
+        self,
+        target_size: int | tuple[int, int],
+        degrees: float = 0.0,
+        translate: float = 0.1,
+        scale: float = 0.5,
+        shear: float = 0.0,
+        generator: torch.Generator | None = None,
+        min_box_size: float = 2.0,
+        min_visibility: float = 0.1,
+        allow_upscale: bool = True,
+    ) -> None:
+        self.affine = RandomAffine(
+            degrees=degrees,
+            translate=translate,
+            scale=scale,
+            shear=shear,
+            generator=generator,
+            min_box_size=min_box_size,
+            min_visibility=min_visibility,
+        )
+        self.letterbox = Letterbox(target_size, allow_upscale=allow_upscale)
+
+    def __call__(self, image: Tensor, targets: Targets) -> tuple[Tensor, Targets]:
+        """Warp ``image`` and ``targets`` through the fused affine+letterbox.
+
+        Args:
+            image: CHW image tensor (float, in the grey-fill value range ``[0, 1]``);
+                the source canvas (mosaic assembly or single base image).
+            targets: Geometry to warp alongside the image. ``rboxes`` must be empty.
+
+        Returns:
+            The ``(C, target_h, target_w)`` letterboxed image resampled once, and
+            the warped, clipped and filtered targets in output-canvas coordinates.
+
+        Raises:
+            NotImplementedError: If ``targets.rboxes`` is non-empty (WP-058).
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from open_yolos.data.targets import Targets
+            >>> fused = FusedAffineLetterbox(16, degrees=0.0, translate=0.0, scale=0.0)
+            >>> box = Targets(boxes=torch.tensor([[2.0, 2.0, 10.0, 10.0]]), labels=torch.tensor([0]))
+            >>> out_image, out_targets = fused(torch.rand(3, 16, 16), box)
+            >>> out_image.shape, out_targets.boxes.shape
+            (torch.Size([3, 16, 16]), torch.Size([1, 4]))
+
+            ```
+        """
+        _, in_h, in_w = image.shape
+        post_matrix, out_h, out_w = self.letterbox.forward_affine(in_h, in_w)
+        out_image, canvas_targets = self.affine.warp_to(image, targets, post_matrix, out_h, out_w)
+        return out_image, self.letterbox.warp_targets(canvas_targets, in_h, in_w)

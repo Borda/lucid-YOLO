@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from open_yolos.data.affine import AffineParams, RandomAffine
+from open_yolos.data.affine import AffineParams, FusedAffineLetterbox, RandomAffine
 from open_yolos.data.augment import HorizontalFlip, HSVJitter, hsv_to_rgb, rgb_to_hsv
 from open_yolos.data.coco import CocoDetectionDataset, build_scale_policy
 from open_yolos.data.download import download_coco
@@ -23,6 +23,7 @@ __all__ = [
     "CocoDetectionDataset",
     "Compose",
     "CopyPaste",
+    "FusedAffineLetterbox",
     "GeometricTransform",
     "HSVJitter",
     "HorizontalFlip",

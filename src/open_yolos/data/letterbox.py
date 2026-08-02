@@ -223,6 +223,70 @@ class Letterbox:
         geom = _resolve_geometry(orig_h, orig_w, out_h, out_w, self.allow_upscale)
         return self._warp(points, geom.inverse_matrix(torch.float64))
 
+    def forward_affine(self, orig_h: int, orig_w: int) -> tuple[Tensor, int, int]:
+        """Return the forward affine and output size mapping a source into this canvas.
+
+        Exposes the pure scale-and-translation letterbox geometry for a source of
+        ``(orig_h, orig_w)`` without resampling any image, so a caller can compose
+        it into another warp (see
+        :class:`~open_yolos.data.affine.FusedAffineLetterbox`).
+
+        Args:
+            orig_h: Source image height in pixels.
+            orig_w: Source image width in pixels.
+
+        Returns:
+            A ``(matrix, out_h, out_w)`` triple: the ``(3, 3)`` float64 forward
+            affine mapping source pixels into the letterboxed canvas, and the
+            target canvas height and width.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> matrix, out_h, out_w = Letterbox(4).forward_affine(8, 8)
+            >>> (out_h, out_w)
+            (4, 4)
+            >>> matrix[:2, :2]  # r = min(4/8, 4/8) = 0.5 on both axes
+            tensor([[0.5000, 0.0000],
+                    [0.0000, 0.5000]], dtype=torch.float64)
+
+            ```
+        """
+        geom = _resolve_geometry(orig_h, orig_w, self.out_h, self.out_w, self.allow_upscale)
+        return geom.forward_matrix(torch.float64), geom.out_h, geom.out_w
+
+    def warp_targets(self, targets: Targets, orig_h: int, orig_w: int) -> Targets:
+        """Warp ``targets`` through the letterbox affine for a source size, no image.
+
+        Applies the same forward affine :meth:`__call__` applies to the geometry —
+        boxes and polygons mapped point-wise, rotated-box centres warped with
+        extents scaled and angle fixed — but touches no image. It lets a fused warp
+        letterbox its targets after another transform has already produced them at
+        the source canvas.
+
+        Args:
+            targets: Geometry at the source canvas to map into the letterboxed
+                canvas.
+            orig_h: Source image height in pixels.
+            orig_w: Source image width in pixels.
+
+        Returns:
+            A new :class:`~open_yolos.data.targets.Targets` in letterboxed-canvas
+            coordinates.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from open_yolos.data.targets import Targets
+            >>> box = Targets(boxes=torch.tensor([[0.0, 0.0, 4.0, 2.0]]), labels=torch.tensor([0]))
+            >>> Letterbox(4).warp_targets(box, orig_h=2, orig_w=4).boxes
+            tensor([[0., 1., 4., 3.]])
+
+            ```
+        """
+        geom = _resolve_geometry(orig_h, orig_w, self.out_h, self.out_w, self.allow_upscale)
+        return self._warp_targets(targets, geom)
+
     def _resize_pad(self, image: Tensor, geom: _LetterboxGeom) -> Tensor:
         """Resize ``image`` to the content region and pad it to the target canvas."""
         resized = F.interpolate(
