@@ -246,9 +246,15 @@ def main(args: ArgsType = None) -> DetectionCLI:
         >>> cli = main(["fit", "--config", "det_tier_a_n"])  # doctest: +SKIP
     """
     if args is None:
-        args = sys.argv[1:]
-    if isinstance(args, list) and all(isinstance(token, str) for token in args):
+        # Rewrite sys.argv in place and keep args=None: passing an args list while
+        # sys.argv also carries arguments makes LightningCLI warn about the overlap.
+        sys.argv[1:] = _resolve_config_args(sys.argv[1:])
+    elif isinstance(args, list) and all(isinstance(token, str) for token in args):
         args = _resolve_config_args(args)
+    if torch.cuda.is_available():
+        # Lightning's Tensor Core advisory: allow TF32 matmuls for the fp32 ops
+        # AMP leaves untouched. CUDA-only effect; CPU/MPS numerics unchanged.
+        torch.set_float32_matmul_precision("high")
     return DetectionCLI(
         DetectionLitModule,
         DetectionDataModule,
