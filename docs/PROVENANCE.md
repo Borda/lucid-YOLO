@@ -47,6 +47,7 @@ before first use; denylisted surfaces are never admissible.
 | R21 | fuse-augmentations, github.com/Borda/fuse-augmentations, commit 5834dc5ed5a245f9a7477ab326c307fc1a279c2b, Apache-2.0 | Synthetic scene generator for test fixtures and dataset stand-ins (A26). No YOLO-implementation lineage; verified Apache-2.0 |
 | R22 | torchmetrics, Lightning AI, github.com/Lightning-AI/torchmetrics, Apache-2.0 | `MeanAveragePrecision` bbox mAP engine for the detection acceptance instrument (WP-069). Apache-2.0 verified from the installed 1.9.0 wheel dist-info `licenses/LICENSE` |
 | R23 | faster-coco-eval, github.com/MiXaiLL76/faster_coco_eval, Apache-2.0 | COCOeval-faithful, pycocotools-free backend for `MeanAveragePrecision` (WP-069). Apache-2.0 verified from the installed 1.7.2 wheel dist-info `licenses/LICENSE` (PyPI metadata omits the license field) |
+| R24 | Lin, T.-Y. et al., *Focal Loss for Dense Object Detection*, arXiv:1708.02002 (ICCV 2017) | Prior-probability classification bias initialization (sec. 5.1, pi = 0.01) for dense one-stage heads (A30) |
 
 ### Placeholders
 
@@ -87,3 +88,4 @@ arXiv id; access dates recorded per session.
 | 2026-08-01 | R1–R20 | Policy docs seeded from the blueprint (WP-003) |
 | 2026-08-01 | R21 | Synthetic fixture/dataset generator decision (A26, D12) |
 | 2026-08-02 | R22, R23 | torchmetrics `MeanAveragePrecision` + `faster_coco_eval` backend replace pycocotools in the bbox evaluator (WP-069) |
+| 2026-08-02 | R24 | Prior-probability cls bias init adopted after the Det-A collapse diagnosis (A30) |

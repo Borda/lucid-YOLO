@@ -155,3 +155,17 @@ def test_small_input_forward() -> None:
 
     assert out.o2o_cls.shape == (1, 336, 4), "small-input dense scores must be (1, 336, nc)"
     assert out.o2o_box.shape == (1, 336, 4), "small-input dense boxes must be (1, 336, 4)"
+
+
+def test_cls_bias_prior_init() -> None:
+    """Class outputs start at the RetinaNet prior pi=0.01 (A30, R24 sec. 5.1)."""
+    head = DualDetectionHead(in_channels=(16, 32, 64), num_classes=4).eval()
+    features = _make_features(128, (16, 32, 64), batch=1)
+
+    with torch.no_grad():
+        out = head(features)
+
+    for logits in (out.o2m_cls, out.o2o_cls):
+        probs = logits.sigmoid()
+        assert probs.mean() == pytest.approx(0.01, rel=0.5), "init class probability must sit near the 0.01 prior"
+        assert probs.max() < 0.2, "no class may start confident"

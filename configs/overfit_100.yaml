@@ -14,6 +14,7 @@ variant: n
 trainer:
   max_epochs: 40 # tiny budget: enough steps to memorize the fixed slice
   # determinism: CLI default (default_determinism) — strict on CPU/CUDA, warn_only on MPS
+  gradient_clip_val: 10.0 # A31: bounds the violent opening steps of the from-scratch recipe
   num_sanity_val_steps: 0
   callbacks:
     # close_mosaic == max_epochs disables mosaic from epoch 0: overfit needs a

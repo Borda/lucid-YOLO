@@ -55,6 +55,7 @@ Provenance: R1 sec. 3.2.1, R1 sec. 3.2.2, R1 Fig. S2, R6. Assumptions: A3, A9, A
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import torch
@@ -69,6 +70,15 @@ _BOX_OUTPUTS = 4
 
 #: Default per-image detection cap of the one-to-one branch (R3 sec. 4, A9).
 _DEFAULT_TOPK = 300
+
+#: Prior probability for the classification-output bias init (RetinaNet sec. 5.1,
+#: R24 arXiv:1708.02002: "we set pi = 0.01"; A30). Every class sigmoid starts
+#: near this value, so the dense background BCE begins at ~0.01 nats per element
+#: instead of ~0.69 — without it the summed classification loss opens six orders
+#: of magnitude too large and the first optimizer step destroys the network
+#: (observed on the Det-A launch: loss 6.2e5 -> collapse to a dead all-zero
+#: predictor within three steps).
+_CLS_PRIOR_PROB = 0.01
 
 
 def _stem_width(channels: int) -> int:
@@ -167,17 +177,29 @@ def _build_cls_stem(channels: int, num_classes: int) -> nn.Sequential:
         The classification stem for a single level, emitting ``(B, num_classes,
         H, W)``.
 
+    The final 1x1 convolution's bias is initialized to
+    ``-log((1 - pi) / pi)`` with ``pi = 0.01`` (:data:`_CLS_PRIOR_PROB`), the
+    RetinaNet prior-probability init (R24 sec. 5.1, A30): at the first step every
+    class sigmoid evaluates to ~``pi``, keeping the dense background BCE — summed
+    over anchors and classes, normalized by the alignment-weight sum (R4) — at a
+    trainable magnitude instead of exploding on the first batch.
+
     Examples:
         >>> import torch
         >>> stem = _build_cls_stem(64, 80).eval()
         >>> stem(torch.zeros(1, 64, 8, 8)).shape
         torch.Size([1, 80, 8, 8])
+        >>> float(stem(torch.zeros(1, 64, 8, 8)).sigmoid().mean())  # ~pi
+        0.01...
     """
     hidden = _stem_width(channels)
+    output = nn.Conv2d(hidden, num_classes, 1)
+    assert output.bias is not None  # nn.Conv2d default; narrows the Optional for mypy
+    nn.init.constant_(output.bias, -math.log((1.0 - _CLS_PRIOR_PROB) / _CLS_PRIOR_PROB))
     return nn.Sequential(
         _depthwise_separable(channels, hidden),
         _depthwise_separable(hidden, hidden),
-        nn.Conv2d(hidden, num_classes, 1),
+        output,
     )
 
 
