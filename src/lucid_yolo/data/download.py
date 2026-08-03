@@ -56,6 +56,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from lucid_yolo.data.verify import VerifyResult, format_report, verify_coco_root
+
 __all__ = ["download_coco", "main"]
 
 #: Official public COCO 2017 image host (blueprint sec. 14.3); no mirrors. The
@@ -405,8 +407,71 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--force", action="store_true", help="re-download even if already extracted")
     parser.add_argument("--keep-archives", action="store_true", help="keep the downloaded .zip files after extraction")
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="after downloading, verify every annotated image was provisioned (fails on mismatch)",
+    )
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="skip downloading; verify an existing --data-root and exit 0 (complete) or 1 (missing files)",
+    )
     parser.add_argument("--quiet", action="store_true", help="suppress progress output")
     return parser
+
+
+def _skipped_splits(data_root: Path, splits: Sequence[str], *, force: bool) -> set[str]:
+    """Return the requested splits the idempotent check will skip.
+
+    Args:
+        data_root: The target data root.
+        splits: Requested short split names (``"train"`` / ``"val"``).
+        force: Whether ``--force`` re-downloads regardless (then nothing is skipped).
+
+    Returns:
+        The subset of ``splits`` whose extraction sentinel already exists, i.e.
+        those a non-forced run leaves untouched.
+    """
+    if force:
+        return set()
+    return {split for split in splits if (data_root / f"{split}2017").exists()}
+
+
+def _emit_repair_hints(data_root: Path, result: VerifyResult, skipped: set[str]) -> None:
+    """Print a ``--force`` re-run hint for each incomplete but skipped split.
+
+    Args:
+        data_root: The verified data root, named in the printed command.
+        result: The verification outcome.
+        skipped: Short split names the idempotent check skipped this run.
+    """
+    for split in sorted(skipped):
+        outcome = next((item for item in result.splits if item.name == f"{split}2017"), None)
+        if outcome is not None and not outcome.ok:
+            command = f"lucid-download --data-root {data_root} --splits {split} --force"
+            sys.stderr.write(f"hint: {split}2017 is incomplete and was skipped; re-fetch it with:\n  {command}\n")
+
+
+def _run_verification(data_root: Path, splits: Sequence[str], skipped: set[str] | None) -> int:
+    """Verify ``splits`` under ``data_root``, print the summary and return a code.
+
+    Args:
+        data_root: The data root to verify.
+        splits: Requested short split names.
+        skipped: Splits the idempotent check skipped (for post-download repair
+            hints), or ``None`` for a standalone ``--verify-only`` run.
+
+    Returns:
+        ``0`` when every split is complete, ``1`` otherwise.
+    """
+    result = verify_coco_root(data_root, splits)
+    print(format_report(result, data_root))
+    if result.ok:
+        return 0
+    if skipped:
+        _emit_repair_hints(data_root, result, skipped)
+    return 1
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -416,7 +481,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv: Command-line arguments (defaults to ``sys.argv[1:]``).
 
     Returns:
-        ``0`` on success, ``1`` on a download/verification/extraction failure.
+        ``0`` on success, ``1`` on a download/verification/extraction failure or an
+        incomplete dataset when ``--verify`` / ``--verify-only`` is requested.
 
     Examples:
         ```pycon
@@ -427,8 +493,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.verify_only:
+        return _run_verification(args.data_root, args.splits, None)
     try:
         checksums = _parse_checksums(args.sha256)
+        skipped = _skipped_splits(args.data_root, args.splits, force=args.force) if args.verify else set()
         download_coco(
             args.data_root,
             args.splits,
@@ -441,6 +510,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (ValueError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
+    if args.verify:
+        return _run_verification(args.data_root, args.splits, skipped)
     return 0
 
 

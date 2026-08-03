@@ -17,6 +17,7 @@ from lucid_yolo.data.transforms import (
     apply_affine_to_points,
     boxes_from_polygons,
 )
+from lucid_yolo.data.verify import VerifyResult, verify_coco_root
 
 __all__ = [
     "AffineParams",
@@ -32,10 +33,12 @@ __all__ = [
     "MosaicAssembly",
     "RandomAffine",
     "Targets",
+    "VerifyResult",
     "apply_affine_to_points",
     "boxes_from_polygons",
     "build_scale_policy",
     "download_coco",
     "hsv_to_rgb",
     "rgb_to_hsv",
+    "verify_coco_root",
 ]

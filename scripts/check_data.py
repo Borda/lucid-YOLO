@@ -17,6 +17,16 @@ The check core is importable (:func:`check_coco_root` returns a
 thin CLI over it. The expected per-split counts are parameters (defaulting to the
 real COCO 2017 totals) so the logic is unit-testable against a tiny fake layout.
 
+Relationship to :mod:`lucid_yolo.data.verify`:
+    This script is the developer-only ``make check-data`` gate and validates the
+    layout by **counts** (fixed per-split totals plus annotation-vs-disk count
+    parity). The packaged :mod:`lucid_yolo.data.verify` module performs the
+    complementary **per-file existence** check exposed to pip-installed users via
+    ``lucid-download --verify`` / ``--verify-only``. The two are kept separate on
+    purpose: their logic differs materially (count parity vs. naming exactly which
+    annotated images are absent), and this script is intentionally not shipped in
+    the wheel.
+
 Examples:
     Validate a provisioned root (exit 1 on any mismatch)::
 

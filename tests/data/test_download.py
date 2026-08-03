@@ -368,3 +368,83 @@ def test_main_returns_one_on_checksum_failure(tmp_path: Path, monkeypatch: pytes
 def test_main_returns_one_on_bad_checksum_arg(tmp_path: Path) -> None:
     code = dl.main(["--data-root", str(tmp_path / "coco"), "--sha256", "malformed", "--quiet"])
     assert code == 1
+
+
+# --------------------------------------------------------------------------- #
+# CLI dataset verification (--verify / --verify-only)
+# --------------------------------------------------------------------------- #
+
+
+def _seed_val_root(root: Path, annotated: int, present: int) -> None:
+    """Seed ``root`` with a val split whose annotations list ``annotated`` images.
+
+    Only the first ``present`` of those images are written to disk, so
+    ``present < annotated`` reproduces an interrupted extraction.
+    """
+    (root / "val2017").mkdir(parents=True)
+    (root / "annotations").mkdir(parents=True)
+    images = [{"id": i, "file_name": f"{i:012d}.jpg", "height": 4, "width": 4} for i in range(annotated)]
+    (root / "annotations" / "instances_val2017.json").write_text(json.dumps({"images": images}), encoding="utf-8")
+    for i in range(present):
+        (root / "val2017" / f"{i:012d}.jpg").write_bytes(b"jpegbytes")
+
+
+def test_cli_verify_only_passes_on_complete_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--verify-only` exits 0 on a complete root without touching the network."""
+    root = tmp_path / "coco"
+    _seed_val_root(root, annotated=2, present=2)
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
+
+    code = dl.main(["--data-root", str(root), "--splits", "val", "--verify-only", "--quiet"])
+
+    assert code == 0
+
+
+def test_cli_verify_only_fails_on_missing_images(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--verify-only` exits 1 and reports the shortfall on an incomplete root."""
+    root = tmp_path / "coco"
+    _seed_val_root(root, annotated=4, present=1)
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
+
+    code = dl.main(["--data-root", str(root), "--splits", "val", "--verify-only", "--quiet"])
+
+    assert code == 1
+
+
+def test_cli_verify_only_fails_on_missing_annotation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--verify-only` exits 1 when the split's annotation JSON is absent."""
+    root = tmp_path / "coco"
+    (root / "val2017").mkdir(parents=True)
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
+
+    code = dl.main(["--data-root", str(root), "--splits", "val", "--verify-only", "--quiet"])
+
+    assert code == 1
+
+
+def test_cli_verify_after_download_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--verify` after a fresh download of a complete split exits 0."""
+    mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes(num_images=2)}
+    monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
+
+    code = dl.main(
+        ["--data-root", str(tmp_path / "coco"), "--splits", "val", "--no-annotations", "--verify", "--quiet"]
+    )
+
+    assert code == 0
+
+
+def test_cli_verify_after_skipped_incomplete_split_hints_force(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--verify` on a skipped, incomplete split exits 1 and prints a --force hint."""
+    root = tmp_path / "coco"
+    _seed_val_root(root, annotated=2, present=1)
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
+
+    code = dl.main(["--data-root", str(root), "--splits", "val", "--verify", "--quiet"])
+    captured = capsys.readouterr()
+
+    assert code == 1
+    assert "val2017" in captured.out  # the verification report
+    assert f"lucid-download --data-root {root} --splits val --force" in captured.err  # repair hint
