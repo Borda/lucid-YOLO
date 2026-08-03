@@ -9,6 +9,7 @@ from lucid_yolo.ptl.datamodule import (
     PackedTargets,
     collate_detection,
     pack_targets,
+    unpack_batch,
     unpack_targets,
 )
 from lucid_yolo.ptl.module import DetectionLitModule, pad_targets
@@ -22,5 +23,6 @@ __all__ = [
     "collate_detection",
     "pack_targets",
     "pad_targets",
+    "unpack_batch",
     "unpack_targets",
 ]

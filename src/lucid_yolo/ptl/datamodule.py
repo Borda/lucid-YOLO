@@ -38,19 +38,27 @@ Batch contract:
     Two forms, split by the DataLoader worker boundary:
 
     * **Transport form** (what :func:`collate_detection` returns): the equal-sized
-      (letterboxed) images stacked into a single ``(B, C, img_size, img_size)``
-      float32 tensor, paired with a :class:`PackedTargets` — the batch's ragged
-      per-image :class:`~lucid_yolo.data.targets.Targets` flattened into a fixed
-      set of eight dense tensors. A worker ships each distinct tensor as its own
-      shared-memory segment, so the natural ``list[Targets]`` (with its per-image
-      *list* of polygon rings) would explode into hundreds of tiny segments and
-      exhaust the consumer's mmap budget; packing bounds the batch to a handful.
+      (letterboxed) images stacked and quantized into a single
+      ``(B, C, img_size, img_size)`` **uint8** tensor — each post-augmentation float
+      pixel in ``[0, 1]`` rounded to a ``1/255`` step (:data:`_PIXEL_QUANT_MAX`) —
+      paired with a :class:`PackedTargets`, the batch's ragged per-image
+      :class:`~lucid_yolo.data.targets.Targets` flattened into a fixed set of eight
+      dense tensors. A worker ships each distinct tensor as its own shared-memory
+      segment: the natural ``list[Targets]`` (with its per-image *list* of polygon
+      rings) would explode into hundreds of tiny segments and exhaust the consumer's
+      mmap budget, so packing bounds the batch to a handful; the uint8 images are a
+      quarter of the float32 bytes, keeping the in-flight worker queue inside the
+      container's shared-memory budget. Both the augmented train path and the
+      letterbox-only val path go through this collate, so both transport uint8 (val
+      images already start from a JPEG-decoded uint8 source, so their letterbox
+      interpolation loses no more than the same bounded half-step).
     * **Consumer form** (what every downstream step sees): the pair
-      ``(images, list[Targets])``. :meth:`DetectionDataModule.on_after_batch_transfer`
-      unpacks the transport form on the destination device, so the module and
-      everything downstream keep consuming a ragged length-``B`` target list
-      exactly as before. A direct (non-Lightning) consumer converts with
-      :func:`unpack_targets`.
+      ``(images, list[Targets])`` with float32 ``[0, 1]`` images unchanged.
+      :meth:`DetectionDataModule.on_after_batch_transfer` restores the images
+      (``uint8 -> float32 / 255``) and unpacks the transport targets on the
+      destination device, so the module and everything downstream keep consuming a
+      ragged length-``B`` target list exactly as before. A direct (non-Lightning)
+      consumer converts the whole pair with :func:`unpack_batch`.
 """
 
 from __future__ import annotations
@@ -77,11 +85,20 @@ __all__ = [
     "PackedTargets",
     "collate_detection",
     "pack_targets",
+    "unpack_batch",
     "unpack_targets",
 ]
 
 #: Column count of a polygon point ``(x, y)`` — the width of a packed ring row.
 _POINT_DIM = 2
+
+#: uint8 quantization scale for image transport. :func:`collate_detection` quantizes
+#: the post-augmentation float pixels (``[0, 1]``) to ``round(x * 255)`` uint8 codes so
+#: the image batch crosses the DataLoader worker boundary at a quarter of its float32
+#: size, and the transfer hook (or :func:`unpack_batch`) restores them as ``code / 255``
+#: on the destination device. ``torch.round`` is round-half-to-even, so the worst-case
+#: round-trip error is one half-step — ``1 / 510``.
+_PIXEL_QUANT_MAX = 255
 
 #: Default mosaic probability: every training sample (blueprint sec. 5.9: ``mosaic
 #: p=1.0``). The ``close_mosaic`` late-epoch disable flips the per-pipeline
@@ -329,8 +346,12 @@ def collate_detection(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, Pack
         batch: The per-sample ``(image, Targets)`` pairs from the dataset.
 
     Returns:
-        A ``(images, packed)`` pair: ``images`` is ``(B, C, H, W)`` float32 and
-        ``packed`` is the batch's targets as a :class:`PackedTargets`.
+        A ``(images, packed)`` pair: ``images`` is the batch quantized to a
+        ``(B, C, H, W)`` **uint8** tensor (float ``[0, 1]`` pixels rounded to
+        ``1/255`` steps — :data:`_PIXEL_QUANT_MAX` — for a 4x-smaller IPC hop) and
+        ``packed`` is the batch's targets as a :class:`PackedTargets`. The transfer
+        hook (or :func:`unpack_batch`) restores float32 ``[0, 1]`` images on the
+        destination device.
 
     Examples:
         ```pycon
@@ -338,14 +359,79 @@ def collate_detection(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, Pack
         >>> from lucid_yolo.data.targets import Targets
         >>> batch = [(torch.zeros(3, 4, 4), Targets.empty()) for _ in range(2)]
         >>> images, packed = collate_detection(batch)
-        >>> images.shape, packed.boxes_per_image.tolist()
-        (torch.Size([2, 3, 4, 4]), [0, 0])
+        >>> images.dtype, images.shape, packed.boxes_per_image.tolist()
+        (torch.uint8, torch.Size([2, 3, 4, 4]), [0, 0])
 
         ```
     """
     images = torch.stack([image for image, _ in batch], dim=0)
+    images = images.mul(_PIXEL_QUANT_MAX).round().clamp_(0, _PIXEL_QUANT_MAX).to(torch.uint8)
     packed = pack_targets([target for _, target in batch])
     return images, packed
+
+
+def _dequantize_images(images: Tensor, dtype: torch.dtype = torch.float32) -> Tensor:
+    """Restore uint8 transport images to floating-point ``[0, 1]``; pass floats through.
+
+    The inverse of the :func:`collate_detection` quantization: uint8 codes cast to
+    ``dtype`` and divide by :data:`_PIXEL_QUANT_MAX`. The ``0``…``255`` codes and the
+    divisor are exactly representable in float16/bfloat16, so a half-precision
+    ``dtype`` keeps the same ``1/510`` quantization bound. An already-float tensor (a
+    direct, non-quantized feed) is returned untouched — its own dtype preserved — so
+    the restore is safe to run over either form.
+
+    Args:
+        images: A ``(B, C, H, W)`` uint8 transport batch or an already-float batch.
+        dtype: Floating-point dtype for the restored images (default
+            ``torch.float32``); used only on the uint8 dequantization path.
+
+    Returns:
+        The images in ``[0, 1]`` at ``dtype`` (dequantized when the input was uint8,
+        otherwise the input unchanged).
+    """
+    if images.dtype == torch.uint8:
+        return images.to(dtype).div(_PIXEL_QUANT_MAX)
+    return images
+
+
+def unpack_batch(
+    batch: tuple[Tensor, PackedTargets], dtype: torch.dtype = torch.float32
+) -> tuple[Tensor, list[Targets]]:
+    """Restore the full consumer batch from a :func:`collate_detection` transport.
+
+    Reverses :func:`collate_detection` end to end: the uint8 images are dequantized
+    to ``dtype`` in ``[0, 1]`` (``code / 255``) and the :class:`PackedTargets` is
+    expanded back to the ragged ``list[Targets]`` (:func:`unpack_targets`). This is
+    the single public restore a direct (non-Lightning) consumer uses when it drives
+    the loader itself; :meth:`DetectionDataModule.on_after_batch_transfer` runs the
+    equivalent on-device restore inside a Lightning run, matching the attached
+    module's precision. Restoring only the targets — leaving the images in their
+    transport dtype — stays available via :func:`unpack_targets`.
+
+    Args:
+        batch: The ``(uint8 images, PackedTargets)`` transport pair from
+            :func:`collate_detection`.
+        dtype: Floating-point dtype for the restored images (default
+            ``torch.float32``); pass ``torch.float16``/``torch.bfloat16`` to match a
+            half-precision consumer.
+
+    Returns:
+        The ``(images, list[Targets])`` consumer pair: ``images`` is ``(B, C, H, W)``
+        ``dtype`` in ``[0, 1]`` and the targets are the ragged length-``B`` per-image list.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> from lucid_yolo.data.targets import Targets
+        >>> batch = [(torch.zeros(3, 4, 4), Targets.empty()) for _ in range(2)]
+        >>> images, targets = unpack_batch(collate_detection(batch))
+        >>> images.dtype, len(targets)
+        (torch.float32, 2)
+
+        ```
+    """
+    images, packed = batch
+    return _dequantize_images(images, dtype), unpack_targets(packed)
 
 
 class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
@@ -549,24 +635,29 @@ class DetectionDataModule(LightningDataModule):
     def on_after_batch_transfer(
         self, batch: tuple[Tensor, PackedTargets] | tuple[Tensor, list[Targets]], dataloader_idx: int
     ) -> tuple[Tensor, list[Targets]]:
-        """Restore the ``list[Targets]`` consumer contract on the destination device.
+        """Restore the float images and ``list[Targets]`` consumer contract on-device.
 
-        Lightning calls this after moving the batch to the accelerator, so the
-        :class:`PackedTargets` tensor fields are already on-device when they are
-        unpacked — the reconstructed per-image targets land on the same device the
-        module trains on, with no extra host-to-device hop. A batch whose targets
-        are already a list (a non-packed direct feed) is passed through untouched,
-        so the hook is safe to run over either form. Both the train and val loaders
-        share this single conversion.
+        Lightning calls this after moving the batch to the accelerator, so both the
+        uint8 images and the :class:`PackedTargets` tensor fields are already
+        on-device: the images are dequantized to the attached module's dtype
+        (:meth:`_consumer_dtype` — ``code / 255`` at that precision,
+        :func:`_dequantize_images`) and the packed targets are unpacked, all on the
+        same device the module trains on, with no extra host-to-device hop. Matching
+        the module dtype keeps a ``"16-true"``/``"bf16-true"`` run's half weights and
+        inputs aligned; ``"16-mixed"`` leaves the module float32 and lets autocast
+        cast. Already-float images and already-list targets (a non-packed direct
+        feed) pass through untouched, so the hook is safe to run over either form.
+        Both the train and val loaders share this single restore.
 
         Args:
-            batch: The transferred ``(images, PackedTargets)`` transport batch, or
-                an already-unpacked ``(images, list[Targets])`` batch.
+            batch: The transferred ``(uint8 images, PackedTargets)`` transport batch,
+                or an already-restored ``(float images, list[Targets])`` batch.
             dataloader_idx: The loader index (unused; the conversion is uniform).
 
         Returns:
             The ``(images, list[Targets])`` consumer batch — the exact contract the
-            module and every downstream step expect.
+            module and every downstream step expect (``[0, 1]`` images at the
+            module's dtype).
 
         Examples:
             ```pycon
@@ -577,9 +668,29 @@ class DetectionDataModule(LightningDataModule):
         """
         del dataloader_idx
         images, targets = batch
+        images = _dequantize_images(images, self._consumer_dtype())
         if isinstance(targets, PackedTargets):
             return images, unpack_targets(targets)
         return images, targets
+
+    def _consumer_dtype(self) -> torch.dtype:
+        """Resolve the floating-point dtype the dequantized images should take.
+
+        Returns the attached :class:`~pytorch_lightning.LightningModule`'s parameter
+        dtype so the restored images match the trainer's precision: a
+        ``"16-true"``/``"bf16-true"`` run holds half weights the inputs must match,
+        while ``"16-mixed"`` leaves the module float32 (autocast casts as needed).
+        Falls back to ``torch.float32`` when no trainer or module is attached — the
+        path a direct :func:`unpack_batch` consumer never reaches.
+
+        Returns:
+            The attached module's dtype, or ``torch.float32`` when unattached.
+        """
+        trainer = self.trainer
+        if trainer is None:
+            return torch.float32
+        module_dtype = trainer.lightning_module.dtype  # str | torch.dtype in the PL stubs
+        return module_dtype if isinstance(module_dtype, torch.dtype) else torch.float32
 
     def _loader_kwargs(self) -> dict[str, object]:
         """Return the streaming DataLoader kwargs shared by both loaders.

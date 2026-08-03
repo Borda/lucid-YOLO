@@ -13,7 +13,8 @@ Batch contract:
     ``(B, C, H, W)`` float32 tensor and the ragged per-image
     :class:`~lucid_yolo.data.targets.Targets` as a length-``B`` list. The
     datamodule ships the batch across the DataLoader worker boundary in a packed
-    transport form and restores this list in its ``on_after_batch_transfer`` hook
+    uint8 transport form and restores the float images and this list in its
+    ``on_after_batch_transfer`` hook
     (see :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule`), so the module
     never sees the packed form — it always receives the ragged list unchanged.
 

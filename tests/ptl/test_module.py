@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.optim.musgd import MuSGD
-from lucid_yolo.ptl import DetectionLitModule, collate_detection, pad_targets, unpack_targets
+from lucid_yolo.ptl import DetectionLitModule, collate_detection, pad_targets, unpack_batch
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -86,12 +86,12 @@ def _synthetic_batch() -> tuple[Tensor, list[Targets]]:
 def _collate_unpacked(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list[Targets]]:
     """Collate, then restore the ``list[Targets]`` the module consumes.
 
-    Without a datamodule the transfer hook that unpacks the transport form never
-    fires, so this loader-side wrapper reproduces the same pack -> unpack round-trip
-    the datamodule runs in production, handing the module its ragged target list.
+    Without a datamodule the transfer hook that restores the transport form never
+    fires, so this loader-side wrapper reproduces the same collate -> restore round
+    trip the datamodule runs in production (dequantizing the uint8 images and
+    unpacking the targets), handing the module its float images and ragged list.
     """
-    images, packed = collate_detection(batch)
-    return images, unpack_targets(packed)
+    return unpack_batch(collate_detection(batch))
 
 
 class _SyntheticDetectionDataset(Dataset[tuple[Tensor, Targets]]):

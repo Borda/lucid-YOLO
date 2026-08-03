@@ -23,6 +23,7 @@ from types import ModuleType
 
 import pytest
 import torch
+from pytorch_lightning import LightningModule, Trainer
 
 from lucid_yolo.data import Targets, boxes_from_polygons
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
@@ -32,6 +33,7 @@ from lucid_yolo.ptl.datamodule import (
     PackedTargets,
     collate_detection,
     pack_targets,
+    unpack_batch,
     unpack_targets,
 )
 
@@ -172,13 +174,34 @@ def _assert_targets_identical(actual: list[Targets], expected: list[Targets]) ->
 
 
 def test_collate_returns_packed_transport() -> None:
-    """Collate stacks equal-size images and packs the ragged targets into a PackedTargets."""
+    """Collate stacks equal-size images as uint8 and packs the ragged targets into a PackedTargets."""
     images, packed = collate_detection([(torch.zeros(3, 8, 8), target) for target in _ragged_targets()])
     assert images.shape == (3, 3, 8, 8)
+    assert images.dtype == torch.uint8  # transport quantizes the float images to uint8
     assert isinstance(packed, PackedTargets)
     assert packed.boxes_per_image.tolist() == [2, 0, 3]
     assert packed.rings_per_image.tolist() == [2, 0, 0]
     assert packed.rboxes_per_image.tolist() == [1, 0, 2]
+
+
+def test_collate_quantization_round_trips_within_half_step() -> None:
+    """Dequantizing the uint8 transport reproduces the pre-collate float image within one half-step."""
+    image = torch.linspace(0.0, 1.0, 3 * 48 * 48).reshape(3, 48, 48)  # full [0, 1] range, hits half-steps
+    restored, _ = unpack_batch(collate_detection([(image, Targets.empty())]))
+    assert restored.dtype == torch.float32
+    assert torch.all((restored >= 0.0) & (restored <= 1.0))
+    # 1/510 is the exact-arithmetic half-step bound; the float32 x*255 product and the
+    # code/255 division each add a sub-ulp of rounding, so allow a small epsilon over it.
+    assert (restored - image).abs().max().item() <= 1.0 / 510.0 + 1e-6
+
+
+def test_unpack_batch_restores_float_images_and_targets() -> None:
+    """unpack_batch restores float32 images and the ragged target list from the transport pair."""
+    targets = _ragged_targets()
+    images, restored = unpack_batch(collate_detection([(torch.zeros(3, 8, 8), target) for target in targets]))
+    assert images.shape == (3, 3, 8, 8)
+    assert images.dtype == torch.float32
+    _assert_targets_identical(restored, targets)
 
 
 def test_collate_batch_is_a_small_constant_segment_count() -> None:
@@ -246,8 +269,11 @@ def test_datamodule_train_batch_smoke(detseg_fixture_dir: Path) -> None:
     datamodule.setup("fit")
     batch = next(iter(datamodule.train_dataloader()))
     assert isinstance(batch[1], PackedTargets)  # the loader emits the packed transport form
+    assert batch[0].dtype == torch.uint8  # transport ships the images as uint8
     images, targets = datamodule.on_after_batch_transfer(batch, 0)
     assert images.shape == (2, 3, _SMOKE_IMG_SIZE, _SMOKE_IMG_SIZE)
+    assert images.dtype == torch.float32  # the hook restores float images
+    assert torch.all((images >= 0.0) & (images <= 1.0))
     assert len(targets) == 2
     assert all(isinstance(target, Targets) for target in targets)
 
@@ -258,10 +284,50 @@ def test_datamodule_val_batch_letterboxed(detseg_fixture_dir: Path) -> None:
     datamodule.setup("validate")
     batch = next(iter(datamodule.val_dataloader()))
     assert isinstance(batch[1], PackedTargets)  # the loader emits the packed transport form
+    assert batch[0].dtype == torch.uint8  # the val path quantizes to uint8 through the same collate
     images, targets = datamodule.on_after_batch_transfer(batch, 0)
     assert images.shape == (2, 3, _SMOKE_IMG_SIZE, _SMOKE_IMG_SIZE)
+    assert images.dtype == torch.float32  # the hook restores float images
+    assert torch.all((images >= 0.0) & (images <= 1.0))
     assert len(targets) == 2
     assert all(isinstance(target, Targets) for target in targets)
+
+
+def test_on_after_batch_transfer_dequantizes_uint8_images(detseg_fixture_dir: Path) -> None:
+    """The hook dequantizes a uint8 transport batch to float32 ``[0, 1]`` on the batch's device."""
+    datamodule = _datamodule(detseg_fixture_dir)
+    transport, packed = collate_detection([(torch.rand(3, 8, 8), target) for target in _ragged_targets()])
+    images, _targets = datamodule.on_after_batch_transfer((transport, packed), 0)
+    assert images.dtype == torch.float32
+    assert images.device == transport.device
+    assert torch.all((images >= 0.0) & (images <= 1.0))
+
+
+class _SingleParamModule(LightningModule):
+    """Minimal LightningModule carrying one parameter, so ``.dtype`` follows ``.half()``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.head = torch.nn.Linear(1, 1)
+
+
+def test_on_after_batch_transfer_matches_half_module_dtype(detseg_fixture_dir: Path) -> None:
+    """The hook restores images at the attached module's dtype, so a half module gets half inputs."""
+    module = _SingleParamModule().half()
+    trainer = Trainer(accelerator="cpu", logger=False, enable_progress_bar=False)
+    trainer.strategy.connect(module)
+    datamodule = _datamodule(detseg_fixture_dir)
+    datamodule.trainer = trainer
+    transport, packed = collate_detection([(torch.rand(3, 8, 8), target) for target in _ragged_targets()])
+    images, _targets = datamodule.on_after_batch_transfer((transport, packed), 0)
+    assert images.dtype == torch.float16
+    assert torch.all((images >= 0.0) & (images <= 1.0))
+
+
+def test_unpack_batch_dtype_argument_controls_image_precision() -> None:
+    """unpack_batch(dtype=...) restores the images at the requested floating precision."""
+    images, _targets = unpack_batch(collate_detection([(torch.zeros(3, 8, 8), Targets.empty())]), dtype=torch.float16)
+    assert images.dtype == torch.float16
 
 
 def test_datamodule_train_batch_is_deterministic(detseg_fixture_dir: Path) -> None:
