@@ -25,6 +25,8 @@ trainer:
 model:
   num_classes: 80 # COCO 2017 (R12)
   lr: 0.01 # blueprint sec. 5.8 (R1 Tables S2/S5): lr0
+  lrf: 0.01 # A8: linear decay to lr0*lrf over the run (WP-072)
+  warmup_epochs: 3 # A8/A31: opening linear LR warmup, generic from-scratch practice
   momentum: 0.95 # blueprint sec. 5.8: momentum ~0.94-0.95
   weight_decay: 0.0005 # blueprint sec. 5.8: weight_decay 5e-4
   box_gain: 7.5 # blueprint sec. 5.7 (R1 Tables S2/S5): pretrain-style box gain

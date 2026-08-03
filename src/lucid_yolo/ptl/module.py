@@ -36,13 +36,19 @@ Task conditioning:
     (segmentation) and Phase 8 (oriented-box) work packages fill; until then all
     three tasks train identically on the detection objective.
 
-Learning-rate schedule (A8 deferral):
-    :meth:`DetectionLitModule.configure_optimizers` returns :class:`MuSGD` with a
-    **constant** learning rate. The linear-decay schedule shape (A8) and the
-    ~1-epoch warmup land with the WP-038/WP-039 experiment configs; the
-    constructor carries ``lr``/``momentum``/``weight_decay`` as the base
-    hyperparameters (blueprint sec. 5.7-5.8: ``lr0 = 0.01``, ``momentum ~ 0.95``,
-    ``weight_decay = 5e-4``) but the schedule itself is out of scope for this WP.
+Learning-rate schedule (A8, WP-072):
+    :meth:`DetectionLitModule.configure_optimizers` pairs :class:`MuSGD` with a
+    per-step :class:`~torch.optim.lr_scheduler.LambdaLR` running
+    :func:`~lucid_yolo.optim.schedule.warmup_decay_factor` — a linear warmup
+    over the first ``warmup_epochs`` epochs followed by a linear decay from
+    ``lr`` to ``lr * lrf`` at the end of the run (A8; the Det-A attempt-1
+    diagnosis showed the constant-LR deferral plateauing val loss). The
+    schedule needs the trainer's step budget
+    (``trainer.estimated_stepping_batches``), so a module with **no trainer
+    attached** — direct ``configure_optimizers()`` calls in tests and tools —
+    falls back to the bare constant-LR optimizer, as does an explicitly
+    disabled schedule (``lrf >= 1`` with ``warmup_epochs <= 0``, the overfit
+    recipe's setting) or a step-bounded run without ``max_epochs``.
 
 Progressive-loss schedule (WP-035):
     :attr:`DetectionLitModule.alpha` delegates to the underlying
@@ -72,8 +78,11 @@ from lucid_yolo.models.backbone import DetectionBackbone
 from lucid_yolo.models.heads.detect import DualDetectionHead, DualHeadOutput, decode_ltrb
 from lucid_yolo.models.neck import DetectionNeck
 from lucid_yolo.optim.musgd import MuSGD
+from lucid_yolo.optim.schedule import warmup_decay_factor
 
 if TYPE_CHECKING:
+    from pytorch_lightning.utilities.types import OptimizerLRScheduler
+
     from lucid_yolo.data.targets import Targets
 
 __all__ = ["DetectionLitModule", "pad_targets"]
@@ -155,8 +164,13 @@ class DetectionLitModule(LightningModule):
         num_classes: Number of object classes the head predicts.
         task: Supervision task; one of ``"detect"`` (active), ``"segment"`` or
             ``"obb"`` (accepted, inert extra-loss stub). Defaults to ``"detect"``.
-        lr: Base learning rate for MuSGD (constant here; A8 schedule is WP-038/039).
-            Defaults to ``0.01``.
+        lr: Base learning rate for MuSGD (``lr0``; the A8 schedule decays from
+            it). Defaults to ``0.01``.
+        lrf: Final LR fraction of the A8 linear decay — the LR ends at
+            ``lr * lrf``. ``>= 1`` together with ``warmup_epochs <= 0`` disables
+            the schedule (constant LR). Defaults to ``0.01``.
+        warmup_epochs: Length of the opening linear LR warmup, in epochs
+            (fractions allowed). ``0`` disables warmup. Defaults to ``3.0``.
         momentum: MuSGD momentum coefficient. Defaults to ``0.95``.
         weight_decay: Decoupled weight decay (matrix parameters only). Defaults to
             ``5e-4``.
@@ -196,6 +210,8 @@ class DetectionLitModule(LightningModule):
         task: str = "detect",
         *,
         lr: float = 0.01,
+        lrf: float = 0.01,
+        warmup_epochs: float = 3.0,
         momentum: float = 0.95,
         weight_decay: float = 5e-4,
         w_muon: float = 0.5,
@@ -213,6 +229,8 @@ class DetectionLitModule(LightningModule):
         self.save_hyperparameters()
         self._task = task
         self._lr = lr
+        self._lrf = lrf
+        self._warmup_epochs = warmup_epochs
         self._momentum = momentum
         self._weight_decay = weight_decay
         self._w_muon = w_muon
@@ -317,18 +335,25 @@ class DetectionLitModule(LightningModule):
         """
         return self._shared_step(batch, "val")
 
-    def configure_optimizers(self) -> MuSGD:
-        """Return the MuSGD optimizer over every parameter with a constant LR.
+    def configure_optimizers(self) -> OptimizerLRScheduler:
+        """Return MuSGD, paired with the A8 warmup + linear-decay LR schedule.
 
-        The learning-rate schedule shape (A8) and warmup are deferred to the
-        WP-038/WP-039 configs; this returns a bare optimizer so the LR stays
-        constant across the run.
+        The schedule (WP-072) is a per-step
+        :class:`~torch.optim.lr_scheduler.LambdaLR` over
+        :func:`~lucid_yolo.optim.schedule.warmup_decay_factor`: a linear warmup
+        across the first ``warmup_epochs`` epochs, then a linear decay from
+        ``lr`` down to ``lr * lrf`` at the trainer's estimated final step. The
+        bare constant-LR optimizer is returned instead when the schedule is
+        explicitly disabled (``lrf >= 1`` and ``warmup_epochs <= 0``), when no
+        trainer is attached (direct calls in tests and tools), or when the run
+        has no positive ``max_epochs`` to anchor the warmup fraction.
 
         Returns:
-            A :class:`~lucid_yolo.optim.musgd.MuSGD` over ``self.parameters()`` built
-            from the constructor hyperparameters.
+            A :class:`~lucid_yolo.optim.musgd.MuSGD` over ``self.parameters()``,
+            alone or inside a Lightning optimizer/scheduler config dict with the
+            step-interval LambdaLR.
         """
-        return MuSGD(
+        optimizer = MuSGD(
             self.parameters(),
             lr=self._lr,
             momentum=self._momentum,
@@ -336,6 +361,18 @@ class DetectionLitModule(LightningModule):
             w_muon=self._w_muon,
             w_sgd=self._w_sgd,
         )
+        schedule_off = self._lrf >= 1.0 and self._warmup_epochs <= 0
+        trainer = self._trainer
+        max_epochs = None if trainer is None else trainer.max_epochs
+        if schedule_off or trainer is None or max_epochs is None or max_epochs <= 0:
+            return optimizer
+        total_steps = max(1, int(trainer.estimated_stepping_batches))
+        warmup_steps = round(total_steps * self._warmup_epochs / max_epochs)
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer,
+            lambda step: warmup_decay_factor(step, total_steps, warmup_steps, self._lrf),
+        )
+        return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"}}
 
     def _shared_step(self, batch: tuple[Tensor, list[Targets]], stage: str) -> Tensor:
         """Forward, decode both branches, score the dual loss, and log every term."""

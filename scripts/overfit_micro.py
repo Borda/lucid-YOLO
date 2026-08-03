@@ -300,6 +300,10 @@ def build_module(recipe: Recipe, num_classes: int) -> DetectionLitModule:
         max_channels=spec.max_channels,
         num_classes=num_classes,
         lr=recipe.lr,
+        # A8 schedule off (lrf >= 1, no warmup): the overfit golden memorizes at a
+        # constant LR and its trajectory was frozen before WP-072 landed.
+        lrf=1.0,
+        warmup_epochs=0.0,
         momentum=recipe.momentum,
         weight_decay=recipe.weight_decay,
         box_gain=recipe.box_gain,

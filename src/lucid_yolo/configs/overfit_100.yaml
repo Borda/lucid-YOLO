@@ -26,6 +26,8 @@ trainer:
 model:
   num_classes: 80 # COCO 2017 (R12); matches the fixture annotation space
   lr: 0.01 # blueprint sec. 5.8 (R1 Tables S2/S5): lr0
+  lrf: 1.0 # A8 schedule OFF (with warmup_epochs 0): overfit memorizes at constant LR; golden frozen pre-WP-072
+  warmup_epochs: 0
   momentum: 0.95 # blueprint sec. 5.8: momentum ~0.94-0.95
   weight_decay: 0.0005 # blueprint sec. 5.8: weight_decay 5e-4
   box_gain: 7.5 # blueprint sec. 5.7 (R1 Tables S2/S5): pretrain-style box gain
