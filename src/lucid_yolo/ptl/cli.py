@@ -43,6 +43,7 @@ Provenance: D9/ADR-001, D12c. Assumptions: A8.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -51,12 +52,36 @@ import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ProgressBar, RichProgressBar, TQDMProgressBar
 from pytorch_lightning.cli import ArgsType, LightningArgumentParser, LightningCLI
+from pytorch_lightning.loggers import CSVLogger, Logger, TensorBoardLogger
 
 from lucid_yolo.models.registry import scale_spec
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.module import DetectionLitModule
 
 __all__ = ["DetectionCLI", "default_determinism", "main"]
+
+
+def _default_loggers(default_root_dir: str | None) -> list[Logger]:
+    """Build the default logger pair: TensorBoard plus CSV in one version directory.
+
+    Lightning's own default is a lone :class:`TensorBoardLogger`; a plain
+    ``metrics.csv`` alongside the event file keeps every run inspectable without
+    TensorBoard tooling. The CSV logger is pinned to the TensorBoard logger's
+    freshly resolved version so both write into the same
+    ``lightning_logs/version_N`` directory (checkpoints stay with the first
+    logger, exactly where a TensorBoard-only run puts them).
+
+    Args:
+        default_root_dir: The trainer's ``default_root_dir`` (both loggers'
+            ``save_dir``); ``None`` falls back to the working directory,
+            matching the trainer's own default.
+
+    Returns:
+        ``[TensorBoardLogger, CSVLogger]`` sharing one version directory.
+    """
+    root = default_root_dir or os.getcwd()
+    tensorboard = TensorBoardLogger(save_dir=root)
+    return [tensorboard, CSVLogger(save_dir=root, version=tensorboard.version)]
 
 
 def default_determinism() -> bool | str:
@@ -134,7 +159,7 @@ class DetectionCLI(LightningCLI):
         parser.link_arguments("variant", "data.variant")
 
     def instantiate_trainer(self, **kwargs: Any) -> Trainer:
-        """Instantiate the trainer with the ``--progress_bar`` choice applied.
+        """Instantiate the trainer with the ``--progress_bar`` choice and default loggers.
 
         Lightning's own default is rich-when-available, whose live rendering
         prints one line per refresh in notebook cell output (Colab/Jupyter), so
@@ -144,6 +169,14 @@ class DetectionCLI(LightningCLI):
         ``none`` disables the bar entirely. A ``ProgressBar`` instance placed
         directly in ``trainer.callbacks`` by a user config still wins: Lightning
         rejects two bars, so the default injection is skipped in that case.
+
+        When the config leaves ``trainer.logger`` at its default (``null`` or
+        ``true`` — Lightning's TensorBoard-only auto-pick), the default is
+        widened to **TensorBoard + CSV side by side** in the same
+        ``lightning_logs/version_N`` directory (the CSV logger is pinned to the
+        TensorBoard logger's version), so every run leaves both the event file
+        and a plain ``metrics.csv``. An explicit ``logger: false`` or a concrete
+        logger (list) in the config wins untouched.
 
         Args:
             kwargs: Extra trainer arguments forwarded to LightningCLI.
@@ -162,6 +195,8 @@ class DetectionCLI(LightningCLI):
             if not isinstance(defaults_callbacks, list):
                 defaults_callbacks = [defaults_callbacks]
             self.trainer_defaults = {**self.trainer_defaults, "callbacks": [*defaults_callbacks, bar]}
+        if trainer_config.get("logger") in (None, True) and "logger" not in kwargs:
+            kwargs["logger"] = _default_loggers(trainer_config.get("default_root_dir"))
         return super().instantiate_trainer(**kwargs)
 
 

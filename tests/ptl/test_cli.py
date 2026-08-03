@@ -69,6 +69,31 @@ def test_progress_bar_choice_selects_callback(flags: tuple[str, ...], expected: 
     assert (None if bar is None else type(bar).__name__) == expected
 
 
+def test_default_loggers_are_tensorboard_plus_csv(tmp_path: Path) -> None:
+    """An unset trainer.logger yields TensorBoard + CSV sharing one version directory."""
+    cli = _build_cli(
+        "--config",
+        str(packaged_config("det_tier_a_n")),
+        "--trainer.default_root_dir",
+        str(tmp_path),
+    )
+    names = [type(logger).__name__ for logger in cli.trainer.loggers]
+    assert names == ["TensorBoardLogger", "CSVLogger"]
+    assert cli.trainer.loggers[0].log_dir == cli.trainer.loggers[1].log_dir
+
+
+def test_logger_false_disables_default_loggers(tmp_path: Path) -> None:
+    """An explicit trainer.logger=false wins over the TensorBoard + CSV default."""
+    cli = _build_cli(
+        "--config",
+        str(packaged_config("det_tier_a_n")),
+        "--trainer.default_root_dir",
+        str(tmp_path),
+        "--trainer.logger=false",
+    )
+    assert cli.trainer.loggers == []
+
+
 def test_default_determinism_matches_accelerator() -> None:
     """Strict determinism everywhere except MPS, which only supports warn_only."""
 
