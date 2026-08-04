@@ -111,6 +111,8 @@
 .envrc
 .hypothesis/
 .idea/
+.junie/
+.claude/agent-memory/
 .installed.cfg
 .ipynb_checkpoints
 .mypy_cache/
@@ -125,6 +127,7 @@
 .pyre/
 .pytest_cache/
 .pytype/
+.experiments/
 .reports/
 .ropeproject
 .ruff_cache/

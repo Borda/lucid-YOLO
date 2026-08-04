@@ -134,10 +134,12 @@ same commit that completes its WP.
 | 065 | `docs(report): consolidated multi-task reproduction note` | Merge det/seg/obb sections; assumption outcomes; deviations and hypotheses | `test_docs_present.py::test_report_sections` | 064 | ⬜ |
 | 066 | `feat(export): ONNX export smoke test for E2E paths` | Verifies the paper's export claim; no NMS ops in the graph | `test_onnx_export.py::test_e2e_graph_ops` | 065 | ⬜ |
 | 067 | `release: v0.4.0 consolidated note and examples` [HUMAN] | `supervision` example notebook (boxes/masks/rboxes); tag; roadmap reopened for the next 0.MINOR | `release.yml` green on `v0.4.0` | 066 | ⬜ |
+| 074 | `feat(data): RF100-VL incremental downloader and merged COCO layout` [DATA] | Extend `lucid-download` with a `rf100-vl` collection mode over the `rf100vl` pip package (Roboflow Universe API key; 100 COCO-JSON datasets, Apache-2.0, <https://github.com/roboflow/rf100-vl>): per-dataset download -> remap category ids into a union label space (dataset-qualified names to avoid cross-domain collisions) -> re-id images -> append into one merged COCO layout -> delete the per-dataset archive before fetching the next, bounding peak disk to O(one dataset + merged). Splits preserved; `RF20-VL` subset flag for smoke runs. Open design points recorded before code: union-label-space vs per-dataset eval, verify-module integration (added 2026-08-04, user request) | offline unit suite over a synthetic two-dataset fixture; merged-layout `check_data.py` parity | 068,073 | ⬜ |
+| 075 | `exp(det): RF100-VL generalization tier` [GPU][HUMAN] | Fine-tune/eval the detector on the merged RF100-VL (RF20-VL smoke first); recipe, per-domain metric breakdown, report section | acceptance criteria set with the WP-074 design; artifacts archived with seeds/configs | 045,074 | ⬜ |
 
 Beyond 0.4.0 the train continues on the same discipline — pose/RLE (R14),
-classification, export matrix — each a new phase of WPs and its own gated
-0.MINOR. No 1.0, ever (ADR-002).
+classification, export matrix, RF100-VL generalization (WP-074/075) — each a
+new phase of WPs and its own gated 0.MINOR. No 1.0, ever (ADR-002).
 
 ## Critical path and parallelism
 
