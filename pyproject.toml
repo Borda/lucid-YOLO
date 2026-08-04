@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lucid-yolo"
-version = "0.0.1.dev9"
+version = "0.0.1.dev10"
 description = "Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, and oriented-detection methods described in the YOLO26 paper (arXiv:2606.03748)"
 readme = "README.md"
 requires-python = ">=3.11"

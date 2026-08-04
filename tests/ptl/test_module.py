@@ -221,3 +221,10 @@ def test_fast_dev_run_smoke() -> None:
     trainer.fit(module, train_dataloaders=loader, val_dataloaders=loader)
     assert trainer.state.finished
     assert "train/loss" in trainer.callback_metrics
+    assert "val/mAP" in trainer.callback_metrics
+
+
+def test_val_map_metric_leaves_state_dict_unchanged() -> None:
+    """The WP-077 val mAP metric adds no state_dict entries, so older checkpoints still load."""
+    module = _tiny_module()
+    assert not [key for key in module.state_dict() if key.startswith("_val_")]

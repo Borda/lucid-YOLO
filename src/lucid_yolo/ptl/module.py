@@ -70,8 +70,11 @@ from typing import TYPE_CHECKING, cast
 import torch
 from pytorch_lightning import LightningModule
 from torch import Tensor
+from torchmetrics.detection import MeanAveragePrecision
 
 from lucid_yolo.assign import make_anchor_points
+from lucid_yolo.decode.common import BOX_CORNERS, SCORE_COLUMN
+from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
 from lucid_yolo.losses.progressive import ProgressiveLossSchedule
 from lucid_yolo.models.backbone import DetectionBackbone
@@ -95,6 +98,9 @@ _TASKS: tuple[str, ...] = ("detect", "segment", "obb")
 
 #: Column count of an ``xyxy`` axis-aligned box.
 _BOX_DIM = 4
+
+#: Column index of the integral class label within the A9 detection tuple.
+_LABEL_COLUMN = 5
 
 
 def pad_targets(targets: list[Targets]) -> tuple[Tensor, Tensor, Tensor]:
@@ -242,6 +248,13 @@ class DetectionLitModule(LightningModule):
         self.loss = DualBranchLoss(box_gain=box_gain, cls_gain=cls_gain, l1_gain=l1_gain, alpha=alpha)
         self._loss_schedule = ProgressiveLossSchedule(alpha_init=alpha_init, alpha_final=alpha_final)
 
+        #: E2E decoder + epoch mAP over the one-to-one branch (WP-077). Neither
+        #: carries parameters and the metric's states are non-persistent, so the
+        #: module's ``state_dict`` — and older checkpoints — are unaffected.
+        self._val_decoder = TopKDecoder()
+        self._val_map = MeanAveragePrecision(backend="faster_coco_eval", box_format="xyxy")
+        self._val_map.warn_on_many_detections = False
+
         #: Per-image-size cache of ``(anchor_points, stride_per_anchor)`` on CPU.
         self._anchor_cache: dict[tuple[int, int], tuple[Tensor, Tensor]] = {}
 
@@ -318,13 +331,21 @@ class DetectionLitModule(LightningModule):
         Returns:
             The scalar total loss for Lightning to backpropagate.
         """
-        return self._shared_step(batch, "train")
+        loss, _ = self._shared_step(batch, "train")
+        return loss
 
     def validation_step(self, batch: tuple[Tensor, list[Targets]], batch_idx: int) -> Tensor:
-        """Run one validation step: identical forward and loss, logged under ``val/``.
+        """Run one validation step: shared forward and loss, plus the mAP update.
 
-        Evaluation decode and mAP scoring land in WP-042/WP-043; this step reports
-        the training loss on the validation split only.
+        Beyond the ``val/``-logged loss, the one-to-one branch is decoded with
+        the E2E :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` from the same
+        forward and accumulated into the epoch's
+        :class:`~torchmetrics.detection.MeanAveragePrecision` (WP-077), logged
+        as ``val/mAP`` by :meth:`on_validation_epoch_end`. Scoring runs in
+        letterbox coordinates — IoU is invariant to each image's uniform
+        letterbox scaling, so the number tracks the original-coordinate
+        protocol closely; the acceptance figure remains ``scripts/eval_det.py``
+        (original coordinates, both paths).
 
         Args:
             batch: The datamodule batch ``(images, list[Targets])``.
@@ -333,7 +354,29 @@ class DetectionLitModule(LightningModule):
         Returns:
             The scalar total validation loss.
         """
-        return self._shared_step(batch, "val")
+        images, targets = batch
+        loss, head_out = self._shared_step((images, targets), "val")
+        anchor_points, strides = self._anchor_grid(images.shape[-2], images.shape[-1], images.device)
+        detections = self._val_decoder(head_out.o2o_cls, head_out.o2o_box, anchor_points, strides).cpu()
+        preds = []
+        for image_detections in detections:
+            kept = image_detections[image_detections[:, SCORE_COLUMN] > 0.0]
+            preds.append(
+                {
+                    "boxes": kept[:, :BOX_CORNERS],
+                    "scores": kept[:, SCORE_COLUMN],
+                    "labels": kept[:, _LABEL_COLUMN].long(),
+                }
+            )
+        ground_truth = [{"boxes": t.boxes.cpu(), "labels": t.labels.cpu()} for t in targets]
+        self._val_map.update(preds, ground_truth)
+        return loss
+
+    def on_validation_epoch_end(self) -> None:
+        """Compute and log the epoch's E2E ``val/mAP`` (progress-bar metric), then reset."""
+        computed = self._val_map.compute()
+        self.log("val/mAP", computed["map"].to(torch.float32), prog_bar=True)
+        self._val_map.reset()
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         """Return MuSGD, paired with the A8 warmup + linear-decay LR schedule.
@@ -374,8 +417,13 @@ class DetectionLitModule(LightningModule):
         )
         return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"}}
 
-    def _shared_step(self, batch: tuple[Tensor, list[Targets]], stage: str) -> Tensor:
-        """Forward, decode both branches, score the dual loss, and log every term."""
+    def _shared_step(self, batch: tuple[Tensor, list[Targets]], stage: str) -> tuple[Tensor, DualHeadOutput]:
+        """Forward, decode both branches, score the dual loss, and log every term.
+
+        Returns:
+            The scalar total loss and the dense head output (so callers can
+            decode from the same forward instead of running a second one).
+        """
         images, targets = batch
         head_out = self(images)
         anchor_points, strides = self._anchor_grid(images.shape[-2], images.shape[-1], images.device)
@@ -390,7 +438,7 @@ class DetectionLitModule(LightningModule):
         )
         total = out.total + self._task_extra_loss(head_out, targets)
         self._log_loss(out, total, stage, images.shape[0])
-        return total
+        return total, head_out
 
     def _task_extra_loss(self, head_out: DualHeadOutput, targets: list[Targets]) -> Tensor:
         """Return the task-conditional extra loss; an inert zero for detection.
