@@ -24,7 +24,7 @@ Status legend: `open` = code not yet landed · `active` = in the codebase ·
 | A10 | Resize semantics | Letterbox, aspect-preserving | YOLO-lineage convention in third-party literature (e.g. R11) | Bbox/mask round-trip test | open |
 | A11 | Anchor center placement | (i+0.5)*stride | R4, R5 | Assignment unit test | open |
 | A12 | Weight-decay exclusions | 1D params excluded | Standard practice (e.g. R7 discussion) | Documented | open |
-| A13 | From-scratch loss gains | Pretrain-style set (7.5/0.5/6.0) | R1 Table S2 | Tier A sanity | open |
+| A13 | From-scratch loss gains; coordinate frame of the L1 term the legacy DFL gain field scales | Pretrain-style gains (7.5/0.5/6.0); the L1 term is measured in **stride units** — the head's native ltrb parameterization — not pixels (revised 2026-08-04 by WP-078: with pixel-frame L1 the term ran 8-32x large and was 97.4% of the val objective at Det-A attempt 2's endpoint, starving classification — mAP50-95 6.3, mar_100 24% despite well-localized boxes; decomposition arithmetic reproduces the logged 200.7 val total exactly) | R1 Table S2; head ltrb frame per R4/R6 lineage | `test_detection_loss.py::test_l1_stride_normalization_divides_by_anchor_stride`; Det-A attempt 3 | active |
 | A14 | Prototype count K | K=32 | YOLACT R16 | Param/FLOP gate vs Table S9 | open |
 | A15 | Proto spatial resolution | 160x160 at 640 input (2x upsample of P3) | YOLACT convention R16 | Param/FLOP gate; mask-quality check | open |
 | A16 | Coefficient activation + instance-mask loss | tanh coefficients; per-pixel BCE on box-cropped masks, box-area normalized | YOLACT R16 | Overfit micro-set mask IoU | open |

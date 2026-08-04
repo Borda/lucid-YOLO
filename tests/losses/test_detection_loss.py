@@ -93,6 +93,32 @@ def test_components() -> None:
     assert math.isclose(out.total.item(), expected_total, abs_tol=1e-4)
 
 
+def test_l1_stride_normalization_divides_by_anchor_stride() -> None:
+    """With strides given, the L1 term is measured in stride units (A13 revision, WP-078).
+
+    Same scenario as test_components (only anchor 1 contributes L1 = 2 pixels,
+    weighted 0.8/1.2); per-anchor strides [8, 16, 32] put anchor 1 at stride 16,
+    so the stride-unit term is exactly 1/16 of the pixel-frame value. CIoU and
+    classification are untouched.
+    """
+    logits = torch.zeros(1, 3, 2)
+    boxes = torch.tensor([[[0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0]]])
+    target_boxes = torch.tensor([[[0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 0.0, 0.0]]])
+    assign = _make_assign(
+        fg_mask=torch.tensor([[True, True, False]]),
+        target_labels=torch.tensor([[0, 0, -1]]),
+        target_boxes=target_boxes,
+        align_weights=torch.tensor([[0.8, 0.4, 0.0]]),
+    )
+
+    pixel = DetectionBranchLoss()(logits, boxes, assign)
+    strided = DetectionBranchLoss()(logits, boxes, assign, strides=torch.tensor([8.0, 16.0, 32.0]))
+
+    assert math.isclose(strided.l1.item(), pixel.l1.item() / 16.0, abs_tol=1e-6)
+    assert math.isclose(strided.box.item(), pixel.box.item(), abs_tol=1e-6)
+    assert math.isclose(strided.cls.item(), pixel.cls.item(), abs_tol=1e-6)
+
+
 def test_zero_positive_batch_trains_cls_only() -> None:
     """No positives: box and L1 are exactly zero, cls finite, grads finite."""
     logits = torch.zeros(1, 4, 3, requires_grad=True)

@@ -141,6 +141,7 @@ class DualBranchLoss:
         gt_boxes: Tensor,
         gt_labels: Tensor,
         gt_mask: Tensor,
+        strides: Tensor | None = None,
     ) -> DualLossOutput:
         """Score both branches against their own assignments and combine them.
 
@@ -154,6 +155,10 @@ class DualBranchLoss:
             gt_boxes: ``(B, N, 4)`` padded ground-truth boxes in ``xyxy`` pixels.
             gt_labels: ``(B, N)`` long class ids; padded slots are ignored.
             gt_mask: ``(B, N)`` bool marking real ground truths.
+            strides: Optional ``(A,)`` per-anchor level strides, forwarded to
+                both branch losses so their L1 terms are measured in stride
+                units (A13 revision, WP-078). The training path always passes
+                strides.
 
         Returns:
             A :class:`DualLossOutput` with the combined ``total``, each branch's
@@ -176,7 +181,7 @@ class DualBranchLoss:
         """
         o2m_assign = self.o2m_assigner(o2m_logits.sigmoid(), o2m_boxes, anchor_points, gt_boxes, gt_labels, gt_mask)
         o2o_assign = self.o2o_assigner(o2o_logits.sigmoid(), o2o_boxes, anchor_points, gt_boxes, gt_labels, gt_mask)
-        o2m_out = self._o2m_loss(o2m_logits, o2m_boxes, o2m_assign)
-        o2o_out = self._o2o_loss(o2o_logits, o2o_boxes, o2o_assign)
+        o2m_out = self._o2m_loss(o2m_logits, o2m_boxes, o2m_assign, strides)
+        o2o_out = self._o2o_loss(o2o_logits, o2o_boxes, o2o_assign, strides)
         total = self.alpha * o2m_out.total + (1.0 - self.alpha) * o2o_out.total
         return DualLossOutput(total=total, o2m=o2m_out, o2o=o2o_out, alpha=self.alpha)

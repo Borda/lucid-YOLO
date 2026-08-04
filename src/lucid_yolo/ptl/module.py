@@ -434,7 +434,15 @@ class DetectionLitModule(LightningModule):
         gt_labels = gt_labels.to(images.device)
         gt_mask = gt_mask.to(images.device)
         out = self.loss(
-            head_out.o2m_cls, o2m_boxes, head_out.o2o_cls, o2o_boxes, anchor_points, gt_boxes, gt_labels, gt_mask
+            head_out.o2m_cls,
+            o2m_boxes,
+            head_out.o2o_cls,
+            o2o_boxes,
+            anchor_points,
+            gt_boxes,
+            gt_labels,
+            gt_mask,
+            strides=strides,
         )
         total = out.total + self._task_extra_loss(head_out, targets)
         self._log_loss(out, total, stage, images.shape[0])

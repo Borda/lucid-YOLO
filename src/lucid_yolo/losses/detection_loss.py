@@ -120,7 +120,13 @@ class DetectionBranchLoss:
         self.cls_gain = cls_gain
         self.l1_gain = l1_gain
 
-    def __call__(self, pred_logits: Tensor, pred_boxes: Tensor, assign: AssignResult) -> DetectionLossOutput:
+    def __call__(
+        self,
+        pred_logits: Tensor,
+        pred_boxes: Tensor,
+        assign: AssignResult,
+        strides: Tensor | None = None,
+    ) -> DetectionLossOutput:
         """Compute the detection-branch loss for one branch of one batch.
 
         Args:
@@ -130,6 +136,10 @@ class DetectionBranchLoss:
             assign: The :class:`~lucid_yolo.assign.tal.AssignResult` for this
                 branch, supplying the foreground mask, target labels and boxes,
                 and normalized alignment weights.
+            strides: Optional ``(A,)`` per-anchor level strides. When given, the
+                L1 term is measured in stride units (the head's native ltrb
+                frame — A13 revision, WP-078); ``None`` keeps the raw input
+                frame. The training path always passes strides.
 
         Returns:
             A :class:`DetectionLossOutput` with the pre-gain terms and their
@@ -155,7 +165,7 @@ class DetectionBranchLoss:
         """
         weight_sum = assign.align_weights.sum().clamp(min=1.0)
         l_cls = self._classification_loss(pred_logits, assign, weight_sum)
-        l_box, l_l1 = self._box_losses(pred_boxes, assign, weight_sum)
+        l_box, l_l1 = self._box_losses(pred_boxes, assign, weight_sum, strides)
         total = self.box_gain * l_box + self.cls_gain * l_cls + self.l1_gain * l_l1
         return DetectionLossOutput(total=total, box=l_box, cls=l_cls, l1=l_l1)
 
@@ -175,8 +185,17 @@ class DetectionBranchLoss:
         return bce.sum() / weight_sum
 
     @staticmethod
-    def _box_losses(pred_boxes: Tensor, assign: AssignResult, weight_sum: Tensor) -> tuple[Tensor, Tensor]:
+    def _box_losses(
+        pred_boxes: Tensor, assign: AssignResult, weight_sum: Tensor, strides: Tensor | None
+    ) -> tuple[Tensor, Tensor]:
         """Alignment-weighted CIoU and L1 terms over positive anchors.
+
+        With ``strides`` given, the L1 differences are divided by each positive
+        anchor's stride so the term is measured in **stride units** — the
+        head's native ltrb frame, the frame the legacy DFL-field gain is
+        calibrated in (A13 revision). Pixel-frame differences run 8-32x larger
+        and let ``l1_gain`` swamp the classification term (the WP-078 Det-A
+        root cause). CIoU is scale-invariant and needs no normalization.
 
         Boolean-masking with an all-``False`` ``fg_mask`` yields empty positive
         tensors whose weighted sums are zero yet stay connected to ``pred_boxes``
@@ -188,7 +207,10 @@ class DetectionBranchLoss:
         target_pos = assign.target_boxes[fg_mask]  # (P, 4)
         weights = assign.align_weights[fg_mask]  # (P,)
         box_terms = ciou_loss(pred_pos, target_pos)  # (P,)
-        l1_terms = (pred_pos - target_pos).abs().sum(dim=-1)  # (P,)
+        diffs = pred_pos - target_pos  # (P, 4)
+        if strides is not None:
+            diffs = diffs / strides.expand(fg_mask.shape)[fg_mask].unsqueeze(-1)
+        l1_terms = diffs.abs().sum(dim=-1)  # (P,)
         l_box = (box_terms * weights).sum() / weight_sum
         l_l1 = (l1_terms * weights).sum() / weight_sum
         return l_box, l_l1
