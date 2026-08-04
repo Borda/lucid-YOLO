@@ -580,8 +580,12 @@ class DetectionDataModule(LightningDataModule):
             DataLoader forbids it.
         val_num_workers: Worker count for the validation loader only. ``None``
             (default) resolves to ``min(num_workers, 4)`` — letterbox-only val
-            samples need few workers, and a small persistent val pool avoids
-            doubling the resident worker population every epoch (WP-073).
+            samples need few workers, and a small val pool avoids doubling the
+            resident worker population every epoch (WP-073).
+        persistent_workers: Keep loader workers alive across epochs. Defaults
+            to ``False`` (WP-076): respawning costs seconds per epoch while a
+            persistent pool accumulates per-worker memory for the whole run —
+            the observed slow-creep OOM on long containerized runs.
 
     Examples:
         ```pycon
@@ -608,6 +612,7 @@ class DetectionDataModule(LightningDataModule):
         pin_memory: bool | None = None,
         prefetch_factor: int = _PREFETCH_FACTOR,
         val_num_workers: int | None = None,
+        persistent_workers: bool = False,
     ) -> None:
         super().__init__()
         self._batch_size = int(batch_size)
@@ -624,6 +629,7 @@ class DetectionDataModule(LightningDataModule):
         self._val_num_workers = (
             min(self._num_workers, _VAL_MAX_WORKERS) if val_num_workers is None else int(val_num_workers)
         )
+        self._persistent_workers = bool(persistent_workers)
         self._seed = int(seed)
         self._pin_memory = torch.cuda.is_available() if pin_memory is None else bool(pin_memory)
         self._policy = build_scale_policy(variant)
@@ -715,13 +721,19 @@ class DetectionDataModule(LightningDataModule):
         the constructor — CUDA yes, MPS/CPU no), ``prefetch_factor`` and the
         one-thread-per-worker cap (:func:`_limit_worker_threads`) apply only
         with workers, so the deterministic ``num_workers=0`` path is untouched.
+
+        Workers are **recycled every epoch** unless ``persistent_workers=True``
+        was requested (WP-076): a respawn costs seconds per epoch, while a
+        persistent pool accumulates per-worker memory — allocator high-water
+        growth, arena fragmentation, residual copy-on-write pages — for the
+        whole run, the observed slow-creep OOM on long containerized runs.
         """
         workers = self._num_workers > 0
         return {
             "batch_size": self._batch_size,
             "num_workers": self._num_workers,
             "collate_fn": collate_detection,
-            "persistent_workers": workers,
+            "persistent_workers": self._persistent_workers and workers,
             "pin_memory": self._pin_memory,
             "prefetch_factor": self._prefetch_factor if workers else None,
             "worker_init_fn": _limit_worker_threads if workers else None,
@@ -753,7 +765,7 @@ class DetectionDataModule(LightningDataModule):
         workers = self._val_num_workers > 0
         kwargs = self._loader_kwargs() | {
             "num_workers": self._val_num_workers,
-            "persistent_workers": workers,
+            "persistent_workers": self._persistent_workers and workers,
             "prefetch_factor": self._prefetch_factor if workers else None,
             "worker_init_fn": _limit_worker_threads if workers else None,
         }

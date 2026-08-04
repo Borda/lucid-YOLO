@@ -245,6 +245,7 @@ def _datamodule(
     num_workers: int | None = 0,
     pin_memory: bool | None = None,
     val_num_workers: int | None = None,
+    persistent_workers: bool = False,
 ) -> DetectionDataModule:
     """Build a datamodule pointing both splits at the fixture's single split."""
     split = fixture_dir / "train"
@@ -262,6 +263,7 @@ def _datamodule(
         seed=seed,
         pin_memory=pin_memory,
         val_num_workers=val_num_workers,
+        persistent_workers=persistent_workers,
     )
 
 
@@ -348,14 +350,25 @@ def test_datamodule_train_batch_is_deterministic(detseg_fixture_dir: Path) -> No
     [pytest.param("train_dataloader", id="train"), pytest.param("val_dataloader", id="val")],
 )
 def test_dataloader_streaming_kwargs_with_workers(detseg_fixture_dir: Path, loader_name: str) -> None:
-    """Worker loaders prefetch deeper, cap worker threads, and auto-resolve pin_memory."""
+    """Worker loaders prefetch deeper, cap worker threads, recycle workers per epoch (WP-076)."""
     datamodule = _datamodule(detseg_fixture_dir, num_workers=2)
     datamodule.setup("fit")
     loader = getattr(datamodule, loader_name)()
     assert loader.prefetch_factor == 2
     assert loader.worker_init_fn is not None
-    assert loader.persistent_workers
+    assert not loader.persistent_workers
     assert loader.pin_memory == torch.cuda.is_available()
+
+
+@pytest.mark.parametrize(
+    "loader_name",
+    [pytest.param("train_dataloader", id="train"), pytest.param("val_dataloader", id="val")],
+)
+def test_dataloader_persistent_workers_opt_in(detseg_fixture_dir: Path, loader_name: str) -> None:
+    """persistent_workers=True keeps both loaders' worker pools alive across epochs."""
+    datamodule = _datamodule(detseg_fixture_dir, num_workers=2, persistent_workers=True)
+    datamodule.setup("fit")
+    assert getattr(datamodule, loader_name)().persistent_workers
 
 
 def test_dataloader_zero_workers_keeps_deterministic_path(detseg_fixture_dir: Path) -> None:
