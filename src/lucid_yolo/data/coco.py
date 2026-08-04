@@ -42,6 +42,7 @@ from torchvision.io import ImageReadMode, read_image
 from lucid_yolo.data.targets import Targets
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from lucid_yolo.data.transforms import GeometricTransform
@@ -169,7 +170,14 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             payload = json.load(handle)
         self.category_id_to_label, self.label_to_category_id = _build_category_maps(payload["categories"])
         self._images = _build_image_records(payload["images"])
-        self._anns_by_image = _group_annotations(payload["annotations"])
+        # Targets are precomputed ONCE here and the raw annotation dicts dropped
+        # (WP-073). Keeping the parsed JSON alive — millions of tiny Python
+        # objects for a train-scale split — makes every DataLoader worker's
+        # refcount traffic materialize copy-on-write pages until the host OOMs
+        # over long runs; tensor-backed Targets keep the coordinate data in
+        # buffers a fork never copies.
+        anns_by_image = _group_annotations(payload["annotations"])
+        self._targets = [self._build_targets(anns_by_image.get(record.image_id, ()), record) for record in self._images]
 
     def __len__(self) -> int:
         """Return the number of images in the dataset."""
@@ -189,7 +197,10 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         """
         record = self._images[index]
         image = self._load_image(record.file_name)
-        targets = self._build_targets(record)
+        # Precomputed at construction (WP-073); the downstream pipeline is
+        # functional (never mutates its input Targets), so the cached instance
+        # is handed out directly.
+        targets = self._targets[index]
         if self._transforms is not None:
             image, targets = self._transforms(image, targets)
         return image, targets
@@ -214,12 +225,12 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             raise OSError(f"failed to read image {path}: {error}") from error
         return cast("Tensor", raw.to(torch.float32) / _UINT8_MAX)
 
-    def _build_targets(self, record: _ImageRecord) -> Targets:
+    def _build_targets(self, annotations: Sequence[dict[str, object]], record: _ImageRecord) -> Targets:
         """Assemble the :class:`~lucid_yolo.data.targets.Targets` for one image."""
         boxes: list[list[float]] = []
         labels: list[int] = []
         polygons: list[Tensor] = []
-        for ann in self._anns_by_image.get(record.image_id, ()):
+        for ann in annotations:
             parsed = self._parse_annotation(ann, record)
             if parsed is None:
                 continue

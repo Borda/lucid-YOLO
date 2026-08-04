@@ -118,6 +118,14 @@ _FLIP_PROB = 0.5
 _PREFETCH_FACTOR = 2
 
 
+#: Default validation-loader worker cap (WP-073). Val samples are letterbox-only
+#: (decode + one resize — a fraction of the train pipeline's work), so a handful
+#: of workers saturates it, while inheriting the train worker count doubles the
+#: resident worker-process population every epoch boundary (train workers are
+#: persistent) — the observed Colab host-OOM trigger on long runs.
+_VAL_MAX_WORKERS = 4
+
+
 #: Fraction of currently-free ``/dev/shm`` the worker queue may claim. Worker
 #: batches travel to the main process as shared-memory segments, so the queue's
 #: worst case — ``num_workers x prefetch_factor`` stacked image batches — must
@@ -570,6 +578,10 @@ class DetectionDataModule(LightningDataModule):
         prefetch_factor: Batches each worker keeps prefetched (defaults to
             :data:`_PREFETCH_FACTOR`); ignored at ``num_workers=0`` where the
             DataLoader forbids it.
+        val_num_workers: Worker count for the validation loader only. ``None``
+            (default) resolves to ``min(num_workers, 4)`` — letterbox-only val
+            samples need few workers, and a small persistent val pool avoids
+            doubling the resident worker population every epoch (WP-073).
 
     Examples:
         ```pycon
@@ -580,7 +592,7 @@ class DetectionDataModule(LightningDataModule):
         ```
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 — flat hyperparameter surface is deliberate: WP-038 LightningCLI configures each knob directly from YAML (only 4 are required positionals)
         self,
         data_root: Path,
         batch_size: int,
@@ -595,6 +607,7 @@ class DetectionDataModule(LightningDataModule):
         seed: int = 0,
         pin_memory: bool | None = None,
         prefetch_factor: int = _PREFETCH_FACTOR,
+        val_num_workers: int | None = None,
     ) -> None:
         super().__init__()
         self._batch_size = int(batch_size)
@@ -608,6 +621,9 @@ class DetectionDataModule(LightningDataModule):
                 self._prefetch_factor,
             )
         self._num_workers = int(num_workers)
+        self._val_num_workers = (
+            min(self._num_workers, _VAL_MAX_WORKERS) if val_num_workers is None else int(val_num_workers)
+        )
         self._seed = int(seed)
         self._pin_memory = torch.cuda.is_available() if pin_memory is None else bool(pin_memory)
         self._policy = build_scale_policy(variant)
@@ -724,13 +740,27 @@ class DetectionDataModule(LightningDataModule):
         )
 
     def val_dataloader(self) -> DataLoader[tuple[Tensor, Targets]]:
-        """Return the unshuffled validation loader (letterbox-only samples)."""
+        """Return the unshuffled validation loader (letterbox-only samples).
+
+        The loader runs on its own (small) worker count — ``val_num_workers``,
+        default ``min(num_workers, 4)`` (WP-073): letterbox-only samples need a
+        fraction of the train pipeline's CPU, and since both loaders' workers
+        are persistent, inheriting the train count would keep a second full
+        worker population resident for the whole run.
+        """
         if self._val is None:
             raise RuntimeError("setup() must be called before val_dataloader()")
+        workers = self._val_num_workers > 0
+        kwargs = self._loader_kwargs() | {
+            "num_workers": self._val_num_workers,
+            "persistent_workers": workers,
+            "prefetch_factor": self._prefetch_factor if workers else None,
+            "worker_init_fn": _limit_worker_threads if workers else None,
+        }
         return DataLoader(
             self._val,
             shuffle=False,
-            **self._loader_kwargs(),  # type: ignore[arg-type]
+            **kwargs,  # type: ignore[arg-type]
         )
 
     @property

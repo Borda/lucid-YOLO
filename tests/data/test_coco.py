@@ -244,6 +244,7 @@ def _datamodule(
     seed: int = 0,
     num_workers: int | None = 0,
     pin_memory: bool | None = None,
+    val_num_workers: int | None = None,
 ) -> DetectionDataModule:
     """Build a datamodule pointing both splits at the fixture's single split."""
     split = fixture_dir / "train"
@@ -260,6 +261,7 @@ def _datamodule(
         val_ann_file=annotation,
         seed=seed,
         pin_memory=pin_memory,
+        val_num_workers=val_num_workers,
     )
 
 
@@ -372,6 +374,24 @@ def test_dataloader_num_workers_auto_scales_with_batch(detseg_fixture_dir: Path)
     datamodule.setup("fit")
     assert datamodule.train_dataloader().num_workers <= min(2, os.cpu_count() or 1)
     assert datamodule.train_dataloader().num_workers >= 1
+
+
+def test_val_loader_workers_capped_below_train(detseg_fixture_dir: Path) -> None:
+    """The val loader defaults to min(num_workers, 4) — never the full train worker pool (WP-073)."""
+    datamodule = _datamodule(detseg_fixture_dir, num_workers=8)
+    datamodule.setup("fit")
+    assert datamodule.train_dataloader().num_workers == 8
+    assert datamodule.val_dataloader().num_workers == 4
+
+
+def test_val_loader_workers_explicit_override(detseg_fixture_dir: Path) -> None:
+    """An explicit val_num_workers wins over the capped default, including 0 (deterministic path)."""
+    datamodule = _datamodule(detseg_fixture_dir, num_workers=2, val_num_workers=0)
+    datamodule.setup("fit")
+    loader = datamodule.val_dataloader()
+    assert loader.num_workers == 0
+    assert loader.prefetch_factor is None
+    assert loader.worker_init_fn is None
 
 
 def test_shm_cap_bounds_workers_to_free_shm(monkeypatch: pytest.MonkeyPatch) -> None:
