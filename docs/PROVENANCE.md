@@ -12,6 +12,16 @@ AGENTS.md.
 Admissible references. Anything not on this list requires a DECISIONS.md entry
 before first use; denylisted surfaces are never admissible.
 
+Reference *implementations* (R25–R28) are admitted under D13/ADR-004 on two
+standing conditions. **Licence:** MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause or
+ISC only — copyleft (AGPL, GPL, LGPL), source-available, research-only,
+non-commercial, commercially licensed and unlicensed code are inadmissible at
+any cost, and an unestablished licence counts as inadmissible rather than
+permissive. **Use:** reading for diagnosis only; copying code from any external
+detection repository remains prohibited (AGENTS.md sec. 7). A per-use provenance
+check still applies to individual files — the entries below record licence
+verification, not a blanket clearance of every file in the repository.
+
 ### Papers under reproduction
 
 | ID | Reference | Role |
@@ -48,6 +58,10 @@ before first use; denylisted surfaces are never admissible.
 | R22 | torchmetrics, Lightning AI, github.com/Lightning-AI/torchmetrics, Apache-2.0 | `MeanAveragePrecision` bbox mAP engine for the detection acceptance instrument (WP-069). Apache-2.0 verified from the installed 1.9.0 wheel dist-info `licenses/LICENSE` |
 | R23 | faster-coco-eval, github.com/MiXaiLL76/faster_coco_eval, Apache-2.0 | COCOeval-faithful, pycocotools-free backend for `MeanAveragePrecision` (WP-069). Apache-2.0 verified from the installed 1.7.2 wheel dist-info `licenses/LICENSE` (PyPI metadata omits the license field) |
 | R24 | Lin, T.-Y. et al., *Focal Loss for Dense Object Detection*, arXiv:1708.02002 (ICCV 2017) | Prior-probability classification bias initialization (sec. 5.1, pi = 0.01) for dense one-stage heads (A30) |
+| R25 | torchvision, github.com/pytorch/vision, BSD-3-Clause | Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). BSD-3-Clause verified 2026-08-05 from the repository `LICENSE` ("Copyright (c) Soumith Chintala 2016"). No Ultralytics lineage: PyTorch-project detection stack, independent of the YOLO family |
+| R26 | YOLOX, Megvii-BaseDetection, github.com/Megvii-BaseDetection/YOLOX, Apache-2.0 | Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). Apache-2.0 verified 2026-08-05 from the repository `LICENSE` ("Copyright (c) 2021-2022 Megvii Inc."). Independent anchor-free YOLO lineage (arXiv:2107.08430), no Ultralytics code |
+| R27 | MMDetection, OpenMMLab, github.com/open-mmlab/mmdetection, Apache-2.0 | Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). Apache-2.0 verified 2026-08-05 from the repository `LICENSE` ("Copyright 2018-2023 OpenMMLab"). **Core `mmdetection` only** — the sibling `mmyolo` repository reimplements Ultralytics-family models and is deliberately excluded pending a provenance check it has not been given |
+| R28 | PaddleDetection (PP-YOLOE), PaddlePaddle, github.com/PaddlePaddle/PaddleDetection, Apache-2.0 | Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). Apache-2.0 verified 2026-08-05 from the repository `LICENSE` (unmodified Apache template, no named holder in the file). Independent PaddlePaddle detection stack |
 
 ### Placeholders
 

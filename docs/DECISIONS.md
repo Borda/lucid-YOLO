@@ -21,6 +21,7 @@ architectural consequences.
 | D10 | Versioning and release policy | Perpetual 0.x — no 1.0 milestone is planned. See ADR-002. |
 | D11 | Execution model | Autonomous agent execution under human gates. See ADR-003. |
 | D12 | Execution-session amendments (2026-07-31) | (a) **Git flow**: work lands as one commit per WP directly on local `main`; `make gate` green is the merge gate (replacing the blueprint's PR/squash-merge flow — single-operator repository, no branch protection available locally); pushes to the remote are batched at phase boundaries and each push requires explicit human confirmation. (b) **Synthetic fixtures and data stand-ins**: test fixtures and offline [DATA]-WP development stand-ins are generated with fuse-augmentations (R21, Apache-2.0, pinned commit) instead of hand-annotated images — recorded as A26; real COCO/DOTA remain mandatory for tier acceptance. (c) **Accelerator**: [GPU] WPs attempt Apple MPS locally first; CUDA runs remain [HUMAN]-gated. (d) **Lint routing**: all linters (ruff check/format, mypy, hygiene hooks) run exclusively through `pre-commit run --all-files`; `make gate` = precommit + test + golden. (e) **Subpackage naming** (2026-08-01): the Lightning-integration subpackage is `src/lucid_yolo/ptl/` (blueprint sec. 7 named it `lit/`; renamed to avoid `lucid_yolo.lit` stutter); Phase 5 commit scopes use `feat(ptl)`. (f) **Package rename** (2026-08-02): distribution `lit-yolo` -> `lucid-yolo`, import `lit_yolo` -> `lucid_yolo`, console scripts `lucid-yolo`/`lucid-download`, variants `lucid-yolo-e2e-{n..x}`. Rationale: the `lit-` prefix is Lightning AI's own project-naming convention (lit-llama, lit-gpt) and the project must not borrow any third party's branding; `lucid-` states the project's education/readability goal. Alternatives ruled out during the decision: `open-yolo` (occupied PyPI name) and plural `*-yolos` forms (collide with the unrelated YOLOS ViT detector, hustvl "You Only Look at One Sequence"). Verified at decision time: `lucid-yolo` free on PyPI (404) and one inactive hobby repository on GitHub. Naming-evidence record and sec. 3.5 discipline unchanged. |
+| D13 | Reference-implementation consultation (2026-08-05) | **Allowlist widened, denylist unchanged.** Detection implementations under a **permissive** license with no Ultralytics lineage may be **read for reference** when diagnosing a structural defect. Admissible licenses are exhaustively: **MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC** (e.g. torchvision, YOLOX, MMDetection, PP-YOLOE). **Inadmissible at any cost, regardless of how useful the content is: AGPL, GPL, LGPL and every other copyleft license; source-available, research-only and non-commercial licenses; anything commercially licensed or of unstated license.** Unlicensed or ambiguously licensed code is treated as inadmissible, not as permissive. Three further conditions apply: (i) the repository's LICENSE and independent provenance are verified before it is opened, (ii) it is registered in PROVENANCE.md with the access date and what it informed, (iii) **no code is ever copied** — the sec. 7 prohibition on copying from external detection repositories is unchanged, as is the absolute Ultralytics denylist. Rationale: three Det-A attempts stalled at 4-6 mAP with the failure mechanisms only identifiable by comparison against a working reference; the papers alone under-specify normalization and assignment conventions. User decision, requested 2026-08-05. See ADR-004. |
 
 ## ADR-001 — Architecture in code; YAML for experiments only (D9)
 
@@ -80,6 +81,35 @@ marked [HUMAN]: (a) compute-heavy tier runs (>4 GPU-hours), (b) release tags,
 model-topology configs, and stop rather than guess (escalation protocol in
 AGENTS.md and docs/ESCALATION.md). The assumption register plus the
 escalation log is itself research output a from-code port could not produce.
+
+## ADR-004 — Reference implementations readable, never copyable (D13)
+
+**Context.** The blueprint's v1.4 tightening (D5) restricted implementation
+sources to the three papers, their cited primary literature, and neutral tooling
+documentation. Three Det-A attempts then stalled at 4-6 val mAP50-95 against a
+>25 criterion. Two root causes were found by measurement alone (WP-078 pixel-frame
+L1, WP-079 augmentation-RNG collapse), but the papers do not fix every
+normalization and assignment convention precisely enough to rule out a third.
+
+**Decision.** Ultralytics-independent detection implementations under a
+permissive license — MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, and
+nothing else — are admissible as **reading** references for diagnosis. Each must
+be LICENSE- and provenance-verified before it is opened and registered in
+PROVENANCE.md. Copyleft (AGPL, GPL, LGPL), source-available, research-only,
+non-commercial, commercially licensed and unlicensed code stay inadmissible at
+any cost: the licence gate is decided before the content is known, so no
+diagnostic value can ever justify opening one. A repository whose license cannot
+be established is inadmissible by default. Copying code from any external detection repository remains
+prohibited (sec. 7), and the Ultralytics denylist stays absolute in every form:
+repository surfaces, package contents, docs site, and released weights.
+
+**Consequences.** The clean-room position now rests on two claims instead of one:
+nothing from Ultralytics was consulted (unchanged, auditable via the fetch log),
+and nothing from any external repository was copied (enforced by the standing
+prohibition and the provenance trail). Reading a permissively licensed
+implementation to learn a convention is the ordinary practice the two-team
+clean-room pattern already contemplates for the specification side; what it must
+never become is transcription.
 
 ## Open items
 

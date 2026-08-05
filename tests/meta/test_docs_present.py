@@ -63,9 +63,9 @@ def test_provenance_carries_allowlist_ids() -> None:
 
 
 def test_decisions_carry_all_ids() -> None:
-    """DECISIONS.md lists D1-D12 and the three ADRs."""
+    """DECISIONS.md lists D1-D13 and the four ADRs."""
     text = (DOCS / "DECISIONS.md").read_text(encoding="utf-8")
     d_ids = {int(m) for m in re.findall(r"^\| D(\d+) \|", text, flags=re.MULTILINE)}
-    assert d_ids == set(range(1, 13)), f"decision ids: {sorted(d_ids)}"
-    for adr in ("ADR-001", "ADR-002", "ADR-003"):
+    assert d_ids == set(range(1, 14)), f"decision ids: {sorted(d_ids)}"
+    for adr in ("ADR-001", "ADR-002", "ADR-003", "ADR-004"):
         assert f"## {adr}" in text, f"missing {adr} section"
