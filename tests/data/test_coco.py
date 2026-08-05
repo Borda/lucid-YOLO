@@ -371,6 +371,54 @@ def test_dataloader_persistent_workers_opt_in(detseg_fixture_dir: Path, loader_n
     assert getattr(datamodule, loader_name)().persistent_workers
 
 
+class _StubWorkerInfo:
+    """Minimal stand-in for :class:`torch.utils.data.WorkerInfo` (only what ``_init_worker`` reads)."""
+
+    def __init__(self, dataset: object, seed: int) -> None:
+        self.dataset = dataset
+        self.seed = seed
+
+
+def _draw_after_init(monkeypatch: pytest.MonkeyPatch, pipeline: object, seed: int) -> float:
+    """Seed ``pipeline`` through ``_init_worker`` as torch would, and return its next draw."""
+    monkeypatch.setattr(dm, "get_worker_info", lambda: _StubWorkerInfo(pipeline, seed))
+    dm._init_worker(0)
+    return float(torch.rand((), generator=pipeline._generator))
+
+
+def test_init_worker_reseeds_pipeline_per_worker_seed(
+    detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Distinct worker seeds give distinct augmentation streams; an equal seed replays one (WP-079)."""
+    datamodule = _datamodule(detseg_fixture_dir, num_workers=2)
+    datamodule.setup("fit")
+    pipeline = datamodule._train
+    first = _draw_after_init(monkeypatch, pipeline, seed=11)
+    second = _draw_after_init(monkeypatch, pipeline, seed=12)
+    replay = _draw_after_init(monkeypatch, pipeline, seed=11)
+    assert first != second
+    assert first == replay
+
+
+@pytest.mark.parametrize(
+    "worker_info",
+    [
+        pytest.param(lambda: _StubWorkerInfo(object(), seed=3), id="dataset-without-generator"),
+        pytest.param(lambda: None, id="outside-a-worker-process"),
+    ],
+)
+def test_init_worker_caps_threads_without_a_seedable_dataset(
+    monkeypatch: pytest.MonkeyPatch, worker_info: object
+) -> None:
+    """No ``_generator`` to seed (val pipeline, or num_workers=0) still caps the worker's threads."""
+    capped: list[int] = []
+    monkeypatch.setattr(dm, "get_worker_info", worker_info)
+    monkeypatch.setattr(torch, "set_num_threads", capped.append)
+    dm._init_worker(0)
+    assert capped == [1]
+    assert torch.get_num_threads() == 1
+
+
 def test_dataloader_zero_workers_keeps_deterministic_path(detseg_fixture_dir: Path) -> None:
     """The num_workers=0 loader skips prefetch and the worker thread cap entirely."""
     datamodule = _datamodule(detseg_fixture_dir)

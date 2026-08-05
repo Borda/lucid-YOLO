@@ -32,7 +32,9 @@ Multi-image augmentation composition:
     :func:`~lucid_yolo.data.coco.build_scale_policy` (size-aware, [R1] Table S3);
     mosaic runs at ``p=1.0`` (blueprint sec. 5.9). Because every draw comes from
     one seeded generator, a fixed ``seed`` and a deterministic access order
-    (``num_workers=0``) give byte-identical epochs.
+    (``num_workers=0``) give byte-identical epochs. With workers the pipeline is
+    seeded *per worker and per epoch* by :func:`_init_worker` (WP-079) — a fresh
+    stream each time, still fully determined by ``seed``.
 
 Batch contract:
     Two forms, split by the DataLoader worker boundary:
@@ -70,7 +72,7 @@ from pathlib import Path
 import torch
 from pytorch_lightning import LightningDataModule
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, get_worker_info
 
 from lucid_yolo.data.affine import FusedAffineLetterbox
 from lucid_yolo.data.augment import HorizontalFlip, HSVJitter
@@ -167,20 +169,47 @@ def _shm_capped_workers(workers: int, batch_size: int, img_size: int, prefetch: 
     return max(1, min(workers, budget // max(1, prefetch * batch_bytes)))
 
 
-def _limit_worker_threads(worker_id: int) -> None:
-    """DataLoader ``worker_init_fn`` capping each worker to one torch CPU thread.
+def _init_worker(worker_id: int) -> None:
+    """DataLoader ``worker_init_fn``: cap torch threads and re-seed the worker's RNG.
 
-    Without the cap every worker process inherits torch's default intra-op
-    thread pool (one thread per core), so ``num_workers`` workers oversubscribe
-    the CPU by that factor and the tensor ops inside the augmentation pipeline
-    (affine warps, HSV jitter, blends) thrash instead of running in parallel.
-    One thread per worker makes worker throughput scale with ``num_workers``.
+    **Thread cap.** Without it every worker process inherits torch's default
+    intra-op thread pool (one thread per core), so ``num_workers`` workers
+    oversubscribe the CPU by that factor and the tensor ops inside the
+    augmentation pipeline (affine warps, HSV jitter, blends) thrash instead of
+    running in parallel. One thread per worker makes worker throughput scale
+    with ``num_workers``.
+
+    **Re-seed (WP-079).** :class:`_TrainPipeline` seeds its single generator once,
+    at construction, in the *parent* process. Every worker therefore inherits a
+    copy of the **same** generator state, and the parent's copy never advances
+    (the parent never calls ``__getitem__`` when workers are used). Two failures
+    follow, and both were live in the Det-A tier runs:
+
+    1. every worker replays one identical augmentation-parameter stream, cutting
+       the per-epoch parameter diversity to ``1 / num_workers``;
+    2. with ``persistent_workers=False`` (the WP-076 default) workers are rebuilt
+       from that same parent state every epoch, so the whole run replays a single
+       epoch's worth of augmentation parameters.
+
+    Seeding from :attr:`torch.utils.data.WorkerInfo.seed` fixes both: torch
+    derives it as ``base_seed + worker_id``, and draws ``base_seed`` from the
+    loader's own generator at every iterator creation — unique per worker, fresh
+    per epoch, and still fully determined by the datamodule's ``seed``.
+
+    Datasets with no ``_generator`` attribute (the val pipeline is letterbox-only,
+    hence deterministic) are left untouched.
 
     Args:
-        worker_id: The worker index (unused; required by the DataLoader API).
+        worker_id: The worker index (unused; the seed comes from the worker info).
     """
     del worker_id
     torch.set_num_threads(1)
+    info = get_worker_info()
+    if info is None:
+        return
+    generator = getattr(info.dataset, "_generator", None)
+    if isinstance(generator, torch.Generator):
+        generator.manual_seed(info.seed)
 
 
 @dataclass
@@ -719,8 +748,8 @@ class DetectionDataModule(LightningDataModule):
 
         Accelerator-aware: ``pin_memory`` is on only where it helps (resolved in
         the constructor — CUDA yes, MPS/CPU no), ``prefetch_factor`` and the
-        one-thread-per-worker cap (:func:`_limit_worker_threads`) apply only
-        with workers, so the deterministic ``num_workers=0`` path is untouched.
+        the per-worker init (:func:`_init_worker` — thread cap plus RNG re-seed)
+        apply only with workers, so the ``num_workers=0`` path is untouched.
 
         Workers are **recycled every epoch** unless ``persistent_workers=True``
         was requested (WP-076): a respawn costs seconds per epoch, while a
@@ -736,7 +765,7 @@ class DetectionDataModule(LightningDataModule):
             "persistent_workers": self._persistent_workers and workers,
             "pin_memory": self._pin_memory,
             "prefetch_factor": self._prefetch_factor if workers else None,
-            "worker_init_fn": _limit_worker_threads if workers else None,
+            "worker_init_fn": _init_worker if workers else None,
         }
 
     def train_dataloader(self) -> DataLoader[tuple[Tensor, Targets]]:
@@ -767,7 +796,7 @@ class DetectionDataModule(LightningDataModule):
             "num_workers": self._val_num_workers,
             "persistent_workers": self._persistent_workers and workers,
             "prefetch_factor": self._prefetch_factor if workers else None,
-            "worker_init_fn": _limit_worker_threads if workers else None,
+            "worker_init_fn": _init_worker if workers else None,
         }
         return DataLoader(
             self._val,
