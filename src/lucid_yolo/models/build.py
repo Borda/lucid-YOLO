@@ -37,6 +37,7 @@ Provenance: R1 Table 7, R6. Assumptions: A3, A4, A28, A29.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import cast
 
 import torch
@@ -44,11 +45,20 @@ from fvcore.nn import FlopCountAnalysis
 from torch import Tensor, nn
 
 from lucid_yolo.models.backbone import DetectionBackbone
-from lucid_yolo.models.heads import DualDetectionHead, DualHeadOutput
+from lucid_yolo.models.heads import DualDetectionHead, DualHeadOutput, ProtoFusion, ProtoNet, SemanticAux
+from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS
 from lucid_yolo.models.neck import DetectionNeck
 from lucid_yolo.models.registry import scale_spec
 
-__all__ = ["Detector", "build_detector", "count_flops", "count_params"]
+__all__ = [
+    "Detector",
+    "SegmentOutput",
+    "Segmenter",
+    "build_detector",
+    "build_segmenter",
+    "count_flops",
+    "count_params",
+]
 
 #: Default detection input side in pixels (square), R1 Table 7 protocol.
 _DEFAULT_IMG_SIZE = 640
@@ -182,6 +192,207 @@ def build_detector(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> Det
     return Detector(variant, num_classes)
 
 
+@dataclass(frozen=True)
+class SegmentOutput:
+    """Dense predictions of the segmentation model's three branches.
+
+    Groups what a segmentation forward pass produces without flattening it: the
+    detection head's own dataclass is kept whole (so the dual-branch contract of
+    :class:`~lucid_yolo.models.heads.DualHeadOutput` stays in one place), and the
+    two mask-side tensors sit beside it.
+
+    Attributes:
+        detect: The full :class:`~lucid_yolo.models.heads.DualHeadOutput`,
+            including both branches' tanh mask coefficients.
+        prototypes: Raw Eq. 9 prototype maps of shape ``(B, K, 2*H3, 2*W3)``,
+            i.e. twice the P3 grid (A15), unactivated.
+        semantic: Auxiliary per-class logits ``(B, num_classes, H3, W3)`` in
+            training mode, ``None`` at eval — the branch is training-only (A17)
+            and :class:`~lucid_yolo.models.heads.SemanticAux` returns ``None``
+            outside training rather than being skipped by the caller.
+    """
+
+    detect: DualHeadOutput
+    prototypes: Tensor
+    semantic: Tensor | None
+
+
+class Segmenter(nn.Module):
+    """Composite YOLO26 segmentation model: detector plus the mask and aux branches.
+
+    Mirrors :class:`Detector` — same backbone and neck for a given variant — and
+    adds the three WP-047…WP-050 segmentation stages on top: the detection head
+    now also emits per-anchor mask coefficients,
+    :class:`~lucid_yolo.models.heads.ProtoFusion` collapses the neck's three
+    levels into the Eq. 8 fused feature, :class:`~lucid_yolo.models.heads.ProtoNet`
+    turns that feature into ``K`` prototype maps, and
+    :class:`~lucid_yolo.models.heads.SemanticAux` attaches the training-only
+    auxiliary classifier to the same fused feature.
+
+    ``num_coeffs`` is threaded into both the head's coefficient stems and the
+    prototype count, one prototype per coefficient: Eq. 7 contracts the two
+    against each other, so a single constructor argument is what stops the two
+    sides from drifting apart.
+
+    The fused feature is computed exactly once and shared by the prototype and
+    auxiliary branches — recomputing it would silently double that subgraph's
+    cost in the FLOP measurement.
+
+    Args:
+        variant: Scale name (``"n"``/``"s"``/``"m"``/``"l"``/``"x"``) resolved
+            through :func:`~lucid_yolo.models.registry.scale_spec`.
+        num_classes: Number of object classes the head and the auxiliary branch
+            predict.
+        num_coeffs: Mask-coefficient width ``K`` (A14), also the prototype count.
+
+    Examples:
+        >>> import torch
+        >>> model = Segmenter("n", num_classes=4).eval()
+        >>> with torch.no_grad():
+        ...     out = model(torch.zeros(1, 3, 128, 128))
+        >>> out.detect.o2o_cls.shape, out.detect.o2o_coeff.shape
+        (torch.Size([1, 336, 4]), torch.Size([1, 336, 32]))
+        >>> out.prototypes.shape
+        torch.Size([1, 32, 32, 32])
+        >>> out.semantic is None  # training-only branch (A17)
+        True
+    """
+
+    def __init__(
+        self,
+        variant: str,
+        num_classes: int = _DEFAULT_NUM_CLASSES,
+        num_coeffs: int = DEFAULT_NUM_COEFFS,
+    ) -> None:
+        super().__init__()
+        spec = scale_spec(variant)
+        self.variant = variant
+        self.num_classes = num_classes
+        self.num_coeffs = num_coeffs
+        self.backbone = DetectionBackbone(spec.depth, spec.width, spec.max_channels)
+        self.neck = DetectionNeck(self.backbone.channels, spec.depth, spec.width, spec.max_channels)
+        self.head = DualDetectionHead(self.neck.channels, num_classes, num_coeffs=num_coeffs)
+        self.proto_fusion = ProtoFusion(self.neck.channels)
+        self.protonet = ProtoNet(self.proto_fusion.out_channels, num_prototypes=num_coeffs)
+        self.semantic = SemanticAux(self.proto_fusion.out_channels, num_classes)
+
+    def forward(self, image: Tensor) -> SegmentOutput:
+        """Run the backbone, neck, dual head, prototype stack, and auxiliary branch.
+
+        Args:
+            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
+                ``W`` divisible by 32.
+
+        Returns:
+            A :class:`SegmentOutput` holding the dual head's dense predictions,
+            the raw prototype maps, and the auxiliary semantic logits (``None``
+            outside training mode).
+        """
+        features: tuple[Tensor, Tensor, Tensor] = self.neck(self.backbone(image))
+        detect: DualHeadOutput = self.head(features)
+        fused: Tensor = self.proto_fusion(features)
+        prototypes: Tensor = self.protonet(fused)
+        semantic: Tensor | None = self.semantic(fused)
+        return SegmentOutput(detect=detect, prototypes=prototypes, semantic=semantic)
+
+    def deploy(self) -> nn.Module:
+        """Return the inference model: backbone -> neck -> one-to-one head + prototypes.
+
+        Two branches of the trained model are training-only and are therefore
+        absent from the returned module: the one-to-many detection branch, which
+        never runs on the NMS-free E2E path (R6), and the auxiliary semantic
+        branch, which exists only to shape the shared prototype features (A17).
+        Neither is disabled or skipped — neither is held at all. The returned
+        module **shares** this segmenter's parameters (no copy), so it is a view
+        rather than a second model.
+
+        Returns:
+            A :class:`torch.nn.Module` whose forward maps an image batch to the
+            ``(cls, box, coeff, prototypes)`` tuple needed to assemble masks.
+
+        Examples:
+            >>> import torch
+            >>> deployed = Segmenter("n", num_classes=4).deploy().eval()
+            >>> with torch.no_grad():
+            ...     cls, box, coeff, prototypes = deployed(torch.zeros(1, 3, 128, 128))
+            >>> cls.shape, box.shape
+            (torch.Size([1, 336, 4]), torch.Size([1, 336, 4]))
+            >>> coeff.shape, prototypes.shape
+            (torch.Size([1, 336, 32]), torch.Size([1, 32, 32, 32]))
+        """
+        return _DeployedSegmenter(self)
+
+
+class _DeployedSegmenter(nn.Module):
+    """Inference view of a :class:`Segmenter` (backbone/neck/o2o + prototypes).
+
+    Runs the backbone, the neck, the one-to-one head branch, and the prototype
+    path, returning the four tensors :func:`~lucid_yolo.models.heads.assemble_masks`
+    and the E2E decode need. Holds references to the parent's submodules, so it
+    shares parameters and adds none of its own.
+
+    The one-to-many detection branch is training-only (R6) and the auxiliary
+    semantic branch is training-only (A17), so this module carries neither: the
+    auxiliary branch is not an attribute here at all, which is what makes its
+    removal checkable by parameter identity rather than by trusting a flag. This
+    is the module whose parameters and FLOPs the Phase 7 segmentation fidelity
+    gate is measured on.
+
+    Args:
+        segmenter: The full segmentation model to expose an inference view of.
+    """
+
+    def __init__(self, segmenter: Segmenter) -> None:
+        super().__init__()
+        self.backbone = segmenter.backbone
+        self.neck = segmenter.neck
+        self.o2o = segmenter.head.o2o
+        self.proto_fusion = segmenter.proto_fusion
+        self.protonet = segmenter.protonet
+
+    def forward(self, image: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Run the backbone, neck, one-to-one branch, and prototype stack.
+
+        Args:
+            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
+                ``W`` divisible by 32.
+
+        Returns:
+            The tuple ``(cls, box, coeff, prototypes)``: dense class logits
+            ``(N, A, num_classes)``, raw ltrb distances ``(N, A, 4)``,
+            tanh mask coefficients ``(N, A, K)``, and raw prototype maps
+            ``(N, K, H/4, W/4)``.
+        """
+        features: tuple[Tensor, Tensor, Tensor] = self.neck(self.backbone(image))
+        cls, box, coeff = self.o2o(features)
+        prototypes: Tensor = self.protonet(self.proto_fusion(features))
+        return cls, box, coeff, prototypes
+
+
+def build_segmenter(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> Segmenter:
+    """Build a :class:`Segmenter` for a named scale variant.
+
+    Args:
+        variant: Scale name (``"n"``/``"s"``/``"m"``/``"l"``/``"x"``).
+        num_classes: Number of object classes. Defaults to 80 (COCO).
+
+    Returns:
+        The assembled :class:`Segmenter` module, with the default A14
+        coefficient width ``K`` shared by the head and the prototype stack.
+
+    Raises:
+        KeyError: If ``variant`` is not one of the five published names.
+
+    Examples:
+        >>> model = build_segmenter("s")
+        >>> model.variant, model.num_classes, model.num_coeffs
+        ('s', 80, 32)
+        >>> model.protonet.num_prototypes  # one prototype per coefficient
+        32
+    """
+    return Segmenter(variant, num_classes)
+
+
 def count_params(module: nn.Module) -> int:
     """Count the total number of parameters in a module.
 
@@ -198,14 +409,33 @@ def count_params(module: nn.Module) -> int:
     return sum(param.numel() for param in module.parameters())
 
 
+def _tensor_fields(*fields: Tensor | None) -> tuple[Tensor, ...]:
+    """Drop the ``None`` entries from a dataclass's flattened tensor fields.
+
+    Args:
+        fields: Dataclass field values in declaration order, any of which may be
+            ``None`` for an optional branch that was not built or is inactive.
+
+    Returns:
+        The present tensors, in the given order.
+
+    Examples:
+        >>> import torch
+        >>> _tensor_fields(torch.zeros(1), None, torch.ones(2))[1].numel()
+        2
+    """
+    return tuple(field for field in fields if field is not None)
+
+
 class _TupleOutputAdapter(nn.Module):
     """Wrap a module so its forward returns a tuple, for FLOP tracing.
 
     :class:`fvcore.nn.FlopCountAnalysis` traces through :func:`torch.jit.trace`,
     which rejects dataclass outputs like
-    :class:`~lucid_yolo.models.heads.DualHeadOutput`. This adapter unpacks such an
-    output to a plain tuple of tensors (leaving already-tensor/tuple outputs
-    untouched) so the trace succeeds; it adds no compute of its own.
+    :class:`~lucid_yolo.models.heads.DualHeadOutput` and :class:`SegmentOutput`.
+    This adapter unpacks such an output to a plain tuple of tensors (leaving
+    already-tensor/tuple outputs untouched) so the trace succeeds; it adds no
+    compute of its own.
 
     Args:
         module: The module whose forward FLOPs are to be counted.
@@ -223,11 +453,31 @@ class _TupleOutputAdapter(nn.Module):
 
         Returns:
             The wrapped module's output as a tensor tuple when it is a
-            :class:`~lucid_yolo.models.heads.DualHeadOutput`, otherwise unchanged.
+            :class:`~lucid_yolo.models.heads.DualHeadOutput` or a
+            :class:`SegmentOutput`, otherwise unchanged. Optional fields that are
+            ``None`` are dropped: the coefficient tensors are absent unless the
+            head was built with ``num_coeffs``, and the auxiliary semantic logits
+            are always ``None`` here because FLOP counting runs in eval mode
+            (A17). Dropping them is safe for a FLOP tally, which reads the traced
+            graph rather than the returned values.
         """
         output = self.module(image)
         if isinstance(output, DualHeadOutput):
-            return (output.o2m_cls, output.o2m_box, output.o2o_cls, output.o2o_box)
+            return _tensor_fields(
+                output.o2m_cls, output.o2m_box, output.o2m_coeff, output.o2o_cls, output.o2o_box, output.o2o_coeff
+            )
+        if isinstance(output, SegmentOutput):
+            detect = output.detect
+            return _tensor_fields(
+                detect.o2m_cls,
+                detect.o2m_box,
+                detect.o2m_coeff,
+                detect.o2o_cls,
+                detect.o2o_box,
+                detect.o2o_coeff,
+                output.prototypes,
+                output.semantic,
+            )
         return cast("tuple[Tensor, ...] | Tensor", output)
 
 

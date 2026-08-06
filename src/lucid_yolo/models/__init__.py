@@ -13,7 +13,15 @@ from lucid_yolo.models.blocks import (
     PSABlock,
     SpatialAttention,
 )
-from lucid_yolo.models.build import Detector, build_detector, count_flops, count_params
+from lucid_yolo.models.build import (
+    Detector,
+    Segmenter,
+    SegmentOutput,
+    build_detector,
+    build_segmenter,
+    count_flops,
+    count_params,
+)
 from lucid_yolo.models.heads import (
     DualDetectionHead,
     DualHeadOutput,
@@ -45,10 +53,13 @@ __all__ = [
     "ProtoFusion",
     "ProtoNet",
     "ScaleSpec",
+    "SegmentOutput",
+    "Segmenter",
     "SemanticAux",
     "SpatialAttention",
     "assemble_masks",
     "build_detector",
+    "build_segmenter",
     "count_flops",
     "count_params",
     "decode_ltrb",
