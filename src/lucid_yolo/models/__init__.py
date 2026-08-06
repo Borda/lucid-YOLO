@@ -17,6 +17,7 @@ from lucid_yolo.models.build import Detector, build_detector, count_flops, count
 from lucid_yolo.models.heads import (
     DualDetectionHead,
     DualHeadOutput,
+    ProtoFusion,
     decode_ltrb,
     o2o_topk,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "DualDetectionHead",
     "DualHeadOutput",
     "PSABlock",
+    "ProtoFusion",
     "ScaleSpec",
     "SpatialAttention",
     "build_detector",

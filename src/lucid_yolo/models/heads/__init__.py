@@ -7,10 +7,12 @@ from lucid_yolo.models.heads.detect import (
     decode_ltrb,
     o2o_topk,
 )
+from lucid_yolo.models.heads.proto import ProtoFusion
 
 __all__ = [
     "DualDetectionHead",
     "DualHeadOutput",
+    "ProtoFusion",
     "decode_ltrb",
     "o2o_topk",
 ]
