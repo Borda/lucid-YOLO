@@ -20,6 +20,7 @@ from lucid_yolo.models.heads import (
     ProtoFusion,
     ProtoNet,
     SemanticAux,
+    assemble_masks,
     decode_ltrb,
     o2o_topk,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "ScaleSpec",
     "SemanticAux",
     "SpatialAttention",
+    "assemble_masks",
     "build_detector",
     "count_flops",
     "count_params",

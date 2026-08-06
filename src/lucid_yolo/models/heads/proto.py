@@ -1,27 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Prototype-feature fusion and generation from Eq. 8-9 (WP-048-049).
+"""Prototype-feature fusion, generation, and assembly from Eq. 7-9 (WP-048-051).
 
 The fusion preserves the highest-resolution P3 feature ``X_1`` directly, then
 adds each coarser P4/P5 feature after a learned 1x1 projection into P3's channel
 space and nearest-neighbour upsampling to P3's exact spatial resolution. It
 returns the fused feature. :class:`ProtoNet` then maps that feature to raw
-per-image prototype maps; semantic supervision and mask assembly intentionally
-land in later work packages.
+per-image prototype maps, and :func:`assemble_masks` linearly combines those
+prototypes with per-instance coefficients (Eq. 7); semantic supervision
+intentionally lands in a later work package.
 
-Provenance: R1 Eq. 8-9. Assumptions: A18, A35.
+Provenance: R1 Eq. 7-9. Assumptions: A16, A18, A35.
 """
 
 from __future__ import annotations
 
 from typing import cast
 
+import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
 from lucid_yolo.models.blocks import ConvBNAct
 from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS
 
-__all__ = ["ProtoFusion", "ProtoNet"]
+__all__ = ["ProtoFusion", "ProtoNet", "assemble_masks"]
 
 
 class ProtoFusion(nn.Module):
@@ -150,3 +152,38 @@ class ProtoNet(nn.Module):
             Unactivated prototype maps with shape ``(B, K, 2H, 2W)``.
         """
         return cast(Tensor, self.layers(feature))
+
+
+def assemble_masks(prototypes: Tensor, coefficients: Tensor) -> Tensor:
+    """Combine prototypes into per-instance mask logits, ``M_i = sum_k c_ik * P_k`` (Eq. 7).
+
+    The contraction is the whole of Eq. 7: a linear combination and nothing
+    else. No activation is applied — the coefficients already carry tanh (A16)
+    and the prototypes are deliberately raw (Eq. 9) — and no box cropping is
+    applied either, because cropping belongs to the consumer: the training loss
+    crops to the ground-truth box (:func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`)
+    while decode crops to the predicted box, and baking one of the two in here
+    would be wrong for the other.
+
+    It lives beside the prototype producer rather than in the loss package
+    because the segmentation decode assembles masks from exactly this
+    expression; a second copy of the contraction would be free to drift.
+
+    Args:
+        prototypes: Raw prototype maps ``(B, K, H, W)`` from :class:`ProtoNet`.
+        coefficients: Per-instance mask coefficients ``(B, N, K)`` for ``N``
+            instances, tanh-activated per A16.
+
+    Returns:
+        Raw per-instance mask logits with shape ``(B, N, H, W)``.
+
+    Examples:
+        >>> import torch
+        >>> prototypes = torch.stack([torch.full((1, 2, 3), 1.0), torch.full((1, 2, 3), 10.0)], dim=1)
+        >>> prototypes.shape  # (B=1, K=2, H=2, W=3)
+        torch.Size([1, 2, 2, 3])
+        >>> coefficients = torch.tensor([[[1.0, 0.0], [0.5, 0.5]]])  # (B=1, N=2, K=2)
+        >>> assemble_masks(prototypes, coefficients)[0, :, 0, 0]
+        tensor([1.0000, 5.5000])
+    """
+    return torch.einsum("bnk,bkhw->bnhw", coefficients, prototypes)

@@ -7,7 +7,7 @@ from lucid_yolo.models.heads.detect import (
     decode_ltrb,
     o2o_topk,
 )
-from lucid_yolo.models.heads.proto import ProtoFusion, ProtoNet
+from lucid_yolo.models.heads.proto import ProtoFusion, ProtoNet, assemble_masks
 from lucid_yolo.models.heads.semantic import SemanticAux
 
 __all__ = [
@@ -16,6 +16,7 @@ __all__ = [
     "ProtoFusion",
     "ProtoNet",
     "SemanticAux",
+    "assemble_masks",
     "decode_ltrb",
     "o2o_topk",
 ]

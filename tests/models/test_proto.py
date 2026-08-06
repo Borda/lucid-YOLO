@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit gates for WP-048-049 prototype fusion and generation.
+"""Unit gates for WP-048-051 prototype fusion, generation, and assembly.
 
 Covers the literal Eq. 8 sum, including the unprojected ``X_1`` identity path,
 target-size nearest-neighbour upsampling, and independent coarse-level
-projections. Also covers the Eq. 9 raw prototype stack; mask assembly and losses
-remain outside this module's scope.
+projections. Also covers the Eq. 9 raw prototype stack and the Eq. 7 linear mask
+assembly; the mask losses themselves remain outside this module's scope.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import pytest
 import torch
 from torch import nn
 
-from lucid_yolo.models import ProtoFusion, ProtoNet
+from lucid_yolo.models import ProtoFusion, ProtoNet, assemble_masks
 from lucid_yolo.models.blocks import ConvBNAct
 from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS
 
@@ -198,3 +198,49 @@ def test_fusion_and_protonet_run_from_neck_feature_triple() -> None:
         output = prototypes(fusion(features))
 
     assert output.shape == (1, DEFAULT_NUM_COEFFS, 160, 160)
+
+
+def test_assemble_masks_shape_contract() -> None:
+    """(B, N, K) coefficients against (B, K, H, W) prototypes give (B, N, H, W).
+
+    Catches a transposed einsum subscript: several wrong contractions still
+    produce a well-formed tensor, and only an N != K != H != W shape separates
+    them from the intended one.
+    """
+    prototypes = torch.randn(2, 5, 7, 11)
+    coefficients = torch.randn(2, 3, 5)
+
+    masks = assemble_masks(prototypes, coefficients)
+
+    assert masks.shape == (2, 3, 7, 11)
+
+
+def test_assemble_masks_matches_explicit_weighted_sum() -> None:
+    """Each output map equals the hand-built sum of c_ik * P_k over all K prototypes.
+
+    Pins Eq. 7 as a plain linear combination: a stray activation, normalization,
+    or crop would break the exact per-instance sum this rebuilds by hand.
+    """
+    prototypes = torch.randn(1, 4, 3, 5)
+    coefficients = torch.randn(1, 2, 4)
+
+    masks = assemble_masks(prototypes, coefficients)
+
+    for instance in range(coefficients.shape[1]):
+        expected = sum(coefficients[0, instance, k] * prototypes[0, k] for k in range(prototypes.shape[1]))
+        assert torch.allclose(masks[0, instance], expected, atol=1e-6)
+
+
+def test_assemble_masks_one_hot_selects_a_single_prototype() -> None:
+    """A one-hot coefficient vector reproduces exactly the prototype it selects.
+
+    Catches a contraction that averages over K or that indexes the wrong axis:
+    both keep the output shape but neither returns the selected map untouched.
+    """
+    prototypes = torch.randn(1, 4, 3, 5)
+    coefficients = torch.zeros(1, 1, 4)
+    coefficients[0, 0, 2] = 1.0
+
+    masks = assemble_masks(prototypes, coefficients)
+
+    assert torch.allclose(masks[0, 0], prototypes[0, 2])
