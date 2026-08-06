@@ -1,18 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit gate for the WP-048 multi-scale prototype-feature fusion.
+"""Unit gates for WP-048-049 prototype fusion and generation.
 
 Covers the literal Eq. 8 sum, including the unprojected ``X_1`` identity path,
 target-size nearest-neighbour upsampling, and independent coarse-level
-projections. Prototype generation, mask assembly, and losses are intentionally
-outside this module's scope.
+projections. Also covers the Eq. 9 raw prototype stack; mask assembly and losses
+remain outside this module's scope.
 """
 
 from __future__ import annotations
 
 import pytest
 import torch
+from torch import nn
 
-from lucid_yolo.models import ProtoFusion
+from lucid_yolo.models import ProtoFusion, ProtoNet
+from lucid_yolo.models.blocks import ConvBNAct
+from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS
 
 #: Small, unequal widths prove each coarse level projects into the P3 width.
 _CHANNELS = (2, 3, 5)
@@ -104,3 +107,94 @@ def test_coarse_level_projections_are_disjoint() -> None:
 
     assert p4_parameter_ids and p5_parameter_ids
     assert p4_parameter_ids.isdisjoint(p5_parameter_ids)
+
+
+@pytest.mark.parametrize(
+    ("p3_size", "prototype_size"),
+    [
+        ((80, 80), (160, 160)),  # 640-pixel input: P3 at stride 8 (A15).
+        ((13, 21), (26, 42)),  # Odd, non-square P3 still doubles structurally.
+    ],
+)
+def test_proto_resolution(
+    p3_size: tuple[int, int],
+    prototype_size: tuple[int, int],
+) -> None:
+    """Proto maps double each P3 dimension without a hard-coded input resolution."""
+    prototypes = ProtoNet(_CHANNELS[0]).eval()
+    feature = torch.randn(1, _CHANNELS[0], *p3_size)
+
+    with torch.no_grad():
+        output = prototypes(feature)
+
+    assert output.shape == (1, DEFAULT_NUM_COEFFS, *prototype_size)
+    assert output.shape[-2] == 2 * feature.shape[-2]
+    assert output.shape[-1] == 2 * feature.shape[-1]
+
+
+def test_proto_count_matches_coefficient_width() -> None:
+    """Prototype count defaults to K and respects an explicit coefficient width."""
+    default = ProtoNet(_CHANNELS[0])
+    custom = ProtoNet(_CHANNELS[0], num_prototypes=8).eval()
+
+    with torch.no_grad():
+        output = custom(torch.randn(1, _CHANNELS[0], 5, 7))
+
+    assert default.num_prototypes == DEFAULT_NUM_COEFFS
+    assert output.shape[1] == 8
+
+
+def test_proto_output_is_unactivated() -> None:
+    """Raw prototype logits retain values outside the range of tanh or sigmoid."""
+    prototypes = ProtoNet(_CHANNELS[0], num_prototypes=1).eval()
+    output_conv = prototypes.layers[-1]
+    assert isinstance(output_conv, nn.Conv2d)
+    output_conv.weight.data.zero_()
+    assert output_conv.bias is not None
+    output_conv.bias.data.fill_(5.0)
+
+    with torch.no_grad():
+        output = prototypes(torch.randn(1, _CHANNELS[0], 4, 6))
+
+    assert torch.equal(output, torch.full_like(output, 5.0))
+
+
+def test_proto_upsample_precedes_final_spatial_conv() -> None:
+    """The fourth 3x3 unit runs after nearest upsampling at the proto grid."""
+    prototypes = ProtoNet(_CHANNELS[0])
+
+    assert len(prototypes.layers) == 6
+    assert isinstance(prototypes.layers[3], nn.Upsample)
+    assert isinstance(prototypes.layers[4], ConvBNAct)
+    assert isinstance(prototypes.layers[5], nn.Conv2d)
+
+
+def test_proto_grid_is_refined_after_upsampling() -> None:
+    """A spatial unit runs at proto resolution, so output is not a bare 2x upsample.
+
+    Complements the structural order check with an observable consequence: if the
+    upsample were the last spatial operation, every 2x2 output block would be
+    constant, because nearest interpolation replicates each source pixel. A 3x3
+    convolution at the proto grid breaks that replication.
+    """
+    torch.manual_seed(0)
+    prototypes = ProtoNet(_CHANNELS[0], num_prototypes=4).eval()
+
+    with torch.no_grad():
+        output = prototypes(torch.randn(1, _CHANNELS[0], 8, 10))
+
+    assert not torch.equal(output[..., 0::2, :], output[..., 1::2, :]), "rows within a 2x2 block are replicated"
+    assert not torch.equal(output[..., 0::2], output[..., 1::2]), "columns within a 2x2 block are replicated"
+
+
+def test_fusion_and_protonet_run_from_neck_feature_triple() -> None:
+    """The Eq. 8 output feeds Eq. 9 directly at the expected proto resolution."""
+    channels = (4, 8, 16)
+    fusion = ProtoFusion(channels).eval()
+    prototypes = ProtoNet(fusion.out_channels).eval()
+    features = tuple(torch.randn(1, channels[index], 80 // (2**index), 80 // (2**index)) for index in range(3))
+
+    with torch.no_grad():
+        output = prototypes(fusion(features))
+
+    assert output.shape == (1, DEFAULT_NUM_COEFFS, 160, 160)

@@ -18,6 +18,7 @@ from lucid_yolo.models.heads import (
     DualDetectionHead,
     DualHeadOutput,
     ProtoFusion,
+    ProtoNet,
     decode_ltrb,
     o2o_topk,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "DualHeadOutput",
     "PSABlock",
     "ProtoFusion",
+    "ProtoNet",
     "ScaleSpec",
     "SpatialAttention",
     "build_detector",
