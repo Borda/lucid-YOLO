@@ -8,6 +8,12 @@ torchmetrics-prediction conversion
 (:func:`~lucid_yolo.eval.coco_eval.detections_to_predictions`) and the
 :class:`torchmetrics.detection.MeanAveragePrecision` wrapper
 (:func:`~lucid_yolo.eval.coco_eval.evaluate_bbox`).
+
+The segmentation half starts at
+:func:`~lucid_yolo.eval.segment_decode.decode_instance_masks`, which turns
+prototypes and per-detection coefficients into box-cropped binary masks, and
+:func:`~lucid_yolo.eval.segment_decode.masks_to_original`, the mask-side twin of
+the box inverse-letterbox (A10).
 """
 
 from lucid_yolo.eval.annotations import (
@@ -18,14 +24,17 @@ from lucid_yolo.eval.annotations import (
     load_eval_annotations,
 )
 from lucid_yolo.eval.coco_eval import DualPathEvaluator, detections_to_predictions, evaluate_bbox
+from lucid_yolo.eval.segment_decode import decode_instance_masks, masks_to_original
 
 __all__ = [
     "DualPathEvaluator",
     "EvalImage",
     "annotations_to_target",
+    "decode_instance_masks",
     "detections_to_predictions",
     "empty_target",
     "evaluate_bbox",
     "letterboxed_batches",
     "load_eval_annotations",
+    "masks_to_original",
 ]

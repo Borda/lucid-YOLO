@@ -71,6 +71,7 @@ __all__ = [
     "decode_ltrb",
     "init_cls_prior_bias",
     "o2o_topk",
+    "o2o_topk_with_indices",
 ]
 
 #: Number of box regression outputs per anchor (ltrb distances; ``reg_max = 1``).
@@ -491,6 +492,53 @@ def decode_ltrb(distances: Tensor, anchor_points: Tensor, strides: Tensor) -> Te
     return torch.stack((x1, y1, x2, y2), dim=-1)
 
 
+def o2o_topk_with_indices(scores: Tensor, boxes: Tensor, k: int = _DEFAULT_TOPK) -> tuple[Tensor, Tensor]:
+    """Reduce the one-to-one branch to the top-k detections *and* the anchors kept.
+
+    The selection itself is :func:`o2o_topk`'s — this is the one place it is
+    written. The extra return is the anchor index each kept detection came from,
+    which any per-anchor quantity that is **not** part of the A9 tuple must be
+    gathered by: the segmentation decode reads its mask coefficients from the
+    dense ``(B, A, K)`` coefficient map, and a coefficient row paired with the
+    wrong anchor's box yields a perfectly plausible mask of the wrong object.
+    Ranking the scores a second time in a separate helper is exactly how such a
+    pairing goes silently wrong, so :func:`o2o_topk` is a wrapper over this
+    function rather than a second copy.
+
+    Args:
+        scores: Raw class logits of shape ``(B, A, C)``.
+        boxes: Decoded ``xyxy`` boxes of shape ``(B, A, 4)``, aligned with
+            ``scores`` on the anchor axis.
+        k: Maximum detections kept per image. Defaults to 300.
+
+    Returns:
+        A pair ``(detections, anchor_index)``. ``detections`` is the A9 tuple
+        batch of shape ``(B, min(k, A), 6)``; ``anchor_index`` is the ``(B,
+        min(k, A))`` long tensor of source anchor rows, score-descending like the
+        detections themselves.
+
+    Examples:
+        >>> import torch
+        >>> scores = torch.tensor([[[2.0, -1.0], [-3.0, 0.5]]])  # (1, 2, 2)
+        >>> boxes = torch.tensor([[[0.0, 0.0, 4.0, 4.0], [1.0, 1.0, 2.0, 2.0]]])
+        >>> det, anchor_index = o2o_topk_with_indices(scores, boxes, k=1)
+        >>> anchor_index  # anchor 0 scores sigmoid(2.0), anchor 1 only sigmoid(0.5)
+        tensor([[0]])
+        >>> torch.equal(det[..., :4], boxes[:, anchor_index[0]])
+        True
+    """
+    _, num_anchors, _ = scores.shape
+    confidence = scores.sigmoid()
+    max_conf, class_index = confidence.max(dim=-1)  # both (B, A)
+    keep = min(k, num_anchors)
+    top_conf, top_anchor = max_conf.topk(keep, dim=1)  # both (B, keep)
+    gather_box = top_anchor.unsqueeze(-1).expand(-1, -1, _BOX_OUTPUTS)
+    top_boxes = boxes.gather(1, gather_box)  # (B, keep, 4)
+    top_class = class_index.gather(1, top_anchor).to(scores.dtype)  # (B, keep)
+    detections = torch.cat((top_boxes, top_conf.unsqueeze(-1), top_class.unsqueeze(-1)), dim=-1)
+    return detections, top_anchor
+
+
 def o2o_topk(scores: Tensor, boxes: Tensor, k: int = _DEFAULT_TOPK) -> Tensor:
     """Reduce the one-to-one branch to the top-k score-ranked detections.
 
@@ -499,6 +547,10 @@ def o2o_topk(scores: Tensor, boxes: Tensor, k: int = _DEFAULT_TOPK) -> Tensor:
     image, and emit the A9 detection tuple ``[x1, y1, x2, y2, score, class]``.
     The full E2E decode module lands in WP-041 and reuses this helper. When the
     anchor count ``A`` is below ``k`` every anchor is returned.
+
+    Thin wrapper over :func:`o2o_topk_with_indices`, which owns the selection and
+    additionally reports which anchors were kept; callers needing only the
+    detection tuple use this name.
 
     Args:
         scores: Raw class logits of shape ``(B, A, C)``.
@@ -521,12 +573,4 @@ def o2o_topk(scores: Tensor, boxes: Tensor, k: int = _DEFAULT_TOPK) -> Tensor:
         >>> det[0, 0, 5]  # class index of the top detection
         tensor(0.)
     """
-    _, num_anchors, _ = scores.shape
-    confidence = scores.sigmoid()
-    max_conf, class_index = confidence.max(dim=-1)  # both (B, A)
-    keep = min(k, num_anchors)
-    top_conf, top_anchor = max_conf.topk(keep, dim=1)  # both (B, keep)
-    gather_box = top_anchor.unsqueeze(-1).expand(-1, -1, _BOX_OUTPUTS)
-    top_boxes = boxes.gather(1, gather_box)  # (B, keep, 4)
-    top_class = class_index.gather(1, top_anchor).to(scores.dtype)  # (B, keep)
-    return torch.cat((top_boxes, top_conf.unsqueeze(-1), top_class.unsqueeze(-1)), dim=-1)
+    return o2o_topk_with_indices(scores, boxes, k)[0]
