@@ -419,6 +419,22 @@ def test_init_worker_caps_threads_without_a_seedable_dataset(
     assert torch.get_num_threads() == 1
 
 
+def test_worker_loader_augments_differently_each_epoch(detseg_fixture_dir: Path) -> None:
+    """Two epochs of a worker-backed train loader must not replay one augmentation stream (WP-079 guard).
+
+    The unit tests above cover ``_init_worker`` in isolation; this one covers the
+    wiring, spawning real workers. Before WP-079 every worker inherited the
+    parent's generator state and rebuilt from it each epoch, so the run drew a
+    single epoch's parameters forever — invisible to every other test.
+    """
+    datamodule = _datamodule(detseg_fixture_dir, num_workers=2)
+    datamodule.setup("fit")
+    loader = datamodule.train_dataloader()
+    first = [float(images.float().mean()) for images, _ in loader]
+    second = [float(images.float().mean()) for images, _ in loader]
+    assert first != second
+
+
 def test_dataloader_zero_workers_keeps_deterministic_path(detseg_fixture_dir: Path) -> None:
     """The num_workers=0 loader skips prefetch and the worker thread cap entirely."""
     datamodule = _datamodule(detseg_fixture_dir)
