@@ -19,6 +19,7 @@ from lucid_yolo.models.heads import (
     DualHeadOutput,
     ProtoFusion,
     ProtoNet,
+    SemanticAux,
     decode_ltrb,
     o2o_topk,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "ProtoFusion",
     "ProtoNet",
     "ScaleSpec",
+    "SemanticAux",
     "SpatialAttention",
     "build_detector",
     "count_flops",

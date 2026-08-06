@@ -63,7 +63,15 @@ from torch import Tensor, nn
 
 from lucid_yolo.models.blocks import ConvBNAct, DepthwiseConv
 
-__all__ = ["DEFAULT_NUM_COEFFS", "DualDetectionHead", "DualHeadOutput", "decode_ltrb", "o2o_topk"]
+__all__ = [
+    "CLS_PRIOR_PROB",
+    "DEFAULT_NUM_COEFFS",
+    "DualDetectionHead",
+    "DualHeadOutput",
+    "decode_ltrb",
+    "init_cls_prior_bias",
+    "o2o_topk",
+]
 
 #: Number of box regression outputs per anchor (ltrb distances; ``reg_max = 1``).
 _BOX_OUTPUTS = 4
@@ -82,7 +90,31 @@ _DEFAULT_TOPK = 300
 #: of magnitude too large and the first optimizer step destroys the network
 #: (observed on the Det-A launch: loss 6.2e5 -> collapse to a dead all-zero
 #: predictor within three steps).
-_CLS_PRIOR_PROB = 0.01
+CLS_PRIOR_PROB = 0.01
+
+
+def init_cls_prior_bias(conv: nn.Conv2d) -> None:
+    """Apply the RetinaNet prior-probability bias init to a dense-classifier 1x1.
+
+    Sets every bias entry to ``-log((1 - pi) / pi)`` with ``pi =``
+    :data:`CLS_PRIOR_PROB`, so each output sigmoid starts at ~``pi`` (A30, R24
+    sec. 5.1). Shared by every dense sigmoid classifier over a mostly-background
+    map — the detection class stems here and the auxiliary semantic branch — so
+    the formula exists exactly once and cannot drift between copies.
+
+    Args:
+        conv: The output convolution whose bias is initialized. Must have a bias.
+
+    Examples:
+        >>> import torch
+        >>> from torch import nn
+        >>> conv = nn.Conv2d(4, 3, 1)
+        >>> init_cls_prior_bias(conv)
+        >>> float(conv.bias.sigmoid()[0])  # ~pi
+        0.01...
+    """
+    assert conv.bias is not None  # nn.Conv2d default; narrows the Optional for mypy
+    nn.init.constant_(conv.bias, -math.log((1.0 - CLS_PRIOR_PROB) / CLS_PRIOR_PROB))
 
 
 def _stem_width(channels: int) -> int:
@@ -181,8 +213,9 @@ def _build_cls_stem(channels: int, num_classes: int) -> nn.Sequential:
         The classification stem for a single level, emitting ``(B, num_classes,
         H, W)``.
 
-    The final 1x1 convolution's bias is initialized to
-    ``-log((1 - pi) / pi)`` with ``pi = 0.01`` (:data:`_CLS_PRIOR_PROB`), the
+    The final 1x1 convolution's bias is initialized by
+    :func:`init_cls_prior_bias` to ``-log((1 - pi) / pi)`` with ``pi = 0.01``
+    (:data:`CLS_PRIOR_PROB`), the
     RetinaNet prior-probability init (R24 sec. 5.1, A30): at the first step every
     class sigmoid evaluates to ~``pi``, keeping the dense background BCE — summed
     over anchors and classes, normalized by the alignment-weight sum (R4) — at a
@@ -198,8 +231,7 @@ def _build_cls_stem(channels: int, num_classes: int) -> nn.Sequential:
     """
     hidden = _stem_width(channels)
     output = nn.Conv2d(hidden, num_classes, 1)
-    assert output.bias is not None  # nn.Conv2d default; narrows the Optional for mypy
-    nn.init.constant_(output.bias, -math.log((1.0 - _CLS_PRIOR_PROB) / _CLS_PRIOR_PROB))
+    init_cls_prior_bias(output)
     return nn.Sequential(
         _depthwise_separable(channels, hidden),
         _depthwise_separable(hidden, hidden),
