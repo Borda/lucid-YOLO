@@ -8,11 +8,11 @@ MINOR     ?=
 TASK      ?= det
 DATA_ROOT ?=
 
-.PHONY: setup lint test precommit gate golden freeze-goldens overfit check-data build clean
+.PHONY: setup lint test precommit gate golden freeze-goldens overfit shapes check-data build clean
 
 setup:
 	$(UV) venv --python 3.11 $(VENV)
-	$(UV) pip install --python $(PY) -e ".[dev]"
+	$(UV) pip install --python $(PY) -e . --group dev
 	$(VENV)/bin/pre-commit install
 
 # All linters (ruff check/format, mypy, hygiene hooks) run through pre-commit.

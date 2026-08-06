@@ -1,3 +1,7 @@
+# `pre-commit install` must wire both stages: the trailer validator below runs at
+# commit-msg time, and without this it would be installed but never fire.
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -26,3 +30,20 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+      # Scans the installed environment, not the diff, so it must run on every
+      # commit: a copyleft dependency can arrive through a transitive bump that
+      # touches no tracked file. Costs ~0.1 s over 93 distributions.
+      - id: license-audit
+        name: dependency license audit
+        entry: .venv/bin/python scripts/audit_licenses.py
+        language: system
+        pass_filenames: false
+        always_run: true
+      # Runs where the contract is actually enforceable. The CI equivalent was
+      # dropped: on a squash merge the validated per-commit messages are replaced
+      # by the squash message, so CI was checking text that never lands.
+      - id: commit-trailers
+        name: provenance commit trailers
+        entry: .venv/bin/python scripts/check_commit_trailers.py --file
+        language: system
+        stages: [commit-msg]

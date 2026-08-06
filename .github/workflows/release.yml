@@ -36,7 +36,7 @@ jobs:
       - name: Create venv and install dev extras
         run: |
           uv venv --python 3.11 .venv
-          uv pip install --python .venv/bin/python -e ".[dev]"
+          uv pip install --python .venv/bin/python -e . --group dev
       - name: Release guard (re-runs the full gate)
         run: .venv/bin/python scripts/release_guard.py --tag "${{ github.ref_name }}"
       - name: Build sdist and wheel

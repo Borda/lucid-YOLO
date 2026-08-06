@@ -29,7 +29,11 @@ dependencies = [
   "numpy>=1.26",
 ]
 
-[project.optional-dependencies]
+# PEP 735 dependency group, not a `[project.optional-dependencies]` extra: these
+# packages exist only to build, lint and test the project, and an extra would
+# publish them in the wheel's metadata as something a consumer could install.
+# Install with `uv pip install -e . --group dev` (see the Makefile setup target).
+[dependency-groups]
 dev = [
   "ruff>=0.6",
   "mypy>=1.11",

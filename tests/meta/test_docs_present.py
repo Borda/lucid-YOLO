@@ -41,18 +41,18 @@ def test_assumption_ids_parse_contiguous() -> None:
 
 
 def test_roadmap_wp_ids_unique_and_complete() -> None:
-    """ROADMAP.md rows carry WP ids 001..083, each exactly once (068-083 added 2026-08-02..06)."""
+    """ROADMAP.md rows carry WP ids 001..084, each exactly once (068-084 added 2026-08-02..06)."""
     text = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")
     ids = [int(m) for m in re.findall(r"^\| (\d{3}) \|", text, flags=re.MULTILINE)]
     assert len(ids) == len(set(ids)), "duplicate WP ids in roadmap"
-    assert sorted(ids) == list(range(1, 84)), f"roadmap must list WP 001-083, got {len(ids)} rows"
+    assert sorted(ids) == list(range(1, 85)), f"roadmap must list WP 001-084, got {len(ids)} rows"
 
 
 def test_roadmap_statuses_valid() -> None:
     """Every roadmap row ends in a recognized status icon."""
     text = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")
     rows = re.findall(r"^\| (\d{3}) \|.*\| (\S+) \|$", text, flags=re.MULTILINE)
-    assert len(rows) == 83
+    assert len(rows) == 84
     bad = [(wp, status) for wp, status in rows if status not in {"⬜", "🔄", "✅", "⛔"}]
     assert not bad, f"invalid status values: {bad}"
 
