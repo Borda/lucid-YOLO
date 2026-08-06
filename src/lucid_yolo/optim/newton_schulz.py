@@ -53,11 +53,18 @@ def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
         ValueError: If ``matrix`` is not 2-dimensional.
 
     Examples:
+        The iteration does not produce an exactly orthogonal matrix — with these
+        coefficients that is unattainable, as ``tests/optim/test_newton_schulz.py``
+        records — so what it guarantees is that no singular value is expanded and
+        the well-conditioned ones are pulled toward 1:
+
         >>> import torch
-        >>> m = torch.randn(64, 64)
-        >>> q = orthogonalize(m)
-        >>> torch.linalg.matrix_norm(q @ q.T - torch.eye(64)) < 1e-2
-        tensor(True)
+        >>> _ = torch.manual_seed(0)
+        >>> q = orthogonalize(torch.randn(64, 64))
+        >>> q.shape
+        torch.Size([64, 64])
+        >>> bool(torch.linalg.svdvals(q).max() < 1.5)  # never blown up
+        True
     """
     if matrix.ndim != 2:
         msg = f"orthogonalize expects a 2D matrix, got a {matrix.ndim}D tensor"

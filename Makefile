@@ -19,8 +19,10 @@ setup:
 lint: precommit
 
 # Offline unit suite: no network, no dataset, no GPU (gpu/data marks excluded).
+# `--doctest-modules src` runs the Examples sections as tests: every public function
+# is required to carry one, so leaving them uncollected let four rot unnoticed.
 test:
-	@$(PY) -m pytest -m "not gpu and not data" --cov=lucid_yolo --cov-report=term; \
+	@$(PY) -m pytest -m "not gpu and not data" --doctest-modules --cov=lucid_yolo --cov-report=term src tests; \
 	status=$$?; if [ $$status -eq 5 ]; then echo "no tests collected yet — passing (pre WP-002)"; exit 0; else exit $$status; fi
 
 precommit:

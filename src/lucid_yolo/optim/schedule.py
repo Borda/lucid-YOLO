@@ -45,7 +45,7 @@ def warmup_decay_factor(step: int, total_steps: int, warmup_steps: int, lrf: flo
         1.0
         >>> round(warmup_decay_factor(55, 100, 10, 0.01), 4)  # mid-decay
         0.505
-        >>> warmup_decay_factor(100, 100, 10, 0.01)  # floor
+        >>> round(warmup_decay_factor(100, 100, 10, 0.01), 6)  # floor
         0.01
         >>> warmup_decay_factor(0, 100, 0, 0.5)  # no warmup: decay starts at 1.0
         1.0

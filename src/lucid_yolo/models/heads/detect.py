@@ -111,8 +111,8 @@ def init_cls_prior_bias(conv: nn.Conv2d) -> None:
         >>> from torch import nn
         >>> conv = nn.Conv2d(4, 3, 1)
         >>> init_cls_prior_bias(conv)
-        >>> float(conv.bias.sigmoid()[0])  # ~pi
-        0.01...
+        >>> round(float(conv.bias.sigmoid()[0]), 4)  # ~pi
+        0.01
     """
     assert conv.bias is not None  # nn.Conv2d default; narrows the Optional for mypy
     nn.init.constant_(conv.bias, -math.log((1.0 - CLS_PRIOR_PROB) / CLS_PRIOR_PROB))
@@ -227,8 +227,8 @@ def _build_cls_stem(channels: int, num_classes: int) -> nn.Sequential:
         >>> stem = _build_cls_stem(64, 80).eval()
         >>> stem(torch.zeros(1, 64, 8, 8)).shape
         torch.Size([1, 80, 8, 8])
-        >>> float(stem(torch.zeros(1, 64, 8, 8)).sigmoid().mean())  # ~pi
-        0.01...
+        >>> round(float(stem(torch.zeros(1, 64, 8, 8)).sigmoid().mean().detach()), 4)  # ~pi
+        0.01
     """
     hidden = _stem_width(channels)
     output = nn.Conv2d(hidden, num_classes, 1)
