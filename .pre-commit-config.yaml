@@ -3,7 +3,11 @@ repos:
     rev: v6.0.0
     hooks:
       - id: end-of-file-fixer
+        # Generated figures are byte-reproducible from scripts/plot_training.py;
+        # rewriting them here would make every regeneration a spurious diff.
+        exclude: ^docs/figures/.*\.svg$
       - id: trailing-whitespace
+        exclude: ^docs/figures/.*\.svg$
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files

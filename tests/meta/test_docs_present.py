@@ -18,6 +18,8 @@ REQUIRED_FILES = (
     DOCS / "DECISIONS.md",
     DOCS / "ESCALATION.md",
     DOCS / "ROADMAP.md",
+    DOCS / "REPRODUCTION_REPORT.md",
+    DOCS / "MODEL_CARD_DETECTION.md",
     REPO_ROOT / "AGENTS.md",
 )
 
@@ -39,18 +41,18 @@ def test_assumption_ids_parse_contiguous() -> None:
 
 
 def test_roadmap_wp_ids_unique_and_complete() -> None:
-    """ROADMAP.md rows carry WP ids 001..078, each exactly once (068-078 added 2026-08-02..04)."""
+    """ROADMAP.md rows carry WP ids 001..081, each exactly once (068-081 added 2026-08-02..06)."""
     text = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")
     ids = [int(m) for m in re.findall(r"^\| (\d{3}) \|", text, flags=re.MULTILINE)]
     assert len(ids) == len(set(ids)), "duplicate WP ids in roadmap"
-    assert sorted(ids) == list(range(1, 80)), f"roadmap must list WP 001-079, got {len(ids)} rows"
+    assert sorted(ids) == list(range(1, 82)), f"roadmap must list WP 001-081, got {len(ids)} rows"
 
 
 def test_roadmap_statuses_valid() -> None:
     """Every roadmap row ends in a recognized status icon."""
     text = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")
     rows = re.findall(r"^\| (\d{3}) \|.*\| (\S+) \|$", text, flags=re.MULTILINE)
-    assert len(rows) == 79
+    assert len(rows) == 81
     bad = [(wp, status) for wp, status in rows if status not in {"⬜", "🔄", "✅", "⛔"}]
     assert not bad, f"invalid status values: {bad}"
 

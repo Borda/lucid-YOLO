@@ -62,6 +62,7 @@ verification, not a blanket clearance of every file in the repository.
 | R26 | YOLOX, Megvii-BaseDetection, github.com/Megvii-BaseDetection/YOLOX, Apache-2.0 | Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). Apache-2.0 verified 2026-08-05 from the repository `LICENSE` ("Copyright (c) 2021-2022 Megvii Inc."). Independent anchor-free YOLO lineage (arXiv:2107.08430), no Ultralytics code |
 | R27 | MMDetection, OpenMMLab, github.com/open-mmlab/mmdetection, Apache-2.0 | Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). Apache-2.0 verified 2026-08-05 from the repository `LICENSE` ("Copyright 2018-2023 OpenMMLab"). **Core `mmdetection` only** — the sibling `mmyolo` repository reimplements Ultralytics-family models and is deliberately excluded pending a provenance check it has not been given |
 | R28 | PaddleDetection (PP-YOLOE), PaddlePaddle, github.com/PaddlePaddle/PaddleDetection, Apache-2.0 | Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). Apache-2.0 verified 2026-08-05 from the repository `LICENSE` (unmodified Apache template, no named holder in the file). Independent PaddlePaddle detection stack |
+| R29 | matplotlib, github.com/matplotlib/matplotlib, PSF-based Matplotlib License | Vector figure rendering for the reproduction report (WP-080), a dev-extra tool only — not a runtime dependency. Permissive PSF-derived license verified 2026-08-06 from the installed 3.11.1 wheel dist-info `LICENSE` ("Copyright (c) 2012- Matplotlib Development Team; All Rights Reserved") |
 
 ### Placeholders
 
@@ -99,7 +100,7 @@ design document (sec. 12); this table is the versioned summary.
 
 | Date | Scope | Evidence layers | Verdict |
 |---|---|---|---|
-| 2026-08-02 | WP-001–WP-069, 56 commits, audited at `4dd18ba` | codebase/dependency sweep · commit provenance trail (55/56 trailers, all allowlist-cited) · complete session fetch log (only R1, R7, R8, R12, R21 endpoints; zero denylisted domains) · delegated-work hand-over records · persistent agent memory | Upheld — no Ultralytics code, config, weights, or docs consulted at any point; every design input traces to R1–R24 or a registered assumption |
+| 2026-08-02 | WP-001–WP-069, 56 commits, audited at `975ff50` | codebase/dependency sweep · commit provenance trail (55/56 trailers, all allowlist-cited) · complete session fetch log (only R1, R7, R8, R12, R21 endpoints; zero denylisted domains) · delegated-work hand-over records · persistent agent memory | Upheld — no Ultralytics code, config, weights, or docs consulted at any point; every design input traces to R1–R24 or a registered assumption |
 
 ## Usage log
 
