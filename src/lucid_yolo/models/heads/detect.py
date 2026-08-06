@@ -63,10 +63,14 @@ from torch import Tensor, nn
 
 from lucid_yolo.models.blocks import ConvBNAct, DepthwiseConv
 
-__all__ = ["DualDetectionHead", "DualHeadOutput", "decode_ltrb", "o2o_topk"]
+__all__ = ["DEFAULT_NUM_COEFFS", "DualDetectionHead", "DualHeadOutput", "decode_ltrb", "o2o_topk"]
 
 #: Number of box regression outputs per anchor (ltrb distances; ``reg_max = 1``).
 _BOX_OUTPUTS = 4
+
+#: Default mask-coefficient width ``K=32`` from assumption A14; callers opt in
+#: explicitly so the accepted detection-only module tree remains unchanged.
+DEFAULT_NUM_COEFFS = 32
 
 #: Default per-image detection cap of the one-to-one branch (R3 sec. 4, A9).
 _DEFAULT_TOPK = 300
@@ -203,6 +207,37 @@ def _build_cls_stem(channels: int, num_classes: int) -> nn.Sequential:
     )
 
 
+def _build_coeff_stem(channels: int, num_coeffs: int) -> nn.Sequential:
+    """Build one level's mask-coefficient stem without classification bias init.
+
+    The coefficient-stem internals are unspecified by the method paper, so this
+    follows the symmetric Fig. S2 class stem selected by assumption A34: two
+    depthwise-separable units project and retain the shared hidden width, then a
+    1x1 convolution emits ``num_coeffs`` channels. Unlike class logits, these
+    outputs are tanh regressands, so the prior-probability bias initialization
+    for sigmoid classification has no meaning here.
+
+    Args:
+        channels: Input channel count of the level.
+        num_coeffs: Number of mask coefficients emitted per anchor.
+
+    Returns:
+        The coefficient stem for one level, emitting ``(B, num_coeffs, H, W)``.
+
+    Examples:
+        >>> import torch
+        >>> stem = _build_coeff_stem(64, 32).eval()
+        >>> stem(torch.zeros(1, 64, 8, 8)).shape
+        torch.Size([1, 32, 8, 8])
+    """
+    hidden = _stem_width(channels)
+    return nn.Sequential(
+        _depthwise_separable(channels, hidden),
+        _depthwise_separable(hidden, hidden),
+        nn.Conv2d(hidden, num_coeffs, 1),
+    )
+
+
 def _flatten_level(feature_map: Tensor) -> Tensor:
     """Flatten a ``(B, C, H, W)`` prediction map to ``(B, H * W, C)`` row-major.
 
@@ -225,42 +260,63 @@ def _flatten_level(feature_map: Tensor) -> Tensor:
 
 
 class _DetectionBranch(nn.Module):
-    """One prediction branch: per-level box and class stems over three levels.
+    """One prediction branch: per-level box/class and optional coefficient stems.
 
     Owns three box stems and three class stems (one pair per level, strides
     8/16/32). :class:`DualDetectionHead` holds two of these — the one-to-one and
     one-to-many branches — with disjoint parameters. Forward flattens and
     concatenates the per-level maps into dense ``(B, A, num_classes)`` scores and
-    ``(B, A, 4)`` raw ltrb distances.
+    ``(B, A, 4)`` raw ltrb distances. When explicitly requested, it also owns
+    coefficient stems that emit tanh-bounded ``(B, A, num_coeffs)`` vectors.
 
     Args:
         in_channels: Per-level input channel counts ``(N3, N4, N5)`` in stride
             order (8, 16, 32).
         num_classes: Number of object classes.
+        num_coeffs: Optional mask-coefficient count. ``None`` leaves the module
+            tree and prediction computation detection-only.
     """
 
-    def __init__(self, in_channels: tuple[int, int, int], num_classes: int) -> None:
+    def __init__(
+        self,
+        in_channels: tuple[int, int, int],
+        num_classes: int,
+        num_coeffs: int | None = None,
+    ) -> None:
         super().__init__()
+        self.coeff_stems: nn.ModuleList | None = None
         self.box_stems = nn.ModuleList(_build_box_stem(channels) for channels in in_channels)
         self.cls_stems = nn.ModuleList(_build_cls_stem(channels, num_classes) for channels in in_channels)
+        if num_coeffs is not None:
+            self.coeff_stems = nn.ModuleList(_build_coeff_stem(channels, num_coeffs) for channels in in_channels)
 
-    def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> tuple[Tensor, Tensor]:
-        """Predict dense scores and raw ltrb distances across the three levels.
+    def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> tuple[Tensor, Tensor] | tuple[Tensor, Tensor, Tensor]:
+        """Predict dense scores, ltrb distances, and optional coefficients.
 
         Args:
             features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32.
 
         Returns:
-            A pair ``(cls, box)`` with ``cls`` of shape ``(B, A, num_classes)``
-            (raw class logits) and ``box`` of shape ``(B, A, 4)`` (raw ltrb
-            distances), where ``A`` sums ``H * W`` over the three levels.
+            When coefficients are disabled, the historical pair ``(cls, box)``.
+            When enabled, a triple ``(cls, box, coeff)`` with tanh-bounded
+            ``coeff`` shape ``(B, A, num_coeffs)``. ``cls`` is raw class logits,
+            ``box`` is raw ltrb distances, and ``A`` sums ``H * W`` over levels.
         """
         cls_levels: list[Tensor] = []
         box_levels: list[Tensor] = []
         for feature, box_stem, cls_stem in zip(features, self.box_stems, self.cls_stems, strict=True):
             box_levels.append(_flatten_level(box_stem(feature)))
             cls_levels.append(_flatten_level(cls_stem(feature)))
-        return torch.cat(cls_levels, dim=1), torch.cat(box_levels, dim=1)
+        cls = torch.cat(cls_levels, dim=1)
+        box = torch.cat(box_levels, dim=1)
+        if self.coeff_stems is None:
+            return cls, box
+
+        coeff_levels = [
+            _flatten_level(torch.tanh(coeff_stem(feature)))
+            for feature, coeff_stem in zip(features, self.coeff_stems, strict=True)
+        ]
+        return cls, box, torch.cat(coeff_levels, dim=1)
 
 
 @dataclass(frozen=True)
@@ -271,19 +327,28 @@ class DualHeadOutput:
     level-by-level in row-major order (matching
     :func:`~lucid_yolo.assign.grid.make_anchor_points`). Class fields are raw
     logits; box fields are raw ltrb distances in stride units (decode them with
-    :func:`decode_ltrb`).
+    :func:`decode_ltrb`). Coefficient fields, when enabled, are already
+    tanh-activated in the head and lie in ``[-1, 1]``. This deliberate asymmetry
+    from the raw class and box outputs keeps the activation with its regression
+    head; a later mask loss must not move it.
 
     Attributes:
         o2m_cls: One-to-many class logits, shape ``(B, A, num_classes)``.
         o2m_box: One-to-many raw ltrb distances, shape ``(B, A, 4)``.
         o2o_cls: One-to-one class logits, shape ``(B, A, num_classes)``.
         o2o_box: One-to-one raw ltrb distances, shape ``(B, A, 4)``.
+        o2m_coeff: One-to-many tanh mask coefficients, shape ``(B, A, K)``, or
+            ``None`` when coefficients are disabled.
+        o2o_coeff: One-to-one tanh mask coefficients, shape ``(B, A, K)``, or
+            ``None`` when coefficients are disabled.
     """
 
     o2m_cls: Tensor
     o2m_box: Tensor
     o2o_cls: Tensor
     o2o_box: Tensor
+    o2m_coeff: Tensor | None = None
+    o2o_coeff: Tensor | None = None
 
 
 class DualDetectionHead(nn.Module):
@@ -299,6 +364,9 @@ class DualDetectionHead(nn.Module):
         in_channels: Neck output channel counts ``(N3, N4, N5)`` in stride order
             (8, 16, 32) — typically :attr:`DetectionNeck.channels`.
         num_classes: Number of object classes.
+        num_coeffs: Optional mask-coefficient count. ``None`` preserves the
+            detection-only head exactly; callers explicitly pass
+            :data:`DEFAULT_NUM_COEFFS` to enable coefficients.
 
     Examples:
         >>> import torch
@@ -310,11 +378,17 @@ class DualDetectionHead(nn.Module):
         (torch.Size([1, 8400, 80]), torch.Size([1, 8400, 4]))
     """
 
-    def __init__(self, in_channels: tuple[int, int, int], num_classes: int) -> None:
+    def __init__(
+        self,
+        in_channels: tuple[int, int, int],
+        num_classes: int,
+        num_coeffs: int | None = None,
+    ) -> None:
         super().__init__()
         self.num_classes = num_classes
-        self.o2o = _DetectionBranch(in_channels, num_classes)
-        self.o2m = _DetectionBranch(in_channels, num_classes)
+        self.num_coeffs = num_coeffs
+        self.o2o = _DetectionBranch(in_channels, num_classes, num_coeffs)
+        self.o2m = _DetectionBranch(in_channels, num_classes, num_coeffs)
 
     def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> DualHeadOutput:
         """Run both branches over the neck features.
@@ -324,12 +398,24 @@ class DualDetectionHead(nn.Module):
                 with channel counts matching the constructor's ``in_channels``.
 
         Returns:
-            A :class:`DualHeadOutput` with dense class logits and raw ltrb
-            distances for both the one-to-many and one-to-one branches.
+            A :class:`DualHeadOutput` with dense class logits, raw ltrb
+            distances, and optional tanh mask coefficients for both branches.
         """
-        o2m_cls, o2m_box = self.o2m(features)
-        o2o_cls, o2o_box = self.o2o(features)
-        return DualHeadOutput(o2m_cls=o2m_cls, o2m_box=o2m_box, o2o_cls=o2o_cls, o2o_box=o2o_box)
+        if self.num_coeffs is None:
+            o2m_cls, o2m_box = self.o2m(features)
+            o2o_cls, o2o_box = self.o2o(features)
+            return DualHeadOutput(o2m_cls=o2m_cls, o2m_box=o2m_box, o2o_cls=o2o_cls, o2o_box=o2o_box)
+
+        o2m_cls, o2m_box, o2m_coeff = self.o2m(features)
+        o2o_cls, o2o_box, o2o_coeff = self.o2o(features)
+        return DualHeadOutput(
+            o2m_cls=o2m_cls,
+            o2m_box=o2m_box,
+            o2o_cls=o2o_cls,
+            o2o_box=o2o_box,
+            o2m_coeff=o2m_coeff,
+            o2o_coeff=o2o_coeff,
+        )
 
 
 def decode_ltrb(distances: Tensor, anchor_points: Tensor, strides: Tensor) -> Tensor:

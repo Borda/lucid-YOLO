@@ -112,7 +112,7 @@ same commit that completes its WP.
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 |---|---|---|---|---|---|
-| 047 | `feat(models): mask coefficient branch` | K=32 tanh coefficients per location (A14, A16) | `test_segment_head.py::test_coeff_shapes` | 046 | ⬜ |
+| 047 | `feat(models): mask coefficient branch` | K=32 tanh coefficients per location (A14, A16), opt-in behind `num_coeffs`: `None` builds no stem, so the accepted detector's module tree, 205600 parameters and forward output are bit-identical. Stem mirrors the class stem without the sigmoid prior-probability bias, registered as A34. Landed ahead of its listed dep 046, which is a release-ordering gate rather than a technical prerequisite (2026-08-06) | `test_segment_head.py::test_coeff_shapes`; off-by-default state-dict/parameter identity; `params_flops_det.json` unchanged | 046 | ✅ |
 | 048 | `feat(models): multi-scale proto pathway` | Eq. 8: F_proto = X1 + sum U(phi_l(X_l)) | `test_proto.py::test_fusion_eq8` | 047 | ⬜ |
 | 049 | `feat(models): prototype generation stack` | Eq. 9 protonet, 160x160 at 640 (A15, A18) | `test_proto.py::test_proto_resolution` | 048 | ⬜ |
 | 050 | `feat(models): auxiliary semantic branch (training-only)` | Dense per-class logits on F_proto (A17); inactive at eval | `test_aux_semantic.py::test_eval_mode_inactive` | 049 | ⬜ |
