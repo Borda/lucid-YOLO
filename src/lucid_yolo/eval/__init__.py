@@ -10,6 +10,22 @@ torchmetrics-prediction conversion
 (:func:`~lucid_yolo.eval.coco_eval.evaluate_bbox`).
 """
 
+from lucid_yolo.eval.annotations import (
+    EvalImage,
+    annotations_to_target,
+    empty_target,
+    letterboxed_batches,
+    load_eval_annotations,
+)
 from lucid_yolo.eval.coco_eval import DualPathEvaluator, detections_to_predictions, evaluate_bbox
 
-__all__ = ["DualPathEvaluator", "detections_to_predictions", "evaluate_bbox"]
+__all__ = [
+    "DualPathEvaluator",
+    "EvalImage",
+    "annotations_to_target",
+    "detections_to_predictions",
+    "empty_target",
+    "evaluate_bbox",
+    "letterboxed_batches",
+    "load_eval_annotations",
+]

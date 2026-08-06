@@ -45,6 +45,12 @@ freeze-goldens:
 overfit:
 	$(PY) scripts/overfit_micro.py --task $(TASK) $(if $(FREEZE),--freeze,)
 
+# Synthetic-shapes generalization regression (WP-083; needs accelerator, ~2 min).
+# Trains on 1800 generated scenes and scores the held-out 200 through both decode
+# paths; add FREEZE=1 to (re)write goldens/gpu/shapes_regression_det.json.
+shapes:
+	$(PY) scripts/shapes_regression.py --task $(TASK) $(if $(FREEZE),--freeze,)
+
 # Real-dataset layout validation (WP-014; synthetic stand-in per docs/ASSUMPTIONS.md A26).
 check-data:
 	@test -n "$(DATA_ROOT)" || { echo "usage: make check-data DATA_ROOT=/path/to/coco"; exit 1; }

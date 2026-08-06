@@ -25,132 +25,22 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
-from torchvision.io import ImageReadMode, read_image
 
 from lucid_yolo.data.letterbox import Letterbox
-from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode.nms_path import NMSDecoder
 from lucid_yolo.decode.topk_e2e import TopKDecoder
+from lucid_yolo.eval.annotations import letterboxed_batches, load_eval_annotations
 from lucid_yolo.eval.coco_eval import DualPathEvaluator
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Sequence
 
     from torch import Tensor
-
-_UINT8_MAX = 255.0
-_XYWH_LEN = 4
-
-
-@dataclass(frozen=True)
-class _EvalImage:
-    """One val-split image: identity plus original geometry."""
-
-    image_id: int
-    file_name: str
-    height: int
-    width: int
-
-
-def _load_annotations(ann_file: Path) -> tuple[list[_EvalImage], dict[int, dict[str, Tensor]], dict[int, int]]:
-    """Parse a COCO instances file into eval images, target dicts, and the label map.
-
-    Args:
-        ann_file: Path to ``instances_val2017.json`` (or a compatible subset).
-
-    Returns:
-        A triple of the image records sorted by ascending image id, the
-        torchmetrics ground-truth dict per image id (``boxes`` ``xyxy`` in
-        original coordinates, ``labels`` as category ids, plus ``iscrowd`` and
-        ``area``), and the contiguous-label -> category-id mapping (matching
-        :class:`~lucid_yolo.data.coco.CocoDetectionDataset`'s sorted-id order).
-    """
-    payload = json.loads(ann_file.read_text())
-    sorted_ids = sorted(int(cat["id"]) for cat in payload["categories"])
-    label_to_category = dict(enumerate(sorted_ids))
-    images = sorted(
-        (
-            _EvalImage(
-                image_id=int(img["id"]),
-                file_name=str(img["file_name"]),
-                height=int(img["height"]),
-                width=int(img["width"]),
-            )
-            for img in payload["images"]
-        ),
-        key=lambda record: record.image_id,
-    )
-    targets: dict[int, dict[str, Tensor]] = {
-        record.image_id: {
-            "boxes": torch.zeros((0, 4), dtype=torch.float32),
-            "labels": torch.zeros((0,), dtype=torch.long),
-            "iscrowd": torch.zeros((0,), dtype=torch.long),
-            "area": torch.zeros((0,), dtype=torch.float32),
-        }
-        for record in images
-    }
-    grouped: dict[int, list[dict[str, object]]] = {}
-    for ann in payload["annotations"]:
-        grouped.setdefault(int(ann["image_id"]), []).append(ann)
-    for image_id, anns in grouped.items():
-        boxes, labels, iscrowd, area = [], [], [], []
-        for ann in anns:
-            raw_bbox = ann["bbox"]
-            if not isinstance(raw_bbox, list):
-                continue
-            bbox = [float(value) for value in raw_bbox]
-            if len(bbox) != _XYWH_LEN or bbox[2] <= 0 or bbox[3] <= 0:
-                continue
-            x, y, w, h = bbox
-            boxes.append([x, y, x + w, y + h])
-            labels.append(int(ann["category_id"]))  # type: ignore[call-overload]
-            iscrowd.append(int(ann.get("iscrowd", 0)))  # type: ignore[call-overload]
-            area.append(float(ann.get("area", w * h)))  # type: ignore[arg-type]
-        if boxes:
-            targets[image_id] = {
-                "boxes": torch.tensor(boxes, dtype=torch.float32),
-                "labels": torch.tensor(labels, dtype=torch.long),
-                "iscrowd": torch.tensor(iscrowd, dtype=torch.long),
-                "area": torch.tensor(area, dtype=torch.float32),
-            }
-    return images, targets, label_to_category
-
-
-def _batches(
-    images: Sequence[_EvalImage],
-    images_dir: Path,
-    letterbox: Letterbox,
-    batch_size: int,
-) -> Iterator[tuple[Tensor, list[int], list[tuple[int, int]]]]:
-    """Yield ``(images, image_ids, orig_sizes)`` batches for the evaluator.
-
-    Args:
-        images: The eval image records to iterate, in order.
-        images_dir: Directory holding the image files.
-        letterbox: The validation letterbox applied to every image.
-        batch_size: Number of images per yielded batch.
-
-    Yields:
-        Batches matching the :class:`DualPathEvaluator` dataloader contract.
-    """
-    for start in range(0, len(images), batch_size):
-        chunk = images[start : start + batch_size]
-        tensors = []
-        for record in chunk:
-            raw = read_image(str(images_dir / record.file_name), ImageReadMode.RGB)
-            boxed, _ = letterbox(raw.to(torch.float32) / _UINT8_MAX, Targets.empty())
-            tensors.append(boxed)
-        yield (
-            torch.stack(tensors),
-            [record.image_id for record in chunk],
-            [(record.height, record.width) for record in chunk],
-        )
 
 
 def _load_module(checkpoint: Path, use_ema: bool) -> tuple[DetectionLitModule, dict[str, object]]:
@@ -219,7 +109,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     ann_file = args.data_root / "annotations" / "instances_val2017.json"
     images_dir = args.data_root / "val2017"
-    images, targets, label_to_category = _load_annotations(ann_file)
+    images, targets, label_to_category = load_eval_annotations(ann_file)
     if args.limit:
         images = images[: args.limit]
     module, info = _load_module(args.checkpoint, use_ema=args.ema)
@@ -229,7 +119,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     print(f"eval: {len(images)} images, device={device.type}, ema={args.ema}, img_size={args.img_size}")
     start = time.perf_counter()
-    report = evaluator.evaluate(_batches(images, images_dir, letterbox, args.batch_size), targets, device)
+    report = evaluator.evaluate(letterboxed_batches(images, images_dir, letterbox, args.batch_size), targets, device)
     elapsed = time.perf_counter() - start
     print(f"done in {elapsed:.1f}s ({len(images) / elapsed:.1f} img/s)")
 

@@ -1,0 +1,19 @@
+{
+  "producer": "scripts.shapes_regression:shapes_regression_det",
+  "tolerances": {
+    "val_map_50_95_nms": 0.05,
+    "val_map_50_95_e2e": 0.05,
+    "val_map_50_nms": 0.05
+  },
+  "values": {
+    "num_train_images": 1800,
+    "num_val_images": 200,
+    "num_val_instances": 1101,
+    "num_classes": 4,
+    "epochs": 6,
+    "img_size": 320,
+    "val_map_50_95_nms": 0.8823365569114685,
+    "val_map_50_95_e2e": 0.8582520484924316,
+    "val_map_50_nms": 0.9841560125350952
+  }
+}
