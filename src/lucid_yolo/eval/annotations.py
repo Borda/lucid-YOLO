@@ -12,6 +12,13 @@ and the small/medium/large breakdown stay faithful; degenerate boxes (non-list
 ``bbox``, wrong arity, non-positive extent) are dropped rather than propagated as
 zero-area targets.
 
+Instance **masks** (WP-053b) are opt-in: pass an ``image_size`` to
+:func:`annotations_to_target` (or ``with_masks=True`` to
+:func:`load_eval_annotations`) and every target additionally carries a ``(M, H,
+W)`` bool ``masks`` tensor at the original image size, aligned row-for-row with
+``boxes``. The default stays detection-only, so the existing callers neither
+change shape nor pay the segmentation-decode cost.
+
 This lives in the library rather than in a script because more than one entry point
 consumes it — the val2017 checkpoint evaluation and the synthetic-shapes regression
 producer — and a second copy of the annotation-to-target conversion would be free to
@@ -24,9 +31,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
+import numpy as np
 import torch
+from faster_coco_eval import mask as coco_mask
 from torchvision.io import ImageReadMode, read_image
 
 from lucid_yolo.data.targets import Targets
@@ -68,27 +77,45 @@ class EvalImage:
     width: int
 
 
-def empty_target() -> dict[str, Tensor]:
+def empty_target(image_size: tuple[int, int] | None = None) -> dict[str, Tensor]:
     """Return the ground-truth mapping of an image carrying no usable annotation.
+
+    Args:
+        image_size: Original image ``(height, width)``. When given, the target also
+            carries an empty ``(0, height, width)`` ``masks`` tensor, so an
+            annotation-free image still satisfies the segm metric's requirement that
+            **every** target dict hold a ``masks`` key. ``None`` (the default) keeps
+            the detection-only shape.
 
     Returns:
         A target dict whose ``boxes``, ``labels``, ``iscrowd`` and ``area`` entries are
-        all empty, with the dtypes torchmetrics expects.
+        all empty, with the dtypes torchmetrics expects, plus ``masks`` when
+        ``image_size`` is given.
 
     Examples:
         >>> target = empty_target()
         >>> tuple(target["boxes"].shape), target["labels"].dtype
         ((0, 4), torch.int64)
+        >>> sorted(empty_target(image_size=(6, 8)))  # masks join the detection keys
+        ['area', 'boxes', 'iscrowd', 'labels', 'masks']
+        >>> tuple(empty_target(image_size=(6, 8))["masks"].shape)
+        (0, 6, 8)
     """
-    return {
+    target = {
         "boxes": torch.zeros((0, 4), dtype=torch.float32),
         "labels": torch.zeros((0,), dtype=torch.long),
         "iscrowd": torch.zeros((0,), dtype=torch.long),
         "area": torch.zeros((0,), dtype=torch.float32),
     }
+    if image_size is not None:
+        target["masks"] = torch.zeros((0, *image_size), dtype=torch.bool)
+    return target
 
 
-def annotations_to_target(annotations: Sequence[dict[str, object]]) -> dict[str, Tensor]:
+def annotations_to_target(
+    annotations: Sequence[dict[str, object]],
+    image_size: tuple[int, int] | None = None,
+) -> dict[str, Tensor]:
     """Convert one image's COCO annotations into a torchmetrics target mapping.
 
     Boxes are converted from COCO ``xywh`` to ``xyxy`` and left in original image
@@ -96,12 +123,24 @@ def annotations_to_target(annotations: Sequence[dict[str, object]]) -> dict[str,
     values, or has a non-positive width or height are skipped — a degenerate box would
     otherwise enter the match as an unmatchable zero-area target and depress recall.
 
+    Passing ``image_size`` additionally decodes each surviving annotation's
+    ``segmentation`` into a bool mask at the original image size (see
+    :func:`annotation_mask`), stacked row-for-row with ``boxes``. The **same**
+    ``bbox`` filter governs both, so a dropped degenerate annotation drops its mask
+    too and the two tensors cannot describe different instances. ``iscrowd``
+    annotations are treated exactly as the box path treats them — kept, with the flag
+    recorded, never skipped — so a crowd region carries its mask as well.
+
     Args:
         annotations: The raw annotation dicts belonging to a single image.
+        image_size: Original image ``(height, width)``. When given, masks are decoded
+            and the target carries a ``(M, height, width)`` bool ``masks`` entry.
+            ``None`` (the default) is detection-only and pays no decode cost.
 
     Returns:
         A target dict with ``boxes`` (``xyxy``), ``labels`` (category ids), ``iscrowd``
-        and ``area``; :func:`empty_target` when nothing survives filtering.
+        and ``area`` — plus ``masks`` when ``image_size`` is given;
+        :func:`empty_target` when nothing survives filtering.
 
     Examples:
         >>> target = annotations_to_target([{"bbox": [1.0, 2.0, 3.0, 4.0], "category_id": 5}])
@@ -109,11 +148,16 @@ def annotations_to_target(annotations: Sequence[dict[str, object]]) -> dict[str,
         ([[1.0, 2.0, 4.0, 6.0]], [5])
         >>> tuple(annotations_to_target([{"bbox": [0.0, 0.0, 0.0, 4.0], "category_id": 1}])["boxes"].shape)
         (0, 4)
+        >>> polygon = {"bbox": [1.0, 2.0, 3.0, 4.0], "category_id": 5, "segmentation": [[1, 2, 4, 2, 4, 6, 1, 6]]}
+        >>> masked = annotations_to_target([polygon], image_size=(8, 8))
+        >>> tuple(masked["masks"].shape), int(masked["masks"].sum())
+        ((1, 8, 8), 12)
     """
     boxes: list[list[float]] = []
     labels: list[int] = []
     iscrowd: list[int] = []
     area: list[float] = []
+    masks: list[Tensor] = []
     for annotation in annotations:
         raw_bbox = annotation["bbox"]
         if not isinstance(raw_bbox, list):
@@ -126,17 +170,67 @@ def annotations_to_target(annotations: Sequence[dict[str, object]]) -> dict[str,
         labels.append(int(cast("int", annotation["category_id"])))
         iscrowd.append(int(cast("int", annotation.get("iscrowd", 0))))
         area.append(float(cast("float", annotation.get("area", width * height))))
+        if image_size is not None:
+            masks.append(annotation_mask(annotation.get("segmentation"), image_size))
     if not boxes:
-        return empty_target()
-    return {
+        return empty_target(image_size)
+    target = {
         "boxes": torch.tensor(boxes, dtype=torch.float32),
         "labels": torch.tensor(labels, dtype=torch.long),
         "iscrowd": torch.tensor(iscrowd, dtype=torch.long),
         "area": torch.tensor(area, dtype=torch.float32),
     }
+    if image_size is not None:
+        target["masks"] = torch.stack(masks)
+    return target
 
 
-def load_eval_annotations(ann_file: Path) -> tuple[list[EvalImage], dict[int, dict[str, Tensor]], dict[int, int]]:
+def annotation_mask(segmentation: object, image_size: tuple[int, int]) -> Tensor:
+    """Decode one COCO ``segmentation`` field into a bool mask at the original size.
+
+    COCO stores instance segmentation in three interchangeable encodings — a list of
+    flat polygon vertex lists, an uncompressed RLE (``counts`` a list of run lengths),
+    and a compressed RLE (``counts`` a byte string, the form ``iscrowd`` regions use).
+    All three are dispatched through :func:`faster_coco_eval.mask.segmToRle`, which
+    also merges a multi-part polygon into the single RLE the instance deserves; a
+    per-encoding branch written here would be a second decoder free to disagree with
+    the one the metric itself uses. Note its ``(width, height)`` argument order, the
+    reverse of the ``frPyObjects`` convention.
+
+    An annotation with no ``segmentation`` field (or an empty one) yields an all-zero
+    mask rather than being skipped: dropping the row would leave ``masks`` shorter
+    than ``boxes``, and every later row would then describe a different instance in
+    the two tensors.
+
+    Args:
+        segmentation: The raw ``segmentation`` value of one COCO annotation, or
+            ``None``.
+        image_size: Original image ``(height, width)`` the mask is decoded onto.
+
+    Returns:
+        A ``(height, width)`` bool tensor, ``True`` on the instance.
+
+    Examples:
+        >>> mask = annotation_mask([[1, 1, 4, 1, 4, 3, 1, 3]], image_size=(6, 6))
+        >>> mask.shape, mask.dtype
+        (torch.Size([6, 6]), torch.bool)
+        >>> int(mask.sum())
+        6
+        >>> int(annotation_mask(None, image_size=(6, 6)).sum())  # no segmentation field
+        0
+    """
+    height, width = image_size
+    if not segmentation:
+        return torch.zeros(image_size, dtype=torch.bool)
+    rle = coco_mask.segmToRle(segmentation, width, height)
+    decoded: np.ndarray[Any, np.dtype[np.uint8]] = np.ascontiguousarray(coco_mask.decode(rle))
+    return torch.from_numpy(decoded).to(torch.bool)
+
+
+def load_eval_annotations(
+    ann_file: Path,
+    with_masks: bool = False,
+) -> tuple[list[EvalImage], dict[int, dict[str, Tensor]], dict[int, int]]:
     """Parse a COCO instances file into eval images, target dicts, and the label map.
 
     Every image in the file gets a target entry, including images with no annotation,
@@ -148,6 +242,11 @@ def load_eval_annotations(ann_file: Path) -> tuple[list[EvalImage], dict[int, di
     Args:
         ann_file: Path to a COCO ``instances`` JSON file (val2017 or any compatible
             subset or synthetic split).
+        with_masks: When ``True``, every target additionally carries the ``masks``
+            entry :func:`annotations_to_target` decodes at that image's own
+            ``(height, width)`` — the ground truth the segm half of the metric scores
+            against. Defaults to ``False``: detection-only callers keep the target
+            shape they have and skip the segmentation decode entirely.
 
     Returns:
         A triple of the image records sorted by ascending image id, the target dict per
@@ -173,12 +272,15 @@ def load_eval_annotations(ann_file: Path) -> tuple[list[EvalImage], dict[int, di
         ),
         key=lambda image: image.image_id,
     )
-    targets: dict[int, dict[str, Tensor]] = {image.image_id: empty_target() for image in images}
+    sizes: dict[int, tuple[int, int] | None] = {
+        image.image_id: (image.height, image.width) if with_masks else None for image in images
+    }
+    targets: dict[int, dict[str, Tensor]] = {image.image_id: empty_target(sizes[image.image_id]) for image in images}
     grouped: dict[int, list[dict[str, object]]] = {}
     for annotation in payload["annotations"]:
         grouped.setdefault(int(annotation["image_id"]), []).append(annotation)
     for image_id, image_annotations in grouped.items():
-        targets[image_id] = annotations_to_target(image_annotations)
+        targets[image_id] = annotations_to_target(image_annotations, sizes[image_id])
     return images, targets, label_to_category
 
 

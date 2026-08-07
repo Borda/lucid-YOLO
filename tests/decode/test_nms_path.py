@@ -20,8 +20,10 @@ from torch import Tensor
 
 from lucid_yolo.assign.grid import make_anchor_points
 from lucid_yolo.decode import NMSDecoder
+from lucid_yolo.models.heads.detect import decode_ltrb
 
 _DET_CAP = 300
+_BOX_CORNERS = 4
 
 
 @pytest.fixture(autouse=True)
@@ -172,3 +174,54 @@ def test_decode_is_deterministic() -> None:
     second = decoder(cls_logits, raw_ltrb, points, strides)
 
     assert torch.equal(first, second)
+
+
+def _two_stage_scores() -> Tensor:
+    """Two images whose survivors are chosen by the threshold *and* by suppression.
+
+    Six anchors sit in a row 8px apart, so same-class neighbours overlap enough to
+    suppress each other at a 0.2 IoU threshold. Image 0 drops anchors 0 and 1
+    below the confidence threshold, suppresses anchor 3 against anchor 2, and
+    leaves ``[2, 5]``; image 1 leaves ``[4, 1]``, in that score order. Neither
+    surviving set is a prefix of the dense anchor order, and neither is a prefix
+    of the *thresholded* order, so an index that names a row's position within
+    either intermediate set is distinguishable from one that names its anchor.
+    """
+    scores = torch.full((2, 6, 2), -20.0)
+    scores[0, 2, 0] = 6.0  # strongest of image 0, class 0
+    scores[0, 3, 0] = 4.0  # class 0 again, adjacent to anchor 2 -> suppressed
+    scores[0, 5, 1] = 5.0  # class 1 -> survives class-wise suppression
+    scores[1, 4, 1] = 6.5  # strongest of image 1
+    scores[1, 5, 1] = 3.0  # class 1 again, adjacent to anchor 4 -> suppressed
+    scores[1, 1, 0] = 5.5  # class 0, far from anchor 4 -> survives
+    return scores
+
+
+def test_decode_with_indices_names_the_surviving_anchors() -> None:
+    """Gathering the dense boxes by the returned indices reproduces the survivors' own corners (WP-053b).
+
+    This path composes two index remappings — the confidence threshold's ``keep``
+    mask and then the suppression's ``order`` — and getting either the base or
+    the ordering wrong yields indices that are in range, correctly shaped, and
+    pointing at the wrong anchors. The mask coefficients of the dense path are
+    gathered by exactly these indices, so such an index produces a plausible mask
+    of the wrong object beside a correct box and a correct score. Only the
+    corner-level correspondence below separates the two: an index left in the
+    thresholded subset's own coordinates, or reversed against the detections it
+    labels, selects different dense boxes here.
+    """
+    points, strides = _grid(1, 6, stride=8)  # 6 anchors in a row, centres 8px apart
+    cls_logits = _two_stage_scores()
+    raw_ltrb = torch.full((2, 6, 4), 1.0)  # every anchor decodes a 16px box around its own centre
+    decoder = NMSDecoder(conf_threshold=0.5, iou_threshold=0.2, max_det=4)
+
+    detections, anchors = decoder.decode_with_indices(cls_logits, raw_ltrb, points, strides)
+
+    real = anchors >= 0
+    dense_boxes = decode_ltrb(raw_ltrb, points, strides)
+    gathered = dense_boxes.gather(1, anchors.clamp(min=0).unsqueeze(-1).expand(-1, -1, _BOX_CORNERS))
+    assert torch.equal(detections, decoder(cls_logits, raw_ltrb, points, strides))  # forward is the same decode
+    assert anchors[0].tolist() == [2, 5, -1, -1]  # thresholded and suppressed anchors are gone
+    assert anchors[1].tolist() == [4, 1, -1, -1]  # a different surviving set in the second image
+    assert torch.equal(real, detections[..., 4] > 0.0)  # an index exists exactly where a detection does
+    assert torch.equal(detections[..., :_BOX_CORNERS][real], gathered[real])

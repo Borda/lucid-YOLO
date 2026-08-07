@@ -13,27 +13,42 @@ The segmentation half starts at
 :func:`~lucid_yolo.eval.segment_decode.decode_instance_masks`, which turns
 prototypes and per-detection coefficients into box-cropped binary masks, and
 :func:`~lucid_yolo.eval.segment_decode.masks_to_original`, the mask-side twin of
-the box inverse-letterbox (A10).
+the box inverse-letterbox (A10). Scoring them is
+:func:`~lucid_yolo.eval.coco_eval.evaluate_segm` and, for both metrics in one
+metric pass, :func:`~lucid_yolo.eval.coco_eval.evaluate_bbox_and_segm`; the
+ground-truth masks come from
+:func:`~lucid_yolo.eval.annotations.annotation_mask`, which decodes COCO's
+polygon and RLE encodings alike.
 """
 
 from lucid_yolo.eval.annotations import (
     EvalImage,
+    annotation_mask,
     annotations_to_target,
     empty_target,
     letterboxed_batches,
     load_eval_annotations,
 )
-from lucid_yolo.eval.coco_eval import DualPathEvaluator, detections_to_predictions, evaluate_bbox
+from lucid_yolo.eval.coco_eval import (
+    DualPathEvaluator,
+    detections_to_predictions,
+    evaluate_bbox,
+    evaluate_bbox_and_segm,
+    evaluate_segm,
+)
 from lucid_yolo.eval.segment_decode import decode_instance_masks, masks_to_original
 
 __all__ = [
     "DualPathEvaluator",
     "EvalImage",
+    "annotation_mask",
     "annotations_to_target",
     "decode_instance_masks",
     "detections_to_predictions",
     "empty_target",
     "evaluate_bbox",
+    "evaluate_bbox_and_segm",
+    "evaluate_segm",
     "letterboxed_batches",
     "load_eval_annotations",
     "masks_to_original",

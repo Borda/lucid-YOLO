@@ -101,7 +101,7 @@ mypy_path = "src"
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["fvcore.*", "torchvision.*"]
+module = ["faster_coco_eval.*", "fvcore.*", "torchvision.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

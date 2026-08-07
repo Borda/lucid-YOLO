@@ -26,8 +26,10 @@ from lucid_yolo.assign.grid import make_anchor_points
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode import TopKDecoder, to_letterboxed_original, topk_e2e
+from lucid_yolo.models.heads.detect import decode_ltrb
 
 _DET_CAP = 300
+_BOX_CORNERS = 4
 
 
 @pytest.fixture(autouse=True)
@@ -184,3 +186,45 @@ def test_module_source_has_no_suppression_or_iou_helper() -> None:
     assert "nms" not in source
     assert "box_iou" not in source
     assert "torchvision" not in source
+
+
+def _ranking_scores() -> Tensor:
+    """Two images of six per-anchor class-0 logits whose score order is no prefix of anchor order.
+
+    Image 0 ranks ``[2, 5, 0, 4, 1, 3]`` and image 1 ``[3, 1, 5, 2, 0, 4]``; the
+    two differ, so a per-image index base that leaked across the batch shows up.
+    """
+    class_zero = torch.tensor([[1.0, -3.0, 5.0, -5.0, 0.0, 3.0], [-1.0, 4.0, 0.5, 6.0, -2.0, 2.0]])
+    scores = torch.full((2, 6, 2), -20.0)
+    scores[..., 0] = class_zero
+    return scores
+
+
+def test_decode_with_indices_names_the_ranked_anchors() -> None:
+    """Gathering the dense boxes by the returned indices reproduces the detections' own corners (WP-053b).
+
+    The segmentation decode reads its mask coefficients from the dense
+    per-anchor map by these indices, so an index that ranked the scores a second
+    time, that reported a row's rank instead of its anchor, or that let the two
+    images share a base pairs a correct box with another anchor's coefficients —
+    a plausible mask of the wrong object at a correct box with a correct score.
+    Every such index is in range and correctly shaped, so only the corner-level
+    correspondence asserted here separates it from a right one. The kept set is
+    deliberately no prefix of the dense order, which a wrong base would satisfy
+    by accident.
+    """
+    points, strides = _grid(2, 3, stride=8)  # 6 anchors, no two boxes alike
+    cls_logits = _ranking_scores()
+    raw_ltrb = torch.full((2, 6, 4), 1.0)  # each anchor decodes a 16px box around its own centre
+    decoder = TopKDecoder(k=8)  # above the anchor count, so padding rows are covered too
+
+    detections, anchors = decoder.decode_with_indices(cls_logits, raw_ltrb, points, strides)
+
+    real = anchors >= 0
+    dense_boxes = decode_ltrb(raw_ltrb, points, strides)
+    gathered = dense_boxes.gather(1, anchors.clamp(min=0).unsqueeze(-1).expand(-1, -1, _BOX_CORNERS))
+    assert torch.equal(detections, decoder(cls_logits, raw_ltrb, points, strides))  # forward is the same decode
+    assert anchors[0, :6].tolist() == [2, 5, 0, 4, 1, 3]  # score order, not anchor order
+    assert anchors[1, :6].tolist() == [3, 1, 5, 2, 0, 4]  # and a different order in the second image
+    assert real.tolist() == [[True] * 6 + [False] * 2] * 2  # the two padding rows name no anchor
+    assert torch.equal(detections[..., :_BOX_CORNERS][real], gathered[real])

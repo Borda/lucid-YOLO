@@ -12,7 +12,7 @@ end-to-end path (R3 sec. 4). The detection cap is 300 (R1 sec. 3.2.1, A9).
 The pipeline is: sigmoid the class logits, decode the raw ltrb distances into
 ``xyxy`` boxes with :func:`~lucid_yolo.models.heads.detect.decode_ltrb`, reduce to
 the score-ranked detections with
-:func:`~lucid_yolo.models.heads.detect.o2o_topk`, pad to a **fixed** ``(B, 300,
+:func:`~lucid_yolo.models.heads.detect.o2o_topk_with_indices`, pad to a **fixed** ``(B, 300,
 6)`` shape, then optionally zero the score of entries below a confidence
 threshold. The fixed-size output is the export-friendly contract: the shape does
 not depend on the anchor count or on how many detections clear the threshold, so
@@ -31,8 +31,8 @@ from __future__ import annotations
 import torch
 from torch import Tensor, nn
 
-from lucid_yolo.decode.common import SCORE_COLUMN, pad_detections
-from lucid_yolo.models.heads.detect import decode_ltrb, o2o_topk
+from lucid_yolo.decode.common import SCORE_COLUMN, pad_anchor_indices, pad_detections
+from lucid_yolo.models.heads.detect import decode_ltrb, o2o_topk_with_indices
 
 __all__ = ["TopKDecoder"]
 
@@ -104,17 +104,64 @@ class TopKDecoder(nn.Module):
             >>> TopKDecoder(k=5)(cls_logits, raw_ltrb, points, strides).shape
             torch.Size([1, 5, 6])
         """
+        detections, _ = self.decode_with_indices(cls_logits, raw_ltrb, anchor_points, strides)
+        return detections
+
+    def decode_with_indices(
+        self,
+        cls_logits: Tensor,
+        raw_ltrb: Tensor,
+        anchor_points: Tensor,
+        strides: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        """Decode as :meth:`forward` does, and report the source anchor of each row.
+
+        The whole decode lives here and :meth:`forward` is its box-only view, so
+        the two cannot report different selections. The extra return is what any
+        per-anchor quantity outside the A9 tuple must be gathered by — the
+        segmentation decode's mask coefficients (WP-053b): a coefficient row taken
+        from a differently ranked selection would yield a plausible mask of the
+        wrong object beside a correct box.
+
+        Args:
+            cls_logits: Raw one-to-one class logits of shape ``(B, A, C)``.
+            raw_ltrb: Raw one-to-one ltrb distances of shape ``(B, A, 4)``,
+                aligned with ``cls_logits`` on the anchor axis.
+            anchor_points: Anchor-centre ``(x, y)`` coordinates of shape
+                ``(A, 2)`` in input pixels.
+            strides: Per-anchor level stride of shape ``(A,)``.
+
+        Returns:
+            A pair ``(detections, anchor_indices)``: the ``(B, k, 6)`` A9 batch
+            :meth:`forward` returns, and the ``(B, k)`` long tensor naming the
+            anchor each row came from, with
+            :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX` on the padding rows.
+
+        Examples:
+            >>> import torch
+            >>> from lucid_yolo.assign.grid import make_anchor_points
+            >>> points, strides = make_anchor_points([(1, 2)], [8])
+            >>> cls_logits = torch.tensor([[[-5.0], [5.0]]])  # anchor 1 is the confident one
+            >>> raw_ltrb = torch.zeros(1, 2, 4)
+            >>> detections, anchors = TopKDecoder(k=3).decode_with_indices(
+            ...     cls_logits, raw_ltrb, points, strides
+            ... )
+            >>> detections.shape
+            torch.Size([1, 3, 6])
+            >>> anchors  # anchor 1 ranks first; the third row is padding
+            tensor([[ 1,  0, -1]])
+        """
         boxes = decode_ltrb(raw_ltrb, anchor_points, strides)
-        detections = o2o_topk(cls_logits, boxes, k=self.k)
+        detections, anchor_indices = o2o_topk_with_indices(cls_logits, boxes, k=self.k)
         detections = self._pad_to_k(detections)
         if self.conf_threshold > 0.0:
             detections = self._zero_below_threshold(detections)
-        return detections
+        return detections, pad_anchor_indices(anchor_indices, self.k)
 
     def _pad_to_k(self, detections: Tensor) -> Tensor:
         """Pad ``detections`` to a fixed length of ``k`` rows with zero rows.
 
-        :func:`o2o_topk` returns ``min(k, A)`` rows; when the anchor count ``A``
+        :func:`o2o_topk_with_indices` returns ``min(k, A)`` rows; when the anchor count ``A``
         is below ``k`` the shortfall is filled with all-zero rows (score 0)
         appended after the ranked detections, so the output length is always
         ``k`` and the descending-score ordering is preserved. Delegates to the

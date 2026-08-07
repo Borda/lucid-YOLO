@@ -40,7 +40,7 @@ import torch
 from torch import Tensor, nn
 from torchvision.ops import batched_nms
 
-from lucid_yolo.decode.common import pad_detections
+from lucid_yolo.decode.common import pad_anchor_indices, pad_detections
 from lucid_yolo.models.heads.detect import decode_ltrb
 
 __all__ = ["NMSDecoder"]
@@ -129,13 +129,64 @@ class NMSDecoder(nn.Module):
             >>> NMSDecoder(max_det=5)(cls_logits, raw_ltrb, points, strides).shape
             torch.Size([1, 5, 6])
         """
+        detections, _ = self.decode_with_indices(cls_logits, raw_ltrb, anchor_points, strides)
+        return detections
+
+    def decode_with_indices(
+        self,
+        cls_logits: Tensor,
+        raw_ltrb: Tensor,
+        anchor_points: Tensor,
+        strides: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        """Decode as :meth:`forward` does, and report the source anchor of each row.
+
+        The whole decode lives here and :meth:`forward` is its box-only view, so
+        the two cannot report different survivor sets. The extra return exists for
+        the same reason as its one-to-one twin
+        (:meth:`~lucid_yolo.decode.topk_e2e.TopKDecoder.decode_with_indices`): the
+        segmentation decode (WP-053b) gathers each detection's mask coefficients
+        from the dense ``(B, A, K)`` map by these indices. On this path the kept
+        set is chosen by the threshold and the suppression, not by a ranking any
+        caller could reproduce, so the indices have to be carried out through the
+        **same** ``keep``/``order`` selection that built the boxes — recomputing a
+        second selection outside is exactly how a mask ends up describing another
+        anchor's object.
+
+        Args:
+            cls_logits: Raw dense class logits of shape ``(B, A, C)``.
+            raw_ltrb: Raw dense ltrb distances of shape ``(B, A, 4)``, aligned
+                with ``cls_logits`` on the anchor axis.
+            anchor_points: Anchor-centre ``(x, y)`` coordinates of shape
+                ``(A, 2)`` in input pixels.
+            strides: Per-anchor level stride of shape ``(A,)``.
+
+        Returns:
+            A pair ``(detections, anchor_indices)``: the ``(B, max_det, 6)`` A9
+            batch :meth:`forward` returns, and the ``(B, max_det)`` long tensor
+            naming the anchor each row came from, with
+            :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX` on the padding rows.
+
+        Examples:
+            >>> import torch
+            >>> from lucid_yolo.assign.grid import make_anchor_points
+            >>> points, strides = make_anchor_points([(1, 2)], [8])
+            >>> cls_logits = torch.tensor([[[-5.0], [5.0]]])  # only anchor 1 clears the threshold
+            >>> raw_ltrb = torch.zeros(1, 2, 4)
+            >>> decoder = NMSDecoder(conf_threshold=0.5, max_det=3)
+            >>> detections, anchors = decoder.decode_with_indices(cls_logits, raw_ltrb, points, strides)
+            >>> detections.shape
+            torch.Size([1, 3, 6])
+            >>> anchors  # anchor 1 survives; the remaining rows are padding
+            tensor([[ 1, -1, -1]])
+        """
         boxes = decode_ltrb(raw_ltrb, anchor_points, strides)  # (B, A, 4)
         confidence = cls_logits.sigmoid()
         scores, classes = confidence.max(dim=-1)  # both (B, A), single-label per anchor
-        images = [self._decode_image(boxes[i], scores[i], classes[i]) for i in range(boxes.shape[0])]
-        return torch.stack(images, dim=0)
+        decoded = [self._decode_image(boxes[i], scores[i], classes[i]) for i in range(boxes.shape[0])]
+        return torch.stack([image for image, _ in decoded]), torch.stack([index for _, index in decoded])
 
-    def _decode_image(self, boxes: Tensor, scores: Tensor, classes: Tensor) -> Tensor:
+    def _decode_image(self, boxes: Tensor, scores: Tensor, classes: Tensor) -> tuple[Tensor, Tensor]:
         """Threshold, class-wise NMS, cap, and pad one image's anchors.
 
         Args:
@@ -144,15 +195,20 @@ class NMSDecoder(nn.Module):
             classes: Per-anchor best-class index of shape ``(A,)`` (integral).
 
         Returns:
-            Detections of shape ``(max_det, 6)`` — the A9 tuple ``[x1, y1, x2,
-            y2, score, class]`` sorted by descending score, padded with
-            score-zero rows.
+            A pair of the ``(max_det, 6)`` A9 detections ``[x1, y1, x2, y2,
+            score, class]`` sorted by descending score and padded with score-zero
+            rows, and the ``(max_det,)`` source anchor index of each row (padding
+            rows carry :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX`). The
+            index is threaded through the same two selections the boxes pass —
+            the threshold's ``keep`` mask and the suppression's ``order`` — rather
+            than recovered afterwards.
         """
         keep = scores >= self.conf_threshold
+        anchors = keep.nonzero(as_tuple=False).flatten()  # source anchor row of each survivor
         boxes, scores, classes = boxes[keep], scores[keep], classes[keep]
         order = batched_nms(boxes, scores, classes, self.iou_threshold)[: self.max_det]
         detection = torch.cat(
             (boxes[order], scores[order].unsqueeze(-1), classes[order].unsqueeze(-1).to(boxes.dtype)),
             dim=-1,
         )
-        return pad_detections(detection, self.max_det)
+        return pad_detections(detection, self.max_det), pad_anchor_indices(anchors[order], self.max_det)

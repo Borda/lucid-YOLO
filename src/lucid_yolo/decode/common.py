@@ -27,7 +27,15 @@ from torch import Tensor
 
 from lucid_yolo.data.letterbox import Letterbox
 
-__all__ = ["BOX_CORNERS", "DET_WIDTH", "SCORE_COLUMN", "pad_detections", "to_letterboxed_original"]
+__all__ = [
+    "BOX_CORNERS",
+    "DET_WIDTH",
+    "PAD_ANCHOR_INDEX",
+    "SCORE_COLUMN",
+    "pad_anchor_indices",
+    "pad_detections",
+    "to_letterboxed_original",
+]
 
 #: Width of the A9 detection tuple ``[x1, y1, x2, y2, score, class]``.
 DET_WIDTH = 6
@@ -37,6 +45,11 @@ BOX_CORNERS = 4
 
 #: Column index of the confidence score within the A9 detection tuple.
 SCORE_COLUMN = 4
+
+#: Anchor index reported for a padding detection row, which has no source anchor.
+#: Negative so it can never be mistaken for a real row and cannot silently index
+#: the last anchor the way ``-1`` would if it were used as a gather index directly.
+PAD_ANCHOR_INDEX = -1
 
 
 def pad_detections(detections: Tensor, max_det: int) -> Tensor:
@@ -76,6 +89,43 @@ def pad_detections(detections: Tensor, max_det: int) -> Tensor:
     pad_shape[-2] = max_det - kept
     padding = detections.new_zeros(pad_shape)
     return torch.cat((detections, padding), dim=-2)
+
+
+def pad_anchor_indices(indices: Tensor, max_det: int) -> Tensor:
+    """Pad the anchor-index axis to a fixed length with :data:`PAD_ANCHOR_INDEX`.
+
+    The index-side twin of :func:`pad_detections`, and it must stay that: the two
+    are padded to the same length by the same callers so that row ``n`` of a
+    decoder's detections and entry ``n`` of its anchor indices describe the same
+    detection for every ``n``, padding rows included. Anything gathered per anchor
+    and **not** carried in the A9 tuple — the mask coefficients of the
+    segmentation decode — is selected by these indices, so a length or ordering
+    mismatch here pairs a box with another anchor's coefficients: a plausible mask
+    of the wrong object, at a correct box, with a correct score.
+
+    Args:
+        indices: Source anchor index per kept detection, shape ``(N,)`` or
+            ``(B, N)`` with the detection count last.
+        max_det: Fixed output length along the detection axis.
+
+    Returns:
+        Indices whose last axis has length ``max_det``, the shortfall filled with
+        :data:`PAD_ANCHOR_INDEX` (unchanged when already at least that long).
+
+    Examples:
+        >>> import torch
+        >>> pad_anchor_indices(torch.tensor([3, 7]), max_det=4)
+        tensor([ 3,  7, -1, -1])
+        >>> pad_anchor_indices(torch.tensor([[3, 7]]), max_det=2)  # already full
+        tensor([[3, 7]])
+    """
+    kept = indices.shape[-1]
+    if kept >= max_det:
+        return indices
+    pad_shape = list(indices.shape)
+    pad_shape[-1] = max_det - kept
+    padding = torch.full(pad_shape, PAD_ANCHOR_INDEX, dtype=indices.dtype, device=indices.device)
+    return torch.cat((indices, padding), dim=-1)
 
 
 def to_letterboxed_original(
