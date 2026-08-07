@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 import torch
+from torch import Tensor
 from torchvision.io import ImageReadMode, read_image
 
 from lucid_yolo.data.coco import CocoDetectionDataset
@@ -46,6 +47,7 @@ from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode import NMSDecoder, TopKDecoder
 from lucid_yolo.eval import DualPathEvaluator, detections_to_predictions, evaluate_bbox
 from lucid_yolo.eval.coco_eval import _METRIC_KEYS
+from lucid_yolo.models.heads.detect import DualHeadOutput
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
@@ -174,6 +176,58 @@ def test_evaluate_bbox_perfect_predictions() -> None:
 
     assert stats["map"] == pytest.approx(1.0)
     assert stats["map_50"] == pytest.approx(1.0)
+
+
+class _ConstantDecoder(torch.nn.Module):
+    """A decoder that ignores the head output and always emits one fixed detection."""
+
+    def __init__(self, box: list[float]) -> None:
+        super().__init__()
+        self.detection = torch.tensor([[[*box, 1.0, 0.0]]])  # (1, 1, 6): xyxy, score, label
+
+    def forward(self, cls_logits: Tensor, raw_ltrb: Tensor, anchor_points: Tensor, strides: Tensor) -> Tensor:
+        """Return the fixed detection, whatever the head predicted."""
+        del cls_logits, raw_ltrb, anchor_points, strides
+        return self.detection
+
+
+class _ZeroHead(torch.nn.Module):
+    """A model returning an all-zero :class:`DualHeadOutput` with no coefficients."""
+
+    def forward(self, images: Tensor) -> DualHeadOutput:
+        """Return dense zeros shaped for a single anchor."""
+        del images
+        zeros_cls, zeros_box = torch.zeros(1, 1, _NUM_CLASSES), torch.zeros(1, 1, 4)
+        return DualHeadOutput(
+            o2m_cls=zeros_cls, o2m_box=zeros_box, o2o_cls=zeros_cls, o2o_box=zeros_box, o2m_coeff=None, o2o_coeff=None
+        )
+
+
+def test_each_path_is_scored_from_its_own_decoder() -> None:
+    """The ``e2e`` report comes from the E2E decoder and ``nms`` from the NMS decoder.
+
+    Which predictions reach which path's metric cannot be checked with a real
+    untrained model: both paths then emit identical detections and both score
+    0.0, so crossing them changes nothing observable. Two constant decoders that
+    disagree -- one landing exactly on the ground truth, one missing it entirely
+    -- separate the paths by construction, and the report has to show 1.0 against
+    0.0 in the right order.
+    """
+    box = [10.0, 12.0, 30.0, 42.0]
+    evaluator = DualPathEvaluator(
+        _ZeroHead(),
+        _ConstantDecoder(box),
+        _ConstantDecoder([100.0, 100.0, 120.0, 130.0]),
+        {0: 5},
+        Letterbox(_CANVAS),
+    )
+    target = {"boxes": torch.tensor([box]), "labels": torch.tensor([5])}
+    batches = [(torch.zeros(1, 3, _CANVAS, _CANVAS), [1], [(_CANVAS, _CANVAS)])]
+
+    report = evaluator.evaluate(batches, {1: target}, torch.device("cpu"))
+
+    assert report["e2e"]["map"] == pytest.approx(1.0)
+    assert report["nms"]["map"] == pytest.approx(0.0)
 
 
 def test_evaluate_bbox_empty_preds_is_zeroed() -> None:

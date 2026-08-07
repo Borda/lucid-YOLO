@@ -22,6 +22,7 @@ import torch
 from torchvision.io import write_png
 
 from lucid_yolo.data.letterbox import Letterbox
+from lucid_yolo.eval import annotations
 from lucid_yolo.eval.annotations import (
     EvalImage,
     annotations_to_target,
@@ -117,6 +118,58 @@ def test_load_gives_unannotated_images_an_empty_target(tmp_path: Path) -> None:
     assert set(targets) == {1, 2}
     assert targets[1]["boxes"].tolist() == [[1.0, 2.0, 4.0, 6.0]]
     assert targets[2]["boxes"].shape == (0, 4)
+
+
+def test_masked_load_matches_an_eager_decode(tmp_path: Path) -> None:
+    """The lazy mapping returns exactly what decoding every annotation up front would.
+
+    Laziness is a memory strategy, not a different ground truth: every key, every
+    tensor and every mask must match :func:`annotations_to_target` called directly
+    with the image's own size. An off-by-one in the size lookup, or a target built
+    against the wrong image's ``(height, width)``, is invisible in the shapes of a
+    single-image fixture and shows up here because the two images differ in size.
+    """
+    payload = _payload()
+    polygon = [[1.0, 2.0, 4.0, 2.0, 4.0, 6.0, 1.0, 6.0]]
+    payload["annotations"] = [{**_payload()["annotations"][0], "segmentation": polygon}]  # type: ignore[index]
+    ann_file = tmp_path / "instances.json"
+    ann_file.write_text(json.dumps(payload))
+
+    _, targets, _ = load_eval_annotations(ann_file, with_masks=True)
+    expected = annotations_to_target(payload["annotations"], image_size=(6, 10))  # type: ignore[arg-type]
+
+    assert set(targets) == {1, 2}
+    assert set(targets[1]) == _TARGET_KEYS | {"masks"}
+    for key, value in expected.items():
+        assert torch.equal(targets[1][key], value)
+    assert targets[2]["masks"].shape == (0, 8, 12)  # the unannotated image, at its own size
+
+
+def test_masked_load_decodes_on_lookup_not_up_front(tmp_path: Path) -> None:
+    """No mask is decoded until its image is asked for.
+
+    The property that makes val2017 segmentation evaluation runnable at all --
+    eager decoding is ~11 GB resident before the first image is read. A mapping
+    that decoded everything in the constructor and merely *stored* it would
+    satisfy every other test in this file.
+    """
+    payload = _payload()
+    ann_file = tmp_path / "instances.json"
+    ann_file.write_text(json.dumps(payload))
+
+    decoded: list[object] = []
+    real_mask = annotations.annotation_mask
+
+    def _counting_mask(segmentation: object, image_size: tuple[int, int]) -> torch.Tensor:
+        decoded.append(segmentation)
+        return real_mask(segmentation, image_size)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(annotations, "annotation_mask", _counting_mask)
+        _, targets, _ = load_eval_annotations(ann_file, with_masks=True)
+        assert decoded == []  # loading the file decodes nothing
+        _ = targets[1]["masks"]
+        assert len(decoded) == 1
 
 
 def test_load_builds_the_sorted_label_map(tmp_path: Path) -> None:

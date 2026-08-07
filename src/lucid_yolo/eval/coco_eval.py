@@ -239,8 +239,7 @@ def evaluate_bbox(
     """
     if not preds:
         return dict.fromkeys(_METRIC_KEYS, 0.0)
-    computed = _compute_metric(preds, targets, "bbox")
-    return {key: float(computed[key]) for key in _METRIC_KEYS}
+    return _named_stats(_compute_metric(preds, targets, "bbox"), combined=False)
 
 
 def evaluate_segm(
@@ -331,7 +330,33 @@ def evaluate_bbox_and_segm(
     """
     if not preds:
         return dict.fromkeys([*_METRIC_KEYS, *(_SEGM_PREFIX + key for key in _METRIC_KEYS)], 0.0)
-    computed = _compute_metric(preds, targets, ("bbox", "segm"))
+    return _named_stats(_compute_metric(preds, targets, ("bbox", "segm")), combined=True)
+
+
+def _new_metric(iou_type: str | tuple[str, ...]) -> MeanAveragePrecision:
+    """Construct the metric for one ``iou_type``.
+
+    The single place the metric is configured, so the backend, the box format and
+    the detection-cap warning setting cannot differ between the one-shot entry
+    points and the streaming one :class:`DualPathEvaluator` drives.
+    """
+    metric = MeanAveragePrecision(backend="faster_coco_eval", box_format="xyxy", iou_type=iou_type)  # type: ignore[arg-type]
+    # The fixed 300-row decoder output routinely exceeds COCO's top-100 detection
+    # cap; keeping only the 100 highest-scoring per image is the standard protocol
+    # (COCOeval's maxDets), not a misconfiguration, so silence the per-call warning.
+    metric.warn_on_many_detections = False
+    return metric
+
+
+def _named_stats(computed: Mapping[str, Tensor], combined: bool) -> dict[str, float]:
+    """Rename one ``compute()`` dict onto this module's reported statistic names.
+
+    torchmetrics names its outputs ``map``/``mar_*`` for a single ``iou_type`` but
+    ``bbox_map``/``segm_map`` for a tuple of them. Both readings live here so the
+    one-shot and streaming paths cannot report the same run under different names.
+    """
+    if not combined:
+        return {key: float(computed[key]) for key in _METRIC_KEYS}
     stats = {key: float(computed[f"bbox_{key}"]) for key in _METRIC_KEYS}
     stats.update({_SEGM_PREFIX + key: float(computed[_SEGM_PREFIX + key]) for key in _METRIC_KEYS})
     return stats
@@ -342,23 +367,53 @@ def _compute_metric(
     targets: list[dict[str, Tensor]],
     iou_type: str | tuple[str, ...],
 ) -> Mapping[str, Tensor]:
-    """Run ``MeanAveragePrecision`` for one ``iou_type`` and return its raw compute dict.
-
-    The single place the metric is constructed and driven, so the backend, the box
-    format and the detection-cap warning setting cannot differ between the bbox,
-    segm and combined entry points. Note that torchmetrics names its outputs
-    ``map``/``mar_*`` for a single ``iou_type`` but ``bbox_map``/``segm_map`` for a
-    tuple of them; the callers own that renaming.
-    """
-    metric = MeanAveragePrecision(backend="faster_coco_eval", box_format="xyxy", iou_type=iou_type)  # type: ignore[arg-type]
-    # The fixed 300-row decoder output routinely exceeds COCO's top-100 detection
-    # cap; keeping only the 100 highest-scoring per image is the standard protocol
-    # (COCOeval's maxDets), not a misconfiguration, so silence the per-call warning.
-    metric.warn_on_many_detections = False
+    """Update a fresh metric with everything at once and return its raw compute dict."""
+    metric = _new_metric(iou_type)
     with contextlib.redirect_stdout(io.StringIO()):
         metric.update(preds, targets)
         computed: Mapping[str, Tensor] = metric.compute()
     return computed
+
+
+class _StreamingScorer:
+    """One decode path's metric, updated batch by batch rather than at the end.
+
+    Accumulating every image's predictions and targets and scoring once is fine
+    for boxes and impossible for masks. A segmentation eval of val2017 would hold
+    both paths' predicted masks *and* the ground-truth masks dense and
+    simultaneously — hundreds of gigabytes at original resolution. Updating per
+    batch bounds that to one batch, because ``MeanAveragePrecision.update``
+    RLE-encodes each mask into its state immediately (torchmetrics 1.9,
+    ``_get_safe_item_values``); the dense tensors are free the moment the batch is
+    scored.
+
+    The ``iou_type`` is decided by the first batch, from whether its predictions
+    carry masks, and the metric is constructed only then: a run that yields no
+    batches at all reports the same all-zero dict the one-shot entry points do,
+    rather than raising from a metric that was never updated.
+    """
+
+    def __init__(self) -> None:
+        self._metric: MeanAveragePrecision | None = None
+        self._combined = False
+
+    def update(self, preds: list[dict[str, Tensor]], targets: list[dict[str, Tensor]]) -> None:
+        """Fold one batch into the metric state, constructing it on the first call."""
+        if not preds:
+            return
+        if self._metric is None:
+            self._combined = "masks" in preds[0]
+            self._metric = _new_metric(("bbox", "segm") if self._combined else "bbox")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self._metric.update(preds, targets)
+
+    def compute(self) -> dict[str, float]:
+        """Return the named statistics, or an all-zero dict if nothing was scored."""
+        if self._metric is None:
+            return dict.fromkeys(_METRIC_KEYS, 0.0)
+        with contextlib.redirect_stdout(io.StringIO()):
+            computed: Mapping[str, Tensor] = self._metric.compute()
+        return _named_stats(computed, self._combined)
 
 
 class _IndexingDecoder(Protocol):
@@ -437,13 +492,6 @@ def _gather_coefficients(coefficients: Tensor, anchor_index: Tensor) -> Tensor:
     index = anchor_index.clamp(min=0).unsqueeze(-1).expand(-1, -1, coefficients.shape[-1])
     gathered = coefficients.gather(1, index)
     return gathered * real.unsqueeze(-1).to(gathered.dtype)
-
-
-def _score_path(preds: list[dict[str, Tensor]], targets: list[dict[str, Tensor]]) -> dict[str, float]:
-    """Score one path's predictions, with segm mAP only when they carry masks."""
-    if preds and "masks" in preds[0]:
-        return evaluate_bbox_and_segm(preds, targets)
-    return evaluate_bbox(preds, targets)
 
 
 class DualPathEvaluator:
@@ -547,7 +595,9 @@ class DualPathEvaluator:
             targets: Ground truth keyed by COCO image id, each a torchmetrics
                 target dict (``boxes`` ``xyxy`` in original coordinates, ``labels``
                 as category ids). Every ``image_id`` yielded by ``dataloader`` must
-                be present.
+                be present. A mapping that materialises a target on lookup
+                (:class:`~lucid_yolo.eval.annotations.LazyTargets`) is what keeps a
+                segmentation run's ground-truth masks off the heap.
             device: Device the model and image batches run on.
 
         Returns:
@@ -555,18 +605,22 @@ class DualPathEvaluator:
             12-metric dict of :func:`evaluate_bbox`, or the 24-entry bbox+segm
             dict of :func:`evaluate_bbox_and_segm` when the model has a mask
             branch.
+
+        Note:
+            Each batch is folded into its path's metric as it is produced rather
+            than accumulated and scored at the end. For boxes the difference is
+            invisible; for masks it is the difference between a bounded footprint
+            and hundreds of gigabytes (see :class:`_StreamingScorer`).
         """
         self._model.to(device).eval()
-        e2e_preds: list[dict[str, Tensor]] = []
-        nms_preds: list[dict[str, Tensor]] = []
-        gt_targets: list[dict[str, Tensor]] = []
+        e2e_scorer, nms_scorer = _StreamingScorer(), _StreamingScorer()
         with torch.no_grad():
             for images, image_ids, orig_sizes in dataloader:
                 e2e_batch, nms_batch = self._predict_batch(images.to(device), device, orig_sizes)
-                e2e_preds.extend(e2e_batch)
-                nms_preds.extend(nms_batch)
-                gt_targets.extend(targets[int(image_id)] for image_id in image_ids)
-        return {"e2e": _score_path(e2e_preds, gt_targets), "nms": _score_path(nms_preds, gt_targets)}
+                gt_batch = [targets[int(image_id)] for image_id in image_ids]
+                e2e_scorer.update(e2e_batch, gt_batch)
+                nms_scorer.update(nms_batch, gt_batch)
+        return {"e2e": e2e_scorer.compute(), "nms": nms_scorer.compute()}
 
     def _predict_batch(
         self,

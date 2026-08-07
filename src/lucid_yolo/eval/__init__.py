@@ -23,6 +23,7 @@ polygon and RLE encodings alike.
 
 from lucid_yolo.eval.annotations import (
     EvalImage,
+    LazyTargets,
     annotation_mask,
     annotations_to_target,
     empty_target,
@@ -41,6 +42,7 @@ from lucid_yolo.eval.segment_decode import decode_instance_masks, masks_to_origi
 __all__ = [
     "DualPathEvaluator",
     "EvalImage",
+    "LazyTargets",
     "annotation_mask",
     "annotations_to_target",
     "decode_instance_masks",

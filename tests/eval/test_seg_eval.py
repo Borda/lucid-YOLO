@@ -36,13 +36,14 @@ from lucid_yolo.decode import NMSDecoder, TopKDecoder
 from lucid_yolo.eval import (
     DualPathEvaluator,
     annotations_to_target,
+    coco_eval,
     detections_to_predictions,
     evaluate_bbox_and_segm,
     evaluate_segm,
     letterboxed_batches,
     load_eval_annotations,
 )
-from lucid_yolo.eval.coco_eval import _METRIC_KEYS, _SEGM_PREFIX
+from lucid_yolo.eval.coco_eval import _METRIC_KEYS, _SEGM_PREFIX, _StreamingScorer
 from lucid_yolo.models.build import Segmenter
 from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -264,6 +265,86 @@ def test_segmentation_model_reports_both_metrics_on_both_paths(detseg_fixture_di
     for stats in report.values():
         assert set(stats) == expected
         assert all(torch.isfinite(torch.tensor(value)) for value in stats.values())
+
+
+def _mixed_batches() -> list[tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]]:
+    """Return three single-image ``(preds, targets)`` batches that do not score alike.
+
+    Batch quality has to *differ* for a streaming test to mean anything. An
+    untrained model is useless here: it scores 0.0 on every statistic, so any
+    subset of the batches gives the same answer as all of them and every
+    accumulation bug is invisible. These three -- a perfect instance, a
+    mask-missed instance, another perfect one -- land the aggregate strictly
+    between 0 and 1, and each batch alone gives something else.
+    """
+    good = (_prediction(_BOX, _filled_mask(_BOX)), _target(_BOX, _filled_mask(_BOX)))
+    missed_mask = _prediction(_BOX, torch.zeros((1, *_IMAGE_SIZE), dtype=torch.bool))
+    return [([good[0]], [good[1]]), ([missed_mask], [good[1]]), ([good[0]], [good[1]])]
+
+
+def test_streaming_scoring_equals_scoring_everything_at_once() -> None:
+    """Folding batches in one at a time reports what scoring them together reports.
+
+    The evaluator no longer holds every image's predictions until the end -- it
+    could not, for masks: a val2017 segmentation run would keep both paths'
+    predicted masks and the ground truth dense and simultaneously. Per-batch
+    updates bound that, and this pins the equivalence on all 24 statistics against
+    the functional one-shot entry point.
+
+    The non-vacuity assertion is the load-bearing part. With a metric reset on
+    every update -- scoring the last batch alone -- an equality against
+    zero-scoring predictions still passes, which is exactly how the first version
+    of this test failed to catch that mutation. Requiring the aggregate to sit
+    strictly between 0 and 1 makes "all the numbers are 0" unable to satisfy it.
+    """
+    batches = _mixed_batches()
+    scorer = _StreamingScorer()
+    for preds, targets in batches:
+        scorer.update(preds, targets)
+    streamed = scorer.compute()
+
+    all_preds = [pred for preds, _ in batches for pred in preds]
+    all_targets = [target for _, targets in batches for target in targets]
+    expected = evaluate_bbox_and_segm(all_preds, all_targets)
+
+    assert 0.0 < expected["segm_map"] < 1.0  # the batches genuinely disagree
+    assert set(streamed) == set(expected)
+    for key, value in expected.items():
+        assert streamed[key] == pytest.approx(value)
+
+
+def test_evaluate_feeds_every_batch_to_both_paths(detseg_fixture_dir: Path) -> None:
+    """The evaluator's loop hands each batch to each path's scorer exactly once.
+
+    The equivalence above pins the scorer; this pins the loop that drives it. A
+    dropped final batch or a path updated from the other path's predictions leaves
+    a complete, finite report behind, and on a fixture where every prediction
+    scores zero it leaves an *identical* one.
+    """
+    torch.manual_seed(0)
+    letterbox = Letterbox(_CANVAS)
+    split_dir = detseg_fixture_dir / _SPLIT
+    images, targets, label_map = load_eval_annotations(split_dir / _ANNOTATION, with_masks=True)
+    batches = list(letterboxed_batches(images[:_NUM_IMAGES], split_dir, letterbox, 1))
+    assert len(batches) == _NUM_IMAGES
+
+    seen: list[int] = []
+    real_update = coco_eval._StreamingScorer.update
+
+    def _counting_update(
+        self: coco_eval._StreamingScorer,
+        preds: list[dict[str, Tensor]],
+        target: list[dict[str, Tensor]],
+    ) -> None:
+        seen.append(len(preds))
+        real_update(self, preds, target)
+
+    evaluator = _segmentation_evaluator(label_map, letterbox)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(coco_eval._StreamingScorer, "update", _counting_update)
+        evaluator.evaluate(batches, targets, torch.device("cpu"))
+
+    assert seen == [1] * (2 * _NUM_IMAGES)  # both paths, every batch, one image each
 
 
 def test_predicted_masks_land_on_the_original_grid_with_content(detseg_fixture_dir: Path) -> None:

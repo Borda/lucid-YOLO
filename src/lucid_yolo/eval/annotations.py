@@ -19,6 +19,13 @@ W)`` bool ``masks`` tensor at the original image size, aligned row-for-row with
 ``boxes``. The default stays detection-only, so the existing callers neither
 change shape nor pay the segmentation-decode cost.
 
+With masks on, the returned ground truth is **lazy** (:class:`LazyTargets`): a
+mapping that decodes an image's masks when that image is looked up and keeps
+nothing afterwards. Eager decoding is not an option at COCO scale -- val2017's
+~36.8k instance annotations at ~0.3 MB per original-resolution bool mask is
+about 11 GB resident before the first image is even read, where the evaluator
+needs only one batch's worth alive at a time.
+
 This lives in the library rather than in a script because more than one entry point
 consumes it — the val2017 checkpoint evaluation and the synthetic-shapes regression
 producer — and a second copy of the annotation-to-target conversion would be free to
@@ -30,12 +37,14 @@ Provenance: R12 (COCO annotation format), R1 sec. 4.4. Assumptions: A9, A10.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping  # runtime import: LazyTargets subclasses it
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import torch
 from faster_coco_eval import mask as coco_mask
+from torch import Tensor  # runtime import: LazyTargets' base class subscripts it
 from torchvision.io import ImageReadMode, read_image
 
 from lucid_yolo.data.targets import Targets
@@ -43,8 +52,6 @@ from lucid_yolo.data.targets import Targets
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from pathlib import Path
-
-    from torch import Tensor
 
     from lucid_yolo.data.letterbox import Letterbox
 
@@ -227,10 +234,60 @@ def annotation_mask(segmentation: object, image_size: tuple[int, int]) -> Tensor
     return torch.from_numpy(decoded).to(torch.bool)
 
 
+class LazyTargets(Mapping[int, dict[str, Tensor]]):
+    """Ground truth that decodes an image's masks on lookup and keeps nothing after.
+
+    A drop-in for the ``dict`` the detection path returns — same keys, same target
+    dicts — differing only in *when* the work happens. That distinction is what
+    makes segmentation evaluation runnable at COCO scale: the eager mapping holds
+    every instance mask of every image at original resolution simultaneously
+    (~11 GB on val2017), while the evaluator consumes them one batch at a time and
+    the metric RLE-encodes each one on ``update``, so nothing needs to stay dense.
+
+    Lookups are not memoised. A repeated lookup re-decodes rather than growing the
+    footprint this class exists to bound; the evaluator visits each image once.
+
+    Attributes:
+        grouped: Raw COCO annotations per image id; a missing id means an image
+            with no annotations, which still gets an :func:`empty_target`.
+        sizes: Original ``(height, width)`` per image id, the grid masks decode onto.
+
+    Examples:
+        >>> polygon = {"bbox": [1.0, 2.0, 3.0, 4.0], "category_id": 5, "segmentation": [[1, 2, 4, 2, 4, 6, 1, 6]]}
+        >>> targets = LazyTargets({7: [polygon]}, {7: (8, 8), 9: (8, 8)})
+        >>> sorted(targets), tuple(targets[7]["masks"].shape)
+        ([7, 9], (1, 8, 8))
+        >>> tuple(targets[9]["masks"].shape)  # an image with no annotations
+        (0, 8, 8)
+    """
+
+    def __init__(
+        self,
+        grouped: Mapping[int, Sequence[dict[str, object]]],
+        sizes: Mapping[int, tuple[int, int]],
+    ) -> None:
+        self._grouped = grouped
+        self._sizes = sizes
+
+    def __getitem__(self, image_id: int) -> dict[str, Tensor]:
+        """Return the target of ``image_id``, decoding its masks now."""
+        size = self._sizes[image_id]
+        annotations = self._grouped.get(image_id)
+        return annotations_to_target(annotations, size) if annotations else empty_target(size)
+
+    def __iter__(self) -> Iterator[int]:
+        """Iterate the image ids, in the order the annotation file's images were sorted."""
+        return iter(self._sizes)
+
+    def __len__(self) -> int:
+        """Return the number of images, annotated or not."""
+        return len(self._sizes)
+
+
 def load_eval_annotations(
     ann_file: Path,
     with_masks: bool = False,
-) -> tuple[list[EvalImage], dict[int, dict[str, Tensor]], dict[int, int]]:
+) -> tuple[list[EvalImage], Mapping[int, dict[str, Tensor]], dict[int, int]]:
     """Parse a COCO instances file into eval images, target dicts, and the label map.
 
     Every image in the file gets a target entry, including images with no annotation,
@@ -249,8 +306,11 @@ def load_eval_annotations(
             shape they have and skip the segmentation decode entirely.
 
     Returns:
-        A triple of the image records sorted by ascending image id, the target dict per
-        image id in original coordinates, and the contiguous-label to category-id map.
+        A triple of the image records sorted by ascending image id, the per-image-id
+        ground truth in original coordinates, and the contiguous-label to category-id
+        map. The ground truth is a plain ``dict`` for the detection default and a
+        :class:`LazyTargets` when ``with_masks`` is set; both satisfy the evaluator's
+        ``Mapping`` contract.
 
     Examples:
         >>> images, targets, label_map = load_eval_annotations(ann_file)  # doctest: +SKIP
@@ -272,15 +332,15 @@ def load_eval_annotations(
         ),
         key=lambda image: image.image_id,
     )
-    sizes: dict[int, tuple[int, int] | None] = {
-        image.image_id: (image.height, image.width) if with_masks else None for image in images
-    }
-    targets: dict[int, dict[str, Tensor]] = {image.image_id: empty_target(sizes[image.image_id]) for image in images}
     grouped: dict[int, list[dict[str, object]]] = {}
     for annotation in payload["annotations"]:
         grouped.setdefault(int(annotation["image_id"]), []).append(annotation)
+    if with_masks:
+        sizes = {image.image_id: (image.height, image.width) for image in images}
+        return images, LazyTargets(grouped, sizes), label_to_category
+    targets: dict[int, dict[str, Tensor]] = {image.image_id: empty_target() for image in images}
     for image_id, image_annotations in grouped.items():
-        targets[image_id] = annotations_to_target(image_annotations, sizes[image_id])
+        targets[image_id] = annotations_to_target(image_annotations)
     return images, targets, label_to_category
 
 

@@ -304,6 +304,28 @@ class DetectionLitModule(LightningModule):
         self._anchor_cache: dict[tuple[int, int], tuple[Tensor, Tensor]] = {}
 
     @property
+    def task(self) -> str:
+        """Supervision task this module was built for, ``"detect"`` or ``"segment"``.
+
+        Read-only, and the supported way for a consumer to ask whether a loaded
+        checkpoint has a mask branch — :meth:`forward_segmentation` gates on this
+        same value, so the caller's question and the module's own behaviour cannot
+        answer differently. Reading ``hparams["task"]`` instead would be a
+        stringly-typed lookup into a bag that is only as complete as the
+        checkpoint that filled it, and it raises rather than defaulting when a
+        checkpoint predates the hyperparameter.
+
+        Returns:
+            The task string given at construction.
+
+        Examples:
+            >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4)
+            >>> module.task
+            'detect'
+        """
+        return self._task
+
+    @property
     def alpha(self) -> float:
         """One-to-many branch weight of the dual loss (the WP-035 schedule seam).
 
