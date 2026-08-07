@@ -55,22 +55,24 @@ def rasterize_polygon(ring: Tensor, height: int, width: int) -> Tensor:
 
         ```
     """
-    ys = torch.arange(height, dtype=torch.float32).view(height, 1)
-    xs = torch.arange(width, dtype=torch.float32).view(1, width)
-    inside = torch.zeros((height, width), dtype=torch.bool)
-    point_count = ring.shape[0]
-    for i in range(point_count):
-        yi = ring[i, 1]
-        yj = ring[i - 1, 1]
-        # A horizontal ray at row `ys` crosses edge (i-1 -> i) only where the edge
-        # straddles that row; `straddles` is False for horizontal edges, so the
-        # divide-by-zero below lands only on masked-out entries.
-        straddles = (yi > ys) != (yj > ys)
-        xi = ring[i, 0]
-        xj = ring[i - 1, 0]
-        x_cross = (xj - xi) * (ys - yi) / (yj - yi) + xi
-        inside = inside ^ (straddles & (xs < x_cross))
-    return inside
+    ys = torch.arange(height, dtype=torch.float32).view(1, height, 1)
+    xs = torch.arange(width, dtype=torch.float32).view(1, 1, width)
+    # Every edge at once, not one Python iteration each. The looped form cost one
+    # full height x width tensor op per vertex, on CPU, inside the training step:
+    # at a 160-px prototype grid a 64-point COCO ring took 1.65 ms, so batch 32
+    # spent most of a second per step rasterising while the GPU sat idle. Edges
+    # here are the (i-1 -> i) pairs the loop walked, produced by rolling the ring.
+    previous = ring.roll(1, dims=0)
+    yi, xi = ring[:, 1].view(-1, 1, 1), ring[:, 0].view(-1, 1, 1)
+    yj, xj = previous[:, 1].view(-1, 1, 1), previous[:, 0].view(-1, 1, 1)
+    # A horizontal ray at row `ys` crosses an edge only where the edge straddles
+    # that row; `straddles` is False for horizontal edges, so the divide-by-zero
+    # below lands only on masked-out entries.
+    straddles = (yi > ys) != (yj > ys)  # (P, height, 1)
+    x_cross = (xj - xi) * (ys - yi) / (yj - yi) + xi  # (P, height, 1)
+    crossings = straddles & (xs < x_cross)  # (P, height, width)
+    # Even-odd parity over the edges: the XOR fold the loop performed, as a sum.
+    return crossings.sum(dim=0) % 2 == 1
 
 
 def rasterize_polygons(polygons: list[Tensor], height: int, width: int) -> Tensor:

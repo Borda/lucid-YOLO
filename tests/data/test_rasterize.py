@@ -11,6 +11,9 @@ the function copy-paste actually calls.
 
 from __future__ import annotations
 
+import math
+
+import pytest
 import torch
 
 from lucid_yolo.data import mixup
@@ -67,6 +70,50 @@ def test_triangle_matches_the_analytic_half_plane_lattice() -> None:
     # 45 lattice centres against a continuous area of 50: pixel-centre sampling of
     # a diagonal edge is short by O(perimeter), which is the convention, not a bug.
     assert int(mask.sum()) == 45
+
+
+def _looped_rasterize_polygon(ring: torch.Tensor, height: int, width: int) -> torch.Tensor:
+    """The per-vertex reference the vectorised crossing test replaced.
+
+    Kept as an oracle rather than deleted: it is the form every segmentation
+    target and every copy-paste mask was produced by until the vectorisation, so
+    it is what "the output did not change" has to be measured against.
+    """
+    ys = torch.arange(height, dtype=torch.float32).view(height, 1)
+    xs = torch.arange(width, dtype=torch.float32).view(1, width)
+    inside = torch.zeros((height, width), dtype=torch.bool)
+    for i in range(ring.shape[0]):
+        yi, yj = ring[i, 1], ring[i - 1, 1]
+        straddles = (yi > ys) != (yj > ys)
+        xi, xj = ring[i, 0], ring[i - 1, 0]
+        x_cross = (xj - xi) * (ys - yi) / (yj - yi) + xi
+        inside = inside ^ (straddles & (xs < x_cross))
+    return inside
+
+
+@pytest.mark.parametrize("vertices", [3, 4, 17, 64])
+def test_vectorised_crossing_test_matches_the_per_vertex_loop(vertices: int) -> None:
+    """All edges at once produces the mask the per-vertex loop produced, exactly.
+
+    The loop cost one full ``height x width`` tensor op per vertex, on CPU, inside
+    the training step: a 64-point ring on a 160-px prototype grid took 1.65 ms, so
+    a batch of 32 spent most of a second per step rasterising while the GPU idled.
+    Doing every edge in one shot is a speed change only if the parity is identical
+    — the fold moved from an XOR chain to a sum modulo two, and horizontal edges
+    still divide by zero before being masked out, so the ``NaN`` handling has to
+    agree too.
+
+    Vertex counts span a triangle up to a ring of COCO-like complexity, and the
+    radius is irrational so no vertex or crossing lands on a pixel centre, where
+    the two forms could agree by rounding rather than by construction.
+    """
+    angles = torch.arange(vertices, dtype=torch.float32) * (2 * math.pi / vertices)
+    ring = torch.stack([7.3 + 5.1 * torch.cos(angles), 6.9 + 4.7 * torch.sin(angles)], dim=-1)
+
+    vectorised = rasterize_polygon(ring, 16, 16)
+
+    assert torch.equal(vectorised, _looped_rasterize_polygon(ring, 16, 16))
+    assert bool(vectorised.any())  # not vacuously equal on two empty masks
 
 
 def test_batch_helper_stacks_one_mask_per_ring() -> None:
