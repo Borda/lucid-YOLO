@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lucid-yolo"
-version = "0.1.0"
+# Single source of truth: src/lucid_yolo/__init__.py. setuptools reads the attribute
+# statically (a plain string literal needs no import), so building never imports torch.
+dynamic = ["version"]
 description = "Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, and oriented-detection methods described in the YOLO26 paper (arXiv:2606.03748)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -53,6 +55,9 @@ lucid-download = "lucid_yolo.data.download:main"
 
 [project.urls]
 Homepage = "https://github.com/Borda/lit-YOLOs"
+
+[tool.setuptools.dynamic]
+version = { attr = "lucid_yolo.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
