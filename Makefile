@@ -8,7 +8,7 @@ MINOR     ?=
 TASK      ?= det
 DATA_ROOT ?=
 
-.PHONY: setup lint test precommit gate golden freeze-goldens overfit shapes check-data build clean
+.PHONY: setup lint test test-gpu precommit gate gate-gpu golden golden-gpu freeze-goldens overfit shapes check-data build clean
 
 setup:
 	$(UV) venv --python 3.11 $(VENV)
@@ -35,6 +35,27 @@ golden:
 	@if [ -f scripts/check_goldens.py ]; then $(PY) scripts/check_goldens.py; else echo "golden harness not yet installed (WP-005) — skipping"; fi
 
 gate: precommit test golden
+
+# The half `make gate` cannot run: tests marked gpu or data, which need an
+# accelerator and a generated dataset. Excluded from the offline gate by design,
+# not by accident — but nothing ran them on a schedule either, which is how the
+# frozen detection overfit golden drifted for six days while WP-078 changed the
+# objective underneath it. This target is that schedule.
+test-gpu:
+	$(PY) -m pytest -m "gpu or data" tests
+
+# Recompute every golden including the goldens/gpu/ subtree. These producers
+# retrain models rather than reading a file: overfit_micro_det and
+# overfit_micro_seg are minutes each, shapes_regression_det trains on 1800
+# generated scenes and is the long pole.
+golden-gpu:
+	$(PY) scripts/check_goldens.py --include-gpu
+
+# Full accelerator gate. Runs the overfit pipeline twice on purpose — the marked
+# tests assert the WP-040/087 acceptance thresholds, the goldens assert the frozen
+# values, and it was the second of those that silently went stale. Run before any
+# release tier and after any change to the loss, the assignment or the decode.
+gate-gpu: test-gpu golden-gpu
 
 # Release-time snapshot of the current goldens (release WPs only, D10).
 freeze-goldens:
