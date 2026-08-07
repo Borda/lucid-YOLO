@@ -199,8 +199,14 @@ def main(argv: list[str] | None = None) -> int:
         otherwise.
 
     Examples:
+        The verdict lines go to stdout and name the changelog by absolute path,
+        so the example captures them and asserts the exit code alone.
+
         ```pycon
-        >>> main(["--tag", "v1.0.0", "--gate-cmd", "true"])
+        >>> import contextlib, io
+        >>> with contextlib.redirect_stdout(io.StringIO()):
+        ...     status = main(["--tag", "v1.0.0", "--gate-cmd", "true"])
+        >>> status
         1
 
         ```

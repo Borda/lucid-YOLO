@@ -19,10 +19,12 @@ setup:
 lint: precommit
 
 # Offline unit suite: no network, no dataset, no GPU (gpu/data marks excluded).
-# `--doctest-modules src` runs the Examples sections as tests: every public function
-# is required to carry one, so leaving them uncollected let four rot unnoticed.
+# `--doctest-modules src scripts` runs the Examples sections as tests: every public
+# function is required to carry one, so leaving them uncollected let four rot in src
+# and three more in scripts. Coverage stays scoped to the lucid_yolo package: the
+# scripts are entry points driving it, not the surface under measurement.
 test:
-	@$(PY) -m pytest -m "not gpu and not data" --doctest-modules --cov=lucid_yolo --cov-report=term src tests; \
+	@$(PY) -m pytest -m "not gpu and not data" --doctest-modules --cov=lucid_yolo --cov-report=term src scripts tests; \
 	status=$$?; if [ $$status -eq 5 ]; then echo "no tests collected yet — passing (pre WP-002)"; exit 0; else exit $$status; fi
 
 precommit:

@@ -374,7 +374,7 @@ def shapes_regression_det() -> dict[str, float]:
 
     Examples:
         >>> metrics = shapes_regression_det()  # doctest: +SKIP
-        >>> metrics['num_val_images']
+        >>> metrics['num_val_images']  # doctest: +SKIP
         200
     """
     return run_regression()
@@ -418,7 +418,13 @@ def main(argv: list[str] | None = None) -> int:
         rejects the request.
 
     Examples:
-        >>> main(['--task', 'seg'])
+        The rejection reason is printed rather than returned, so the example
+        captures stdout and asserts the exit code.
+
+        >>> import contextlib, io
+        >>> with contextlib.redirect_stdout(io.StringIO()):
+        ...     status = main(['--task', 'seg'])
+        >>> status
         1
     """
     parser = argparse.ArgumentParser(description="Train and evaluate held-out synthetic shapes.")
