@@ -54,7 +54,9 @@ __all__ = [
     "Detector",
     "SegmentOutput",
     "Segmenter",
+    "build_detection_stages",
     "build_detector",
+    "build_segmentation_stages",
     "build_segmenter",
     "count_flops",
     "count_params",
@@ -65,6 +67,99 @@ _DEFAULT_IMG_SIZE = 640
 
 #: Default COCO detection class count.
 _DEFAULT_NUM_CLASSES = 80
+
+
+def build_detection_stages(
+    depth: float,
+    width: float,
+    max_channels: int,
+    num_classes: int,
+    num_coeffs: int | None = None,
+) -> tuple[DetectionBackbone, DetectionNeck, DualDetectionHead]:
+    """Construct the three detection stages from raw compound-scaling numbers.
+
+    The single construction site for ``backbone -> neck -> head``. It exists
+    because the model is composed in two places — :class:`Detector` (what the R1
+    Table 7 fidelity gate measures) and
+    :class:`~lucid_yolo.ptl.module.DetectionLitModule` (what training actually
+    runs) — and a duplicated composition lets the two drift apart while the gate
+    keeps certifying the copy nobody trains.
+
+    It takes the **raw** multipliers rather than a variant name because the
+    Lightning module is configured with raw numbers from YAML (ADR-001, no config
+    object); :class:`Detector` resolves its variant through
+    :func:`~lucid_yolo.models.registry.scale_spec` and passes the numbers through.
+
+    The stages are returned rather than wrapped in a container: each caller
+    assigns them to the attribute names it already used, so no state-dict key
+    moves and existing checkpoints keep loading.
+
+    Args:
+        depth: Compound-scaling depth multiplier.
+        width: Compound-scaling width multiplier.
+        max_channels: Channel-count ceiling applied after width scaling.
+        num_classes: Number of object classes both head branches predict.
+        num_coeffs: Optional mask-coefficient width ``K`` (A14) enabling the
+            head's coefficient stems. ``None`` (the default) builds the
+            detection-only head, whose parameters and state-dict keys are exactly
+            those of the pre-segmentation head.
+
+    Returns:
+        The ``(backbone, neck, head)`` triple, already wired to each other's
+        channel counts.
+
+    Examples:
+        >>> backbone, neck, head = build_detection_stages(0.34, 0.25, 1024, num_classes=4)
+        >>> backbone.channels, neck.channels
+        ((128, 128, 256), (64, 128, 256))
+        >>> head.num_classes, head.o2o.coeff_stems is None  # detection-only by default
+        (4, True)
+    """
+    backbone = DetectionBackbone(depth=depth, width=width, max_channels=max_channels)
+    neck = DetectionNeck(backbone.channels, depth=depth, width=width, max_channels=max_channels)
+    head = DualDetectionHead(neck.channels, num_classes=num_classes, num_coeffs=num_coeffs)
+    return backbone, neck, head
+
+
+def build_segmentation_stages(
+    neck_channels: tuple[int, int, int],
+    num_classes: int,
+    num_coeffs: int,
+) -> tuple[ProtoFusion, ProtoNet, SemanticAux]:
+    """Construct the three segmentation branches that sit on the neck's features.
+
+    The mask-side counterpart of :func:`build_detection_stages`, and the single
+    construction site for the WP-047…WP-050 branches, so :class:`Segmenter` and
+    :class:`~lucid_yolo.ptl.module.DetectionLitModule` cannot disagree about what
+    the segmentation model is.
+
+    ``num_coeffs`` is required, not defaulted: Eq. 7 contracts the head's
+    coefficients against the prototypes one-for-one, so the count must come from
+    the same place that built the head rather than being re-defaulted here.
+
+    The fused-feature width is read off the constructed
+    :class:`~lucid_yolo.models.heads.ProtoFusion` rather than recomputed, which is
+    what keeps the prototype and auxiliary branches attached to the same feature.
+
+    Args:
+        neck_channels: The neck's per-level output channels, ``(P3, P4, P5)``.
+        num_classes: Number of classes the auxiliary semantic branch predicts.
+        num_coeffs: Mask-coefficient width ``K`` (A14), also the prototype count.
+
+    Returns:
+        The ``(proto_fusion, protonet, semantic)`` triple.
+
+    Examples:
+        >>> fusion, protonet, semantic = build_segmentation_stages((64, 128, 256), 4, 32)
+        >>> protonet.num_prototypes
+        32
+        >>> semantic.classifier.in_channels == fusion.out_channels
+        True
+    """
+    proto_fusion = ProtoFusion(neck_channels)
+    protonet = ProtoNet(proto_fusion.out_channels, num_prototypes=num_coeffs)
+    semantic = SemanticAux(proto_fusion.out_channels, num_classes)
+    return proto_fusion, protonet, semantic
 
 
 class Detector(nn.Module):
@@ -94,9 +189,9 @@ class Detector(nn.Module):
         spec = scale_spec(variant)
         self.variant = variant
         self.num_classes = num_classes
-        self.backbone = DetectionBackbone(spec.depth, spec.width, spec.max_channels)
-        self.neck = DetectionNeck(self.backbone.channels, spec.depth, spec.width, spec.max_channels)
-        self.head = DualDetectionHead(self.neck.channels, num_classes)
+        self.backbone, self.neck, self.head = build_detection_stages(
+            spec.depth, spec.width, spec.max_channels, num_classes
+        )
 
     def forward(self, image: Tensor) -> DualHeadOutput:
         """Run the backbone, neck, and dual head over an image batch.
@@ -269,12 +364,12 @@ class Segmenter(nn.Module):
         self.variant = variant
         self.num_classes = num_classes
         self.num_coeffs = num_coeffs
-        self.backbone = DetectionBackbone(spec.depth, spec.width, spec.max_channels)
-        self.neck = DetectionNeck(self.backbone.channels, spec.depth, spec.width, spec.max_channels)
-        self.head = DualDetectionHead(self.neck.channels, num_classes, num_coeffs=num_coeffs)
-        self.proto_fusion = ProtoFusion(self.neck.channels)
-        self.protonet = ProtoNet(self.proto_fusion.out_channels, num_prototypes=num_coeffs)
-        self.semantic = SemanticAux(self.proto_fusion.out_channels, num_classes)
+        self.backbone, self.neck, self.head = build_detection_stages(
+            spec.depth, spec.width, spec.max_channels, num_classes, num_coeffs=num_coeffs
+        )
+        self.proto_fusion, self.protonet, self.semantic = build_segmentation_stages(
+            self.neck.channels, num_classes, num_coeffs
+        )
 
     def forward(self, image: Tensor) -> SegmentOutput:
         """Run the backbone, neck, dual head, prototype stack, and auxiliary branch.

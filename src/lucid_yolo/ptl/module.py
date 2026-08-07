@@ -77,9 +77,8 @@ from lucid_yolo.decode.common import BOX_CORNERS, SCORE_COLUMN
 from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
 from lucid_yolo.losses.progressive import ProgressiveLossSchedule
-from lucid_yolo.models.backbone import DetectionBackbone
-from lucid_yolo.models.heads.detect import DualDetectionHead, DualHeadOutput, decode_ltrb
-from lucid_yolo.models.neck import DetectionNeck
+from lucid_yolo.models.build import build_detection_stages, build_segmentation_stages
+from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS, DualHeadOutput, decode_ltrb
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
 
@@ -155,8 +154,11 @@ class DetectionLitModule(LightningModule):
 
     Composes :class:`~lucid_yolo.models.backbone.DetectionBackbone`,
     :class:`~lucid_yolo.models.neck.DetectionNeck`, and
-    :class:`~lucid_yolo.models.heads.detect.DualDetectionHead` (built from the same
-    compound-scaling multipliers), scores their dense predictions with
+    :class:`~lucid_yolo.models.heads.detect.DualDetectionHead` through
+    :func:`~lucid_yolo.models.build.build_detection_stages` — the same factory
+    :class:`~lucid_yolo.models.build.Detector` uses, so the model the fidelity
+    gate measures and the model training runs cannot drift apart (WP-087). It
+    scores their dense predictions with
     :class:`~lucid_yolo.losses.dual_loss.DualBranchLoss`, and optimizes under
     Lightning automatic optimization (D4) with
     :class:`~lucid_yolo.optim.musgd.MuSGD`. See the module docstring for the A8
@@ -169,7 +171,11 @@ class DetectionLitModule(LightningModule):
         max_channels: Channel cap applied before the width multiply.
         num_classes: Number of object classes the head predicts.
         task: Supervision task; one of ``"detect"`` (active), ``"segment"`` or
-            ``"obb"`` (accepted, inert extra-loss stub). Defaults to ``"detect"``.
+            ``"obb"`` (accepted, inert extra-loss stub). ``"segment"``
+            additionally builds the head's mask-coefficient stems and the three
+            :func:`~lucid_yolo.models.build.build_segmentation_stages` branches
+            as ``proto_fusion``/``protonet``/``semantic``; they are constructed
+            but not yet supervised (WP-087 part B). Defaults to ``"detect"``.
         lr: Base learning rate for MuSGD (``lr0``; the A8 schedule decays from
             it). Defaults to ``0.01``.
         lrf: Final LR fraction of the A8 linear decay — the LR ends at
@@ -242,9 +248,18 @@ class DetectionLitModule(LightningModule):
         self._w_muon = w_muon
         self._w_sgd = w_sgd
 
-        self.backbone = DetectionBackbone(depth=depth, width=width, max_channels=max_channels)
-        self.neck = DetectionNeck(self.backbone.channels, depth=depth, width=width, max_channels=max_channels)
-        self.head = DualDetectionHead(self.neck.channels, num_classes=num_classes)
+        #: Mask coefficients are built only for the segmentation task, so a
+        #: ``"detect"`` module's head — and therefore its state dict — is exactly
+        #: what it was before the segmentation branches existed (the Det-A
+        #: checkpoint still loads).
+        num_coeffs = DEFAULT_NUM_COEFFS if task == "segment" else None
+        self.backbone, self.neck, self.head = build_detection_stages(
+            depth, width, max_channels, num_classes, num_coeffs=num_coeffs
+        )
+        if task == "segment":
+            self.proto_fusion, self.protonet, self.semantic = build_segmentation_stages(
+                self.neck.channels, num_classes, DEFAULT_NUM_COEFFS
+            )
         self.loss = DualBranchLoss(box_gain=box_gain, cls_gain=cls_gain, l1_gain=l1_gain, alpha=alpha)
         self._loss_schedule = ProgressiveLossSchedule(alpha_init=alpha_init, alpha_final=alpha_final)
 

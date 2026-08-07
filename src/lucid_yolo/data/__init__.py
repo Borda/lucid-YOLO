@@ -10,6 +10,7 @@ from lucid_yolo.data.download import download_coco
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.mixup import CopyPaste, Mixup
 from lucid_yolo.data.mosaic import MosaicAssembly
+from lucid_yolo.data.rasterize import rasterize_polygon, rasterize_polygons
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.data.transforms import (
     Compose,
@@ -39,6 +40,8 @@ __all__ = [
     "build_scale_policy",
     "download_coco",
     "hsv_to_rgb",
+    "rasterize_polygon",
+    "rasterize_polygons",
     "rgb_to_hsv",
     "verify_coco_root",
 ]

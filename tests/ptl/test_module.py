@@ -199,10 +199,23 @@ def test_task_extra_loss_is_inert_zero(task: str) -> None:
 
 
 def test_segment_task_trains_identically_to_detect() -> None:
-    """With identical weights a segment module yields the same loss as a detect module."""
+    """The segment module's extra branches leave the detection objective untouched.
+
+    Since WP-087 a ``segment`` module additionally carries the head's mask
+    coefficient stems and the three prototype/auxiliary branches, so its state
+    dict is a strict superset of the ``detect`` one — hence ``strict=False``.
+    Those branches are constructed but not yet supervised, so sharing every
+    detection weight must still reproduce the detection loss bit for bit; a
+    stray coefficient or prototype term leaking into the total would break here.
+    """
     detect = _tiny_module(task="detect")
     segment = _tiny_module(task="segment")
-    segment.load_state_dict(detect.state_dict())
+    missing, unexpected = segment.load_state_dict(detect.state_dict(), strict=False)
+    assert not unexpected
+    assert all(
+        key.startswith(("head.o2m.coeff", "head.o2o.coeff", "proto_fusion.", "protonet.", "semantic."))
+        for key in missing
+    )
     batch = _synthetic_batch()
     detect.log = MagicMock()  # type: ignore[method-assign]
     segment.log = MagicMock()  # type: ignore[method-assign]

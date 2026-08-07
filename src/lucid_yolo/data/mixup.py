@@ -20,7 +20,9 @@ per-image geometric transforms.
 :class:`CopyPaste` (R9-lineage, [R1] Table S3)
     With probability ``p`` **per candidate instance**, polygon-carrying instances
     of image ``b`` are pasted onto image ``a``: the source polygon is rasterised
-    to a pixel mask (even-odd point-in-polygon rule, :func:`_rasterize_polygon`),
+    to a pixel mask (even-odd point-in-polygon rule,
+    :func:`~lucid_yolo.data.rasterize.rasterize_polygon`, imported here under its
+    former private name so this module's call sites and tests are unchanged),
     the masked pixels are copied, and the instance's box/label/polygon are appended
     to ``a``'s targets. Instances without a polygon are never pasted — the mask is
     mandatory — so the destination targets must themselves carry polygons (or be
@@ -49,6 +51,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
+from lucid_yolo.data.rasterize import rasterize_polygon as _rasterize_polygon
 from lucid_yolo.data.targets import Targets
 
 __all__ = ["CopyPaste", "Mixup"]
@@ -81,56 +84,6 @@ def _uniform(low: float, high: float, generator: torch.Generator | None) -> floa
     if high <= low:
         return float(low)
     return float(torch.empty((), dtype=torch.float64).uniform_(low, high, generator=generator).item())
-
-
-def _rasterize_polygon(ring: Tensor, height: int, width: int) -> Tensor:
-    """Rasterise a polygon ring to a boolean pixel mask by the even-odd rule.
-
-    Each pixel is tested at its integer-coordinate centre ``(x, y)`` with the
-    classic ray-casting (PNPOLY) even-odd crossing test, vectorised over the whole
-    ``height x width`` grid: for every polygon edge, pixels whose horizontal ray to
-    ``-inf`` crosses that edge flip their inside/outside parity. The test is
-    ``O(P * H * W)`` in the ring's point count ``P`` — acceptable at training-time
-    resolutions (e.g. 640 px) and kept deliberately simple over a scanline sweep.
-
-    Boundary pixels (a centre lying exactly on an edge) follow PNPOLY's half-open
-    convention: the left/top edges count as inside, the right/bottom as outside, so
-    an axis-aligned rectangle rasterises to a clean half-open pixel block.
-
-    Args:
-        ring: ``(P, 2)`` float polygon points ``(x, y)``; ``P >= 3`` for any area.
-        height: Mask height in pixels.
-        width: Mask width in pixels.
-
-    Returns:
-        ``(height, width)`` boolean mask, ``True`` where a pixel centre is inside
-        the polygon.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> square = torch.tensor([[1.0, 1.0], [4.0, 1.0], [4.0, 4.0], [1.0, 4.0]])
-        >>> _rasterize_polygon(square, 6, 6).sum().item()
-        9
-
-        ```
-    """
-    ys = torch.arange(height, dtype=torch.float32).view(height, 1)
-    xs = torch.arange(width, dtype=torch.float32).view(1, width)
-    inside = torch.zeros((height, width), dtype=torch.bool)
-    point_count = ring.shape[0]
-    for i in range(point_count):
-        yi = ring[i, 1]
-        yj = ring[i - 1, 1]
-        # A horizontal ray at row `ys` crosses edge (i-1 -> i) only where the edge
-        # straddles that row; `straddles` is False for horizontal edges, so the
-        # divide-by-zero below lands only on masked-out entries.
-        straddles = (yi > ys) != (yj > ys)
-        xi = ring[i, 0]
-        xj = ring[i - 1, 0]
-        x_cross = (xj - xi) * (ys - yi) / (yj - yi) + xi
-        inside = inside ^ (straddles & (xs < x_cross))
-    return inside
 
 
 class Mixup:
