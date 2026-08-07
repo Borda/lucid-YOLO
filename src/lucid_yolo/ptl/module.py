@@ -29,12 +29,29 @@ Forward and loss wiring:
     logged.
 
 Task conditioning:
-    ``task`` selects the active supervision. ``"detect"`` is fully wired here;
-    ``"segment"`` and ``"obb"`` are accepted so their configs parse, but their
-    extra-loss contribution flows through :meth:`DetectionLitModule._task_extra_loss`,
-    an **inert stub** returning a zero scalar. That method is the seam the Phase 7
-    (segmentation) and Phase 8 (oriented-box) work packages fill; until then all
-    three tasks train identically on the detection objective.
+    ``task`` selects the active supervision, and every task's extra contribution
+    flows through :meth:`DetectionLitModule._task_extra_loss`. ``"detect"`` adds
+    nothing (a zero scalar, so the total is exactly the dual detection loss) and
+    ``"obb"`` keeps that inert stub until Phase 8 fills it.
+
+    ``"segment"`` (WP-087) adds ``mask_gain * mask + semantic_gain * semantic``
+    (A38). :meth:`DetectionLitModule.forward_segmentation` produces the prototype
+    maps and auxiliary logits alongside the detection output;
+    :mod:`lucid_yolo.ptl.seg_targets` rasterizes the batch's polygons once, onto
+    the prototype grid read off the prediction itself; the assembled Eq. 7 masks
+    of the positives are scored by
+    :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` and the pooled
+    per-class union by :func:`~lucid_yolo.losses.semantic_loss.semantic_aux_loss`.
+
+    The positives are **not** re-assigned: :class:`DualLossOutput` carries the two
+    :class:`~lucid_yolo.assign.tal.AssignResult` values the box terms were scored
+    against, and the mask term gathers its targets by those. A second assignment
+    would be a second selection path, free to pair an anchor's mask with a
+    different instance than its box — a defect no loss value reveals. Both
+    branches' coefficients are supervised, each against its own assignment and
+    weighted by the same ``alpha`` split :class:`DualBranchLoss` applies to the
+    box terms, because the one-to-one coefficients are the ones the segmentation
+    decode reads at inference.
 
 Learning-rate schedule (A8, WP-072):
     :meth:`DetectionLitModule.configure_optimizers` pairs :class:`MuSGD` with a
@@ -76,15 +93,20 @@ from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.decode.common import BOX_CORNERS, SCORE_COLUMN
 from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
+from lucid_yolo.losses.mask_loss import instance_mask_loss
 from lucid_yolo.losses.progressive import ProgressiveLossSchedule
-from lucid_yolo.models.build import build_detection_stages, build_segmentation_stages
+from lucid_yolo.losses.semantic_loss import semantic_aux_loss
+from lucid_yolo.models.build import SegmentOutput, build_detection_stages, build_segmentation_stages
 from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS, DualHeadOutput, decode_ltrb
+from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
+from lucid_yolo.ptl.seg_targets import instance_mask_targets, scale_boxes_to_grid, semantic_target
 
 if TYPE_CHECKING:
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
 
+    from lucid_yolo.assign.tal import AssignResult
     from lucid_yolo.data.targets import Targets
 
 __all__ = ["DetectionLitModule", "pad_targets"]
@@ -170,12 +192,12 @@ class DetectionLitModule(LightningModule):
         width: Width multiplier scaling channel counts.
         max_channels: Channel cap applied before the width multiply.
         num_classes: Number of object classes the head predicts.
-        task: Supervision task; one of ``"detect"`` (active), ``"segment"`` or
-            ``"obb"`` (accepted, inert extra-loss stub). ``"segment"``
-            additionally builds the head's mask-coefficient stems and the three
-            :func:`~lucid_yolo.models.build.build_segmentation_stages` branches
-            as ``proto_fusion``/``protonet``/``semantic``; they are constructed
-            but not yet supervised (WP-087 part B). Defaults to ``"detect"``.
+        task: Supervision task; one of ``"detect"``, ``"segment"`` (both active)
+            or ``"obb"`` (accepted, inert extra-loss stub until Phase 8).
+            ``"segment"`` additionally builds the head's mask-coefficient stems
+            and the three :func:`~lucid_yolo.models.build.build_segmentation_stages`
+            branches as ``proto_fusion``/``protonet``/``semantic``, and supervises
+            them with the two terms below. Defaults to ``"detect"``.
         lr: Base learning rate for MuSGD (``lr0``; the A8 schedule decays from
             it). Defaults to ``0.01``.
         lrf: Final LR fraction of the A8 linear decay — the LR ends at
@@ -198,6 +220,10 @@ class DetectionLitModule(LightningModule):
             first epoch (branch weights ``(0.8, 0.2)``). Defaults to ``0.8``.
         alpha_final: One-to-many branch weight the schedule ramps to on the last
             epoch (branch weights ``(0.1, 0.9)``). Defaults to ``0.1``.
+        mask_gain: Weight on the instance-mask term under ``task="segment"``,
+            ignored otherwise (A38). Defaults to ``2.5``.
+        semantic_gain: Weight on the auxiliary semantic term under
+            ``task="segment"``, ignored otherwise (A38). Defaults to ``0.5``.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``.
@@ -234,12 +260,16 @@ class DetectionLitModule(LightningModule):
         alpha: float = 0.5,
         alpha_init: float = 0.8,
         alpha_final: float = 0.1,
+        mask_gain: float = 2.5,
+        semantic_gain: float = 0.5,
     ) -> None:
         super().__init__()
         if task not in _TASKS:
             raise ValueError(f"task must be one of {_TASKS}, got {task!r}")
         self.save_hyperparameters()
         self._task = task
+        self._mask_gain: float = mask_gain
+        self._semantic_gain: float = semantic_gain
         self._lr = lr
         self._lrf = lrf
         self._warmup_epochs = warmup_epochs
@@ -335,6 +365,54 @@ class DetectionLitModule(LightningModule):
             4
         """
         return cast("DualHeadOutput", self.head(self.neck(self.backbone(images))))
+
+    def forward_segmentation(self, images: Tensor) -> SegmentOutput:
+        """Run the detection **and** mask branches over an image batch (WP-087).
+
+        :meth:`forward` returns the detection head's output alone, because that is
+        what every detection consumer — the E2E decode, the mAP metric, the export
+        path — asks for. Segmentation needs the prototype maps and the auxiliary
+        logits from the *same* neck features, so this is the second entry point,
+        and it is the module's only composition of the mask side: the training
+        step and the overfit gate both call it rather than re-running
+        ``backbone -> neck -> proto_fusion -> protonet`` themselves, which is how
+        the two would drift apart.
+
+        The auxiliary semantic branch is training-only (A17) and returns ``None``
+        in eval mode; the prototypes are produced in both modes.
+
+        Args:
+            images: Input batch of shape ``(B, 3, H, W)`` with ``H`` and ``W``
+                divisible by 32.
+
+        Returns:
+            A :class:`~lucid_yolo.models.build.SegmentOutput` holding the dual
+            head's dense predictions (including both branches' mask
+            coefficients), the raw prototype maps, and the auxiliary logits.
+
+        Raises:
+            ValueError: If this module's task is not ``"segment"`` — the mask
+                branches are only built for that task, so any other task has no
+                prototypes to return.
+
+        Examples:
+            >>> import torch
+            >>> module = DetectionLitModule(
+            ...     depth=0.34, width=0.25, max_channels=256, num_classes=4, task="segment"
+            ... ).eval()
+            >>> with torch.no_grad():
+            ...     out = module.forward_segmentation(torch.zeros(1, 3, 64, 64))
+            >>> out.prototypes.shape  # twice the P3 grid (A15): 64 / 8 * 2
+            torch.Size([1, 32, 16, 16])
+            >>> out.detect.o2o_coeff.shape[-1], out.semantic is None  # aux is training-only (A17)
+            (32, True)
+        """
+        if self._task != "segment":
+            raise ValueError(f"forward_segmentation requires task='segment'; this module's task is {self._task!r}")
+        features: tuple[Tensor, Tensor, Tensor] = self.neck(self.backbone(images))
+        detect = cast("DualHeadOutput", self.head(features))
+        fused: Tensor = self.proto_fusion(features)
+        return SegmentOutput(detect=detect, prototypes=self.protonet(fused), semantic=self.semantic(fused))
 
     def training_step(self, batch: tuple[Tensor, list[Targets]], batch_idx: int) -> Tensor:
         """Run one training step under automatic optimization (D4).
@@ -440,7 +518,8 @@ class DetectionLitModule(LightningModule):
             decode from the same forward instead of running a second one).
         """
         images, targets = batch
-        head_out = self(images)
+        seg_out = self.forward_segmentation(images) if self._task == "segment" else None
+        head_out = self(images) if seg_out is None else seg_out.detect
         anchor_points, strides = self._anchor_grid(images.shape[-2], images.shape[-1], images.device)
         o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)
         o2o_boxes = decode_ltrb(head_out.o2o_box, anchor_points, strides)
@@ -459,27 +538,142 @@ class DetectionLitModule(LightningModule):
             gt_mask,
             strides=strides,
         )
-        total = out.total + self._task_extra_loss(head_out, targets)
+        image_size = (int(images.shape[-2]), int(images.shape[-1]))
+        total = out.total + self._task_extra_loss(seg_out, targets, out, gt_boxes, image_size, stage)
         self._log_loss(out, total, stage, images.shape[0])
         return total, head_out
 
-    def _task_extra_loss(self, head_out: DualHeadOutput, targets: list[Targets]) -> Tensor:
-        """Return the task-conditional extra loss; an inert zero for detection.
+    def _task_extra_loss(
+        self,
+        seg_out: SegmentOutput | None,
+        targets: list[Targets],
+        out: DualLossOutput,
+        gt_boxes: Tensor,
+        image_size: tuple[int, int],
+        stage: str,
+    ) -> Tensor:
+        """Return the task-conditional extra loss: segmentation terms, else zero.
 
-        This is the seam Phase 7 (segmentation mask loss) and Phase 8 (oriented-box
-        angle loss) fill. For ``"detect"`` — and, until those phases land, for
-        ``"segment"``/``"obb"`` too — it contributes a zero scalar on the
-        prediction device so the total is exactly the dual detection loss.
+        For ``"segment"`` this is ``mask_gain * mask + semantic_gain * semantic``
+        (A38), with both pre-gain terms logged. For ``"detect"`` and ``"obb"``
+        ``seg_out`` is ``None`` and the contribution is a zero scalar, so the total
+        is exactly the dual detection loss — ``"obb"`` keeps the WP-034 stub until
+        Phase 8 fills it.
 
         Args:
-            head_out: The dense head predictions (used only for device/dtype here).
-            targets: The batch targets (unused by the detection stub).
+            seg_out: The segmentation forward output, or ``None`` for a task with
+                no mask branches.
+            targets: The batch targets, supplying the polygons and class ids.
+            out: The dual-branch loss output, read for its ``alpha`` and — the
+                point of the WP-087 plumbing — for the two assignments the box
+                terms were scored against.
+            gt_boxes: The ``(B, N, 4)`` padded ground-truth boxes in input pixels.
+            image_size: The batch's ``(height, width)`` in input pixels.
+            stage: Metric prefix (``"train"``/``"val"``) for the logged terms.
 
         Returns:
-            A zero scalar tensor matching the head output's device and dtype.
+            A scalar tensor on the prediction device: the gain-weighted sum for
+            ``"segment"``, a zero otherwise.
         """
-        del targets  # inert stub: no extra supervision for the detection task
-        return torch.zeros((), device=head_out.o2m_cls.device, dtype=head_out.o2m_cls.dtype)
+        if seg_out is None:
+            del targets, gt_boxes, image_size, stage  # inert: no extra supervision for detection
+            return torch.zeros_like(out.total)
+        mask_term, semantic_term = self._segment_terms(seg_out, targets, out, gt_boxes, image_size)
+        self.log(f"{stage}/mask", mask_term, batch_size=len(targets))
+        self.log(f"{stage}/semantic", semantic_term, batch_size=len(targets))
+        return self._mask_gain * mask_term + self._semantic_gain * semantic_term
+
+    def _segment_terms(
+        self,
+        seg_out: SegmentOutput,
+        targets: list[Targets],
+        out: DualLossOutput,
+        gt_boxes: Tensor,
+        image_size: tuple[int, int],
+    ) -> tuple[Tensor, Tensor]:
+        """Return the pre-gain ``(mask, semantic)`` terms for a segmentation batch.
+
+        The instance masks are rasterized **once** per batch, on the prototype grid
+        read off ``seg_out.prototypes``, and feed both terms (the semantic map is
+        pooled down from them). The mask term mirrors
+        :class:`~lucid_yolo.losses.dual_loss.DualBranchLoss`'s own composition —
+        ``alpha * o2m + (1 - alpha) * o2o``, each branch against its own assignment
+        — so the coefficient stem of the branch that survives into deployment (the
+        one-to-one branch, the only one the segmentation decode reads) is trained,
+        and the WP-035 ramp moves the mask supervision with the box supervision
+        rather than against it.
+        """
+        prototypes = seg_out.prototypes
+        proto_grid = (int(prototypes.shape[-2]), int(prototypes.shape[-1]))
+        masks = [instance_mask_targets(target, image_size, proto_grid).to(prototypes.device) for target in targets]
+        grid_boxes = scale_boxes_to_grid(gt_boxes, image_size, proto_grid)
+        o2m_coeff, o2o_coeff = seg_out.detect.o2m_coeff, seg_out.detect.o2o_coeff
+        assert o2m_coeff is not None  # a "segment" module always builds both coefficient stems
+        assert o2o_coeff is not None
+        o2m_mask = self._branch_mask_loss(prototypes, o2m_coeff, out.o2m_assign, masks, grid_boxes)
+        o2o_mask = self._branch_mask_loss(prototypes, o2o_coeff, out.o2o_assign, masks, grid_boxes)
+        mask_term = out.alpha * o2m_mask + (1.0 - out.alpha) * o2o_mask
+        return mask_term, self._semantic_term(seg_out, masks, targets)
+
+    @staticmethod
+    def _branch_mask_loss(
+        prototypes: Tensor,
+        coefficients: Tensor,
+        assign: AssignResult,
+        masks: list[Tensor],
+        grid_boxes: Tensor,
+    ) -> Tensor:
+        """Score one branch's assembled masks against the ground truth it was assigned.
+
+        Every per-positive quantity — the coefficient row, the target mask, and the
+        crop box — is gathered by the **same** assignment: the anchor rows by
+        ``fg_mask`` and the instances by ``gt_index``. Pairing positive ``k`` with
+        instance ``k`` instead would produce a perfectly plausible mask of the wrong
+        object, which no loss value reveals.
+
+        Args:
+            prototypes: ``(B, K, Hp, Wp)`` raw prototype maps.
+            coefficients: ``(B, A, K)`` tanh mask coefficients of this branch.
+            assign: This branch's assignment (``fg_mask`` and ``gt_index``).
+            masks: Per-image ``(N_i, Hp, Wp)`` instance-mask targets.
+            grid_boxes: ``(B, N, 4)`` padded ground-truth boxes, already in the
+                prototype grid's frame.
+
+        Returns:
+            The scalar :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` over
+            every positive of the batch; a finite zero when there are none.
+        """
+        mask_logits: list[Tensor] = []
+        mask_targets: list[Tensor] = []
+        boxes: list[Tensor] = []
+        for index, image_masks in enumerate(masks):
+            gt_index = assign.gt_index[index][assign.fg_mask[index]]  # (P,)
+            coefficient_rows = coefficients[index][assign.fg_mask[index]].unsqueeze(0)  # (1, P, K)
+            mask_logits.append(assemble_masks(prototypes[index : index + 1], coefficient_rows)[0])
+            mask_targets.append(image_masks[gt_index])
+            boxes.append(grid_boxes[index][gt_index])
+        return instance_mask_loss(torch.cat(mask_logits), torch.cat(mask_targets), torch.cat(boxes))
+
+    def _semantic_term(self, seg_out: SegmentOutput, masks: list[Tensor], targets: list[Targets]) -> Tensor:
+        """Score the auxiliary semantic branch, or return zero when it is absent.
+
+        The branch is training-only and returns ``None`` outside training mode
+        (A17), so a validation step's segmentation loss carries the mask term
+        alone — the auxiliary objective exists to shape the shared features during
+        training and has nothing to report at eval.
+        """
+        logits = seg_out.semantic
+        if logits is None:
+            return torch.zeros((), device=seg_out.prototypes.device, dtype=seg_out.prototypes.dtype)
+        grid = (int(logits.shape[-2]), int(logits.shape[-1]))
+        num_classes = self.head.num_classes
+        dense = torch.stack(
+            [
+                semantic_target(image_masks, target.labels, num_classes, grid)
+                for image_masks, target in zip(masks, targets, strict=True)
+            ]
+        )
+        return semantic_aux_loss(logits, dense).total
 
     def _log_loss(self, out: DualLossOutput, total: Tensor, stage: str, batch_size: int) -> None:
         """Log the combined total and every per-branch box/cls/l1 component."""

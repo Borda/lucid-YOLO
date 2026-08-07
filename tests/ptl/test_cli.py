@@ -113,9 +113,9 @@ def _config_cli(path: Path, *extra: str) -> DetectionCLI:
 
 
 def test_configs_dir_is_non_empty() -> None:
-    """The three shipped configs are discovered (guards against an empty glob)."""
+    """Every shipped config is discovered (guards against an empty glob)."""
     names = {path.name for path in _CONFIG_PATHS}
-    assert {"det_tier_a_n.yaml", "det_tier_b_s.yaml", "overfit_100.yaml"} <= names
+    assert {"det_tier_a_n.yaml", "det_tier_b_s.yaml", "overfit_100.yaml", "seg_tier_a_n.yaml"} <= names
 
 
 @pytest.mark.parametrize("config_path", _CONFIG_PATHS, ids=lambda path: path.name)

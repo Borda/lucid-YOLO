@@ -34,7 +34,23 @@ scratch), and the gradient clip (:data:`_GRAD_CLIP`, standing in for the deferre
 LR warmup) are this script's constants — all documented as proposed assumptions
 (A-overfit-imgsz / A-overfit-epochs / A-overfit-clip).
 
-Provenance: blueprint sec. 5.8-5.11, R1 Eq. 2-3. Assumptions: A8, A26.
+Segmentation (``--task seg``, WP-087):
+    The same loop with ``task="segment"``, gated on **train mask IoU** instead of
+    recall. Each image is decoded through the deployed segmentation path — the
+    one-to-one branch's boxes and coefficients paired by
+    :func:`~lucid_yolo.models.heads.detect.o2o_topk_with_indices`, assembled and
+    cropped by :func:`~lucid_yolo.eval.segment_decode.decode_instance_masks` — and
+    every ground truth is matched to a detection by the *same* greedy box rule the
+    recall gate uses (:func:`_match_pairs`, written once). The score is the mean
+    mask IoU over **all** instances, so an unmatched ground truth contributes a
+    zero rather than being excused; the floor is :data:`_MASK_IOU_FLOOR`.
+
+    This is the fast wiring check for the whole segmentation training path: mask
+    targets on the wrong grid, coefficients paired with the wrong anchor, or an
+    unsupervised one-to-one coefficient stem all show up here in minutes instead
+    of after a COCO run.
+
+Provenance: blueprint sec. 5.8-5.11, R1 Eq. 2-3. Assumptions: A8, A26, A38.
 """
 
 from __future__ import annotations
@@ -42,6 +58,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -55,8 +72,11 @@ from torch import Tensor
 import lucid_yolo
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.data.coco import CocoDetectionDataset
+from lucid_yolo.data.rasterize import rasterize_polygons
+from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode.topk_e2e import TopKDecoder
-from lucid_yolo.models.heads.detect import DualHeadOutput
+from lucid_yolo.eval.segment_decode import decode_instance_masks
+from lucid_yolo.models.heads.detect import DualHeadOutput, decode_ltrb, o2o_topk_with_indices
 from lucid_yolo.models.registry import scale_spec
 from lucid_yolo.ptl.callbacks import CloseMosaicCallback
 from lucid_yolo.ptl.datamodule import DetectionDataModule
@@ -72,8 +92,14 @@ _RECIPE_PATH = Path(lucid_yolo.__file__).resolve().parent / "configs" / "overfit
 #: The frozen golden written by ``--freeze``; under ``gpu/`` so the offline harness skips it.
 _GOLDEN_PATH = REPO_ROOT / "goldens" / "gpu" / "overfit_micro_det.json"
 
+#: The segmentation counterpart of :data:`_GOLDEN_PATH` (WP-087).
+_SEG_GOLDEN_PATH = REPO_ROOT / "goldens" / "gpu" / "overfit_micro_seg.json"
+
 #: Producer spec recorded in the golden file (resolved by ``scripts/check_goldens.py``).
 _PRODUCER_SPEC = "scripts.overfit_micro:overfit_micro_det"
+
+#: Producer spec of the segmentation golden.
+_SEG_PRODUCER_SPEC = "scripts.overfit_micro:overfit_micro_seg"
 
 #: Gitignored cache the synthetic slice is materialized into (never committed).
 _SLICE_DIR = REPO_ROOT / ".cache" / "overfit_slice"
@@ -121,8 +147,23 @@ _RECALL_TOL = 0.04
 #: Per-image detection cap used when decoding the one-to-one branch for recall.
 _MAX_DET = 300
 
-#: Task accepted by the CLI; segmentation/obb overfit goldens are later WPs.
-_SUPPORTED_TASK = "det"
+#: Per-image detection cap when decoding *masks*. Lower than :data:`_MAX_DET` because
+#: every kept detection materializes a full-canvas float mask during decode; the slice
+#: carries a handful of instances per image, so the score-ranked head of the list is
+#: all the greedy matching can ever consume.
+_SEG_MAX_DET = 50
+
+#: Mean train mask IoU the segmentation overfit must clear (the WP-087 DoD).
+_MASK_IOU_FLOOR = 0.7
+
+#: Golden tolerance on the achieved mask IoU (integer counts are pinned exactly).
+_MASK_IOU_TOL = 0.05
+
+#: Mask-decode probability floor; the A37 default, restated here only to be explicit.
+_MASK_THRESHOLD = 0.5
+
+#: Leading columns of the A9 detection tuple holding the ``xyxy`` box.
+_BOX_COLUMNS = 4
 
 
 @dataclass(frozen=True)
@@ -277,13 +318,16 @@ def build_datamodule(split: Path, recipe: Recipe) -> DetectionDataModule:
     )
 
 
-def build_module(recipe: Recipe, num_classes: int) -> DetectionLitModule:
-    """Build the ``n``-scale detection module from the recipe hyperparameters.
+def build_module(recipe: Recipe, num_classes: int, module_task: str = "detect") -> DetectionLitModule:
+    """Build the ``n``-scale module from the recipe hyperparameters.
 
     Args:
         recipe: The parsed recipe supplying the scale letter and every optimizer /
             loss / progressive-loss knob.
         num_classes: Class count of the slice (derived from its annotations).
+        module_task: The module's supervision task — ``"detect"`` (the WP-040
+            gate) or ``"segment"`` (the WP-087 gate, which additionally builds and
+            supervises the mask branches at the module's A38 default gains).
 
     Returns:
         A :class:`~lucid_yolo.ptl.module.DetectionLitModule` at the recipe's scale.
@@ -292,6 +336,8 @@ def build_module(recipe: Recipe, num_classes: int) -> DetectionLitModule:
         >>> module = build_module(load_recipe(), num_classes=4)
         >>> module.head.num_classes
         4
+        >>> build_module(load_recipe(), num_classes=4, module_task="segment").protonet.num_prototypes
+        32
     """
     spec = scale_spec(recipe.variant)
     return DetectionLitModule(
@@ -299,6 +345,7 @@ def build_module(recipe: Recipe, num_classes: int) -> DetectionLitModule:
         width=spec.width,
         max_channels=spec.max_channels,
         num_classes=num_classes,
+        task=module_task,
         lr=recipe.lr,
         # A8 schedule off (lrf >= 1, no warmup): the overfit golden memorizes at a
         # constant LR and its trajectory was frozen before WP-072 landed.
@@ -360,19 +407,64 @@ def _box_iou(boxes_a: Tensor, boxes_b: Tensor) -> Tensor:
     return intersection / union.clamp(min=1e-9)
 
 
-def _recall_counts(dets: Tensor, gt_boxes: Tensor, gt_labels: Tensor) -> tuple[int, int]:
+def _match_pairs(dets: Tensor, gt_boxes: Tensor, gt_labels: Tensor) -> list[tuple[int, int]]:
     """Score-ordered greedy matching of one image's detections to its ground truths.
 
-    The COCO-style recall match: detections are taken in descending score order
-    (the fixed-size decoder already sorts them, with the zero-score padding rows
-    dropped by :data:`_SCORE_FLOOR`) and each claims, at most once, the highest-IoU
-    still-unmatched ground truth of its own class whose IoU clears
-    :data:`_IOU_THRESHOLD`. Processing high-score detections first lets the confident
-    correct boxes claim their ground truths before any weak box can.
+    The COCO-style recall match, and the **only** implementation of it: detections
+    are taken in descending score order (the fixed-size decoder already sorts them,
+    with the zero-score padding rows dropped by :data:`_SCORE_FLOOR`) and each
+    claims, at most once, the highest-IoU still-unmatched ground truth of its own
+    class whose IoU clears :data:`_IOU_THRESHOLD`. Processing high-score detections
+    first lets the confident correct boxes claim their ground truths before any weak
+    box can.
+
+    Both gates consume it — :func:`_recall_counts` needs only how many matched, the
+    mask gate needs *which* detection matched each ground truth — so it returns the
+    pairs and the counting is a one-line wrapper. A separate matcher for the mask
+    gate would be free to drift into scoring masks against a different pairing than
+    the recall it is compared with.
 
     Args:
         dets: ``(N, 6)`` A9 detections ``[x1, y1, x2, y2, score, class]`` for one
             image, sorted by descending score.
+        gt_boxes: ``(G, 4)`` ground-truth ``xyxy`` boxes.
+        gt_labels: ``(G,)`` ground-truth class ids.
+
+    Returns:
+        The ``(detection_row, ground_truth_row)`` pairs, in the order the
+        detections claimed them. Rows index ``dets`` and ``gt_boxes`` directly.
+
+    Examples:
+        >>> import torch
+        >>> dets = torch.tensor([[0.0, 0.0, 2.0, 2.0, 0.9, 1.0]])
+        >>> gt_boxes = torch.tensor([[0.0, 0.0, 2.0, 2.0]])
+        >>> _match_pairs(dets, gt_boxes, torch.tensor([1]))
+        [(0, 0)]
+    """
+    total = int(gt_boxes.shape[0])
+    pairs: list[tuple[int, int]] = []
+    if total == 0:
+        return pairs
+    kept_rows = (dets[:, 4] > _SCORE_FLOOR).nonzero(as_tuple=True)[0]
+    keep = dets[kept_rows]
+    iou = _box_iou(keep[:, :4], gt_boxes)  # (P, G)
+    matched_gt = torch.zeros(total, dtype=torch.bool)
+    for det_index in range(keep.shape[0]):
+        available = (keep[det_index, 5] == gt_labels) & ~matched_gt & (iou[det_index] >= _IOU_THRESHOLD)
+        if bool(available.any()):
+            gt_index = int((iou[det_index] * available).argmax())
+            matched_gt[gt_index] = True
+            pairs.append((int(kept_rows[det_index]), gt_index))
+            if len(pairs) == total:
+                break
+    return pairs
+
+
+def _recall_counts(dets: Tensor, gt_boxes: Tensor, gt_labels: Tensor) -> tuple[int, int]:
+    """Count how many of one image's ground truths a detection claimed.
+
+    Args:
+        dets: ``(N, 6)`` A9 detections for one image, sorted by descending score.
         gt_boxes: ``(G, 4)`` ground-truth ``xyxy`` boxes.
         gt_labels: ``(G,)`` ground-truth class ids.
 
@@ -386,21 +478,7 @@ def _recall_counts(dets: Tensor, gt_boxes: Tensor, gt_labels: Tensor) -> tuple[i
         >>> _recall_counts(dets, gt_boxes, torch.tensor([1]))
         (1, 1)
     """
-    total = int(gt_boxes.shape[0])
-    if total == 0:
-        return 0, 0
-    keep = dets[dets[:, 4] > _SCORE_FLOOR]
-    iou = _box_iou(keep[:, :4], gt_boxes)  # (P, G)
-    matched_gt = torch.zeros(total, dtype=torch.bool)
-    matched = 0
-    for det_index in range(keep.shape[0]):
-        available = (keep[det_index, 5] == gt_labels) & ~matched_gt & (iou[det_index] >= _IOU_THRESHOLD)
-        if bool(available.any()):
-            matched_gt[int((iou[det_index] * available).argmax())] = True
-            matched += 1
-            if matched == total:
-                break
-    return matched, total
+    return len(_match_pairs(dets, gt_boxes, gt_labels)), int(gt_boxes.shape[0])
 
 
 def _anchor_grid(device: torch.device) -> tuple[Tensor, Tensor]:
@@ -449,48 +527,221 @@ def evaluate_recall(module: DetectionLitModule, datamodule: DetectionDataModule)
     return recall, instance_total
 
 
-def _train_and_score(recipe: Recipe, split: Path, deterministic: bool) -> tuple[float, int, int]:
-    """Build, train, and score one overfit run; return ``(recall, instances, classes)``."""
+def _binary_iou(predicted: Tensor, target: Tensor) -> float:
+    """Intersection over union of two boolean masks; zero when both are empty.
+
+    Args:
+        predicted: Boolean mask of any shape.
+        target: Boolean mask of the same shape.
+
+    Returns:
+        The IoU as a float, or ``0.0`` when the union is empty (two empty masks
+        agree perfectly but carry no evidence that the model found the instance).
+
+    Examples:
+        >>> import torch
+        >>> a = torch.tensor([[True, True], [False, False]])
+        >>> b = torch.tensor([[True, False], [False, False]])
+        >>> _binary_iou(a, b)
+        0.5
+    """
+    intersection = float((predicted & target).sum())
+    union = float((predicted | target).sum())
+    return intersection / union if union > 0 else 0.0
+
+
+def _mask_iou_sum(dets: Tensor, pred_masks: Tensor, target: Targets) -> tuple[float, int]:
+    """Total mask IoU of one image's ground truths, and how many there are.
+
+    The ground truths are matched to detections by :func:`_match_pairs` — the same
+    greedy box rule the recall gate uses — and each matched pair contributes its
+    binary mask IoU. An **unmatched** ground truth contributes nothing to the sum
+    while still counting in the total, so the mean over the returned counts scores
+    a missed instance as a zero rather than excusing it.
+
+    Args:
+        dets: ``(N, 6)`` A9 detections for one image, sorted by descending score.
+        pred_masks: ``(N, H, W)`` boolean decoded masks, row-aligned with ``dets``.
+        target: The image's ground truth; its polygons are rasterised on the same
+            letterboxed canvas the masks were decoded onto.
+
+    Returns:
+        A ``(iou_sum, num_instances)`` pair.
+
+    Examples:
+        >>> import torch
+        >>> from lucid_yolo.data.targets import Targets
+        >>> ring = torch.tensor([[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]])
+        >>> target = Targets(boxes=torch.tensor([[0.0, 0.0, 2.0, 2.0]]), labels=torch.tensor([1]), polygons=[ring])
+        >>> dets = torch.tensor([[0.0, 0.0, 2.0, 2.0, 0.9, 1.0]])
+        >>> masks = torch.zeros(1, _IMG_SIZE, _IMG_SIZE, dtype=torch.bool)
+        >>> masks[0, :2, :2] = True
+        >>> _mask_iou_sum(dets, masks, target)
+        (1.0, 1)
+    """
+    total = int(target.boxes.shape[0])
+    if total == 0:
+        return 0.0, 0
+    gt_masks = rasterize_polygons([ring.cpu() for ring in target.polygons], _IMG_SIZE, _IMG_SIZE)
+    pairs = _match_pairs(dets, target.boxes, target.labels)
+    iou_sum = sum(_binary_iou(pred_masks[det_row], gt_masks[gt_row]) for det_row, gt_row in pairs)
+    return iou_sum, total
+
+
+def evaluate_mask_iou(module: DetectionLitModule, datamodule: DetectionDataModule) -> tuple[float, int]:
+    """Measure the train-set mean instance-mask IoU over the letterbox-only slice.
+
+    Runs the trained module over the val loader (the same 100 images with only the
+    letterbox transform) through the **deployed** segmentation path: the one-to-one
+    branch's boxes and coefficients paired by
+    :func:`~lucid_yolo.models.heads.detect.o2o_topk_with_indices`, then assembled,
+    upsampled, box-cropped and binarized by
+    :func:`~lucid_yolo.eval.segment_decode.decode_instance_masks` (A37). Masks are
+    decoded one image at a time: every kept detection materializes a full-canvas
+    float map, and the whole batch at once is a needless memory spike.
+
+    Args:
+        module: The trained ``task="segment"`` module.
+        datamodule: The datamodule whose val loader yields the letterboxed slice.
+
+    Returns:
+        A ``(mask_iou, total_instances)`` pair: the mean IoU over **all** ground
+        truths (unmatched ones scoring zero) and the total ground-truth count.
+
+    Examples:
+        >>> evaluate_mask_iou(module, datamodule)  # doctest: +SKIP
+        (0.82, 592)
+    """
+    device = module.device
+    module.eval()
+    anchor_points, strides = _anchor_grid(device)
+    iou_total = 0.0
+    instance_total = 0
+    with torch.no_grad():
+        for batch in datamodule.val_dataloader():
+            images, targets = datamodule.on_after_batch_transfer(batch, 0)
+            seg_out = module.forward_segmentation(images.to(device))
+            coefficients = seg_out.detect.o2o_coeff
+            assert coefficients is not None  # a "segment" module always builds the coefficient stems
+            boxes = decode_ltrb(seg_out.detect.o2o_box, anchor_points, strides)
+            dets, anchor_index = o2o_topk_with_indices(seg_out.detect.o2o_cls, boxes, k=_SEG_MAX_DET)
+            gather_index = anchor_index.unsqueeze(-1).expand(-1, -1, coefficients.shape[-1])
+            kept_coefficients = coefficients.gather(1, gather_index)
+            for index, target in enumerate(targets):
+                masks = decode_instance_masks(
+                    seg_out.prototypes[index : index + 1],
+                    kept_coefficients[index : index + 1],
+                    dets[index : index + 1, :, :_BOX_COLUMNS],
+                    image_size=(_IMG_SIZE, _IMG_SIZE),
+                    threshold=_MASK_THRESHOLD,
+                )
+                iou_sum, count = _mask_iou_sum(dets[index].cpu(), masks[0].cpu(), target)
+                iou_total += iou_sum
+                instance_total += count
+    return (iou_total / instance_total if instance_total else 0.0), instance_total
+
+
+@dataclass(frozen=True)
+class TaskSpec:
+    """Everything that differs between the detection and segmentation overfit gates.
+
+    Attributes:
+        module_task: The :class:`~lucid_yolo.ptl.module.DetectionLitModule` task.
+        metric: Key the achieved score is reported and frozen under.
+        label: Human-readable metric name for the console line.
+        floor: Acceptance floor the score must clear.
+        tolerance: Golden tolerance on the score.
+        golden_path: Where ``--freeze`` writes the golden.
+        producer: Producer spec recorded inside the golden file.
+        scorer: Callable measuring the trained module over the val loader.
+    """
+
+    module_task: str
+    metric: str
+    label: str
+    floor: float
+    tolerance: float
+    golden_path: Path
+    producer: str
+    scorer: Callable[[DetectionLitModule, DetectionDataModule], tuple[float, int]]
+
+
+#: The two wired gates, keyed by the ``--task`` value.
+TASK_SPECS: dict[str, TaskSpec] = {
+    "det": TaskSpec(
+        module_task="detect",
+        metric="train_recall_at_050",
+        label="recall@0.5",
+        floor=_RECALL_FLOOR,
+        tolerance=_RECALL_TOL,
+        golden_path=_GOLDEN_PATH,
+        producer=_PRODUCER_SPEC,
+        scorer=evaluate_recall,
+    ),
+    "seg": TaskSpec(
+        module_task="segment",
+        metric="train_mask_iou",
+        label="mask IoU",
+        floor=_MASK_IOU_FLOOR,
+        tolerance=_MASK_IOU_TOL,
+        golden_path=_SEG_GOLDEN_PATH,
+        producer=_SEG_PRODUCER_SPEC,
+        scorer=evaluate_mask_iou,
+    ),
+}
+
+
+def _train_and_score(recipe: Recipe, split: Path, deterministic: bool, spec: TaskSpec) -> tuple[float, int, int]:
+    """Build, train, and score one overfit run; return ``(score, instances, classes)``."""
     seed_everything(recipe.seed, workers=True)
     num_classes = _num_classes(split)
-    module = build_module(recipe, num_classes)
+    module = build_module(recipe, num_classes, module_task=spec.module_task)
     datamodule = build_datamodule(split, recipe)
     _make_trainer(recipe, deterministic).fit(module, datamodule=datamodule)
-    recall, instances = evaluate_recall(module, datamodule)
-    return recall, instances, num_classes
+    score, instances = spec.scorer(module, datamodule)
+    return score, instances, num_classes
 
 
-def run_overfit() -> dict[str, float]:
-    """Run the full overfit pipeline and return the golden metric mapping.
+def run_overfit(task: str = "det") -> dict[str, float]:
+    """Run the full overfit pipeline for one task and return the golden metric mapping.
 
     Generates the slice, trains the ``n``-scale module end to end (attempting
     deterministic execution, falling back to non-deterministic if the accelerator
-    lacks a deterministic kernel — expected on MPS), then measures train-set recall
-    at IoU 0.5. Every value is produced by *running* the pipeline, never hand-written.
+    lacks a deterministic kernel — expected on MPS), then scores it with the task's
+    gate metric. Every value is produced by *running* the pipeline, never
+    hand-written.
+
+    Args:
+        task: ``"det"`` (train recall at IoU 0.5) or ``"seg"`` (mean train mask
+            IoU). Defaults to ``"det"``.
 
     Returns:
         A mapping of the frozen metrics: ``num_images``, ``num_instances``,
-        ``num_classes``, ``epochs``, ``img_size`` (all integer-valued) and
-        ``train_recall_at_050``.
+        ``num_classes``, ``epochs``, ``img_size`` (all integer-valued) and the
+        task's own metric key.
+
+    Raises:
+        KeyError: If ``task`` is not one of the wired gates.
 
     Examples:
         >>> metrics = run_overfit()  # doctest: +SKIP
         >>> metrics["train_recall_at_050"] >= 0.95  # doctest: +SKIP
         True
     """
+    spec = TASK_SPECS[task]
     recipe = load_recipe()
     split = generate_slice()
     try:
-        recall, instances, num_classes = _train_and_score(recipe, split, deterministic=True)
+        score, instances, num_classes = _train_and_score(recipe, split, True, spec)
     except RuntimeError:
-        recall, instances, num_classes = _train_and_score(recipe, split, deterministic=False)
+        score, instances, num_classes = _train_and_score(recipe, split, False, spec)
     return {
         "num_images": float(_NUM_IMAGES),
         "num_instances": float(instances),
         "num_classes": float(num_classes),
         "epochs": float(recipe.max_epochs),
         "img_size": float(_IMG_SIZE),
-        "train_recall_at_050": round(recall, 6),
+        spec.metric: round(score, 6),
     }
 
 
@@ -510,57 +761,77 @@ def overfit_micro_det() -> dict[str, float]:
         >>> sorted(metrics)  # doctest: +SKIP
         ['epochs', 'img_size', 'num_classes', 'num_images', 'num_instances', 'train_recall_at_050']
     """
-    return run_overfit()
+    return run_overfit("det")
 
 
-def write_golden(metrics: dict[str, float], path: Path = _GOLDEN_PATH) -> None:
-    """Freeze ``metrics`` into the golden JSON with the recall tolerance pinned.
+def overfit_micro_seg() -> dict[str, float]:
+    """Golden producer: the overfit-100 segmentation metrics (WP-087).
+
+    The segmentation counterpart of :func:`overfit_micro_det`, with the same
+    accelerator-only status: it retrains the slice from scratch, so its golden
+    lives under ``goldens/gpu/`` and the default offline harness never recomputes it.
+
+    Returns:
+        The metric mapping from :func:`run_overfit`.
+
+    Examples:
+        >>> metrics = overfit_micro_seg()  # doctest: +SKIP
+        >>> sorted(metrics)  # doctest: +SKIP
+        ['epochs', 'img_size', 'num_classes', 'num_images', 'num_instances', 'train_mask_iou']
+    """
+    return run_overfit("seg")
+
+
+def write_golden(metrics: dict[str, float], spec: TaskSpec = TASK_SPECS["det"]) -> None:
+    """Freeze ``metrics`` into the task's golden JSON with its tolerance pinned.
 
     Args:
         metrics: The metric mapping to store as the golden's ``values``.
-        path: The golden file path. Defaults to ``goldens/gpu/overfit_micro_det.json``.
+        spec: The task whose golden path, producer and tolerance are used.
+            Defaults to the detection gate.
 
     Examples:
         >>> write_golden(run_overfit())  # doctest: +SKIP
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    spec.golden_path.parent.mkdir(parents=True, exist_ok=True)
     golden = {
-        "producer": _PRODUCER_SPEC,
-        "tolerances": {"train_recall_at_050": _RECALL_TOL},
+        "producer": spec.producer,
+        "tolerances": {spec.metric: spec.tolerance},
         "values": metrics,
     }
-    path.write_text(json.dumps(golden, indent=2) + "\n")
+    spec.golden_path.write_text(json.dumps(golden, indent=2) + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the overfit gate and optionally freeze the golden.
+    """Run the overfit gate for one task and optionally freeze its golden.
 
     Args:
         argv: Command-line arguments (defaults to ``sys.argv[1:]``).
 
     Returns:
-        ``0`` when recall clears the ``>= 0.95`` floor; ``1`` otherwise (or when an
+        ``0`` when the task's score clears its floor; ``1`` otherwise (or when an
         unsupported task is requested).
     """
-    parser = argparse.ArgumentParser(description="Overfit a fixed ~100-image slice and gate on train recall.")
-    parser.add_argument("--task", default=_SUPPORTED_TASK, help="detection task (only 'det' is wired for WP-040)")
-    parser.add_argument("--freeze", action="store_true", help="write goldens/gpu/overfit_micro_det.json on success")
+    parser = argparse.ArgumentParser(description="Overfit a fixed ~100-image slice and gate on a train metric.")
+    parser.add_argument("--task", default="det", help="gate to run: 'det' (recall) or 'seg' (mask IoU)")
+    parser.add_argument("--freeze", action="store_true", help="write the task's goldens/gpu/ file on success")
     args = parser.parse_args(argv)
 
-    if args.task != _SUPPORTED_TASK:
-        print(f"unsupported task {args.task!r}; only {_SUPPORTED_TASK!r} is wired for WP-040")
+    spec = TASK_SPECS.get(args.task)
+    if spec is None:
+        print(f"unsupported task {args.task!r}; wired tasks are {sorted(TASK_SPECS)}")
         return 1
 
-    metrics = run_overfit()
-    recall = metrics["train_recall_at_050"]
-    print(f"overfit-{args.task}: recall@0.5 = {recall:.4f} over {int(metrics['num_instances'])} instances")
-    if recall < _RECALL_FLOOR:
-        print(f"FAIL: recall {recall:.4f} below floor {_RECALL_FLOOR}")
+    metrics = run_overfit(args.task)
+    score = metrics[spec.metric]
+    print(f"overfit-{args.task}: {spec.label} = {score:.4f} over {int(metrics['num_instances'])} instances")
+    if score < spec.floor:
+        print(f"FAIL: {spec.label} {score:.4f} below floor {spec.floor}")
         return 1
     if args.freeze:
-        write_golden(metrics)
-        print(f"froze golden -> {_GOLDEN_PATH.relative_to(REPO_ROOT)}")
-    print(f"PASS: recall {recall:.4f} >= {_RECALL_FLOOR}")
+        write_golden(metrics, spec)
+        print(f"froze golden -> {spec.golden_path.relative_to(REPO_ROOT)}")
+    print(f"PASS: {spec.label} {score:.4f} >= {spec.floor}")
     return 0
 
 

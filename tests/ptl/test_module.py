@@ -31,6 +31,8 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.losses.dual_loss import DualLossOutput
+from lucid_yolo.models.heads.detect import decode_ltrb
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.ptl import DetectionLitModule, collate_detection, pad_targets, unpack_batch
 
@@ -81,6 +83,39 @@ def _synthetic_batch() -> tuple[Tensor, list[Targets]]:
     images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
     targets = [_synthetic_targets(2), _synthetic_targets(1)]
     return images, targets
+
+
+def _with_polygons(target: Targets) -> Targets:
+    """Attach the rectangular ring of each box, so a segment module can supervise masks."""
+    rings = [
+        torch.tensor([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=torch.float32)
+        for x1, y1, x2, y2 in target.boxes.tolist()
+    ]
+    return Targets(boxes=target.boxes, labels=target.labels, polygons=rings)
+
+
+def _synthetic_batch_with_polygons() -> tuple[Tensor, list[Targets]]:
+    """Build the same ragged batch with one polygon ring per instance."""
+    images, targets = _synthetic_batch()
+    return images, [_with_polygons(target) for target in targets]
+
+
+def _dual_loss_output(module: DetectionLitModule, images: Tensor, targets: list[Targets]) -> DualLossOutput:
+    """Score the module's own dual detection loss over a batch (the reference total)."""
+    head_out = module(images)
+    points, strides = module._anchor_grid(images.shape[-2], images.shape[-1], images.device)
+    gt_boxes, gt_labels, gt_mask = pad_targets(targets)
+    return module.loss(
+        head_out.o2m_cls,
+        decode_ltrb(head_out.o2m_box, points, strides),
+        head_out.o2o_cls,
+        decode_ltrb(head_out.o2o_box, points, strides),
+        points,
+        gt_boxes,
+        gt_labels,
+        gt_mask,
+        strides=strides,
+    )
 
 
 def _collate_unpacked(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list[Targets]]:
@@ -184,39 +219,51 @@ def test_invalid_task_raises() -> None:
         _tiny_module(task="pose")
 
 
-@pytest.mark.parametrize(
-    "task",
-    [pytest.param("detect", id="detect"), pytest.param("segment", id="segment"), pytest.param("obb", id="obb")],
-)
+@pytest.mark.parametrize("task", [pytest.param("detect", id="detect"), pytest.param("obb", id="obb")])
 def test_task_extra_loss_is_inert_zero(task: str) -> None:
-    """The task extra-loss stub returns a zero scalar for every accepted task."""
+    """The task extra-loss stub returns a zero scalar for the tasks with no extra supervision.
+
+    ``segment`` is excluded: WP-087 made its contribution live, and
+    ``tests/ptl/test_seg_training.py`` covers it.
+    """
     module = _tiny_module(task=task)
     images, targets = _synthetic_batch()
-    head_out = module(images)
-    extra = module._task_extra_loss(head_out, targets)
+    gt_boxes, _, _ = pad_targets(targets)
+    extra = module._task_extra_loss(
+        None, targets, _dual_loss_output(module, images, targets), gt_boxes, (_IMG_SIZE, _IMG_SIZE), "train"
+    )
     assert extra.ndim == 0
     assert float(extra) == 0.0
 
 
-def test_segment_task_trains_identically_to_detect() -> None:
-    """The segment module's extra branches leave the detection objective untouched.
+def test_segment_task_with_zero_gains_trains_identically_to_detect() -> None:
+    """With both segmentation gains at zero, a segment module reproduces the detection loss bit for bit.
 
-    Since WP-087 a ``segment`` module additionally carries the head's mask
-    coefficient stems and the three prototype/auxiliary branches, so its state
-    dict is a strict superset of the ``detect`` one — hence ``strict=False``.
-    Those branches are constructed but not yet supervised, so sharing every
-    detection weight must still reproduce the detection loss bit for bit; a
-    stray coefficient or prototype term leaking into the total would break here.
+    A ``segment`` module carries the head's mask coefficient stems and the three
+    prototype/auxiliary branches, so its state dict is a strict superset of the
+    ``detect`` one — hence ``strict=False``. Zeroing only the two WP-087 gains
+    must leave *nothing* else different: any segmentation quantity that reached
+    the detection terms by another route — a shared forward that mutates them, a
+    re-run assignment — would break this equality while the ordinary gains hid it
+    inside a larger total.
     """
     detect = _tiny_module(task="detect")
-    segment = _tiny_module(task="segment")
+    segment = DetectionLitModule(
+        depth=0.34,
+        width=0.25,
+        max_channels=256,
+        num_classes=_NUM_CLASSES,
+        task="segment",
+        mask_gain=0.0,
+        semantic_gain=0.0,
+    )
     missing, unexpected = segment.load_state_dict(detect.state_dict(), strict=False)
     assert not unexpected
     assert all(
         key.startswith(("head.o2m.coeff", "head.o2o.coeff", "proto_fusion.", "protonet.", "semantic."))
         for key in missing
     )
-    batch = _synthetic_batch()
+    batch = _synthetic_batch_with_polygons()
     detect.log = MagicMock()  # type: ignore[method-assign]
     segment.log = MagicMock()  # type: ignore[method-assign]
     detect_loss = detect.training_step(batch, 0)

@@ -1,7 +1,7 @@
 {
-  "producer": "scripts.overfit_micro:overfit_micro_det",
+  "producer": "scripts.overfit_micro:overfit_micro_seg",
   "tolerances": {
-    "train_recall_at_050": 0.04
+    "train_mask_iou": 0.05
   },
   "values": {
     "num_images": 100.0,
@@ -9,6 +9,6 @@
     "num_classes": 4.0,
     "epochs": 100.0,
     "img_size": 320.0,
-    "train_recall_at_050": 0.994932
+    "train_mask_iou": 0.814623
   }
 }

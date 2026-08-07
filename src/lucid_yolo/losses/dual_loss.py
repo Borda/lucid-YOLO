@@ -42,6 +42,7 @@ from torch import Tensor
 
 from lucid_yolo.assign.one_to_one import UniqueAssigner
 from lucid_yolo.assign.stal import SmallTargetAssigner
+from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.losses.detection_loss import DetectionBranchLoss, DetectionLossOutput
 
 __all__ = ["DualBranchLoss", "DualLossOutput"]
@@ -49,7 +50,7 @@ __all__ = ["DualBranchLoss", "DualLossOutput"]
 
 @dataclass(frozen=True)
 class DualLossOutput:
-    """Combined dual-branch loss and its two per-branch breakdowns.
+    """Combined dual-branch loss, its two per-branch breakdowns, and both assignments.
 
     ``total`` is the ``alpha``-weighted combination of the two branch totals;
     the ``o2m`` and ``o2o`` fields carry each branch's full
@@ -57,18 +58,30 @@ class DualLossOutput:
     ``box``/``cls``/``l1`` terms and gain-weighted ``total``), and ``alpha`` is
     the branch weight used for this call.
 
+    The two :class:`~lucid_yolo.assign.tal.AssignResult` values are returned rather
+    than kept private because any *other* term supervising the same positives —
+    the WP-087 instance-mask loss is the first — must score the ground truth each
+    anchor was actually assigned to here. Recomputing the assignment at the call
+    site would create a second selection path free to disagree with this one, and
+    a mask scored against the wrong (but plausible) instance is invisible in the
+    loss value.
+
     Attributes:
         total: ``alpha * o2m.total + (1 - alpha) * o2o.total``; the scalar to
             backpropagate.
         o2m: One-to-many branch loss output (dense ``topk = 10`` assignment).
         o2o: One-to-one branch loss output (unique ``topk = 7 -> 1`` assignment).
         alpha: Branch weight applied to the o2m total (o2o gets ``1 - alpha``).
+        o2m_assign: The dense assignment the o2m branch was scored against.
+        o2o_assign: The unique assignment the o2o branch was scored against.
     """
 
     total: Tensor
     o2m: DetectionLossOutput
     o2o: DetectionLossOutput
     alpha: float
+    o2m_assign: AssignResult
+    o2o_assign: AssignResult
 
 
 class DualBranchLoss:
@@ -162,8 +175,9 @@ class DualBranchLoss:
 
         Returns:
             A :class:`DualLossOutput` with the combined ``total``, each branch's
-            :class:`~lucid_yolo.losses.detection_loss.DetectionLossOutput`, and the
-            ``alpha`` used.
+            :class:`~lucid_yolo.losses.detection_loss.DetectionLossOutput`, the
+            ``alpha`` used, and both branches' assignments (so a mask term can
+            supervise exactly these positives instead of assigning again).
 
         Examples:
             >>> import torch
@@ -184,4 +198,11 @@ class DualBranchLoss:
         o2m_out = self._o2m_loss(o2m_logits, o2m_boxes, o2m_assign, strides)
         o2o_out = self._o2o_loss(o2o_logits, o2o_boxes, o2o_assign, strides)
         total = self.alpha * o2m_out.total + (1.0 - self.alpha) * o2o_out.total
-        return DualLossOutput(total=total, o2m=o2m_out, o2o=o2o_out, alpha=self.alpha)
+        return DualLossOutput(
+            total=total,
+            o2m=o2m_out,
+            o2o=o2o_out,
+            alpha=self.alpha,
+            o2m_assign=o2m_assign,
+            o2o_assign=o2o_assign,
+        )
