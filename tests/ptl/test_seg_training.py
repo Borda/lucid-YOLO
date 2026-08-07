@@ -242,6 +242,79 @@ def test_mask_targets_follow_the_assignment_not_the_positive_order() -> None:
     assert not torch.isclose(assigned, naive)
 
 
+def _looped_branch_mask_loss(
+    prototypes: Tensor,
+    coefficients: Tensor,
+    assign: AssignResult,
+    masks: list[Tensor],
+    grid_boxes: Tensor,
+) -> Tensor:
+    """The per-image reference the batched implementation replaced.
+
+    Kept verbatim as an oracle rather than deleted with the code: it is the form
+    whose result the Det/Seg goldens were frozen against, and it is the only thing
+    that can show the padded batched gather changed the *speed* and nothing else.
+    """
+    mask_logits: list[Tensor] = []
+    mask_targets: list[Tensor] = []
+    boxes: list[Tensor] = []
+    for index, image_masks in enumerate(masks):
+        gt_index = assign.gt_index[index][assign.fg_mask[index]]
+        coefficient_rows = coefficients[index][assign.fg_mask[index]].unsqueeze(0)
+        mask_logits.append(assemble_masks(prototypes[index : index + 1], coefficient_rows)[0])
+        mask_targets.append(image_masks[gt_index])
+        boxes.append(grid_boxes[index][gt_index])
+    return instance_mask_loss(torch.cat(mask_logits), torch.cat(mask_targets), torch.cat(boxes))
+
+
+@pytest.mark.parametrize(
+    ("positives", "instances"),
+    [
+        pytest.param([3, 1], [2, 1], id="uneven-positive-counts"),
+        pytest.param([2, 0], [1, 2], id="one-image-with-no-positives"),
+        pytest.param([0, 0], [1, 1], id="no-positives-at-all"),
+        pytest.param([4, 4], [2, 2], id="equal-counts-no-padding"),
+    ],
+)
+def test_batched_mask_loss_equals_the_per_image_loop(positives: list[int], instances: list[int]) -> None:
+    """The batched gather reproduces the per-image loop's value bit for bit.
+
+    The looped form selected each image's positives with a boolean mask, whose
+    output shape depends on the data — which forces a device sync per image per
+    branch, measured at 1.2 s of stall per step at batch 32. The batched form pads
+    to the largest positive count and selects once. That is a speed change only if
+    the value is untouched, and the padding is where it could go wrong: padded rows
+    carry the ``-1`` unassigned sentinel and must contribute nothing.
+
+    Uneven counts are the point of the parametrization — with equal counts there is
+    no padding, so a padding leak would pass unnoticed.
+    """
+    channels, grid = 2, 8
+    anchors = max(positives) + 3
+    prototypes = torch.randn(len(positives), channels, grid, grid)
+    coefficients = torch.randn(len(positives), anchors, channels).tanh()
+    fg_mask = torch.zeros(len(positives), anchors, dtype=torch.bool)
+    gt_index = torch.full((len(positives), anchors), -1, dtype=torch.long)
+    for image, (count, available) in enumerate(zip(positives, instances, strict=True)):
+        fg_mask[image, :count] = True
+        gt_index[image, :count] = torch.arange(count) % available
+    masks = [torch.randint(0, 2, (count, grid, grid)).float() for count in instances]
+    grid_boxes = torch.tensor([[[0.0, 0.0, float(grid), float(grid)]] * max(instances)] * len(positives))
+    assign = AssignResult(
+        fg_mask=fg_mask,
+        gt_index=gt_index,
+        target_labels=torch.zeros(len(positives), anchors, dtype=torch.long),
+        target_boxes=torch.zeros(len(positives), anchors, 4),
+        align_weights=torch.zeros(len(positives), anchors),
+    )
+
+    batched = DetectionLitModule._branch_mask_loss(prototypes, coefficients, assign, masks, grid_boxes)
+    looped = _looped_branch_mask_loss(prototypes, coefficients, assign, masks, grid_boxes)
+
+    assert torch.equal(batched, looped)
+    assert bool(torch.isfinite(batched))
+
+
 def test_detect_total_is_exactly_the_dual_detection_loss() -> None:
     """``task="detect"`` is bit-for-bit the dual detection loss — the extra term adds exactly zero.
 
