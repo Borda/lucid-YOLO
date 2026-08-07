@@ -19,7 +19,7 @@ import pytest
 import torch
 from scripts.check_goldens import DEFAULT_GOLDENS_DIR, check_golden
 
-from lucid_yolo.models import build_detector, count_flops, count_params
+from lucid_yolo.models import build_detector, build_segmenter, count_flops, count_params
 
 #: Published detection numbers at a 640-pixel input, R1 Table 7 (verified verbatim
 #: against the arXiv HTML): (params in millions, conventional GFLOPs). Rounded to
@@ -71,6 +71,57 @@ def test_det_vs_table7(variant: str, published_params_m: float, published_gflops
 def test_det_params_flops_golden() -> None:
     """The frozen goldens/params_flops_det.json regression lock still reproduces."""
     result = check_golden(DEFAULT_GOLDENS_DIR / "params_flops_det.json")
+
+    assert result.passed, result.error or next(
+        f"{c.metric}: expected {c.expected}, got {c.actual}" for c in result.comparisons if not c.passed
+    )
+
+
+#: Published segmentation numbers at a 640-pixel input, R1 Table S9 (transcribed
+#: verbatim from the arXiv PDF, page 28): (params in millions, FLOPs in billions).
+#: The E2E and non-E2E rows carry an identical pair per scale, so the table does
+#: not distinguish the deployed model from the full one; the convention used here
+#: is the one that lands Table 7 within tolerance for detection.
+_TABLE_S9: dict[str, tuple[float, float]] = {
+    "n": (2.7, 9.1),
+    "s": (10.4, 34.2),
+    "m": (23.6, 121.5),
+    "l": (28.0, 139.8),
+    "x": (62.8, 313.5),
+}
+
+#: Segmentation parameter tolerance, wider than detection's +/-2%. The segmentation
+#: head's sizing rests on five registered assumptions (A14 K=32, A15 proto grid,
+#: A18 protonet stack, A34 coefficient stem, A35 fusion projections) rather than on
+#: published structure, so it cannot claim detection-grade parity. The binding
+#: scale is ``s`` at +2.5%; every other scale lands inside +/-1.5%.
+_SEG_PARAM_TOL = 0.03
+
+
+@pytest.mark.parametrize(
+    ("variant", "published_params_m", "published_gflops"),
+    [pytest.param(v, p, f, id=v) for v, (p, f) in _TABLE_S9.items()],
+)
+def test_seg_vs_tableS9(variant: str, published_params_m: float, published_gflops: float) -> None:
+    """Each variant's params (+/-3%) and inference GFLOPs (+/-5%) match R1 Table S9."""
+    model = build_segmenter(variant, _NUM_CLASSES)
+
+    params_m = count_params(model) / 1e6
+    gflops = count_flops(model.deploy())
+
+    param_delta = abs(params_m - published_params_m) / published_params_m
+    flop_delta = abs(gflops - published_gflops) / published_gflops
+    assert param_delta <= _SEG_PARAM_TOL, (
+        f"{variant}: {params_m:.3f} M params is {param_delta:.1%} from Table S9's {published_params_m} M (>3%)"
+    )
+    assert flop_delta <= _FLOP_TOL, (
+        f"{variant}: {gflops:.3f} GFLOPs is {flop_delta:.1%} from Table S9's {published_gflops} G (>5%)"
+    )
+
+
+def test_seg_params_flops_golden() -> None:
+    """The frozen goldens/params_flops_seg.json regression lock still reproduces."""
+    result = check_golden(DEFAULT_GOLDENS_DIR / "params_flops_seg.json")
 
     assert result.passed, result.error or next(
         f"{c.metric}: expected {c.expected}, got {c.actual}" for c in result.comparisons if not c.passed

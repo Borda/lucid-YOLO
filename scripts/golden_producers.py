@@ -54,7 +54,7 @@ from lucid_yolo.assign import (
     surrogate_boxes,
 )
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
-from lucid_yolo.models.build import build_detector, count_flops, count_params
+from lucid_yolo.models.build import build_detector, build_segmenter, count_flops, count_params
 from lucid_yolo.optim import MuSGD
 from lucid_yolo.ptl.datamodule import _TrainPipeline
 
@@ -784,6 +784,52 @@ def det_params_flops() -> dict[str, float]:
     metrics: dict[str, float] = {}
     for variant in _DET_VARIANTS:
         model = build_detector(variant, _DET_NUM_CLASSES)
+        metrics[f"{variant}_params"] = float(count_params(model))
+        gflops = count_flops(model.deploy(), img_size=_DET_IMG_SIZE)
+        metrics[f"{variant}_gflops"] = round(gflops, _DET_GFLOP_DECIMALS)
+    return metrics
+
+
+def seg_params_flops() -> dict[str, float]:
+    """Frozen per-variant parameter and GFLOP metrics for the segmentation model (WP-052b).
+
+    The segmentation counterpart of :func:`det_params_flops`, measured under the
+    identical convention so the two goldens stay comparable: parameters of the
+    full model (:func:`~lucid_yolo.models.build.count_params` on
+    :func:`~lucid_yolo.models.build.build_segmenter`) and conventional GFLOPs of
+    the deployed inference model
+    (:meth:`~lucid_yolo.models.build.Segmenter.deploy`) at a 640-pixel input. The
+    deployed view carries neither the one-to-many detection branch nor the
+    training-only auxiliary semantic branch (A17), so its FLOPs are what an
+    inference deployment actually costs, while the parameter count is the whole
+    checkpoint.
+
+    R1 Table S9 states neither its FLOP convention nor whether its Params column
+    denotes the full or the deployed model — it reports one Params/FLOPs pair per
+    scale shared by the E2E and non-E2E rows. This convention is the one that
+    lands R1 Table 7 within tolerance for detection (WP-023) and it holds for
+    Table S9 too, which is corroboration rather than assumption.
+
+    Every value is produced by building and measuring the live modules — never
+    hand-written — so the golden re-derives from the actual architecture.
+
+    Returns:
+        A mapping of ten metrics: ``<variant>_params`` (exact) and
+        ``<variant>_gflops`` (tolerance-pinned) for each variant ``n``…``x``.
+
+    Examples:
+        ```pycon
+        >>> metrics = seg_params_flops()
+        >>> metrics["n_params"] > metrics["n_gflops"]
+        True
+        >>> sorted(metrics) == sorted(seg_params_flops())
+        True
+
+        ```
+    """
+    metrics: dict[str, float] = {}
+    for variant in _DET_VARIANTS:
+        model = build_segmenter(variant, _DET_NUM_CLASSES)
         metrics[f"{variant}_params"] = float(count_params(model))
         gflops = count_flops(model.deploy(), img_size=_DET_IMG_SIZE)
         metrics[f"{variant}_gflops"] = round(gflops, _DET_GFLOP_DECIMALS)
