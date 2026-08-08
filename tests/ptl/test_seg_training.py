@@ -236,7 +236,7 @@ def test_mask_targets_follow_the_assignment_not_the_positive_order() -> None:
     assigned = instance_mask_loss(mask_logits, masks[[1, 0]], grid_boxes[0][[1, 0]])
     naive = instance_mask_loss(mask_logits, masks[[0, 1]], grid_boxes[0][[0, 1]])
 
-    scored = DetectionLitModule._branch_mask_loss(prototypes, coefficients, assign, [masks], grid_boxes)
+    scored = DetectionLitModule._branch_mask_loss(prototypes, coefficients, assign, masks.unsqueeze(0), grid_boxes)
 
     assert torch.equal(scored, assigned)
     assert not torch.isclose(assigned, naive)
@@ -308,7 +308,13 @@ def test_batched_mask_loss_equals_the_per_image_loop(positives: list[int], insta
         align_weights=torch.zeros(len(positives), anchors),
     )
 
-    batched = DetectionLitModule._branch_mask_loss(prototypes, coefficients, assign, masks, grid_boxes)
+    # The batched form takes the densified stack its caller now builds once for both
+    # branches; the oracle keeps the ragged list the looped form consumed.
+    padded = torch.zeros(len(masks), max(int(image_masks.shape[0]) for image_masks in masks), grid, grid)
+    for index, image_masks in enumerate(masks):
+        padded[index, : image_masks.shape[0]] = image_masks
+
+    batched = DetectionLitModule._branch_mask_loss(prototypes, coefficients, assign, padded, grid_boxes)
     looped = _looped_branch_mask_loss(prototypes, coefficients, assign, masks, grid_boxes)
 
     assert torch.equal(batched, looped)

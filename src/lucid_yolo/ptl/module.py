@@ -632,8 +632,15 @@ class DetectionLitModule(LightningModule):
         o2m_coeff, o2o_coeff = seg_out.detect.o2m_coeff, seg_out.detect.o2o_coeff
         assert o2m_coeff is not None  # a "segment" module always builds both coefficient stems
         assert o2o_coeff is not None
-        o2m_mask = self._branch_mask_loss(prototypes, o2m_coeff, out.o2m_assign, masks, grid_boxes)
-        o2o_mask = self._branch_mask_loss(prototypes, o2o_coeff, out.o2o_assign, masks, grid_boxes)
+        # Densified once and shared by both branches: the ragged per-image stacks are
+        # padded to a single (B, N, Hp, Wp) tensor here rather than inside the branch
+        # loss, which would rebuild it for the second branch from the same input.
+        instances = max(*(int(image_masks.shape[0]) for image_masks in masks), 1)
+        padded_masks = prototypes.new_zeros((len(masks), instances, *proto_grid))
+        for index, image_masks in enumerate(masks):
+            padded_masks[index, : image_masks.shape[0]] = image_masks
+        o2m_mask = self._branch_mask_loss(prototypes, o2m_coeff, out.o2m_assign, padded_masks, grid_boxes)
+        o2o_mask = self._branch_mask_loss(prototypes, o2o_coeff, out.o2o_assign, padded_masks, grid_boxes)
         mask_term = out.alpha * o2m_mask + (1.0 - out.alpha) * o2o_mask
         return mask_term, self._semantic_term(seg_out, masks, targets)
 
@@ -642,7 +649,7 @@ class DetectionLitModule(LightningModule):
         prototypes: Tensor,
         coefficients: Tensor,
         assign: AssignResult,
-        masks: list[Tensor],
+        masks: Tensor,
         grid_boxes: Tensor,
     ) -> Tensor:
         """Score one branch's assembled masks against the ground truth it was assigned.
@@ -657,7 +664,9 @@ class DetectionLitModule(LightningModule):
             prototypes: ``(B, K, Hp, Wp)`` raw prototype maps.
             coefficients: ``(B, A, K)`` tanh mask coefficients of this branch.
             assign: This branch's assignment (``fg_mask`` and ``gt_index``).
-            masks: Per-image ``(N_i, Hp, Wp)`` instance-mask targets.
+            masks: ``(B, N, Hp, Wp)`` instance-mask targets, padded to the batch's
+                largest instance count by the caller so both branches share one
+                densification.
             grid_boxes: ``(B, N, 4)`` padded ground-truth boxes, already in the
                 prototype grid's frame.
 
@@ -697,16 +706,11 @@ class DetectionLitModule(LightningModule):
         rows = torch.gather(gt_index, 1, order).clamp(min=0)  # (B, P) instance ids
         coefficient_rows = torch.gather(coefficients, 1, order.unsqueeze(-1).expand(-1, -1, coefficients.shape[-1]))
 
-        instances = max(*(int(image_masks.shape[0]) for image_masks in masks), 1)
-        padded_masks = prototypes.new_zeros((batch, instances, *proto_grid))
-        for index, image_masks in enumerate(masks):
-            padded_masks[index, : image_masks.shape[0]] = image_masks
-
         image_ids = torch.arange(batch, device=prototypes.device).unsqueeze(-1).expand_as(rows)
         keep = valid.reshape(-1)
         return instance_mask_loss(
             assemble_masks(prototypes, coefficient_rows).flatten(0, 1)[keep],
-            padded_masks[image_ids, rows].flatten(0, 1)[keep],
+            masks[image_ids, rows].flatten(0, 1)[keep],
             torch.gather(grid_boxes, 1, rows.unsqueeze(-1).expand(-1, -1, 4)).flatten(0, 1)[keep],
         )
 

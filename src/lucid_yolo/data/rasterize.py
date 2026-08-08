@@ -22,6 +22,12 @@ from torch import Tensor
 
 __all__ = ["rasterize_polygon", "rasterize_polygons"]
 
+#: Element budget for the batched crossing test's ``(instances, points, H, W)``
+#: intermediate. At 64 M booleans that is ~64 MB, which a 160-px prototype grid with
+#: COCO-scale instance counts sits an order of magnitude under; it exists so that one
+#: unusually detailed ring cannot size the whole stack.
+_CHUNK_ELEMENTS = 64_000_000
+
 
 def rasterize_polygon(ring: Tensor, height: int, width: int) -> Tensor:
     """Rasterise a polygon ring to a boolean pixel mask by the even-odd rule.
@@ -109,4 +115,59 @@ def rasterize_polygons(polygons: list[Tensor], height: int, width: int) -> Tenso
     """
     if not polygons:
         return torch.zeros((0, height, width), dtype=torch.bool)
-    return torch.stack([rasterize_polygon(ring, height, width) for ring in polygons])
+
+    # Every instance in one crossing test rather than one call each. A mosaic batch
+    # carries far more instances than an unaugmented one -- 1138 across 32 images in
+    # a measured COCO batch, 35 an image -- and per-ring calls made that 1138 passes
+    # over the grid, on CPU, inside the training step.
+    #
+    # Rings are padded to a common point count by repeating the last vertex, which
+    # adds only zero-length edges: their endpoints share a y, so `straddles` is False
+    # and they contribute no crossing. The roll below still pairs vertex 0 with the
+    # true last vertex, so the closing edge is counted exactly once.
+    counts = [int(ring.shape[0]) for ring in polygons]
+    longest = max(counts)
+    padded = torch.stack(
+        [
+            ring if count == longest else torch.cat([ring, ring[-1:].expand(longest - count, 2)])
+            for ring, count in zip(polygons, counts, strict=True)
+        ]
+    )  # (N, P, 2)
+
+    # The intermediate is (instances, points, height, width) booleans, so a single
+    # unusually detailed ring would otherwise size the whole stack. Chunking bounds
+    # it without changing the result: instances are independent.
+    per_instance = max(longest * height * width, 1)
+    chunk_size = max(1, _CHUNK_ELEMENTS // per_instance)
+    chunks = [
+        _crossing_parity(padded[start : start + chunk_size], height, width)
+        for start in range(0, len(polygons), chunk_size)
+    ]
+    return torch.cat(chunks)
+
+
+def _crossing_parity(rings: Tensor, height: int, width: int) -> Tensor:
+    """Even-odd crossing test for a padded ``(N, P, 2)`` ring stack, all edges at once.
+
+    Args:
+        rings: ``(N, P, 2)`` float rings, padded by repeated vertices.
+        height: Mask height in pixels.
+        width: Mask width in pixels.
+
+    Returns:
+        ``(N, height, width)`` boolean masks.
+
+    Examples:
+        >>> import torch
+        >>> square = torch.tensor([[[1.0, 1.0], [4.0, 1.0], [4.0, 4.0], [1.0, 4.0]]])
+        >>> int(_crossing_parity(square, 6, 6).sum())
+        9
+    """
+    ys = torch.arange(height, dtype=torch.float32).view(1, 1, height, 1)
+    xs = torch.arange(width, dtype=torch.float32).view(1, 1, 1, width)
+    previous = rings.roll(1, dims=1)
+    yi, xi = rings[..., 1].unsqueeze(-1).unsqueeze(-1), rings[..., 0].unsqueeze(-1).unsqueeze(-1)
+    yj, xj = previous[..., 1].unsqueeze(-1).unsqueeze(-1), previous[..., 0].unsqueeze(-1).unsqueeze(-1)
+    straddles = (yi > ys) != (yj > ys)  # (N, P, height, 1)
+    x_cross = (xj - xi) * (ys - yi) / (yj - yi) + xi  # (N, P, height, 1)
+    return (straddles & (xs < x_cross)).sum(dim=1) % 2 == 1
