@@ -22,10 +22,10 @@ from torch import Tensor
 
 __all__ = ["rasterize_polygon", "rasterize_polygons"]
 
-#: Element budget for the batched crossing test's ``(instances, points, H, W)``
-#: intermediate. At 64 M booleans that is ~64 MB, which a 160-px prototype grid with
-#: COCO-scale instance counts sits an order of magnitude under; it exists so that one
-#: unusually detailed ring cannot size the whole stack.
+#: Element budget for the batched crossing test's ``(edges, H, W)`` intermediate. At
+#: 64 M entries that is ~64 MB of int32, which a 160-px prototype grid with COCO-scale
+#: instance counts sits an order of magnitude under; it exists so that an image with
+#: unusually many edges cannot size the whole stack at once.
 _CHUNK_ELEMENTS = 64_000_000
 
 
@@ -61,24 +61,13 @@ def rasterize_polygon(ring: Tensor, height: int, width: int) -> Tensor:
 
         ```
     """
-    ys = torch.arange(height, dtype=torch.float32).view(1, height, 1)
-    xs = torch.arange(width, dtype=torch.float32).view(1, 1, width)
     # Every edge at once, not one Python iteration each. The looped form cost one
     # full height x width tensor op per vertex, on CPU, inside the training step:
     # at a 160-px prototype grid a 64-point COCO ring took 1.65 ms, so batch 32
     # spent most of a second per step rasterising while the GPU sat idle. Edges
-    # here are the (i-1 -> i) pairs the loop walked, produced by rolling the ring.
-    previous = ring.roll(1, dims=0)
-    yi, xi = ring[:, 1].view(-1, 1, 1), ring[:, 0].view(-1, 1, 1)
-    yj, xj = previous[:, 1].view(-1, 1, 1), previous[:, 0].view(-1, 1, 1)
-    # A horizontal ray at row `ys` crosses an edge only where the edge straddles
-    # that row; `straddles` is False for horizontal edges, so the divide-by-zero
-    # below lands only on masked-out entries.
-    straddles = (yi > ys) != (yj > ys)  # (P, height, 1)
-    x_cross = (xj - xi) * (ys - yi) / (yj - yi) + xi  # (P, height, 1)
-    crossings = straddles & (xs < x_cross)  # (P, height, width)
-    # Even-odd parity over the edges: the XOR fold the loop performed, as a sum.
-    return crossings.sum(dim=0) % 2 == 1
+    # here are the (i-1 -> i) pairs the loop walked, produced by rolling the ring,
+    # and the parity is the XOR fold the loop performed, as a sum.
+    return _edge_crossings(ring, ring.roll(1, dims=0), height, width).sum(dim=0) % 2 == 1
 
 
 def rasterize_polygons(polygons: list[Tensor], height: int, width: int) -> Tensor:
@@ -116,58 +105,66 @@ def rasterize_polygons(polygons: list[Tensor], height: int, width: int) -> Tenso
     if not polygons:
         return torch.zeros((0, height, width), dtype=torch.bool)
 
-    # Every instance in one crossing test rather than one call each. A mosaic batch
-    # carries far more instances than an unaugmented one -- 1138 across 32 images in
-    # a measured COCO batch, 35 an image -- and per-ring calls made that 1138 passes
-    # over the grid, on CPU, inside the training step.
+    # Every instance in one crossing test rather than one call each: a mosaic batch
+    # carries 35 instances an image in a measured COCO batch, and per-ring calls made
+    # one pass over the grid each, on CPU, inside the training step.
     #
-    # Rings are padded to a common point count by repeating the last vertex, which
-    # adds only zero-length edges: their endpoints share a y, so `straddles` is False
-    # and they contribute no crossing. The roll below still pairs vertex 0 with the
-    # true last vertex, so the closing edge is counted exactly once.
-    counts = [int(ring.shape[0]) for ring in polygons]
-    longest = max(counts)
-    padded = torch.stack(
-        [
-            ring if count == longest else torch.cat([ring, ring[-1:].expand(longest - count, 2)])
-            for ring, count in zip(polygons, counts, strict=True)
-        ]
-    )  # (N, P, 2)
+    # The edges are flattened across instances rather than the rings padded to a
+    # common point count. Padding costs `instances * longest_ring` edge tests, so a
+    # single 500-point ring made a 7-instance image cost what 3500 points would --
+    # measured 0.93 ms to 20.24 ms at a 160-px grid, and COCO rings are that ragged.
+    # Flattening costs the true point total instead, and parity is then accumulated
+    # per instance rather than read off a padded axis.
+    counts = torch.tensor([int(ring.shape[0]) for ring in polygons])
+    points = torch.cat(polygons)  # (E, 2)
+    starts = torch.repeat_interleave(counts.cumsum(0) - counts, counts)  # (E,)
+    local = torch.arange(points.shape[0]) - starts
+    # The closing edge is the (last -> first) pair, so vertex 0's predecessor is the
+    # ring's last vertex: floor-semantics `%` maps local 0 to count - 1.
+    previous = points[starts + (local - 1) % torch.repeat_interleave(counts, counts)]
+    instance = torch.repeat_interleave(torch.arange(len(polygons)), counts)  # (E,)
 
-    # The intermediate is (instances, points, height, width) booleans, so a single
-    # unusually detailed ring would otherwise size the whole stack. Chunking bounds
-    # it without changing the result: instances are independent.
-    per_instance = max(longest * height * width, 1)
-    chunk_size = max(1, _CHUNK_ELEMENTS // per_instance)
-    chunks = [
-        _crossing_parity(padded[start : start + chunk_size], height, width)
-        for start in range(0, len(polygons), chunk_size)
-    ]
-    return torch.cat(chunks)
+    # Crossings are counted into an int accumulator, so chunking the edge axis cannot
+    # change the result -- addition is associative over the integers, and the parity
+    # is only read at the end.
+    crossings = torch.zeros((len(polygons), height, width), dtype=torch.int32)
+    chunk_size = max(1, _CHUNK_ELEMENTS // max(height * width, 1))
+    for start in range(0, points.shape[0], chunk_size):
+        stop = start + chunk_size
+        edge_crossings = _edge_crossings(points[start:stop], previous[start:stop], height, width)
+        crossings.index_add_(0, instance[start:stop], edge_crossings.to(torch.int32))
+    return crossings % 2 == 1
 
 
-def _crossing_parity(rings: Tensor, height: int, width: int) -> Tensor:
-    """Even-odd crossing test for a padded ``(N, P, 2)`` ring stack, all edges at once.
+def _edge_crossings(ends: Tensor, starts: Tensor, height: int, width: int) -> Tensor:
+    """Test which pixels' horizontal rays cross each of ``E`` independent edges.
+
+    The per-edge core of the even-odd rule, shared by the instance-batched path: the
+    caller decides which edges belong to which ring and folds the parity itself.
 
     Args:
-        rings: ``(N, P, 2)`` float rings, padded by repeated vertices.
+        ends: ``(E, 2)`` float edge end points ``(x, y)``.
+        starts: ``(E, 2)`` float edge start points, aligned with ``ends``.
         height: Mask height in pixels.
         width: Mask width in pixels.
 
     Returns:
-        ``(N, height, width)`` boolean masks.
+        ``(E, height, width)`` boolean crossings.
 
     Examples:
         >>> import torch
-        >>> square = torch.tensor([[[1.0, 1.0], [4.0, 1.0], [4.0, 4.0], [1.0, 4.0]]])
-        >>> int(_crossing_parity(square, 6, 6).sum())
-        9
+        >>> ends = torch.tensor([[4.0, 1.0]])
+        >>> starts = torch.tensor([[4.0, 4.0]])
+        >>> int(_edge_crossings(ends, starts, 6, 6).sum())
+        12
     """
-    ys = torch.arange(height, dtype=torch.float32).view(1, 1, height, 1)
-    xs = torch.arange(width, dtype=torch.float32).view(1, 1, 1, width)
-    previous = rings.roll(1, dims=1)
-    yi, xi = rings[..., 1].unsqueeze(-1).unsqueeze(-1), rings[..., 0].unsqueeze(-1).unsqueeze(-1)
-    yj, xj = previous[..., 1].unsqueeze(-1).unsqueeze(-1), previous[..., 0].unsqueeze(-1).unsqueeze(-1)
-    straddles = (yi > ys) != (yj > ys)  # (N, P, height, 1)
-    x_cross = (xj - xi) * (ys - yi) / (yj - yi) + xi  # (N, P, height, 1)
-    return (straddles & (xs < x_cross)).sum(dim=1) % 2 == 1
+    ys = torch.arange(height, dtype=torch.float32).view(1, height, 1)
+    xs = torch.arange(width, dtype=torch.float32).view(1, 1, width)
+    yi, xi = ends[:, 1].view(-1, 1, 1), ends[:, 0].view(-1, 1, 1)
+    yj, xj = starts[:, 1].view(-1, 1, 1), starts[:, 0].view(-1, 1, 1)
+    # A horizontal ray at row `ys` crosses an edge only where the edge straddles that
+    # row; `straddles` is False for horizontal edges, so the divide-by-zero below
+    # lands only on masked-out entries.
+    straddles = (yi > ys) != (yj > ys)  # (E, height, 1)
+    x_cross = (xj - xi) * (ys - yi) / (yj - yi) + xi  # (E, height, 1)
+    return straddles & (xs < x_cross)  # (E, height, width)

@@ -16,7 +16,7 @@ import math
 import pytest
 import torch
 
-from lucid_yolo.data import mixup
+from lucid_yolo.data import mixup, rasterize
 from lucid_yolo.data.rasterize import rasterize_polygon, rasterize_polygons
 from lucid_yolo.data.targets import Targets
 
@@ -91,6 +91,12 @@ def _looped_rasterize_polygon(ring: torch.Tensor, height: int, width: int) -> to
     return inside
 
 
+def _regular_ring(vertices: int, radius: float = 5.1) -> torch.Tensor:
+    """Build a ``(vertices, 2)`` ring on an irrational-radius circle, off the pixel lattice."""
+    angles = torch.arange(vertices, dtype=torch.float32) * (2 * math.pi / vertices)
+    return torch.stack([7.3 + radius * torch.cos(angles), 6.9 + (radius - 0.4) * torch.sin(angles)], dim=-1)
+
+
 @pytest.mark.parametrize("vertices", [3, 4, 17, 64])
 def test_vectorised_crossing_test_matches_the_per_vertex_loop(vertices: int) -> None:
     """All edges at once produces the mask the per-vertex loop produced, exactly.
@@ -132,6 +138,55 @@ def test_batch_helper_stacks_one_mask_per_ring() -> None:
     assert masks.dtype == torch.bool
     assert torch.equal(masks[0], rasterize_polygon(left, _SIDE, _SIDE))
     assert torch.equal(masks[1], rasterize_polygon(right, _SIDE, _SIDE))
+
+
+@pytest.mark.parametrize(
+    "vertex_counts",
+    [
+        pytest.param((3, 3, 3), id="uniform"),
+        pytest.param((5, 41, 7), id="one-long-ring"),
+        pytest.param((64, 3, 17, 4), id="mixed"),
+    ],
+)
+def test_batched_rings_match_one_call_per_ring(vertex_counts: tuple[int, ...]) -> None:
+    """Rasterising a whole image at once gives what per-ring calls give, whatever the point counts.
+
+    The batch path does not pad rings to a common length: padding costs
+    ``instances x longest_ring`` edge tests, and COCO rings are ragged enough that
+    one 500-point ring made a 7-instance image cost 20 ms rather than 0.9 at a
+    160-px grid. The edges are flattened across instances instead and the parity is
+    accumulated per instance, so the ring a crossing belongs to is now carried by an
+    index rather than by an axis — an off-by-one there would attribute an edge to
+    its neighbour and still return a full, plausible stack.
+
+    The counts deliberately include a ring an order of magnitude longer than its
+    neighbours, which is exactly the case padding handled correctly but slowly.
+    """
+    rings = [_regular_ring(count, radius=3.0 + index) for index, count in enumerate(vertex_counts)]
+
+    masks = rasterize_polygons(rings, 16, 16)
+
+    expected = torch.stack([rasterize_polygon(ring, 16, 16) for ring in rings])
+    assert torch.equal(masks, expected)
+    assert bool(masks.all(dim=0).any())  # not vacuously equal on empty masks
+
+
+def test_chunking_the_edge_axis_does_not_change_the_masks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A chunk budget small enough to split every ring yields the unchunked masks exactly.
+
+    The edge axis is chunked so that an image with unusually many points cannot size
+    the whole ``(edges, H, W)`` intermediate at once. Crossings are counted into an
+    integer accumulator for precisely this reason — the parity is read only at the
+    end — so a chunk boundary falling mid-ring must not change a single pixel.
+    """
+    rings = [_regular_ring(count, radius=3.0 + index) for index, count in enumerate((5, 41, 7))]
+    unchunked = rasterize_polygons(rings, 16, 16)
+
+    monkeypatch.setattr(rasterize, "_CHUNK_ELEMENTS", 16 * 16 * 2)  # two edges a chunk
+    chunked = rasterize_polygons(rings, 16, 16)
+
+    assert torch.equal(chunked, unchunked)
+    assert bool(unchunked.any())
 
 
 def test_batch_helper_returns_empty_stack_for_no_rings() -> None:
