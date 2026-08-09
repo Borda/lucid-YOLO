@@ -233,9 +233,12 @@ def test_on_after_batch_transfer_leaves_unpacked_batch_untouched(detseg_fixture_
     """An already-unpacked (list) batch passes through the hook defensively unchanged."""
     datamodule = _datamodule(detseg_fixture_dir)
     targets = _ragged_targets()
-    images, passed = datamodule.on_after_batch_transfer((torch.zeros(2, 3, 8, 8), targets), 0)
+    images, passed, masks = datamodule.on_after_batch_transfer((torch.zeros(2, 3, 8, 8), targets), 0)
     assert images.shape == (2, 3, 8, 8)
     assert passed is targets
+    # No transport means no loader-side rasterisation to report, which is the signal
+    # the step rasterises for itself.
+    assert masks is None
 
 
 def _datamodule(
@@ -274,7 +277,7 @@ def test_datamodule_train_batch_smoke(detseg_fixture_dir: Path) -> None:
     batch = next(iter(datamodule.train_dataloader()))
     assert isinstance(batch[1], PackedTargets)  # the loader emits the packed transport form
     assert batch[0].dtype == torch.uint8  # transport ships the images as uint8
-    images, targets = datamodule.on_after_batch_transfer(batch, 0)
+    images, targets, _ = datamodule.on_after_batch_transfer(batch, 0)
     assert images.shape == (2, 3, _SMOKE_IMG_SIZE, _SMOKE_IMG_SIZE)
     assert images.dtype == torch.float32  # the hook restores float images
     assert torch.all((images >= 0.0) & (images <= 1.0))
@@ -289,7 +292,7 @@ def test_datamodule_val_batch_letterboxed(detseg_fixture_dir: Path) -> None:
     batch = next(iter(datamodule.val_dataloader()))
     assert isinstance(batch[1], PackedTargets)  # the loader emits the packed transport form
     assert batch[0].dtype == torch.uint8  # the val path quantizes to uint8 through the same collate
-    images, targets = datamodule.on_after_batch_transfer(batch, 0)
+    images, targets, _ = datamodule.on_after_batch_transfer(batch, 0)
     assert images.shape == (2, 3, _SMOKE_IMG_SIZE, _SMOKE_IMG_SIZE)
     assert images.dtype == torch.float32  # the hook restores float images
     assert torch.all((images >= 0.0) & (images <= 1.0))
@@ -301,7 +304,7 @@ def test_on_after_batch_transfer_dequantizes_uint8_images(detseg_fixture_dir: Pa
     """The hook dequantizes a uint8 transport batch to float32 ``[0, 1]`` on the batch's device."""
     datamodule = _datamodule(detseg_fixture_dir)
     transport, packed = collate_detection([(torch.rand(3, 8, 8), target) for target in _ragged_targets()])
-    images, _targets = datamodule.on_after_batch_transfer((transport, packed), 0)
+    images, _targets, _ = datamodule.on_after_batch_transfer((transport, packed), 0)
     assert images.dtype == torch.float32
     assert images.device == transport.device
     assert torch.all((images >= 0.0) & (images <= 1.0))
@@ -323,7 +326,7 @@ def test_on_after_batch_transfer_matches_half_module_dtype(detseg_fixture_dir: P
     datamodule = _datamodule(detseg_fixture_dir)
     datamodule.trainer = trainer
     transport, packed = collate_detection([(torch.rand(3, 8, 8), target) for target in _ragged_targets()])
-    images, _targets = datamodule.on_after_batch_transfer((transport, packed), 0)
+    images, _targets, _ = datamodule.on_after_batch_transfer((transport, packed), 0)
     assert images.dtype == torch.float16
     assert torch.all((images >= 0.0) & (images <= 1.0))
 

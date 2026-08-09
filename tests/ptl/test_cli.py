@@ -222,3 +222,23 @@ def test_fit_without_config_defaults_to_packaged_recipe(capsys) -> None:
     assert "max_epochs: 50" in out
     assert "gradient_clip_val: 10.0" in out
     assert "variant: n" in out
+
+
+@pytest.mark.parametrize(
+    ("config_name", "expected"),
+    [
+        pytest.param("seg_tier_a_n.yaml", True, id="segment-rasterises-in-the-loader"),
+        pytest.param("det_tier_a_n.yaml", False, id="detect-does-not"),
+    ],
+)
+def test_mask_targets_follows_the_model_task(config_name: str, expected: bool) -> None:
+    """``model.task`` decides whether the loader rasterises mask targets, with no second knob.
+
+    A detection loader that rasterised would raise on the first box without a ring;
+    a segmentation loader that did not would silently put ~1 s per step of CPU work
+    back on the training process's critical path, which is a performance regression
+    no test asserting correctness would ever see.
+    """
+    cli = _config_cli(_CONFIGS_DIR / config_name)
+
+    assert cli.datamodule._mask_targets is expected

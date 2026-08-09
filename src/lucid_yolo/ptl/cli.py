@@ -157,6 +157,13 @@ class DetectionCLI(LightningCLI):
             "variant", "model.max_channels", compute_fn=lambda variant: scale_spec(variant).max_channels
         )
         parser.link_arguments("variant", "data.variant")
+        # A segmentation run rasterises its mask targets in the loader workers rather
+        # than in the training process (WP-087 perf). The task already states whether
+        # masks are supervised, so linking beats a second knob two configs could
+        # disagree on: a loader that rasterised for a detection run would raise on the
+        # first box without a ring, and one that did not for a segmentation run would
+        # silently put that CPU work back on the critical path.
+        parser.link_arguments("model.task", "data.mask_targets", compute_fn=lambda task: task == "segment")
 
     def instantiate_trainer(self, **kwargs: Any) -> Trainer:
         """Instantiate the trainer with the ``--progress_bar`` choice and default loggers.

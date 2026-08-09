@@ -67,6 +67,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import torch
@@ -81,6 +82,7 @@ from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.mixup import CopyPaste, Mixup
 from lucid_yolo.data.mosaic import MosaicAssembly
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.ptl.seg_targets import instance_mask_targets
 
 __all__ = [
     "DetectionDataModule",
@@ -88,6 +90,7 @@ __all__ = [
     "collate_detection",
     "pack_targets",
     "unpack_batch",
+    "unpack_masks",
     "unpack_targets",
 ]
 
@@ -101,6 +104,15 @@ _POINT_DIM = 2
 #: on the destination device. ``torch.round`` is round-half-to-even, so the worst-case
 #: round-trip error is one half-step — ``1 / 510``.
 _PIXEL_QUANT_MAX = 255
+
+#: Input-pixel stride of the prototype grid the mask targets are rasterised onto.
+#: :class:`~lucid_yolo.models.heads.proto.ProtoNet` upsamples the fused P3 feature
+#: (stride 8) by two (A15), so the grid is a fixed quarter of the input canvas. The
+#: collate needs the grid without the model, and
+#: :meth:`~lucid_yolo.ptl.module.DetectionLitModule._segment_terms` asserts the
+#: transported masks match the prototypes it actually got, so a topology that broke
+#: this fails loudly rather than supervising at the wrong resolution.
+_PROTO_STRIDE = 4
 
 #: Default mosaic probability: every training sample (blueprint sec. 5.9: ``mosaic
 #: p=1.0``). The ``close_mosaic`` late-epoch disable flips the per-pipeline
@@ -221,7 +233,8 @@ class PackedTargets:
     image also carries a *list* of per-instance polygon rings — explodes into
     hundreds of tiny segments and exhausts the consumer's mmap budget
     (``vm.max_map_count``) at realistic worker counts. This container collapses the
-    whole ragged batch into a **fixed set of eight dense tensors**: the modality
+    whole ragged batch into a **fixed set of dense tensors** (eight, plus the
+    optional mask stack a segmentation loader adds): the modality
     rows are concatenated along their instance/ring/point axes and paired with the
     per-image (and per-ring) counts needed to split them back apart. The tensor
     count is constant regardless of how many instances the batch holds, so the
@@ -247,6 +260,15 @@ class PackedTargets:
         rings_per_image: ``(B,)`` int64 ring count per image (``0`` when an image
             carries no polygons, else its instance count); groups the ``R`` rings
             back into per-image lists.
+        masks_cat: ``(sum_N, Hp, Wp)`` bool instance masks of every image,
+            concatenated, or ``None`` on a detection loader. Present only when the
+            collate rasterises (``mask_targets=True``), which moves that CPU work
+            out of the training process and into the workers; the split is
+            ``boxes_per_image``, since a segmentation annotation carries one ring
+            per box. Shipped as ``bool`` rather than the ``float32``
+            :func:`~lucid_yolo.ptl.seg_targets.instance_mask_targets` returns: the
+            values are ``{0, 1}``, so the cast back is exact and the transport is a
+            quarter of the size.
 
     Examples:
         ```pycon
@@ -268,6 +290,7 @@ class PackedTargets:
     polygon_points_cat: Tensor
     points_per_ring: Tensor
     rings_per_image: Tensor
+    masks_cat: Tensor | None = None
 
 
 def pack_targets(targets: list[Targets]) -> PackedTargets:
@@ -366,7 +389,41 @@ def unpack_targets(packed: PackedTargets) -> list[Targets]:
     return targets
 
 
-def collate_detection(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, PackedTargets]:
+def unpack_masks(packed: PackedTargets) -> list[Tensor] | None:
+    """Split a packed mask stack back into one ``(N_i, Hp, Wp)`` tensor per image.
+
+    The mask counterpart of :func:`unpack_targets`, kept separate because the masks
+    are an optional modality: a detection loader ships none and this returns
+    ``None``, which is the signal the consumer falls back to rasterising itself.
+    ``torch.split`` returns views, so the per-image tensors cost no copy and stay on
+    whatever device the transport was moved to.
+
+    Args:
+        packed: The transport container, whose ``masks_cat`` may be ``None``.
+
+    Returns:
+        One float mask stack per image in image order, or ``None`` when the batch
+        carries no masks. The bool transport is restored to float32 ``{0.0, 1.0}``,
+        the dtype :func:`~lucid_yolo.ptl.seg_targets.instance_mask_targets` produces.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> from lucid_yolo.data.targets import Targets
+        >>> unpack_masks(pack_targets([Targets.empty()])) is None
+        True
+
+        ```
+    """
+    if packed.masks_cat is None:
+        return None
+    counts = [int(count) for count in packed.boxes_per_image.tolist()]
+    return [chunk.to(torch.float32) for chunk in torch.split(packed.masks_cat, counts)]
+
+
+def collate_detection(
+    batch: list[tuple[Tensor, Targets]], *, mask_targets: bool = False
+) -> tuple[Tensor, PackedTargets]:
     """Collate ``(image, Targets)`` samples into ``(images, PackedTargets)``.
 
     All images are letterboxed to a common ``img_size`` upstream, so they stack
@@ -379,8 +436,23 @@ def collate_detection(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, Pack
     :meth:`DetectionDataModule.on_after_batch_transfer`; a direct caller converts
     with :func:`unpack_targets`.
 
+    Under ``mask_targets`` the segmentation mask targets are rasterised **here**,
+    which is what puts that work in the loader workers: the DataLoader hands a whole
+    batch to one worker and runs its ``collate_fn`` in that same process, so the
+    batches of a run are rasterised concurrently across workers and ahead of the step
+    that needs them. Rasterising in the training process instead cost a measured
+    1005 ms per step at batch 32 on COCO, serial with the GPU, which is most of why
+    the accelerator idled. The grid is the input canvas at :data:`_PROTO_STRIDE`
+    (A15) rather than a size read off the model, so the collate needs no model;
+    :meth:`~lucid_yolo.ptl.module.DetectionLitModule._segment_terms` checks the
+    transported grid against the prototypes it actually got.
+
     Args:
         batch: The per-sample ``(image, Targets)`` pairs from the dataset.
+        mask_targets: Rasterise each image's instance masks onto the prototype grid
+            and ship them in ``packed.masks_cat``. Requires one polygon ring per box
+            (:func:`~lucid_yolo.ptl.seg_targets.instance_mask_targets` raises
+            otherwise), so it is set only by a segmentation loader.
 
     Returns:
         A ``(images, packed)`` pair: ``images`` is the batch quantized to a
@@ -402,8 +474,14 @@ def collate_detection(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, Pack
         ```
     """
     images = torch.stack([image for image, _ in batch], dim=0)
+    image_size = (int(images.shape[-2]), int(images.shape[-1]))
     images = images.mul(_PIXEL_QUANT_MAX).round().clamp_(0, _PIXEL_QUANT_MAX).to(torch.uint8)
-    packed = pack_targets([target for _, target in batch])
+    targets = [target for _, target in batch]
+    packed = pack_targets(targets)
+    if mask_targets:
+        grid = (image_size[0] // _PROTO_STRIDE, image_size[1] // _PROTO_STRIDE)
+        rasterised = [instance_mask_targets(target, image_size, grid).to(torch.bool) for target in targets]
+        packed.masks_cat = torch.cat(rasterised) if rasterised else torch.zeros((0, *grid), dtype=torch.bool)
     return images, packed
 
 
@@ -615,6 +693,13 @@ class DetectionDataModule(LightningDataModule):
             to ``False`` (WP-076): respawning costs seconds per epoch while a
             persistent pool accumulates per-worker memory for the whole run —
             the observed slow-creep OOM on long containerized runs.
+        mask_targets: Rasterise the segmentation mask targets in the loader workers
+            (:func:`collate_detection`) instead of leaving that CPU work in the
+            training process. Off by default because it requires a polygon ring per
+            box; the CLI turns it on for ``model.task="segment"``. Adds the mask
+            stack to the batch transport — roughly 27 MB per batch of 32 at COCO
+            instance density — so a container with a small ``/dev/shm`` may need
+            fewer workers or a lower ``prefetch_factor``.
 
     Examples:
         ```pycon
@@ -642,8 +727,10 @@ class DetectionDataModule(LightningDataModule):
         prefetch_factor: int = _PREFETCH_FACTOR,
         val_num_workers: int | None = None,
         persistent_workers: bool = False,
+        mask_targets: bool = False,
     ) -> None:
         super().__init__()
+        self._mask_targets = bool(mask_targets)
         self._batch_size = int(batch_size)
         self._img_size = int(img_size)
         self._prefetch_factor = int(prefetch_factor)
@@ -685,7 +772,7 @@ class DetectionDataModule(LightningDataModule):
 
     def on_after_batch_transfer(
         self, batch: tuple[Tensor, PackedTargets] | tuple[Tensor, list[Targets]], dataloader_idx: int
-    ) -> tuple[Tensor, list[Targets]]:
+    ) -> tuple[Tensor, list[Targets], list[Tensor] | None]:
         """Restore the float images and ``list[Targets]`` consumer contract on-device.
 
         Lightning calls this after moving the batch to the accelerator, so both the
@@ -706,9 +793,11 @@ class DetectionDataModule(LightningDataModule):
             dataloader_idx: The loader index (unused; the conversion is uniform).
 
         Returns:
-            The ``(images, list[Targets])`` consumer batch — the exact contract the
-            module and every downstream step expect (``[0, 1]`` images at the
-            module's dtype).
+            The ``(images, list[Targets], masks)`` consumer batch — ``[0, 1]`` images
+            at the module's dtype, the ragged per-image targets, and the per-image
+            mask stacks a segmentation loader rasterised in its workers (``None`` on
+            a detection loader, or on any already-restored feed, which is the signal
+            the module rasterises the masks itself).
 
         Examples:
             ```pycon
@@ -721,8 +810,8 @@ class DetectionDataModule(LightningDataModule):
         images, targets = batch
         images = _dequantize_images(images, self._consumer_dtype())
         if isinstance(targets, PackedTargets):
-            return images, unpack_targets(targets)
-        return images, targets
+            return images, unpack_targets(targets), unpack_masks(targets)
+        return images, targets, None
 
     def _consumer_dtype(self) -> torch.dtype:
         """Resolve the floating-point dtype the dequantized images should take.
@@ -761,7 +850,10 @@ class DetectionDataModule(LightningDataModule):
         return {
             "batch_size": self._batch_size,
             "num_workers": self._num_workers,
-            "collate_fn": collate_detection,
+            # A partial, not a closure or a lambda: the worker start method pickles
+            # `collate_fn`, and `functools.partial` over a module-level function is
+            # picklable where a local function is not.
+            "collate_fn": partial(collate_detection, mask_targets=self._mask_targets),
             "persistent_workers": self._persistent_workers and workers,
             "pin_memory": self._pin_memory,
             "prefetch_factor": self._prefetch_factor if workers else None,

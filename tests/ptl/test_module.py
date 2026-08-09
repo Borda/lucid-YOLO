@@ -230,7 +230,7 @@ def test_task_extra_loss_is_inert_zero(task: str) -> None:
     images, targets = _synthetic_batch()
     gt_boxes, _, _ = pad_targets(targets)
     extra = module._task_extra_loss(
-        None, targets, _dual_loss_output(module, images, targets), gt_boxes, (_IMG_SIZE, _IMG_SIZE), "train"
+        None, targets, _dual_loss_output(module, images, targets), gt_boxes, (_IMG_SIZE, _IMG_SIZE), "train", None
     )
     assert extra.ndim == 0
     assert float(extra) == 0.0

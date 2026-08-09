@@ -64,7 +64,7 @@ class _OneParamModule(LightningModule):
 
     def training_step(self, batch: tuple[Tensor, list[Targets]], batch_idx: int) -> Tensor:
         """Return a scalar loss coupling the image mean to the single parameter."""
-        images, _targets = batch
+        images, _targets, *_ = batch
         return (self._weight * images.mean()).sum()
 
     def configure_optimizers(self) -> torch.optim.Optimizer:

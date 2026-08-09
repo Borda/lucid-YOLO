@@ -30,6 +30,8 @@ from lucid_yolo.losses.mask_loss import instance_mask_loss
 from lucid_yolo.models.heads.detect import decode_ltrb
 from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.ptl import DetectionLitModule, pad_targets
+from lucid_yolo.ptl.datamodule import _PROTO_STRIDE, collate_detection, unpack_masks
+from lucid_yolo.ptl.seg_targets import instance_mask_targets
 
 #: Class count of the tiny test head.
 _NUM_CLASSES = 4
@@ -334,3 +336,77 @@ def test_detect_total_is_exactly_the_dual_detection_loss() -> None:
     total = module.training_step(batch, 0)
 
     assert torch.equal(total, _reference_detection_loss(module, batch))
+
+
+def _collated_masks(images: Tensor, targets: list[Targets]) -> list[Tensor]:
+    """Rasterise a batch's masks the way a segmentation loader's workers do."""
+    _, packed = collate_detection(list(zip(images, targets, strict=True)), mask_targets=True)
+    masks = unpack_masks(packed)
+    assert masks is not None  # the collate was asked to rasterise
+    return masks
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [
+        pytest.param((2, 1), id="ragged"),
+        pytest.param((3, 0), id="one-image-empty"),
+        pytest.param((0, 0), id="no-instances-at-all"),
+    ],
+)
+def test_loader_rasterises_the_masks_the_step_would_have(counts: tuple[int, ...]) -> None:
+    """The collate's transported masks equal what the step rasterises from the same targets.
+
+    The whole point of moving rasterisation into the loader workers is that it is
+    the *same* rasterisation — the training process just stops doing it. The
+    transport ships bool and the grid comes from the image size rather than from
+    the prototypes, so this pins both: a wrong stride would produce a plausible
+    mask stack at the wrong resolution, and a bool round-trip that lost a value
+    would train against a hole no loss curve would explain.
+
+    The empty cases are here because they are where a per-image split goes wrong:
+    an image with no instances must consume no rows of the concatenated stack.
+    """
+    targets = [_synthetic_targets(count) if count else Targets.empty() for count in counts]
+    images = torch.rand(len(counts), 3, _IMG_SIZE, _IMG_SIZE)
+    grid = (_IMG_SIZE // _PROTO_STRIDE, _IMG_SIZE // _PROTO_STRIDE)
+
+    masks = _collated_masks(images, targets)
+
+    expected = [instance_mask_targets(target, (_IMG_SIZE, _IMG_SIZE), grid) for target in targets]
+    assert [mask.shape for mask in masks] == [reference.shape for reference in expected]
+    assert all(torch.equal(mask, reference) for mask, reference in zip(masks, expected, strict=True))
+
+
+def test_loader_rasterised_masks_give_the_identical_loss() -> None:
+    """A batch carrying the loader's masks scores exactly what the in-step fallback scores.
+
+    This is the bit-exactness claim of the move, end to end through the real
+    training step rather than through the rasteriser alone: same weights, same
+    inputs, one batch with the third element and one without.
+    """
+    module = _tiny_module()
+    module.log = _LogRecorder()  # type: ignore[method-assign]
+    images, targets = _synthetic_batch()
+
+    from_loader = module.training_step((images, targets, _collated_masks(images, targets)), 0)
+
+    assert torch.equal(from_loader, module.training_step((images, targets), 0))
+
+
+def test_masks_rasterised_for_another_grid_are_rejected() -> None:
+    """Masks whose grid disagrees with the prototypes raise instead of supervising at the wrong scale.
+
+    The collate derives the grid from the input canvas (A15) while the step reads
+    it off the prototypes, so the two agree only as long as the prototype stride
+    is what A15 says. Nothing about a half-resolution mask stack is malformed —
+    it would broadcast, train, and quietly supervise the wrong pixels — so the
+    disagreement has to be an error rather than a shape coincidence.
+    """
+    module = _tiny_module()
+    module.log = _LogRecorder()  # type: ignore[method-assign]
+    images, targets = _synthetic_batch()
+    coarse = [mask[:, ::2, ::2] for mask in _collated_masks(images, targets)]
+
+    with pytest.raises(ValueError, match="prototypes are"):
+        module.training_step((images, targets, coarse), 0)

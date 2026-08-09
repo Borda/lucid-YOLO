@@ -9,14 +9,18 @@ training loop. It runs under Lightning **automatic optimization** (blueprint D4)
 backward/step/zero-grad cycle.
 
 Batch contract:
-    Every step consumes ``(images, list[Targets])`` — the images stacked into one
-    ``(B, C, H, W)`` float32 tensor and the ragged per-image
-    :class:`~lucid_yolo.data.targets.Targets` as a length-``B`` list. The
+    Every step consumes ``(images, list[Targets], masks)`` — the images stacked into
+    one ``(B, C, H, W)`` float32 tensor, the ragged per-image
+    :class:`~lucid_yolo.data.targets.Targets` as a length-``B`` list, and the
+    per-image instance masks a segmentation loader rasterised in its workers
+    (``None`` otherwise, which makes the step rasterise them itself). The
     datamodule ships the batch across the DataLoader worker boundary in a packed
-    uint8 transport form and restores the float images and this list in its
-    ``on_after_batch_transfer`` hook
+    uint8 transport form and restores the float images, this list and those masks in
+    its ``on_after_batch_transfer`` hook
     (see :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule`), so the module
-    never sees the packed form — it always receives the ragged list unchanged.
+    never sees the packed form — it always receives the ragged list unchanged. The
+    two-element ``(images, list[Targets])`` form is still accepted, so a hand-built
+    feed needs no mask stack.
 
 Forward and loss wiring:
     The head emits raw ``ltrb`` distances per anchor; the module derives the
@@ -38,7 +42,9 @@ Task conditioning:
     (A38). :meth:`DetectionLitModule.forward_segmentation` produces the prototype
     maps and auxiliary logits alongside the detection output;
     :mod:`lucid_yolo.ptl.seg_targets` rasterizes the batch's polygons once, onto
-    the prototype grid read off the prediction itself; the assembled Eq. 7 masks
+    the prototype grid — in the loader workers when the loader was built for it,
+    in the step otherwise, and checked against the prototypes either way; the
+    assembled Eq. 7 masks
     of the positives are scored by
     :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` and the pooled
     per-class union by :func:`~lucid_yolo.losses.semantic_loss.semantic_aux_loss`.
@@ -169,6 +175,39 @@ def pad_targets(targets: list[Targets]) -> tuple[Tensor, Tensor, Tensor]:
         gt_labels[index, :count] = target.labels
         gt_mask[index, :count] = True
     return gt_boxes, gt_labels, gt_mask
+
+
+#: A step batch. The datamodule's transfer hook produces the three-element form; the
+#: two-element form is the hand-built feed a direct caller passes to
+#: :meth:`DetectionLitModule.training_step`.
+StepBatch = tuple[Tensor, list["Targets"]] | tuple[Tensor, list["Targets"], list[Tensor] | None]
+
+
+def _split_batch(batch: StepBatch) -> tuple[Tensor, list[Targets], list[Tensor] | None]:
+    """Split a step batch into images, targets and the loader's mask stacks.
+
+    :meth:`~lucid_yolo.ptl.datamodule.DetectionDataModule.on_after_batch_transfer`
+    hands over a third element — the per-image instance masks a segmentation loader
+    rasterised in its workers, or ``None``. A two-element batch is still accepted so
+    that a hand-built ``(images, targets)`` feed (every direct-call test, every
+    script that drives the module without the datamodule) keeps working and simply
+    rasterises in the step, as it always did.
+
+    Args:
+        batch: The ``(images, targets)`` or ``(images, targets, masks)`` step batch.
+
+    Returns:
+        The ``(images, targets, masks)`` triple, with ``masks`` ``None`` when the
+        batch carried none.
+
+    Examples:
+        >>> import torch
+        >>> images, targets, masks = _split_batch((torch.zeros(1, 3, 4, 4), []))
+        >>> masks is None
+        True
+    """
+    images, targets, *rest = batch
+    return images, targets, rest[0] if rest else None
 
 
 class DetectionLitModule(LightningModule):
@@ -436,11 +475,12 @@ class DetectionLitModule(LightningModule):
         fused: Tensor = self.proto_fusion(features)
         return SegmentOutput(detect=detect, prototypes=self.protonet(fused), semantic=self.semantic(fused))
 
-    def training_step(self, batch: tuple[Tensor, list[Targets]], batch_idx: int) -> Tensor:
+    def training_step(self, batch: StepBatch, batch_idx: int) -> Tensor:
         """Run one training step under automatic optimization (D4).
 
         Args:
-            batch: The datamodule batch ``(images, list[Targets])``.
+            batch: The datamodule batch ``(images, list[Targets], masks)``; the
+                two-element ``(images, list[Targets])`` form rasterises in the step.
             batch_idx: Index of the batch within the epoch (unused).
 
         Returns:
@@ -449,7 +489,7 @@ class DetectionLitModule(LightningModule):
         loss, _ = self._shared_step(batch, "train")
         return loss
 
-    def validation_step(self, batch: tuple[Tensor, list[Targets]], batch_idx: int) -> Tensor:
+    def validation_step(self, batch: StepBatch, batch_idx: int) -> Tensor:
         """Run one validation step: shared forward and loss, plus the mAP update.
 
         Beyond the ``val/``-logged loss, the one-to-one branch is decoded with
@@ -463,14 +503,15 @@ class DetectionLitModule(LightningModule):
         (original coordinates, both paths).
 
         Args:
-            batch: The datamodule batch ``(images, list[Targets])``.
+            batch: The datamodule batch ``(images, list[Targets], masks)``; the
+                two-element ``(images, list[Targets])`` form rasterises in the step.
             batch_idx: Index of the batch within the epoch (unused).
 
         Returns:
             The scalar total validation loss.
         """
-        images, targets = batch
-        loss, head_out = self._shared_step((images, targets), "val")
+        images, targets, _ = _split_batch(batch)
+        loss, head_out = self._shared_step(batch, "val")
         anchor_points, strides = self._anchor_grid(images.shape[-2], images.shape[-1], images.device)
         detections = self._val_decoder(head_out.o2o_cls, head_out.o2o_box, anchor_points, strides).cpu()
         preds = []
@@ -532,14 +573,14 @@ class DetectionLitModule(LightningModule):
         )
         return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"}}
 
-    def _shared_step(self, batch: tuple[Tensor, list[Targets]], stage: str) -> tuple[Tensor, DualHeadOutput]:
+    def _shared_step(self, batch: StepBatch, stage: str) -> tuple[Tensor, DualHeadOutput]:
         """Forward, decode both branches, score the dual loss, and log every term.
 
         Returns:
             The scalar total loss and the dense head output (so callers can
             decode from the same forward instead of running a second one).
         """
-        images, targets = batch
+        images, targets, masks = _split_batch(batch)
         seg_out = self.forward_segmentation(images) if self._task == "segment" else None
         head_out = self(images) if seg_out is None else seg_out.detect
         anchor_points, strides = self._anchor_grid(images.shape[-2], images.shape[-1], images.device)
@@ -561,7 +602,7 @@ class DetectionLitModule(LightningModule):
             strides=strides,
         )
         image_size = (int(images.shape[-2]), int(images.shape[-1]))
-        total = out.total + self._task_extra_loss(seg_out, targets, out, gt_boxes, image_size, stage)
+        total = out.total + self._task_extra_loss(seg_out, targets, out, gt_boxes, image_size, stage, masks)
         self._log_loss(out, total, stage, images.shape[0])
         return total, head_out
 
@@ -573,6 +614,7 @@ class DetectionLitModule(LightningModule):
         gt_boxes: Tensor,
         image_size: tuple[int, int],
         stage: str,
+        masks: list[Tensor] | None,
     ) -> Tensor:
         """Return the task-conditional extra loss: segmentation terms, else zero.
 
@@ -592,15 +634,17 @@ class DetectionLitModule(LightningModule):
             gt_boxes: The ``(B, N, 4)`` padded ground-truth boxes in input pixels.
             image_size: The batch's ``(height, width)`` in input pixels.
             stage: Metric prefix (``"train"``/``"val"``) for the logged terms.
+            masks: The loader's per-image instance masks, or ``None`` to rasterise
+                them here.
 
         Returns:
             A scalar tensor on the prediction device: the gain-weighted sum for
             ``"segment"``, a zero otherwise.
         """
         if seg_out is None:
-            del targets, gt_boxes, image_size, stage  # inert: no extra supervision for detection
+            del targets, gt_boxes, image_size, stage, masks  # inert: no extra supervision for detection
             return torch.zeros_like(out.total)
-        mask_term, semantic_term = self._segment_terms(seg_out, targets, out, gt_boxes, image_size)
+        mask_term, semantic_term = self._segment_terms(seg_out, targets, out, gt_boxes, image_size, masks)
         self.log(f"{stage}/mask", mask_term, batch_size=len(targets))
         self.log(f"{stage}/semantic", semantic_term, batch_size=len(targets))
         return self._mask_gain * mask_term + self._semantic_gain * semantic_term
@@ -612,12 +656,18 @@ class DetectionLitModule(LightningModule):
         out: DualLossOutput,
         gt_boxes: Tensor,
         image_size: tuple[int, int],
+        masks: list[Tensor] | None,
     ) -> tuple[Tensor, Tensor]:
         """Return the pre-gain ``(mask, semantic)`` terms for a segmentation batch.
 
         The instance masks are rasterized **once** per batch, on the prototype grid
         read off ``seg_out.prototypes``, and feed both terms (the semantic map is
-        pooled down from them). The mask term mirrors
+        pooled down from them). A segmentation loader rasterises them in its workers
+        and passes them in; this rasterises them here only when it did not, which is
+        the hand-built-batch path. Either way the grid is checked against the
+        prototypes actually produced, so a transport built for a different input size
+        — or a topology that moved the prototype stride off A15 — fails loudly rather
+        than supervising at the wrong resolution. The mask term mirrors
         :class:`~lucid_yolo.losses.dual_loss.DualBranchLoss`'s own composition —
         ``alpha * o2m + (1 - alpha) * o2o``, each branch against its own assignment
         — so the coefficient stem of the branch that survives into deployment (the
@@ -627,7 +677,15 @@ class DetectionLitModule(LightningModule):
         """
         prototypes = seg_out.prototypes
         proto_grid = (int(prototypes.shape[-2]), int(prototypes.shape[-1]))
-        masks = [instance_mask_targets(target, image_size, proto_grid).to(prototypes.device) for target in targets]
+        if masks is None:
+            masks = [instance_mask_targets(target, image_size, proto_grid) for target in targets]
+        masks = [image_masks.to(prototypes.device) for image_masks in masks]
+        grids = {tuple(image_masks.shape[-2:]) for image_masks in masks}
+        if grids - {proto_grid}:
+            raise ValueError(
+                f"instance mask targets are on grid(s) {sorted(grids)} but the prototypes are {proto_grid}; "
+                f"the loader rasterised for a different input size or prototype stride"
+            )
         grid_boxes = scale_boxes_to_grid(gt_boxes, image_size, proto_grid)
         o2m_coeff, o2o_coeff = seg_out.detect.o2m_coeff, seg_out.detect.o2o_coeff
         assert o2m_coeff is not None  # a "segment" module always builds both coefficient stems

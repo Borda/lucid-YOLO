@@ -288,12 +288,15 @@ def _num_classes(split: Path) -> int:
     return len(dataset.category_id_to_label)
 
 
-def build_datamodule(split: Path, recipe: Recipe) -> DetectionDataModule:
+def build_datamodule(split: Path, recipe: Recipe, *, mask_targets: bool = False) -> DetectionDataModule:
     """Build a datamodule pointing both splits at the single overfit slice.
 
     Args:
         split: The slice's ``train`` split directory.
         recipe: The parsed recipe (supplies ``variant``, ``batch_size``, ``seed``).
+        mask_targets: Rasterise the instance masks in the loader, as a segmentation
+            training run does. Set for the ``seg`` gate so the frozen mask IoU covers
+            the loader-side path the real runs take, not only the in-step fallback.
 
     Returns:
         A :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule` with ``num_workers=0``
@@ -315,6 +318,7 @@ def build_datamodule(split: Path, recipe: Recipe) -> DetectionDataModule:
         val_images_dir=split,
         val_ann_file=annotation,
         seed=recipe.seed,
+        mask_targets=mask_targets,
     )
 
 
@@ -516,7 +520,7 @@ def evaluate_recall(module: DetectionLitModule, datamodule: DetectionDataModule)
     instance_total = 0
     with torch.no_grad():
         for batch in datamodule.val_dataloader():
-            images, targets = datamodule.on_after_batch_transfer(batch, 0)
+            images, targets, _ = datamodule.on_after_batch_transfer(batch, 0)
             head_out: DualHeadOutput = module(images.to(device))
             dets = decoder(head_out.o2o_cls, head_out.o2o_box, anchor_points, strides).cpu()
             for image_dets, target in zip(dets, targets, strict=True):
@@ -619,7 +623,7 @@ def evaluate_mask_iou(module: DetectionLitModule, datamodule: DetectionDataModul
     instance_total = 0
     with torch.no_grad():
         for batch in datamodule.val_dataloader():
-            images, targets = datamodule.on_after_batch_transfer(batch, 0)
+            images, targets, _ = datamodule.on_after_batch_transfer(batch, 0)
             seg_out = module.forward_segmentation(images.to(device))
             coefficients = seg_out.detect.o2o_coeff
             assert coefficients is not None  # a "segment" module always builds the coefficient stems
@@ -696,7 +700,7 @@ def _train_and_score(recipe: Recipe, split: Path, deterministic: bool, spec: Tas
     seed_everything(recipe.seed, workers=True)
     num_classes = _num_classes(split)
     module = build_module(recipe, num_classes, module_task=spec.module_task)
-    datamodule = build_datamodule(split, recipe)
+    datamodule = build_datamodule(split, recipe, mask_targets=spec.module_task == "segment")
     _make_trainer(recipe, deterministic).fit(module, datamodule=datamodule)
     score, instances = spec.scorer(module, datamodule)
     return score, instances, num_classes
