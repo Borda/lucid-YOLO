@@ -98,6 +98,7 @@ from torchmetrics.detection import MeanAveragePrecision
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.decode.common import BOX_CORNERS, SCORE_COLUMN
 from lucid_yolo.decode.topk_e2e import TopKDecoder
+from lucid_yolo.eval.segment_decode import decode_instance_masks
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
 from lucid_yolo.losses.mask_loss import instance_mask_loss
 from lucid_yolo.losses.progressive import ProgressiveLossSchedule
@@ -128,6 +129,12 @@ _BOX_DIM = 4
 
 #: Column index of the integral class label within the A9 detection tuple.
 _LABEL_COLUMN = 5
+
+#: Detections per image whose masks are decoded for the epoch ``val/segm_mAP``.
+#: COCO's own ``maxDets`` cap is 100, and the metric applies it anyway, so
+#: decoding the fixed 300-row decoder output in full would cost two thirds of the
+#: mask work to produce rows the evaluation then discards.
+_VAL_SEGM_MAX_DET = 100
 
 
 def pad_targets(targets: list[Targets]) -> tuple[Tensor, Tensor, Tensor]:
@@ -339,6 +346,23 @@ class DetectionLitModule(LightningModule):
         self._val_map = MeanAveragePrecision(backend="faster_coco_eval", box_format="xyxy")
         self._val_map.warn_on_many_detections = False
 
+        #: Epoch mask mAP, for ``"segment"`` only (WP-087). A second metric rather
+        #: than ``iou_type=("bbox", "segm")`` on :attr:`_val_map`, because the two
+        #: are scored in **different frames** — boxes in letterbox pixels, masks on
+        #: the prototype grid — and one metric holding both would report each
+        #: instance's area under whichever frame torchmetrics picked, silently
+        #: mis-bucketing the small/medium/large splits. Split in two, each metric's
+        #: inputs are self-consistent. ``None`` for a detection module, whose
+        #: validation must not pay for mask machinery it has no branch for.
+        self._val_segm = (
+            MeanAveragePrecision(backend="faster_coco_eval", iou_type="segm") if task == "segment" else None
+        )
+        if self._val_segm is not None:
+            self._val_segm.warn_on_many_detections = False
+        #: Whether any batch fed :attr:`_val_segm` this epoch — ``compute`` on an
+        #: untouched metric raises, and a loader without mask targets never feeds it.
+        self._val_segm_seen = False
+
         #: Per-image-size cache of ``(anchor_points, stride_per_anchor)`` on CPU.
         self._anchor_cache: dict[tuple[int, int], tuple[Tensor, Tensor]] = {}
 
@@ -486,7 +510,7 @@ class DetectionLitModule(LightningModule):
         Returns:
             The scalar total loss for Lightning to backpropagate.
         """
-        loss, _ = self._shared_step(batch, "train")
+        loss, _, _ = self._shared_step(batch, "train")
         return loss
 
     def validation_step(self, batch: StepBatch, batch_idx: int) -> Tensor:
@@ -502,6 +526,14 @@ class DetectionLitModule(LightningModule):
         protocol closely; the acceptance figure remains ``scripts/eval_det.py``
         (original coordinates, both paths).
 
+        A ``"segment"`` module additionally decodes the kept detections' masks
+        and accumulates ``val/segm_mAP`` (:meth:`_update_val_segm`), so a
+        segmentation run reports the quality of the branch it exists for rather
+        than of its boxes alone. That needs the ground-truth masks, which only a
+        loader built with ``mask_targets=True`` supplies — the CLI links that
+        flag to ``model.task``, and a batch without them is scored on boxes only
+        rather than rasterised a second time here.
+
         Args:
             batch: The datamodule batch ``(images, list[Targets], masks)``; the
                 two-element ``(images, list[Targets])`` form rasterises in the step.
@@ -510,12 +542,14 @@ class DetectionLitModule(LightningModule):
         Returns:
             The scalar total validation loss.
         """
-        images, targets, _ = _split_batch(batch)
-        loss, head_out = self._shared_step(batch, "val")
+        images, targets, masks = _split_batch(batch)
+        loss, head_out, seg_out = self._shared_step(batch, "val")
         anchor_points, strides = self._anchor_grid(images.shape[-2], images.shape[-1], images.device)
-        detections = self._val_decoder(head_out.o2o_cls, head_out.o2o_box, anchor_points, strides).cpu()
+        detections, anchor_indices = self._val_decoder.decode_with_indices(
+            head_out.o2o_cls, head_out.o2o_box, anchor_points, strides
+        )
         preds = []
-        for image_detections in detections:
+        for image_detections in detections.cpu():
             kept = image_detections[image_detections[:, SCORE_COLUMN] > 0.0]
             preds.append(
                 {
@@ -526,13 +560,95 @@ class DetectionLitModule(LightningModule):
             )
         ground_truth = [{"boxes": t.boxes.cpu(), "labels": t.labels.cpu()} for t in targets]
         self._val_map.update(preds, ground_truth)
+        if self._val_segm is not None and seg_out is not None and masks is not None:
+            image_size = (int(images.shape[-2]), int(images.shape[-1]))
+            self._update_val_segm(seg_out, detections, anchor_indices, targets, masks, image_size)
         return loss
 
+    def _update_val_segm(
+        self,
+        seg_out: SegmentOutput,
+        detections: Tensor,
+        anchor_indices: Tensor,
+        targets: list[Targets],
+        masks: list[Tensor],
+        image_size: tuple[int, int],
+    ) -> None:
+        """Decode the kept detections' masks and accumulate them into ``val/segm_mAP``.
+
+        The decode is the **deployed** one (A37): the one-to-one branch's boxes and
+        coefficients paired by the anchor indices the same top-k selection returned,
+        then assembled, cropped and binarised by
+        :func:`~lucid_yolo.eval.segment_decode.decode_instance_masks`. Pairing a
+        coefficient row with a differently ranked box would yield a plausible mask of
+        the wrong object, which no metric value reveals.
+
+        Scoring happens **on the prototype grid**, not on the letterboxed canvas: the
+        ground-truth masks arrive from the loader already rasterised there, and both
+        sides upsampled by four would cost sixteen times the memory to compare the
+        same two fields at a finer sampling of the same boundary. That makes
+        ``val/segm_mAP`` a proxy in exactly the sense ``val/mAP`` already is — the
+        acceptance figure is ``scripts/eval_det.py``, which scores masks at original
+        resolution.
+
+        Masks are decoded one image at a time: every kept detection materialises a
+        full-grid float map, and a whole batch at once is a needless memory spike.
+
+        Args:
+            seg_out: The segmentation forward output of this batch.
+            detections: The ``(B, k, 6)`` decoded A9 batch, on the model's device.
+            anchor_indices: The ``(B, k)`` source anchor of each detection row.
+            targets: Per-image ground truth, for the labels.
+            masks: Per-image ground-truth masks on the prototype grid.
+            image_size: The letterboxed canvas ``(height, width)`` the boxes are in.
+        """
+        assert self._val_segm is not None  # the caller gates on it
+        prototypes = seg_out.prototypes
+        proto_grid = (int(prototypes.shape[-2]), int(prototypes.shape[-1]))
+        coefficients = seg_out.detect.o2o_coeff
+        assert coefficients is not None  # a "segment" module always builds the coefficient stems
+        limit = min(_VAL_SEGM_MAX_DET, int(detections.shape[1]))
+        detections = detections[:, :limit]
+        # Padding rows carry PAD_ANCHOR_INDEX; they are clamped into range so the
+        # gather is legal and then dropped by the score filter below.
+        gather_index = anchor_indices[:, :limit].clamp_min(0).unsqueeze(-1).expand(-1, -1, coefficients.shape[-1])
+        kept_coefficients = coefficients.gather(1, gather_index)
+        grid_boxes = scale_boxes_to_grid(detections[..., :BOX_CORNERS], image_size, proto_grid)
+        cpu_detections = detections.cpu()
+        preds = []
+        ground_truth = []
+        for index, target in enumerate(targets):
+            decoded = decode_instance_masks(
+                prototypes[index : index + 1],
+                kept_coefficients[index : index + 1],
+                grid_boxes[index : index + 1],
+                image_size=proto_grid,
+            )[0].cpu()
+            keep = cpu_detections[index, :, SCORE_COLUMN] > 0.0
+            preds.append(
+                {
+                    "scores": cpu_detections[index, keep, SCORE_COLUMN],
+                    "labels": cpu_detections[index, keep, _LABEL_COLUMN].long(),
+                    "masks": decoded[keep],
+                }
+            )
+            ground_truth.append({"labels": target.labels.cpu(), "masks": masks[index].to(torch.bool).cpu()})
+        self._val_segm.update(preds, ground_truth)
+        self._val_segm_seen = True
+
     def on_validation_epoch_end(self) -> None:
-        """Compute and log the epoch's E2E ``val/mAP`` (progress-bar metric), then reset."""
+        """Compute and log the epoch's E2E ``val/mAP`` (progress-bar metric), then reset.
+
+        A ``"segment"`` run additionally logs ``val/segm_mAP``, whenever any batch
+        of the epoch carried ground-truth masks.
+        """
         computed = self._val_map.compute()
         self.log("val/mAP", computed["map"].to(torch.float32), prog_bar=True)
         self._val_map.reset()
+        if self._val_segm is not None and self._val_segm_seen:
+            self.log("val/segm_mAP", self._val_segm.compute()["map"].to(torch.float32), prog_bar=True)
+            self._val_segm.reset()
+            self._val_segm_seen = False
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         """Return MuSGD, paired with the A8 warmup + linear-decay LR schedule.
@@ -573,12 +689,14 @@ class DetectionLitModule(LightningModule):
         )
         return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"}}
 
-    def _shared_step(self, batch: StepBatch, stage: str) -> tuple[Tensor, DualHeadOutput]:
+    def _shared_step(self, batch: StepBatch, stage: str) -> tuple[Tensor, DualHeadOutput, SegmentOutput | None]:
         """Forward, decode both branches, score the dual loss, and log every term.
 
         Returns:
-            The scalar total loss and the dense head output (so callers can
-            decode from the same forward instead of running a second one).
+            The scalar total loss, the dense head output, and the segmentation
+            output (``None`` for a detection module) — so callers can decode from
+            the same forward instead of running a second one. The mask metric needs
+            the prototypes, which the head output alone does not carry.
         """
         images, targets, masks = _split_batch(batch)
         seg_out = self.forward_segmentation(images) if self._task == "segment" else None
@@ -604,7 +722,7 @@ class DetectionLitModule(LightningModule):
         image_size = (int(images.shape[-2]), int(images.shape[-1]))
         total = out.total + self._task_extra_loss(seg_out, targets, out, gt_boxes, image_size, stage, masks)
         self._log_loss(out, total, stage, images.shape[0])
-        return total, head_out
+        return total, head_out, seg_out
 
     def _task_extra_loss(
         self,

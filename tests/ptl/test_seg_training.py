@@ -27,10 +27,12 @@ from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.losses.dual_loss import DualBranchLoss
 from lucid_yolo.losses.mask_loss import instance_mask_loss
-from lucid_yolo.models.heads.detect import decode_ltrb
+from lucid_yolo.models.build import SegmentOutput
+from lucid_yolo.models.heads.detect import DualHeadOutput, decode_ltrb
 from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.ptl import DetectionLitModule, pad_targets
 from lucid_yolo.ptl.datamodule import _PROTO_STRIDE, collate_detection, unpack_masks
+from lucid_yolo.ptl.module import _VAL_SEGM_MAX_DET
 from lucid_yolo.ptl.seg_targets import instance_mask_targets
 
 #: Class count of the tiny test head.
@@ -410,3 +412,150 @@ def test_masks_rasterised_for_another_grid_are_rejected() -> None:
 
     with pytest.raises(ValueError, match="prototypes are"):
         module.training_step((images, targets, coarse), 0)
+
+
+def _validated_module(batch: tuple[Tensor, list[Targets]] | tuple[Tensor, list[Targets], list[Tensor]]) -> _LogRecorder:
+    """Run one validation batch plus the epoch end, and return the log recorder."""
+    module = _tiny_module("segment" if len(batch) == 3 else "detect").eval()
+    recorder = _LogRecorder()
+    module.log = recorder  # type: ignore[method-assign]
+    module.validation_step(batch, 0)
+    module.on_validation_epoch_end()
+    return recorder
+
+
+def test_validation_logs_a_mask_map_beside_the_box_map() -> None:
+    """A segmentation run reports the quality of the branch it exists for.
+
+    Without this the only epoch metric of a ``task="segment"`` run is ``val/mAP``,
+    which the mask branch cannot move: a run whose masks were degenerate and a run
+    whose masks were perfect would log the identical curve, and the first sign of
+    either would be a post-hoc ``scripts/eval_det.py`` pass hours later.
+    """
+    images, targets = _synthetic_batch()
+
+    recorder = _validated_module((images, targets, _collated_masks(images, targets)))
+
+    assert "val/segm_mAP" in recorder.values
+    assert 0.0 <= recorder.values["val/segm_mAP"] <= 1.0
+
+
+def test_detection_validation_logs_no_mask_metric() -> None:
+    """A detection module has no mask branch, so it must not pay for or report one."""
+    recorder = _validated_module(_synthetic_batch())
+
+    assert "val/mAP" in recorder.values
+    assert "val/segm_mAP" not in recorder.values
+
+
+def test_mask_map_is_skipped_when_the_batch_carries_no_ground_truth_masks() -> None:
+    """A segment module validating a two-element batch scores boxes only, rather than raising.
+
+    ``compute`` on a metric no batch ever updated raises, so the epoch end has to
+    know the difference between "no masks this epoch" and "masks scored zero".
+    """
+    recorder = _validated_module(_synthetic_batch())  # detect module, two-element batch
+    assert "val/segm_mAP" not in recorder.values
+
+    module = _tiny_module().eval()
+    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.validation_step(_synthetic_batch(), 0)
+    epoch_recorder = _LogRecorder()
+    module.log = epoch_recorder  # type: ignore[method-assign]
+    module.on_validation_epoch_end()
+
+    assert "val/mAP" in epoch_recorder.values
+    assert "val/segm_mAP" not in epoch_recorder.values
+
+
+#: Side of the toy prototype grid the pairing test scores on.
+_TOY_GRID = 8
+#: Prototype count of the toy segmentation output.
+_TOY_COEFFS = 4
+#: Anchor count of the toy segmentation output.
+_TOY_ANCHORS = 8
+#: Prototype logit magnitude — saturated, so every decoded pixel is an unambiguous
+#: ``True``/``False`` rather than a value near the 0.5 threshold.
+_TOY_LOGIT = 8.0
+
+
+def _toy_segment_output() -> SegmentOutput:
+    """Build a segmentation output whose decoded mask names the anchor it came from.
+
+    Prototype ``k`` is positive on row ``k`` alone, and anchor ``a`` carries the
+    one-hot coefficient selecting prototype ``a % _TOY_COEFFS``. A decoded mask is
+    therefore a single lit row, and *which* row identifies the anchor whose
+    coefficients were used — the one thing a real model's near-uniform masks cannot
+    show.
+    """
+    prototypes = torch.full((1, _TOY_COEFFS, _TOY_GRID, _TOY_GRID), -_TOY_LOGIT)
+    for k in range(_TOY_COEFFS):
+        prototypes[0, k, k] = _TOY_LOGIT
+    coefficients = torch.zeros(1, _TOY_ANCHORS, _TOY_COEFFS)
+    for anchor in range(_TOY_ANCHORS):
+        coefficients[0, anchor, anchor % _TOY_COEFFS] = 1.0
+    zeros = torch.zeros(1, _TOY_ANCHORS, _NUM_CLASSES)
+    detect = DualHeadOutput(
+        o2m_cls=zeros,
+        o2m_box=torch.zeros(1, _TOY_ANCHORS, 4),
+        o2o_cls=zeros,
+        o2o_box=torch.zeros(1, _TOY_ANCHORS, 4),
+        o2o_coeff=coefficients,
+    )
+    return SegmentOutput(detect=detect, prototypes=prototypes, semantic=None)
+
+
+def test_scored_masks_are_paired_with_the_boxes_own_anchors() -> None:
+    """Detection ``j``'s mask is assembled from the coefficients of the anchor ``j`` came from.
+
+    The decisive test of the metric. A coefficient row gathered by anything other
+    than the indices its box was ranked by yields a perfectly plausible mask of the
+    wrong object, and every aggregate — the mAP included — stays finite and
+    unremarkable, so only a construction where each anchor decodes to a *visibly
+    different* mask can catch it. A real module's masks cannot: at initialisation
+    every prototype logit sits at the sigmoid's midpoint, and the whole batch
+    decodes to empty masks that compare equal however they were paired.
+    """
+    module = _tiny_module().eval()
+    captured: list[tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]] = []
+    module._val_segm.update = lambda preds, targets: captured.append((preds, targets))  # type: ignore[union-attr]
+    anchor_indices = torch.tensor([[5, 2, 7]])
+    canvas = _TOY_GRID * _PROTO_STRIDE
+    whole_canvas = torch.tensor([0.0, 0.0, float(canvas), float(canvas)])
+    detections = torch.cat([whole_canvas.expand(1, 3, 4), torch.full((1, 3, 2), 0.9)], dim=-1)
+
+    module._update_val_segm(
+        _toy_segment_output(),
+        detections,
+        anchor_indices,
+        [_synthetic_targets(1)],
+        [torch.zeros(1, _TOY_GRID, _TOY_GRID)],
+        (canvas, canvas),
+    )
+
+    lit_rows = [sorted(set(mask.nonzero()[:, 0].tolist())) for mask in captured[0][0][0]["masks"]]
+    assert lit_rows == [[index % _TOY_COEFFS] for index in anchor_indices[0].tolist()]
+
+
+def test_scored_masks_and_ground_truth_share_the_prototype_grid() -> None:
+    """Predicted and ground-truth masks reach the metric on one grid, at the cap.
+
+    Two frames would make every mask IoU wrong while leaving ``val/segm_mAP``
+    finite and plausible, and decoding all 300 decoder rows would cost two thirds
+    of the mask work for rows COCO's ``maxDets`` then drops.
+    """
+    module = _tiny_module().eval()
+    module.log = _LogRecorder()  # type: ignore[method-assign]
+    images, targets = _synthetic_batch()
+    ground_truth_masks = _collated_masks(images, targets)
+    captured: list[tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]] = []
+    module._val_segm.update = lambda preds, targets: captured.append((preds, targets))  # type: ignore[union-attr]
+
+    module.validation_step((images, targets, ground_truth_masks), 0)
+
+    preds, scored_truth = captured[0]
+    grid = (_IMG_SIZE // _PROTO_STRIDE, _IMG_SIZE // _PROTO_STRIDE)
+    assert [pred["masks"].shape for pred in preds] == [(_VAL_SEGM_MAX_DET, *grid)] * _BATCH_SIZE
+    assert all(
+        torch.equal(entry["masks"], truth.bool()) for entry, truth in zip(scored_truth, ground_truth_masks, strict=True)
+    )
