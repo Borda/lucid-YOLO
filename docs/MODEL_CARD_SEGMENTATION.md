@@ -1,10 +1,9 @@
 # Model card — lucid-yolo segmenter (n scale)
 
-Covers the segmentation model produced by the Seg-smoke tier run, intended for
-release `0.2.0`. Acceptance of that tier is a human gate (roadmap 054) and has
-not been given: everything below is what the run measured, not an accepted
-release claim. One card per task family; detection has its own, oriented
-detection gets one at `0.3.0`.
+Covers the segmentation model produced by the Seg-smoke tier run, released as
+`0.2.0`. That tier was accepted at its human gate (roadmap 054) on 2026-08-10,
+against the criterion recorded in `REPRODUCTION_REPORT.md`. One card per task
+family; detection has its own, oriented detection gets one at `0.3.0`.
 
 ## Model details
 

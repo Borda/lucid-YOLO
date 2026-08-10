@@ -21,6 +21,11 @@ paper plus this project's assumption register), and each release freezes its
 golden metrics; later releases must never regress them. This is a deliberate
 policy, not an abandonment signal — see docs/DECISIONS.md.
 
+Current release: **0.2.0** — detection and instance segmentation, at the smoke
+tier and the smallest scale. No `v0.1.0` was ever tagged; the detector's history
+ships inside the 0.2.0 changelog section, and `goldens/frozen/0.2/` is the first
+frozen set. Releases publish no trained weights (D14).
+
 ## Development
 
 ```bash

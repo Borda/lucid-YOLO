@@ -6,6 +6,6 @@ published in arXiv:2606.03748 from the papers and their cited primary literature
 only. See docs/PROVENANCE.md and docs/ASSUMPTIONS.md for the clean-room record.
 """
 
-__version__ = "0.1.0.dev6"
+__version__ = "0.2.0"
 
 __all__ = ["__version__"]

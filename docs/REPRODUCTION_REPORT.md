@@ -174,12 +174,12 @@ seeds, and metric reports are archived under `.experiments/det_smoke/`.
 
 ---
 
-## 0.2.0 — Instance segmentation (acceptance pending)
+## 0.2.0 — Instance segmentation
 
-The Seg-smoke tier has run. Its acceptance is roadmap 054's `[HUMAN]` gate and
-has not been given, so this section records what the run measured and proposes
-the numeric criterion `seg_smoke.yaml` states only qualitatively. Nothing below
-is an acceptance.
+The Seg-smoke tier has run and was **accepted 2026-08-10** at roadmap 054's
+`[HUMAN]` gate, together with the numeric criterion below, which `seg_smoke.yaml`
+had stated only qualitatively. This section records what the run measured and
+what it was measured against.
 
 ### What was reproduced
 
@@ -232,23 +232,23 @@ against 12.33 / 28.54 / 34.86 box for small / medium / large.
 
 The NMS-free path costs 1.27 box AP and 0.81 segm AP.
 
-### A proposed acceptance criterion
+### Seg-smoke acceptance
 
 `seg_smoke.yaml` asks for "stable training and a segm mAP that tracks the box
 mAP". That is a ratio statement, and a ratio is the right shape: it survives a
 change of scale or schedule where an absolute floor would have to be re-derived
-for every tier. What it lacks is a number.
+for every tier. What it lacked is a number.
 
-**PROPOSAL — not accepted.** The criterion below is offered for the roadmap 054
-decision, which is the operator's.
+**Accepted 2026-08-10** at roadmap 054, the criterion below with it: it is the
+standing Seg-tier criterion from here, not a reading of this run alone.
 
-| criterion | proposed | observed | |
+| criterion | required | observed | |
 |---|---|---|---|
 | stable training | no divergence | `val/loss` strictly decreasing across all 49 logged epochs, 19.739 → 10.403 | ✓ |
 | wiring gate | train mask IoU ≥ 0.7 | **0.8146** | ✓ |
 | box mAP50-95 | > 25, the Det-smoke floor unchanged | **26.12** EMA-NMS | ✓ |
 | mask-to-box ratio | segm mAP50-95 ≥ **0.65 ×** box mAP50-95, same weights, same path | **0.728** NMS, **0.732** E2E | ✓ |
-| Phase ≤6 gates | green | 867 tests, 6/6 goldens | ✓ |
+| Phase ≤6 gates | green | 867 tests, 12/12 goldens — the six live sets and the `frozen/0.2` snapshot this release cut from them | ✓ |
 
 The box floor is carried over from Det-smoke rather than dropped, because a
 ratio alone cannot fail a run that collapsed: halve both numbers and the ratio
