@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-# Det-B trends tier (blueprint sec. 10): s-scale, ~120-epoch paired runs.
+# Det-B ablations tier (blueprint sec. 10 calls it the trends tier): ~120-epoch
+# paired runs, each isolating one contribution. `variant` below is this file's
+# default scale, not a claim about the run -- `--variant` overrides it.
 # Acceptance: sign-matching against R1 Tables 2/3/5/6 (STAL -> dAP_S > 0;
 # ProgLoss beats fixed (0.5, 0.5); MuSGD >= SGD at equal epochs; -DFL >= +DFL
 # within +/-0.2). Same recipe as Det-A but s-scale and longer. ADR-001: topology

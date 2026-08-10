@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-# Seg-A smoke tier (blueprint sec. 10): n-scale, ~50 COCO epochs, instance masks.
-# The det_tier_a_n.yaml recipe with `task: segment` -- the detection objective is
-# unchanged, and the two WP-087 mask terms (A38) ride on top of it. Acceptance:
-# stable training and a segm mAP that tracks the box mAP; the fast wiring gate is
-# `scripts/overfit_micro.py --task segment` (train mask IoU >= 0.7), which runs in
-# minutes and must pass before any COCO launch. ADR-001 boundary: this file carries
-# only run-level configuration -- topology is named by `variant` only and lives in
-# lucid_yolo/models/registry.py, never here.
+# Det-A smoke tier (blueprint sec. 10): ~50 COCO epochs. `variant` below is this
+# file's default scale, not a claim about the run -- `--variant` overrides it.
+# Acceptance: stable training, val mAP50-95 > 25, E2E within ~1.5 AP of the NMS
+# path. ADR-001 boundary: this file carries only run-level configuration
+# (data paths, schedule, optimizer/loss gains) -- topology is named by `variant`
+# only and lives in lucid_yolo/models/registry.py, never here.
 seed_everything: 0
 
 # Registry row, not a topology (ADR-001). Expands via scale_spec() onto the
@@ -14,7 +12,7 @@ seed_everything: 0
 variant: n
 
 trainer:
-  max_epochs: 50 # blueprint sec. 10 Seg-A: ~50 epochs, mirroring Det-A
+  max_epochs: 50 # blueprint sec. 10 Det-A: ~50 epochs
   # determinism: CLI default (default_determinism) — strict on CPU/CUDA, warn_only on MPS
   gradient_clip_val: 10.0 # A31: bounds the violent opening steps of the from-scratch recipe
   callbacks:
@@ -26,7 +24,6 @@ trainer:
     - class_path: lucid_yolo.ptl.callbacks.EMACallback
 
 model:
-  task: segment # builds and supervises the coefficient stems, prototypes and aux branch
   num_classes: 80 # COCO 2017 (R12)
   lr: 0.01 # blueprint sec. 5.8 (R1 Tables S2/S5): lr0
   lrf: 0.01 # A8: linear decay to lr0*lrf over the run (WP-072)
@@ -36,8 +33,6 @@ model:
   box_gain: 7.5 # blueprint sec. 5.7 (R1 Tables S2/S5): pretrain-style box gain
   cls_gain: 0.5 # blueprint sec. 5.7: cls gain
   l1_gain: 6.0 # blueprint sec. 5.7: L1 gain (the legacy dfl field scales L1)
-  mask_gain: 2.5 # A38: instance-mask term weight (papers give none)
-  semantic_gain: 0.5 # A38: auxiliary semantic term weight (papers give none)
   alpha_init: 0.8 # blueprint sec. 5.7 (R1 Eq. 2-3): ProgLoss ramp start, weights (0.8, 0.2)
   alpha_final: 0.1 # blueprint sec. 5.7: ProgLoss ramp end, weights (0.1, 0.9)
 

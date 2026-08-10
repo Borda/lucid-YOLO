@@ -161,7 +161,7 @@ Assumptions the detector tier exercised. Full register in `ASSUMPTIONS.md`.
 ```bash
 pip install lucid-yolo==0.0.1.dev12
 lucid-download --data-root <root> --splits train val --verify
-lucid-yolo fit --config det_tier_a_n.yaml \
+lucid-yolo fit --config det_smoke.yaml \
   --data.data_root <root> --data.batch_size 128 --data.num_workers 32 \
   --data.prefetch_factor 1 --model.lr 0.02 --trainer.max_epochs 50 \
   --trainer.precision 16-mixed

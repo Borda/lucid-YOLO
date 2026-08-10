@@ -139,7 +139,7 @@ same commit that completes its WP.
 | 061 | `feat(assign): rotated containment for TAL and STAL` | Point-in-rotated-rect candidates; STAL clamp on rotated (w,h) (A25) | `test_rotated_assign.py::test_tiny_rotated_gt` | 058,060 | ⬜ |
 | 062 | `feat(models): OBB head, direct angle, NMS-free decode` | Angle branch (A20); theta = z (Eq. 13); one-to-one decode + canonicalization; vs Table S11 at 1024 | `test_obb_head.py`, `test_param_flops.py::test_obb_vs_tableS11` — **golden frozen** | 061 | ⬜ |
 | 063 | `feat(eval): rotated mAP on DOTA val` | Exact polygon-intersection IoU (A24) with shapely oracle in tests | `test_dota_eval.py::test_vs_oracle` | 062 | ⬜ |
-| 088 | `feat(ptl): oriented-detection training path` | The Phase 8 counterpart of WP-087: OBB losses reach `_task_extra_loss`, rotated targets thread through the loaders, `obb_tier_a_n.yaml` added. **Prerequisite for WP-064's OBB-A run** | `test_obb_training.py`; overfit-100 rotated mAP50 >= 0.9 before any DOTA run | 063 | ⬜ |
+| 088 | `feat(ptl): oriented-detection training path` | The Phase 8 counterpart of WP-087: OBB losses reach `_task_extra_loss`, rotated targets thread through the loaders, `obb_smoke.yaml` added. **Prerequisite for WP-064's OBB-A run** | `test_obb_training.py`; overfit-100 rotated mAP50 >= 0.9 before any DOTA run | 063 | ⬜ |
 | 064 | `release: v0.3.0 oriented detection` [GPU][HUMAN] | OBB-A tier + overfit-100 (rotated mAP50 >=0.9); O4 resolved; 0.1/0.2 goldens green | OBB-A acceptance; `release.yml` green on `v0.3.0` | 063 | ⬜ |
 
 

@@ -6,7 +6,7 @@
 :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule`, so a run is launched
 entirely from YAML::
 
-    python -m lucid_yolo.ptl.cli fit --config configs/det_tier_a_n.yaml
+    python -m lucid_yolo.ptl.cli fit --config configs/det_smoke.yaml
 
 or, once the package is installed, through the ``lucid-yolo`` console script.
 
@@ -110,7 +110,7 @@ _DEFAULT_VARIANT = "n"
 
 #: Packaged config loaded as the parser's defaults when no ``--config`` is given
 #: (the Det-A reference recipe); any user config or CLI flag overrides per key.
-_DEFAULT_CONFIG = "det_tier_a_n"
+_DEFAULT_CONFIG = "det_smoke"
 
 #: Default progress-bar flavour. ``tqdm`` — not Lightning's rich-when-available
 #: auto-pick — because :class:`~pytorch_lightning.callbacks.TQDMProgressBar` goes
@@ -212,7 +212,7 @@ def packaged_config(name: str) -> Path:
 
     Args:
         name: Config file name with or without the ``.yaml`` suffix
-            (e.g. ``"det_tier_a_n"`` or ``"det_tier_a_n.yaml"``).
+            (e.g. ``"det_smoke"`` or ``"det_smoke.yaml"``).
 
     Returns:
         Absolute path of ``lucid_yolo/configs/<name>.yaml``. The path is
@@ -220,8 +220,8 @@ def packaged_config(name: str) -> Path:
         file with its usual error.
 
     Examples:
-        >>> packaged_config("det_tier_a_n").name
-        'det_tier_a_n.yaml'
+        >>> packaged_config("det_smoke").name
+        'det_smoke.yaml'
     """
     if not name.endswith((".yaml", ".yml")):
         name = f"{name}.yaml"
@@ -234,7 +234,7 @@ def _resolve_config_args(args: list[str]) -> list[str]:
     A value following ``--config``/``-c`` (or embedded as ``--config=NAME``)
     that does not exist on disk but matches a file under the packaged
     ``lucid_yolo/configs`` tree is replaced by that packaged path, so an
-    installed wheel runs ``lucid-yolo fit --config det_tier_a_n.yaml`` with no
+    installed wheel runs ``lucid-yolo fit --config det_smoke.yaml`` with no
     checkout and no absolute path. Existing paths always win untouched, and
     unknown names pass through unchanged for the parser's normal error.
     """
@@ -271,7 +271,7 @@ def main(args: ArgsType = None) -> DetectionCLI:
     ``--config`` values that name a **packaged** config (with or without the
     ``.yaml`` suffix) are resolved onto the installed ``lucid_yolo/configs``
     tree when no such file exists locally, so a bare
-    ``lucid-yolo fit --config det_tier_a_n.yaml`` works from a wheel install
+    ``lucid-yolo fit --config det_smoke.yaml`` works from a wheel install
     (see :func:`packaged_config`).
 
     Args:
@@ -285,7 +285,7 @@ def main(args: ArgsType = None) -> DetectionCLI:
 
     Examples:
         >>> from lucid_yolo.ptl.cli import main
-        >>> cli = main(["fit", "--config", "det_tier_a_n"])  # doctest: +SKIP
+        >>> cli = main(["fit", "--config", "det_smoke"])  # doctest: +SKIP
     """
     if args is None:
         # Rewrite sys.argv in place and keep args=None: passing an args list while
