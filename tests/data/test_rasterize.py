@@ -151,13 +151,11 @@ def test_batch_helper_stacks_one_mask_per_ring() -> None:
 def test_batched_rings_match_one_call_per_ring(vertex_counts: tuple[int, ...]) -> None:
     """Rasterising a whole image at once gives what per-ring calls give, whatever the point counts.
 
-    The batch path does not pad rings to a common length: padding costs
-    ``instances x longest_ring`` edge tests, and COCO rings are ragged enough that
-    one 500-point ring made a 7-instance image cost 20 ms rather than 0.9 at a
-    160-px grid. The edges are flattened across instances instead and the parity is
-    accumulated per instance, so the ring a crossing belongs to is now carried by an
-    index rather than by an axis — an off-by-one there would attribute an edge to
-    its neighbour and still return a full, plausible stack.
+    Each ring is rasterised inside its own window, so the instances of one image no
+    longer share anything — not a padded point axis, not a grid. That is what makes
+    a ragged image cheap, and it is also what could go wrong silently: a stack
+    assembled from per-ring windows can be plausible in shape and content while a
+    ring landed in the wrong row of it.
 
     The counts deliberately include a ring an order of magnitude longer than its
     neighbours, which is exactly the case padding handled correctly but slowly.
@@ -174,15 +172,16 @@ def test_batched_rings_match_one_call_per_ring(vertex_counts: tuple[int, ...]) -
 def test_chunking_the_edge_axis_does_not_change_the_masks(monkeypatch: pytest.MonkeyPatch) -> None:
     """A chunk budget small enough to split every ring yields the unchunked masks exactly.
 
-    The edge axis is chunked so that an image with unusually many points cannot size
-    the whole ``(edges, H, W)`` intermediate at once. Crossings are counted into an
-    integer accumulator for precisely this reason — the parity is read only at the
-    end — so a chunk boundary falling mid-ring must not change a single pixel.
+    A ring's edge axis is chunked so that one that is both unusually detailed and
+    grid-spanning cannot size the whole ``(edges, h, w)`` intermediate at once.
+    Crossings are counted into an integer accumulator for precisely this reason —
+    the parity is read only at the end — so a chunk boundary falling mid-ring must
+    not change a single pixel.
     """
     rings = [_regular_ring(count, radius=3.0 + index) for index, count in enumerate((5, 41, 7))]
     unchunked = rasterize_polygons(rings, 16, 16)
 
-    monkeypatch.setattr(rasterize, "_CHUNK_ELEMENTS", 16 * 16 * 2)  # two edges a chunk
+    monkeypatch.setattr(rasterize, "_CHUNK_ELEMENTS", 2)  # two edges a chunk at any window
     chunked = rasterize_polygons(rings, 16, 16)
 
     assert torch.equal(chunked, unchunked)
@@ -219,3 +218,57 @@ def test_copy_paste_uses_the_promoted_rasteriser() -> None:
 
     assert mixup._rasterize_polygon is rasterize_polygon
     assert torch.equal(out_image[0] == 1.0, rasterize_polygon(ring, _SIDE, _SIDE))
+
+
+@pytest.mark.parametrize(
+    ("offset", "span"),
+    [
+        pytest.param((8.0, 8.0), 4.0, id="well-inside"),
+        pytest.param((0.0, 0.0), 6.0, id="touches-the-top-left-corner"),
+        pytest.param((12.0, 12.0), 8.0, id="spills-off-the-bottom-right"),
+        pytest.param((-5.0, 3.0), 7.0, id="spills-off-the-left"),
+        pytest.param((-20.0, -20.0), 5.0, id="entirely-outside"),
+        pytest.param((0.0, 0.0), 40.0, id="covers-the-whole-grid"),
+    ],
+)
+def test_windowed_rasterisation_matches_the_full_grid_rule(offset: tuple[float, float], span: float) -> None:
+    """Testing only a ring's own window gives what testing every pixel gave, exactly.
+
+    Rings are rasterised inside their bounding window because a COCO instance
+    covers a small part of the prototype grid, and a full-grid pass spends nearly
+    all of its time proving distant pixels are outside — measured 4454 ms for one
+    batch of 64 mosaic images on a single thread, which starved the loader workers.
+
+    The window is a restriction of the full-grid computation, not a second rule:
+    the coordinate ranges are sliced and the ring is never translated, so every
+    surviving pixel sees the identical arithmetic. The oracle here is the original
+    per-vertex loop over the whole grid, so a window that clipped a row, or a
+    translation that re-rounded a crossing, fails rather than merely shifting a
+    boundary pixel nobody checks. The cases that matter are the ones at the edges
+    of the clamp: a ring on the border, one hanging off each side, one entirely
+    outside, and one with no restriction left to make.
+    """
+    angles = torch.arange(9, dtype=torch.float32) * (2 * math.pi / 9)
+    centre = torch.tensor(offset) + span
+    ring = centre + torch.stack([span * torch.cos(angles), span * 0.8 * torch.sin(angles)], dim=-1)
+
+    windowed = rasterize_polygon(ring, _SIDE * 2, _SIDE * 2)
+
+    assert torch.equal(windowed, _looped_rasterize_polygon(ring, _SIDE * 2, _SIDE * 2))
+
+
+@pytest.mark.parametrize("points", [0, 1, 2])
+def test_a_ring_without_area_rasterises_to_nothing(points: int) -> None:
+    """A ring of fewer than three points encloses no area and yields an empty mask.
+
+    Fewer than three points cannot bound a region, and the crossing test agrees —
+    every edge is traversed twice in opposite directions, so the parity cancels.
+    The guard exists because the window is derived from the ring's extent, and
+    ``amin`` over a zero-point ring raises rather than returning an empty box.
+    """
+    ring = torch.rand(points, 2) * _SIDE
+
+    mask = rasterize_polygon(ring, _SIDE, _SIDE)
+
+    assert mask.shape == (_SIDE, _SIDE)
+    assert not bool(mask.any())
