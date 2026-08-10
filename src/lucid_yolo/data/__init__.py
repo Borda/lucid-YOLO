@@ -11,6 +11,12 @@ from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.mixup import CopyPaste, Mixup
 from lucid_yolo.data.mosaic import MosaicAssembly
 from lucid_yolo.data.rasterize import rasterize_polygon, rasterize_polygons
+from lucid_yolo.data.rotated_geom import (
+    canonicalize,
+    points_in_rboxes,
+    polygons_to_rboxes,
+    rboxes_to_polygons,
+)
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.data.transforms import (
     Compose,
@@ -38,10 +44,14 @@ __all__ = [
     "apply_affine_to_points",
     "boxes_from_polygons",
     "build_scale_policy",
+    "canonicalize",
     "download_coco",
     "hsv_to_rgb",
+    "points_in_rboxes",
+    "polygons_to_rboxes",
     "rasterize_polygon",
     "rasterize_polygons",
+    "rboxes_to_polygons",
     "rgb_to_hsv",
     "verify_coco_root",
 ]
