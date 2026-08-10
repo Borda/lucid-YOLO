@@ -20,7 +20,7 @@ file byte-for-byte instead of churning the diff.
 Examples:
     ```console
     $ python scripts/plot_training.py lightning_logs/version_8/metrics.csv \
-        --output docs/figures/det_a_training.svg --title "Det-A - run v8"
+        --output docs/figures/det_smoke_training.svg --title "Det-smoke - run v8"
     ```
 """
 
@@ -176,7 +176,7 @@ def plot_run(metrics: Path, output: Path, title: str, close_mosaic: int | None =
     Args:
         metrics: Path to the run's ``metrics.csv``.
         output: Destination ``.svg`` path; parent directories are created.
-        title: Figure suptitle, e.g. ``"Det-A - run v8"``.
+        title: Figure suptitle, e.g. ``"Det-smoke - run v8"``.
         close_mosaic: Epoch at which mosaic augmentation was disabled, marked on
             the mAP panel. ``None`` omits the marker.
 

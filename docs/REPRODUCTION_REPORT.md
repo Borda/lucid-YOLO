@@ -34,9 +34,9 @@ Architectural fidelity is gated rather than asserted: `test_param_flops.py`
 holds all five scales within ±2% params and ±5% FLOPs of [R1, Table 7]
 (n: 2.4M/5.4G … x: 55.7M/193.9G).
 
-### Det-A acceptance
+### Det-smoke acceptance
 
-Tier Det-A (blueprint sec. 10): n-scale, ~50 COCO epochs, ~1 GPU-day.
+The Det-smoke tier (blueprint sec. 10 tier A): n-scale, ~50 COCO epochs, ~1 GPU-day.
 
 **Run v8** — dev12, COCO 2017 train, batch 128, lr 0.02, MuSGD, warmup 3 epochs
 then linear decay to `lr0 * 0.01`, close-mosaic for the final 10, EMA
@@ -65,9 +65,9 @@ which runs one forward per batch and decodes both paths from it, scoring with
 0.6–0.8 AP between the NMS-free and NMS paths. This run measures 1.11 AP on raw
 weights and 1.46 on EMA — the right sign and the right order of magnitude,
 wider than the paper's figure. Whether the residual gap closes at longer
-schedules is a Det-B question, recorded here rather than explained away.
+schedules is a Det-ablations question, recorded here rather than explained away.
 
-![Det-A training curves](figures/det_a_training.svg)
+![Det-smoke training curves](figures/det_smoke_training.svg)
 
 *Run v8. Left: the epoch-end E2E mAP proxy logged during training (letterbox
 coordinates — the acceptance figure above comes from the standalone evaluator).
@@ -146,7 +146,7 @@ Assumptions the detector tier exercised. Full register in `ASSUMPTIONS.md`.
 ### Deviations from the paper
 
 1. **Epoch budget.** ~50 epochs at n-scale, against the paper's from-scratch
-   500/600-epoch schedules. Det-A is a smoke tier by design; the headline
+   500/600-epoch schedules. Det-smoke is a smoke tier by design; the headline
    comparison against [R1 Table 4] is Det-C and remains a stretch goal.
 2. **No Objects365 pretraining, no evolutionary hyperparameter search** (D2).
 3. **Batch-scaled learning rate.** lr 0.02 at batch 128, linear scaling from the
@@ -170,4 +170,4 @@ python scripts/eval_det.py <checkpoint> --data-root <root>
 
 Seed 0 throughout. Cross-platform bitwise reproduction is not claimed (A26:
 libm last-bit rounding differs across OS and architecture); the run config,
-seeds, and metric reports are archived under `.experiments/det_a/`.
+seeds, and metric reports are archived under `.experiments/det_smoke/`.

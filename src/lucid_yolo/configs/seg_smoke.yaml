@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Seg-A smoke tier (blueprint sec. 10): ~50 COCO epochs, instance masks. `variant`
+# Seg-smoke tier (blueprint sec. 10 tier A): ~50 COCO epochs, instance masks. `variant`
 # below is this file's default scale, not a claim about the run -- `--variant`
 # overrides it.
 # The det_smoke.yaml recipe with `task: segment` -- the detection objective is
@@ -16,7 +16,7 @@ seed_everything: 0
 variant: n
 
 trainer:
-  max_epochs: 50 # blueprint sec. 10 Seg-A: ~50 epochs, mirroring Det-A
+  max_epochs: 50 # blueprint sec. 10 tier A: ~50 epochs, mirroring Det-smoke
   # determinism: CLI default (default_determinism) — strict on CPU/CUDA, warn_only on MPS
   gradient_clip_val: 10.0 # A31: bounds the violent opening steps of the from-scratch recipe
   callbacks:

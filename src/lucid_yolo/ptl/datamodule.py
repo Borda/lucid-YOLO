@@ -195,7 +195,7 @@ def _init_worker(worker_id: int) -> None:
     at construction, in the *parent* process. Every worker therefore inherits a
     copy of the **same** generator state, and the parent's copy never advances
     (the parent never calls ``__getitem__`` when workers are used). Two failures
-    follow, and both were live in the Det-A tier runs:
+    follow, and both were live in the Det-smoke tier runs:
 
     1. every worker replays one identical augmentation-parameter stream, cutting
        the per-epoch parameter diversity to ``1 / num_workers``;

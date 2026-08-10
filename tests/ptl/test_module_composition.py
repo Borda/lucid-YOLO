@@ -16,7 +16,7 @@ default detection module emitted **before** the refactor, captured from the
 pre-change source. It is a frozen snapshot rather than a live comparison against
 the previous git revision on purpose: once this work lands, ``HEAD`` holds the new
 file and such a comparison would compare the new code against itself. The keys
-matter because the accepted Det-A checkpoint (run v8) is keyed on them — holding a
+matter because the accepted Det-smoke checkpoint (run v8) is keyed on them — holding a
 :class:`~lucid_yolo.models.build.Detector` inside the module instead of the three
 flat stages would prefix every key with ``model.`` and invalidate it.
 
@@ -85,7 +85,7 @@ def test_detection_state_dict_keys_are_unmoved() -> None:
     :class:`~lucid_yolo.models.build.Detector` attribute, reordering the
     ``backbone``/``neck``/``head`` assignments, or letting the segmentation
     branches be constructed for the detection task would each rewrite or reorder
-    these keys and silently break loading of the accepted Det-A checkpoint.
+    these keys and silently break loading of the accepted Det-smoke checkpoint.
     """
     expected = tuple(_PRECHANGE_KEYS_FILE.read_text().split())
 

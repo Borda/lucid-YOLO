@@ -13,7 +13,7 @@ only for the final epoch. That intentionally exercises the multi-image
 augmentation pipeline and its per-worker, per-epoch RNG reseeding; an overfit
 golden instead disables mosaic from epoch zero to make memorization stationary.
 
-The model and optimizer recipe is loaded from the packaged Det-A n-scale config so
+The model and optimizer recipe is loaded from the packaged Det-smoke n-scale config so
 the run-level hyperparameters remain single-source-of-truth. This script pins only
 the small generalization-gate budget, image size, dataset split, and worker count.
 The latter is deliberately fixed because a machine-dependent worker count changes
@@ -59,7 +59,7 @@ from lucid_yolo.ptl.module import DetectionLitModule
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: Packaged n-scale detector recipe; it remains the single source of truth for
-#: optimizer, loss, and LR-schedule hyperparameters shared with the Det-A run.
+#: optimizer, loss, and LR-schedule hyperparameters shared with the Det-smoke run.
 _RECIPE_PATH = Path(lucid_yolo.__file__).resolve().parent / "configs" / "det_smoke.yaml"
 
 #: The frozen accelerator golden, isolated from the default offline golden harness.
@@ -104,7 +104,7 @@ _CLOSE_MOSAIC_EPOCHS = 1
 #: reproduced 0.8823 / 0.8583 / 0.9842 to four decimals, so the same-platform spread is
 #: zero and this band exists only to absorb cross-accelerator kernel differences (A26
 #: records the same libm-rounding divergence for the fixture checksums). It is set an
-#: order of magnitude below the regressions it must catch: WP-078 moved Det-A mAP by
+#: order of magnitude below the regressions it must catch: WP-078 moved Det-smoke mAP by
 #: 36% relative, which on this gate would be a swing of ~0.3, six times the band.
 _MAP_TOLERANCE = 0.05
 
@@ -129,7 +129,7 @@ _SUPPORTED_TASK = "det"
 
 @dataclass(frozen=True)
 class Recipe:
-    """Hyperparameters read from the packaged Det-A n-scale YAML recipe.
+    """Hyperparameters read from the packaged Det-smoke n-scale YAML recipe.
 
     Attributes:
         variant: Scale letter selecting the compound-scaling multipliers.
@@ -179,7 +179,7 @@ class _DatasetSummary:
 
 
 def load_recipe(path: Path = _RECIPE_PATH) -> Recipe:
-    """Load the regression recipe from the packaged Det-A n-scale YAML.
+    """Load the regression recipe from the packaged Det-smoke n-scale YAML.
 
     The packaged config supplies model, optimizer, loss, schedule, seed, and batch
     settings. The producer owns only its six-epoch budget and one-epoch

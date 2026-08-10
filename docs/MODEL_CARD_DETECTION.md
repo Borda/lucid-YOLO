@@ -1,6 +1,6 @@
 # Model card — lucid-yolo detector (n scale)
 
-Covers the detection model accepted at the Det-A tier for release `0.1.0`. One
+Covers the detection model accepted at the Det-smoke tier for release `0.1.0`. One
 card per task family; segmentation and oriented detection get their own at
 `0.2.0` and `0.3.0`.
 
@@ -84,7 +84,7 @@ within ±2% params, ±5% FLOPs of [R1 Table 7]).
   epochs against the paper's 500–600. Expect frequent misses and confusions on
   anything but large, unambiguous, well-lit instances.
 - **Small objects are weakest** — 11.9 mAP_S against 33.9 mAP_L. STAL is
-  implemented but its benefit is a Det-B trend claim, unmeasured here.
+  implemented but its benefit is a Det-ablations trend claim, unmeasured here.
 - **80 COCO categories only.** No open-vocabulary capability; anything outside
   those categories is either missed or misclassified as the nearest one.
 - **640×640 letterboxed.** Untested at other resolutions or aspect extremes.

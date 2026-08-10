@@ -113,4 +113,4 @@ arXiv id; access dates recorded per session.
 | 2026-08-01 | R1–R20 | Policy docs seeded from the blueprint (WP-003) |
 | 2026-08-01 | R21 | Synthetic fixture/dataset generator decision (A26, D12) |
 | 2026-08-02 | R22, R23 | torchmetrics `MeanAveragePrecision` + `faster_coco_eval` backend replace pycocotools in the bbox evaluator (WP-069) |
-| 2026-08-02 | R24 | Prior-probability cls bias init adopted after the Det-A collapse diagnosis (A30) |
+| 2026-08-02 | R24 | Prior-probability cls bias init adopted after the Det-smoke collapse diagnosis (A30) |

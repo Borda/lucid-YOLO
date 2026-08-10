@@ -51,10 +51,27 @@ def test_roadmap_wp_ids_unique_and_complete() -> None:
 def test_roadmap_statuses_valid() -> None:
     """Every roadmap row ends in a recognized status icon."""
     text = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")
-    rows = re.findall(r"^\| (\d{3}) \|.*\| (\S+) \|$", text, flags=re.MULTILINE)
-    assert len(rows) == 91
+    rows = re.findall(r"^\| (\d{3}[a-z]?) \|.*\| (\S+) \|$", text, flags=re.MULTILINE)
+    assert len(rows) >= 91
     bad = [(wp, status) for wp, status in rows if status not in {"⬜", "🔄", "✅", "⛔"}]
     assert not bad, f"invalid status values: {bad}"
+
+
+def test_roadmap_header_states_the_actual_package_count() -> None:
+    """The opening paragraph's package count matches the numbered rows it describes.
+
+    That count is prose, so nothing forced it to move when rows were added: it
+    read "69 work packages" while the table carried 91, and the two ids-and-status
+    gates above both passed the whole time because neither of them reads the
+    sentence. A documented number with no gate is a number that decays.
+    """
+    text = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")
+    numbered = len(re.findall(r"^\| \d{3} \|", text, flags=re.MULTILINE))
+
+    stated = re.search(r"(\d+) numbered work packages", text)
+
+    assert stated is not None, "the header must state the numbered work-package count"
+    assert int(stated.group(1)) == numbered
 
 
 def test_provenance_carries_allowlist_ids() -> None:

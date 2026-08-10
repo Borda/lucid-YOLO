@@ -87,8 +87,11 @@ Gate: tests/models/test_head.py::test_dual_head_shapes
 - `WP:` exactly one WP id. `Provenance:` at least one source id from
   docs/PROVENANCE.md (papers/primary literature only). `Assumptions:` A-ids
   touched, or `none`. `Gate:` the test id(s) proving the DoD.
-- Types: `feat` `fix` `test` `ci` `docs` `chore` `perf` `refactor` `exp`
-  `release`.
+- Types: `feat` `fix` `test` `ci` `docs` `chore` `perf` `refactor` `refine`
+  `exp` `release`. `refine` is this project's own addition, for a change that
+  improves something already correct — a rename, a clearer boundary, a
+  sharpened comment: `refactor` claims behaviour-preserving restructuring and
+  `docs` claims prose, and a rename crossing code, configs and prose is neither.
 - No commit message references the Ultralytics repository; papers are cited
   by arXiv id. Hash-sign and at-sign characters never appear in subject or
   body (co-author trailer emails are the sole exception).

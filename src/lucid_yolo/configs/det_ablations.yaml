@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-# Det-B ablations tier (blueprint sec. 10 calls it the trends tier): ~120-epoch
+# Det-ablations tier (blueprint sec. 10 tier B, which it calls the trends tier): ~120-epoch
 # paired runs, each isolating one contribution. `variant` below is this file's
 # default scale, not a claim about the run -- `--variant` overrides it.
 # Acceptance: sign-matching against R1 Tables 2/3/5/6 (STAL -> dAP_S > 0;
 # ProgLoss beats fixed (0.5, 0.5); MuSGD >= SGD at equal epochs; -DFL >= +DFL
-# within +/-0.2). Same recipe as Det-A but s-scale and longer. ADR-001: topology
+# within +/-0.2). Same recipe as Det-smoke but s-scale and longer. ADR-001: topology
 # is named by `variant` only and lives in lucid_yolo/models/registry.py.
 seed_everything: 0
 
@@ -13,7 +13,7 @@ seed_everything: 0
 variant: s
 
 trainer:
-  max_epochs: 120 # blueprint sec. 10 Det-B: ~100-150-epoch runs
+  max_epochs: 120 # blueprint sec. 10 tier B: ~100-150-epoch runs
   # determinism: CLI default (default_determinism) — strict on CPU/CUDA, warn_only on MPS
   gradient_clip_val: 10.0 # A31: bounds the violent opening steps of the from-scratch recipe
   callbacks:

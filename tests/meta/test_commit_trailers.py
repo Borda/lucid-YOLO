@@ -3,13 +3,16 @@
 
 Guards the provenance-carrying commit contract (AGENTS.md sec. 5): a valid
 message passes, a missing WP trailer fails, an unknown provenance id fails, a
-hash before the separator fails, and an at-sign confined to the co-author
-trailers after the separator passes.
+hash before the separator fails, an at-sign confined to the co-author trailers
+after the separator passes, and the subject's type comes from the AGENTS.md
+sec. 5 allowed set.
 """
 
 import importlib.util
 from pathlib import Path
 from types import ModuleType
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VALIDATOR_PATH = REPO_ROOT / "scripts" / "check_commit_trailers.py"
@@ -104,3 +107,28 @@ def test_hash_before_separator_fails() -> None:
 def test_at_sign_after_separator_passes() -> None:
     """An at-sign confined to the co-author trailers is permitted."""
     assert validator.validate_message(AT_SIGN_AFTER_SEPARATOR_MESSAGE, VALID_IDS) == []
+
+
+@pytest.mark.parametrize(
+    ("subject", "accepted"),
+    [
+        pytest.param("feat(models): add dual detection head with reg_max=1", True, id="feat"),
+        pytest.param("refine(configs): name tiers by what they are", True, id="refine"),
+        pytest.param("chore: bump the dev version", True, id="chore"),
+        pytest.param("improve(models): make the head nicer", False, id="unlisted-type"),
+        pytest.param("add dual detection head", False, id="no-type"),
+    ],
+)
+def test_subject_type_is_checked_against_the_allowed_set(subject: str, accepted: bool) -> None:
+    """Only the listed conventional types open a subject line.
+
+    ``refine`` is this project's own addition and is the reason this test exists:
+    it was rejected by the validator while already being used in the history, so
+    the allowed set and the set actually in use had drifted apart with nothing
+    watching. An unlisted type and a type-less subject pin the other side.
+    """
+    message = VALID_MESSAGE.replace(VALID_MESSAGE.splitlines()[0], subject, 1)
+
+    violations = validator.validate_message(message, VALID_IDS)
+
+    assert any("<type>(<scope>)" in violation for violation in violations) is not accepted

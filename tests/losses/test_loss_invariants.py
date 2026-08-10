@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Invariant gate for the detection objective (WP-082).
 
-These tests exist because of what the Det-A tier runs cost. WP-078 (the L1 term
+These tests exist because of what the Det-smoke tier runs cost. WP-078 (the L1 term
 measured in pixels while its gain is calibrated for stride units) survived 474
 tests, five green goldens, 96% line coverage, and three full COCO training runs.
 It never crashed, never produced a NaN, never changed a tensor shape. It was a

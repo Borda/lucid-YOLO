@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Det-A smoke tier (blueprint sec. 10): ~50 COCO epochs. `variant` below is this
+# Det-smoke tier (blueprint sec. 10 tier A): ~50 COCO epochs. `variant` below is this
 # file's default scale, not a claim about the run -- `--variant` overrides it.
 # Acceptance: stable training, val mAP50-95 > 25, E2E within ~1.5 AP of the NMS
 # path. ADR-001 boundary: this file carries only run-level configuration
@@ -12,7 +12,7 @@ seed_everything: 0
 variant: n
 
 trainer:
-  max_epochs: 50 # blueprint sec. 10 Det-A: ~50 epochs
+  max_epochs: 50 # blueprint sec. 10 tier A: ~50 epochs
   # determinism: CLI default (default_determinism) — strict on CPU/CUDA, warn_only on MPS
   gradient_clip_val: 10.0 # A31: bounds the violent opening steps of the from-scratch recipe
   callbacks:

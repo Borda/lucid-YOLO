@@ -109,7 +109,7 @@ def default_determinism() -> bool | str:
 _DEFAULT_VARIANT = "n"
 
 #: Packaged config loaded as the parser's defaults when no ``--config`` is given
-#: (the Det-A reference recipe); any user config or CLI flag overrides per key.
+#: (the Det-smoke reference recipe); any user config or CLI flag overrides per key.
 _DEFAULT_CONFIG = "det_smoke"
 
 #: Default progress-bar flavour. ``tqdm`` — not Lightning's rich-when-available

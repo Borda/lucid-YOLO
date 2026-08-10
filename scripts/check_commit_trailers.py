@@ -26,7 +26,12 @@ import sys
 from pathlib import Path
 
 #: Conventional-commit subject: allowed type, optional lowercase scope, ": " then text.
-SUBJECT_RE = re.compile(r"^(feat|fix|test|ci|docs|chore|perf|refactor|exp|release)(\([a-z0-9_-]+\))?: .+")
+#: ``refine`` is this project's own addition to the conventional set, for a change
+#: that improves something already correct — a rename, a clearer boundary, a
+#: sharpened comment. ``refactor`` claims behaviour-preserving restructuring and
+#: ``docs`` claims prose, and a rename that crosses code, configs and prose at once
+#: is neither.
+SUBJECT_RE = re.compile(r"^(feat|fix|test|ci|docs|chore|perf|refactor|refine|exp|release)(\([a-z0-9_-]+\))?: .+")
 #: Maximum subject length (characters).
 SUBJECT_MAX_LEN = 72
 

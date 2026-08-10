@@ -126,8 +126,8 @@ def test_config_dry_parses(config_path: Path) -> None:
     assert isinstance(cli.datamodule, DetectionDataModule)
 
 
-def test_tier_a_resolves_variant_n_multipliers_and_gains() -> None:
-    """Det-A (``variant: n``) expands to the n-row multipliers and reference gains."""
+def test_smoke_tier_resolves_variant_n_multipliers_and_gains() -> None:
+    """Det-smoke (``variant: n``) expands to the n-row multipliers and reference gains."""
     cli = _config_cli(_CONFIGS_DIR / "det_smoke.yaml")
     spec = scale_spec("n")
     assert cli.model.hparams.depth == spec.depth
@@ -145,7 +145,7 @@ def test_tier_a_resolves_variant_n_multipliers_and_gains() -> None:
 
 
 def test_variant_s_resolves_registry_multipliers() -> None:
-    """Det-B (``variant: s``) expands to the s-row multipliers and s-policy."""
+    """Det-ablations (``variant: s``) expands to the s-row multipliers and s-policy."""
     cli = _config_cli(_CONFIGS_DIR / "det_ablations.yaml")
     spec = scale_spec("s")
     assert cli.model.hparams.depth == spec.depth
@@ -215,7 +215,7 @@ def test_resolve_config_args_leaves_existing_and_unknown_paths_alone(tmp_path) -
 
 
 def test_fit_without_config_defaults_to_packaged_recipe(capsys) -> None:
-    """Bare fit (no --config) loads the packaged Det-A recipe as parser defaults."""
+    """Bare fit (no --config) loads the packaged Det-smoke recipe as parser defaults."""
     with pytest.raises(SystemExit):
         main(["fit", "--print_config"])
     out = capsys.readouterr().out

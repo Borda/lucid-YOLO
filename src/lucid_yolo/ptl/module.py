@@ -64,7 +64,7 @@ Learning-rate schedule (A8, WP-072):
     per-step :class:`~torch.optim.lr_scheduler.LambdaLR` running
     :func:`~lucid_yolo.optim.schedule.warmup_decay_factor` — a linear warmup
     over the first ``warmup_epochs`` epochs followed by a linear decay from
-    ``lr`` to ``lr * lrf`` at the end of the run (A8; the Det-A attempt-1
+    ``lr`` to ``lr * lrf`` at the end of the run (A8; the Det-smoke attempt-1
     diagnosis showed the constant-LR deferral plateauing val loss). The
     schedule needs the trainer's step budget
     (``trainer.estimated_stepping_batches``), so a module with **no trainer
@@ -326,7 +326,7 @@ class DetectionLitModule(LightningModule):
 
         #: Mask coefficients are built only for the segmentation task, so a
         #: ``"detect"`` module's head — and therefore its state dict — is exactly
-        #: what it was before the segmentation branches existed (the Det-A
+        #: what it was before the segmentation branches existed (the Det-smoke
         #: checkpoint still loads).
         num_coeffs = DEFAULT_NUM_COEFFS if task == "segment" else None
         self.backbone, self.neck, self.head = build_detection_stages(

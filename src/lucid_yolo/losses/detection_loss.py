@@ -194,7 +194,7 @@ class DetectionBranchLoss:
         anchor's stride so the term is measured in **stride units** — the
         head's native ltrb frame, the frame the legacy DFL-field gain is
         calibrated in (A13 revision). Pixel-frame differences run 8-32x larger
-        and let ``l1_gain`` swamp the classification term (the WP-078 Det-A
+        and let ``l1_gain`` swamp the classification term (the WP-078 Det-smoke
         root cause). CIoU is scale-invariant and needs no normalization.
 
         Boolean-masking with an all-``False`` ``fg_mask`` yields empty positive

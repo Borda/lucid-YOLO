@@ -24,7 +24,7 @@ Crowd / RLE policy:
 :func:`build_scale_policy` returns the size-aware augmentation strengths of
 [R1] Table S3 (blueprint sec. 5.9): the ``n`` recipe is mildest and larger
 variants grow stronger. The exact per-variant tuples are this project's reading
-of that table; the acceptance gate is Tier-A *behaviour* (the augmentation
+of that table; the acceptance gate is smoke-tier *behaviour* (the augmentation
 pipeline runs and stays geometrically consistent), not the literal constants.
 """
 
@@ -74,7 +74,7 @@ def build_scale_policy(variant: str) -> dict[str, float]:
     The values transcribe [R1] Table S3 (blueprint sec. 5.9): the ``n`` variant is
     mildest (``scale`` 0.5, no mixup, light copy-paste) and larger variants grow
     stronger, up to ``x`` (``scale`` 0.9, ``mixup`` 0.2, ``copy_paste`` 0.6). The
-    exact tuples are this project's reading of that table; the gate is Tier-A
+    exact tuples are this project's reading of that table; the gate is smoke-tier
     behaviour, not the literal constants.
 
     Args:

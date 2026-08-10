@@ -329,7 +329,7 @@ def test_detect_total_is_exactly_the_dual_detection_loss() -> None:
     """``task="detect"`` is bit-for-bit the dual detection loss — the extra term adds exactly zero.
 
     Catches any segmentation quantity leaking into the detection objective, which
-    would silently invalidate the frozen Det-A trajectory and its goldens.
+    would silently invalidate the frozen Det-smoke trajectory and its goldens.
     """
     module = _tiny_module(task="detect")
     module.log = _LogRecorder()  # type: ignore[method-assign]

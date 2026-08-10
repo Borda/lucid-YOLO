@@ -89,7 +89,7 @@ _DEFAULT_TOPK = 300
 #: near this value, so the dense background BCE begins at ~0.01 nats per element
 #: instead of ~0.69 — without it the summed classification loss opens six orders
 #: of magnitude too large and the first optimizer step destroys the network
-#: (observed on the Det-A launch: loss 6.2e5 -> collapse to a dead all-zero
+#: (observed on the Det-smoke launch: loss 6.2e5 -> collapse to a dead all-zero
 #: predictor within three steps).
 CLS_PRIOR_PROB = 0.01
 
