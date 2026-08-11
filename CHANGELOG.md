@@ -31,6 +31,10 @@ ever planned, promised, or tagged — per ADR-002 (docs/DECISIONS.md).
   boxes instead of refusing them, warping each box through its four corners and
   re-fitting a long-edge box — exact under a similarity, an explicit fit under
   shear (WP-058).
+- ProbIoU rotated-box loss: both forms the source paper proposes, the bounded
+  Hellinger distance and the unbounded Bhattacharyya distance, evaluated in a
+  cancellation-free form that holds float32 accuracy from square boxes out to
+  1000:1 elongation and stays finite on degenerate input (WP-059).
 
 ### Fixed
 
