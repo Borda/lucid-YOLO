@@ -52,10 +52,12 @@ from lucid_yolo.models.registry import scale_spec
 
 __all__ = [
     "Detector",
+    "OrientedDetector",
     "SegmentOutput",
     "Segmenter",
     "build_detection_stages",
     "build_detector",
+    "build_obb_detector",
     "build_segmentation_stages",
     "build_segmenter",
     "count_flops",
@@ -75,6 +77,7 @@ def build_detection_stages(
     max_channels: int,
     num_classes: int,
     num_coeffs: int | None = None,
+    predict_angle: bool = False,
 ) -> tuple[DetectionBackbone, DetectionNeck, DualDetectionHead]:
     """Construct the three detection stages from raw compound-scaling numbers.
 
@@ -103,6 +106,8 @@ def build_detection_stages(
             head's coefficient stems. ``None`` (the default) builds the
             detection-only head, whose parameters and state-dict keys are exactly
             those of the pre-segmentation head.
+        predict_angle: Build the head's orientation stems (A20), the oriented
+            path's opt-in. ``False`` (the default) leaves the head angle-free.
 
     Returns:
         The ``(backbone, neck, head)`` triple, already wired to each other's
@@ -114,10 +119,12 @@ def build_detection_stages(
         ((128, 128, 256), (64, 128, 256))
         >>> head.num_classes, head.o2o.coeff_stems is None  # detection-only by default
         (4, True)
+        >>> head.o2o.angle_stems is None  # and angle-free by default
+        True
     """
     backbone = DetectionBackbone(depth=depth, width=width, max_channels=max_channels)
     neck = DetectionNeck(backbone.channels, depth=depth, width=width, max_channels=max_channels)
-    head = DualDetectionHead(neck.channels, num_classes=num_classes, num_coeffs=num_coeffs)
+    head = DualDetectionHead(neck.channels, num_classes=num_classes, num_coeffs=num_coeffs, predict_angle=predict_angle)
     return backbone, neck, head
 
 
@@ -260,7 +267,7 @@ class _DeployedDetector(nn.Module):
             The one-to-one branch's ``(cls, box)`` pair: dense class logits of
             shape ``(N, A, num_classes)`` and raw ltrb distances ``(N, A, 4)``.
         """
-        cls, box = self.o2o(self.neck(self.backbone(image)))
+        cls, box, _, _ = self.o2o(self.neck(self.backbone(image)))
         return cls, box
 
 
@@ -285,6 +292,147 @@ def build_detector(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> Det
         0.5
     """
     return Detector(variant, num_classes)
+
+
+class OrientedDetector(nn.Module):
+    """Composite YOLO26 oriented detector: the detector plus the A20 angle branch.
+
+    Structurally :class:`Detector` with ``predict_angle=True``: identical
+    backbone, neck, and dual head for a given variant, with a third per-level
+    stem on **each** head branch emitting the single orientation scalar of R1
+    sec. 3.4.3. The angle is predicted raw (R1 Eq. 13, ``theta_hat = z``); the
+    oriented box is assembled and normalized by
+    :func:`~lucid_yolo.models.heads.obb.decode_rboxes` (A23), not by the model.
+
+    The angle stems sit on the head's two branches rather than in a fourth
+    top-level module, which is what makes the one-to-many angle stems training-only
+    in the same sense the one-to-many box and class stems already are: they are
+    dropped by :meth:`deploy` with the branch that owns them, rather than needing
+    a rule of their own.
+
+    Args:
+        variant: Scale name (``"n"``/``"s"``/``"m"``/``"l"``/``"x"``) resolved
+            through :func:`~lucid_yolo.models.registry.scale_spec`.
+        num_classes: Number of object classes the head predicts. Defaults to 80
+            for signature consistency with :class:`Detector`; the R1 Table S11
+            fidelity gate and the DOTA path pass 15 explicitly.
+
+    Examples:
+        >>> import torch
+        >>> model = OrientedDetector("n", num_classes=15).eval()
+        >>> with torch.no_grad():
+        ...     out = model(torch.zeros(1, 3, 128, 128))
+        >>> out.o2o_cls.shape, out.o2o_box.shape, out.o2o_angle.shape
+        (torch.Size([1, 336, 15]), torch.Size([1, 336, 4]), torch.Size([1, 336, 1]))
+    """
+
+    def __init__(self, variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> None:
+        super().__init__()
+        spec = scale_spec(variant)
+        self.variant = variant
+        self.num_classes = num_classes
+        self.backbone, self.neck, self.head = build_detection_stages(
+            spec.depth, spec.width, spec.max_channels, num_classes, predict_angle=True
+        )
+
+    def forward(self, image: Tensor) -> DualHeadOutput:
+        """Run the backbone, neck, and dual head with the angle branch active.
+
+        Args:
+            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
+                ``W`` divisible by 32.
+
+        Returns:
+            The head's :class:`~lucid_yolo.models.heads.DualHeadOutput`, whose
+            angle fields are populated for both branches.
+        """
+        output: DualHeadOutput = self.head(self.neck(self.backbone(image)))
+        return output
+
+    def deploy(self) -> nn.Module:
+        """Return the NMS-free inference model: backbone -> neck -> one-to-one head.
+
+        The one-to-many branch is training-only (R6) and never runs at E2E
+        inference, so the deployed model executes a single detection branch —
+        including only that branch's angle stems. This is the module whose FLOPs
+        the R1 Table S11 gate reads, at the table's 1024-pixel input. The returned
+        module **shares** this detector's parameters (no copy).
+
+        Returns:
+            A :class:`torch.nn.Module` whose forward maps an image batch to the
+            one-to-one branch's ``(cls_logits, ltrb, angle)`` tensor triple.
+
+        Examples:
+            >>> import torch
+            >>> deployed = OrientedDetector("n", num_classes=15).deploy().eval()
+            >>> with torch.no_grad():
+            ...     cls, box, angle = deployed(torch.zeros(1, 3, 128, 128))
+            >>> cls.shape, box.shape, angle.shape
+            (torch.Size([1, 336, 15]), torch.Size([1, 336, 4]), torch.Size([1, 336, 1]))
+        """
+        return _DeployedOrientedDetector(self)
+
+
+class _DeployedOrientedDetector(nn.Module):
+    """Single-branch inference view of an :class:`OrientedDetector`.
+
+    Runs the backbone, neck, and only the one-to-one head branch, returning that
+    branch's dense ``(cls, box, angle)`` tensors. Holds references to the parent's
+    submodules, so it shares parameters and adds none of its own; the one-to-many
+    branch — its box, class, and angle stems alike — is not an attribute here at
+    all, which is what makes its removal checkable by parameter identity rather
+    than by trusting a flag.
+
+    Args:
+        detector: The full oriented detector to expose an inference view of.
+    """
+
+    def __init__(self, detector: OrientedDetector) -> None:
+        super().__init__()
+        self.backbone = detector.backbone
+        self.neck = detector.neck
+        self.o2o = detector.head.o2o
+
+    def forward(self, image: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        """Run the backbone, neck, and one-to-one branch over an image batch.
+
+        Args:
+            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
+                ``W`` divisible by 32.
+
+        Returns:
+            The one-to-one branch's ``(cls, box, angle)`` triple: dense class
+            logits ``(N, A, num_classes)``, raw ltrb distances ``(N, A, 4)``, and
+            raw orientation angles ``(N, A, 1)``.
+        """
+        cls, box, _, angle = self.o2o(self.neck(self.backbone(image)))
+        assert angle is not None  # an OrientedDetector always builds the angle stems
+        return cls, box, angle
+
+
+def build_obb_detector(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> OrientedDetector:
+    """Build an :class:`OrientedDetector` for a named scale variant.
+
+    Args:
+        variant: Scale name (``"n"``/``"s"``/``"m"``/``"l"``/``"x"``).
+        num_classes: Number of object classes. Defaults to 80 to match
+            :func:`build_detector`; DOTA-v1.0 work passes
+            ``len(DOTA_CLASSES) == 15``.
+
+    Returns:
+        The assembled :class:`OrientedDetector` module.
+
+    Raises:
+        KeyError: If ``variant`` is not one of the five published names.
+
+    Examples:
+        >>> model = build_obb_detector("s", num_classes=15)
+        >>> model.variant, model.num_classes
+        ('s', 15)
+        >>> model.head.predict_angle
+        True
+    """
+    return OrientedDetector(variant, num_classes)
 
 
 @dataclass(frozen=True)
@@ -459,7 +607,8 @@ class _DeployedSegmenter(nn.Module):
             ``(N, K, H/4, W/4)``.
         """
         features: tuple[Tensor, Tensor, Tensor] = self.neck(self.backbone(image))
-        cls, box, coeff = self.o2o(features)
+        cls, box, coeff, _ = self.o2o(features)
+        assert coeff is not None  # a Segmenter always builds the coefficient stems
         prototypes: Tensor = self.protonet(self.proto_fusion(features))
         return cls, box, coeff, prototypes
 
@@ -551,7 +700,8 @@ class _TupleOutputAdapter(nn.Module):
             :class:`~lucid_yolo.models.heads.DualHeadOutput` or a
             :class:`SegmentOutput`, otherwise unchanged. Optional fields that are
             ``None`` are dropped: the coefficient tensors are absent unless the
-            head was built with ``num_coeffs``, and the auxiliary semantic logits
+            head was built with ``num_coeffs``, the angle tensors unless it was
+            built with ``predict_angle``, and the auxiliary semantic logits
             are always ``None`` here because FLOP counting runs in eval mode
             (A17). Dropping them is safe for a FLOP tally, which reads the traced
             graph rather than the returned values.
@@ -559,7 +709,14 @@ class _TupleOutputAdapter(nn.Module):
         output = self.module(image)
         if isinstance(output, DualHeadOutput):
             return _tensor_fields(
-                output.o2m_cls, output.o2m_box, output.o2m_coeff, output.o2o_cls, output.o2o_box, output.o2o_coeff
+                output.o2m_cls,
+                output.o2m_box,
+                output.o2m_coeff,
+                output.o2m_angle,
+                output.o2o_cls,
+                output.o2o_box,
+                output.o2o_coeff,
+                output.o2o_angle,
             )
         if isinstance(output, SegmentOutput):
             detect = output.detect
@@ -567,9 +724,11 @@ class _TupleOutputAdapter(nn.Module):
                 detect.o2m_cls,
                 detect.o2m_box,
                 detect.o2m_coeff,
+                detect.o2m_angle,
                 detect.o2o_cls,
                 detect.o2o_box,
                 detect.o2o_coeff,
+                detect.o2o_angle,
                 output.prototypes,
                 output.semantic,
             )

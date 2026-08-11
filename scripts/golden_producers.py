@@ -54,7 +54,13 @@ from lucid_yolo.assign import (
     surrogate_boxes,
 )
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
-from lucid_yolo.models.build import build_detector, build_segmenter, count_flops, count_params
+from lucid_yolo.models.build import (
+    build_detector,
+    build_obb_detector,
+    build_segmenter,
+    count_flops,
+    count_params,
+)
 from lucid_yolo.optim import MuSGD
 from lucid_yolo.ptl.datamodule import _TrainPipeline
 
@@ -832,5 +838,53 @@ def seg_params_flops() -> dict[str, float]:
         model = build_segmenter(variant, _DET_NUM_CLASSES)
         metrics[f"{variant}_params"] = float(count_params(model))
         gflops = count_flops(model.deploy(), img_size=_DET_IMG_SIZE)
+        metrics[f"{variant}_gflops"] = round(gflops, _DET_GFLOP_DECIMALS)
+    return metrics
+
+
+#: DOTA-v1.0 class count and input side the R1 Table S11 OBB rows are measured at.
+#: Both differ from the detection and segmentation goldens above — the table is
+#: reported at 1024 pixels over 15 categories, not at 640 over COCO's 80 — so
+#: neither constant may be inherited from :data:`_DET_IMG_SIZE` or
+#: :data:`_DET_NUM_CLASSES`.
+_OBB_NUM_CLASSES = 15
+_OBB_IMG_SIZE = 1024
+
+
+def obb_params_flops() -> dict[str, float]:
+    """Frozen per-variant parameter and GFLOP metrics for the OBB model (WP-062).
+
+    The oriented counterpart of :func:`det_params_flops`, measured under the same
+    A29 convention — parameters of the full model, conventional GFLOPs of the
+    deployed NMS-free inference model — but at **R1 Table S11's** protocol rather
+    than Table 7's: a 1024-pixel input and DOTA-v1.0's 15 categories. The deployed
+    view carries only the one-to-one branch, so the one-to-many angle stems are
+    excluded from the FLOP tally along with the rest of that branch, while the
+    parameter count is the whole checkpoint.
+
+    Every value is produced by building and measuring the live modules — never
+    hand-written — so the golden re-derives from the actual architecture. Param
+    counts are exact integers; GFLOPs come from fvcore's deterministic MAC trace
+    and are pinned with a small golden tolerance.
+
+    Returns:
+        A mapping of ten metrics: ``<variant>_params`` (exact) and
+        ``<variant>_gflops`` (tolerance-pinned) for each variant ``n``…``x``.
+
+    Examples:
+        ```pycon
+        >>> metrics = obb_params_flops()
+        >>> metrics["n_params"]
+        2563976.0
+        >>> metrics["x_gflops"] > metrics["n_gflops"]
+        True
+
+        ```
+    """
+    metrics: dict[str, float] = {}
+    for variant in _DET_VARIANTS:
+        model = build_obb_detector(variant, _OBB_NUM_CLASSES)
+        metrics[f"{variant}_params"] = float(count_params(model))
+        gflops = count_flops(model.deploy(), img_size=_OBB_IMG_SIZE)
         metrics[f"{variant}_gflops"] = round(gflops, _DET_GFLOP_DECIMALS)
     return metrics

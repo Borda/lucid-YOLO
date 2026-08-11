@@ -15,14 +15,17 @@ from lucid_yolo.models.blocks import (
 )
 from lucid_yolo.models.build import (
     Detector,
+    OrientedDetector,
     Segmenter,
     SegmentOutput,
     build_detector,
+    build_obb_detector,
     build_segmenter,
     count_flops,
     count_params,
 )
 from lucid_yolo.models.heads import (
+    RBOX_DET_WIDTH,
     DualDetectionHead,
     DualHeadOutput,
     ProtoFusion,
@@ -30,6 +33,8 @@ from lucid_yolo.models.heads import (
     SemanticAux,
     assemble_masks,
     decode_ltrb,
+    decode_rboxes,
+    o2o_rotated_topk,
     o2o_topk,
 )
 from lucid_yolo.models.neck import DetectionNeck
@@ -37,6 +42,7 @@ from lucid_yolo.models.registry import VARIANTS, ScaleSpec, scale_spec
 
 __all__ = [
     "C2PSA",
+    "RBOX_DET_WIDTH",
     "SPPF",
     "VARIANTS",
     "Bottleneck",
@@ -49,6 +55,7 @@ __all__ = [
     "Detector",
     "DualDetectionHead",
     "DualHeadOutput",
+    "OrientedDetector",
     "PSABlock",
     "ProtoFusion",
     "ProtoNet",
@@ -59,10 +66,13 @@ __all__ = [
     "SpatialAttention",
     "assemble_masks",
     "build_detector",
+    "build_obb_detector",
     "build_segmenter",
     "count_flops",
     "count_params",
     "decode_ltrb",
+    "decode_rboxes",
+    "o2o_rotated_topk",
     "o2o_topk",
     "scale_spec",
 ]

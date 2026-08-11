@@ -43,6 +43,20 @@ where ``A = 8400`` at a 640-pixel input. That ``A`` ordering matches
 :func:`~lucid_yolo.assign.grid.make_anchor_points` position-for-position, so the
 anchor point and stride of prediction ``a`` are simply row ``a`` of its outputs.
 
+Two branch outputs are **opt-in** and absent by default, so the accepted
+detection-only head keeps its exact module tree, state-dict keys, and parameter
+count: the mask coefficients of the segmentation path (WP-047) and the
+orientation angle of the oriented path (WP-062). The angle branch is A20's
+reading of R1 sec. 3.4.3 — "a separate branch is adopted to predict the
+orientation angle" — built as a third per-level stem sharing the class and
+coefficient stems' shape but **not** their width (``channels // 2`` rather than
+A28's ``channels // 3``; :func:`_angle_stem_width` records the Table S11
+measurement behind the split), emitting **one scalar per location**. That
+scalar is the angle itself: R1 Eq. 13 makes ``theta_hat = z`` with no squashing
+nonlinearity, so :func:`_build_angle_stem` ends at a raw 1x1 and no activation
+follows it anywhere in the head. Decoding and range normalization live in
+:mod:`lucid_yolo.models.heads.obb`.
+
 Two pure helpers accompany the module and are reused by the E2E decoder
 (WP-041): :func:`decode_ltrb` turns raw distances into ``xyxy`` boxes against an
 anchor grid, and :func:`o2o_topk` reduces the one-to-one branch to the
@@ -50,7 +64,8 @@ score-ranked ``(B, 300, 6)`` detection tuple ``[x1, y1, x2, y2, score, class]``
 (A9). The full NMS-free E2E decode module lands in WP-041 and reuses
 :func:`o2o_topk`.
 
-Provenance: R1 sec. 3.2.1, R1 sec. 3.2.2, R1 Fig. S2, R6. Assumptions: A3, A9, A28.
+Provenance: R1 sec. 3.2.1, R1 sec. 3.2.2, R1 sec. 3.4.3, R1 Eq. 13, R1 Fig. S2, R6.
+Assumptions: A3, A9, A20, A28.
 """
 
 from __future__ import annotations
@@ -76,6 +91,9 @@ __all__ = [
 
 #: Number of box regression outputs per anchor (ltrb distances; ``reg_max = 1``).
 _BOX_OUTPUTS = 4
+
+#: Number of orientation outputs per anchor: one scalar angle (A20, R1 sec. 3.4.3).
+_ANGLE_OUTPUTS = 1
 
 #: Default mask-coefficient width ``K=32`` from assumption A14; callers opt in
 #: explicitly so the accepted detection-only module tree remains unchanged.
@@ -271,6 +289,104 @@ def _build_coeff_stem(channels: int, num_coeffs: int) -> nn.Sequential:
     )
 
 
+def _angle_stem_width(channels: int) -> int:
+    """Return the hidden width of an orientation stem: ``max(16, channels // 2)``.
+
+    Deliberately **not** :func:`_stem_width`. The box and class stems keep A28's
+    ``channels // 3``; only the angle stem is half the level width, and the split
+    is what the R1 Table S11 fidelity gate selected.
+
+    Both divisors were measured across all five scales rather than reasoned about,
+    because Table S11 rounds its parameter column to 0.1 M and that rounding is
+    what decides which scales can discriminate at all. Expressed as the ratio of
+    the measured angle-branch cost to the increment Table S11 implies over Table 7
+    (after correcting for the 80 -> 15 class saving), with the rounding
+    uncertainty that increment carries:
+
+    ==========  ==========  ==========  ============
+    variant     ``// 3``    ``// 2``    uncertainty
+    ==========  ==========  ==========  ============
+    n           0.76        1.22        +/-59%
+    s           0.98        1.62        +/-21%
+    m           0.66        1.09        +/-8%
+    l           0.66        1.09        +/-8%
+    x           0.63        1.04        +/-3.5%
+    ==========  ==========  ==========  ============
+
+    At ``n`` and ``s`` the published increment is so small that rounding swamps
+    the comparison and neither divisor is discriminable. At ``m``, ``l`` and
+    ``x`` it is not: ``// 3`` lands at 0.63-0.66 of the published increment, far
+    outside the uncertainty, while ``// 2`` lands at 1.04-1.09, inside or beside
+    it. ``x`` is the most precise point in the table at +/-3.5% and it selects
+    ``// 2`` decisively.
+
+    **Neither divisor is uniformly right**, and that is the honest reading rather
+    than a caveat: ``// 3`` undershoots the large scales and ``// 2`` overshoots
+    ``s`` (ratio 1.62, though at +/-21% that is much weaker evidence than ``x``).
+    The published angle cost therefore does not follow any one fraction of the
+    level width, and this is the rule that matches the evidence where the evidence
+    discriminates — not a recovery of the paper's structure. Anyone tempted to
+    "restore" symmetry with :func:`_stem_width` should re-measure first: doing so
+    moves ``x`` from -1.65% to -3.07% against Table S11.
+
+    Args:
+        channels: Input channel count of the level.
+
+    Returns:
+        The orientation stem's hidden channel width.
+
+    Examples:
+        >>> _angle_stem_width(64), _stem_width(64)  # wider than the box/class stems
+        (32, 21)
+        >>> _angle_stem_width(16)  # floored, as the shared convention floors
+        16
+    """
+    return max(16, channels // 2)
+
+
+def _build_angle_stem(channels: int) -> nn.Sequential:
+    """Build one level's orientation stem: two depthwise-separable units then a 1x1 to 1.
+
+    A20's structure for R1 sec. 3.4.3's "separate branch ... to predict the
+    orientation angle": a third stem beside the box and class stems, sharing their
+    *shape* (Fig. S2 shows one stem shape, not one per output kind) and ending at
+    a 1x1 that emits a **single** scalar per location.
+
+    The shape is shared; the width is not. The hidden width comes from
+    :func:`_angle_stem_width` (``channels // 2``), not from A28's
+    :func:`_stem_width` (``channels // 3``) — the Table S11 gate selected the
+    wider stem, and that function's docstring holds the per-scale measurement and
+    the reason a uniform width does not exist.
+
+    Nothing follows that 1x1. R1 Eq. 13 sets ``theta_hat = z`` — the previous
+    versions' Eq. 12 squashing, ``theta_hat = (sigmoid(z) - 0.25) * pi``, is
+    exactly what YOLO26 removes — so an activation here would reintroduce the
+    bounded range the paper deletes. The consequence is that the emitted angle is
+    unbounded; :func:`~lucid_yolo.models.heads.obb.decode_rboxes` is where it is
+    brought into the canonical range (A23), not here.
+
+    Args:
+        channels: Input channel count of the level.
+
+    Returns:
+        The orientation stem for one level, emitting ``(B, 1, H, W)``.
+
+    Examples:
+        >>> import torch
+        >>> stem = _build_angle_stem(64).eval()
+        >>> stem(torch.zeros(1, 64, 8, 8)).shape
+        torch.Size([1, 1, 8, 8])
+        >>> sum(p.numel() for p in stem.parameters())  # 11c + c*h + 2h, twice, + h + 1
+        4289
+    """
+    hidden = _angle_stem_width(channels)
+    return nn.Sequential(
+        _depthwise_separable(channels, hidden),
+        _depthwise_separable(hidden, hidden),
+        nn.Conv2d(hidden, _ANGLE_OUTPUTS, 1),
+    )
+
+
 def _flatten_level(feature_map: Tensor) -> Tensor:
     """Flatten a ``(B, C, H, W)`` prediction map to ``(B, H * W, C)`` row-major.
 
@@ -293,14 +409,21 @@ def _flatten_level(feature_map: Tensor) -> Tensor:
 
 
 class _DetectionBranch(nn.Module):
-    """One prediction branch: per-level box/class and optional coefficient stems.
+    """One prediction branch: per-level box/class stems plus optional extra stems.
 
     Owns three box stems and three class stems (one pair per level, strides
     8/16/32). :class:`DualDetectionHead` holds two of these — the one-to-one and
     one-to-many branches — with disjoint parameters. Forward flattens and
     concatenates the per-level maps into dense ``(B, A, num_classes)`` scores and
-    ``(B, A, 4)`` raw ltrb distances. When explicitly requested, it also owns
-    coefficient stems that emit tanh-bounded ``(B, A, num_coeffs)`` vectors.
+    ``(B, A, 4)`` raw ltrb distances. Two further stem sets are built only when
+    explicitly requested: mask-coefficient stems emitting tanh-bounded
+    ``(B, A, num_coeffs)`` vectors (WP-047), and an orientation stem emitting the
+    raw ``(B, A, 1)`` angle of A20 (WP-062).
+
+    The optional stems are constructed **after** the box and class stems, so a
+    branch that requests neither draws exactly the random numbers the
+    detection-only branch has always drawn: enabling a stem set must not perturb
+    the initialization of the parameters that were already accepted.
 
     Args:
         in_channels: Per-level input channel counts ``(N3, N4, N5)`` in stride
@@ -308,6 +431,8 @@ class _DetectionBranch(nn.Module):
         num_classes: Number of object classes.
         num_coeffs: Optional mask-coefficient count. ``None`` leaves the module
             tree and prediction computation detection-only.
+        predict_angle: Build the orientation stems (A20). ``False`` leaves the
+            module tree and prediction computation angle-free.
     """
 
     def __init__(
@@ -315,25 +440,36 @@ class _DetectionBranch(nn.Module):
         in_channels: tuple[int, int, int],
         num_classes: int,
         num_coeffs: int | None = None,
+        predict_angle: bool = False,
     ) -> None:
         super().__init__()
         self.coeff_stems: nn.ModuleList | None = None
+        self.angle_stems: nn.ModuleList | None = None
         self.box_stems = nn.ModuleList(_build_box_stem(channels) for channels in in_channels)
         self.cls_stems = nn.ModuleList(_build_cls_stem(channels, num_classes) for channels in in_channels)
         if num_coeffs is not None:
             self.coeff_stems = nn.ModuleList(_build_coeff_stem(channels, num_coeffs) for channels in in_channels)
+        if predict_angle:
+            self.angle_stems = nn.ModuleList(_build_angle_stem(channels) for channels in in_channels)
 
-    def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> tuple[Tensor, Tensor] | tuple[Tensor, Tensor, Tensor]:
-        """Predict dense scores, ltrb distances, and optional coefficients.
+    def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> tuple[Tensor, Tensor, Tensor | None, Tensor | None]:
+        """Predict dense scores, ltrb distances, and whichever optional outputs exist.
+
+        The returned tuple has a **fixed** width whatever the branch was built
+        with, the disabled outputs coming back as ``None``. A width that varied
+        with the enabled stem sets would make a three-element result ambiguous
+        between coefficients and angles, which is precisely the kind of
+        positional confusion that pairs one output with another's consumer.
 
         Args:
             features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32.
 
         Returns:
-            When coefficients are disabled, the historical pair ``(cls, box)``.
-            When enabled, a triple ``(cls, box, coeff)`` with tanh-bounded
-            ``coeff`` shape ``(B, A, num_coeffs)``. ``cls`` is raw class logits,
-            ``box`` is raw ltrb distances, and ``A`` sums ``H * W`` over levels.
+            The quadruple ``(cls, box, coeff, angle)``. ``cls`` is raw class
+            logits ``(B, A, num_classes)``, ``box`` raw ltrb distances
+            ``(B, A, 4)``, ``coeff`` tanh-bounded ``(B, A, num_coeffs)`` or
+            ``None``, and ``angle`` the raw ``(B, A, 1)`` orientation of R1
+            Eq. 13 or ``None``. ``A`` sums ``H * W`` over levels.
         """
         cls_levels: list[Tensor] = []
         box_levels: list[Tensor] = []
@@ -342,14 +478,47 @@ class _DetectionBranch(nn.Module):
             cls_levels.append(_flatten_level(cls_stem(feature)))
         cls = torch.cat(cls_levels, dim=1)
         box = torch.cat(box_levels, dim=1)
-        if self.coeff_stems is None:
-            return cls, box
+        return cls, box, self._coefficients(features), self._angles(features)
 
-        coeff_levels = [
+    def _coefficients(self, features: tuple[Tensor, Tensor, Tensor]) -> Tensor | None:
+        """Run the coefficient stems, tanh-activated, or return ``None`` if absent.
+
+        Args:
+            features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32.
+
+        Returns:
+            Dense tanh coefficients ``(B, A, num_coeffs)``, or ``None`` when the
+            branch was built without coefficient stems.
+        """
+        if self.coeff_stems is None:
+            return None
+        levels = [
             _flatten_level(torch.tanh(coeff_stem(feature)))
             for feature, coeff_stem in zip(features, self.coeff_stems, strict=True)
         ]
-        return cls, box, torch.cat(coeff_levels, dim=1)
+        return torch.cat(levels, dim=1)
+
+    def _angles(self, features: tuple[Tensor, Tensor, Tensor]) -> Tensor | None:
+        """Run the orientation stems unactivated, or return ``None`` if absent.
+
+        No activation is applied: R1 Eq. 13 predicts ``theta_hat = z`` directly,
+        deleting the Eq. 12 sigmoid squashing of the previous versions. The
+        unbounded scalar is normalized at decode time
+        (:func:`~lucid_yolo.models.heads.obb.decode_rboxes`, A23), never here.
+
+        Args:
+            features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32.
+
+        Returns:
+            Dense raw angles ``(B, A, 1)`` in radians, or ``None`` when the branch
+            was built without orientation stems.
+        """
+        if self.angle_stems is None:
+            return None
+        levels = [
+            _flatten_level(angle_stem(feature)) for feature, angle_stem in zip(features, self.angle_stems, strict=True)
+        ]
+        return torch.cat(levels, dim=1)
 
 
 @dataclass(frozen=True)
@@ -363,7 +532,10 @@ class DualHeadOutput:
     :func:`decode_ltrb`). Coefficient fields, when enabled, are already
     tanh-activated in the head and lie in ``[-1, 1]``. This deliberate asymmetry
     from the raw class and box outputs keeps the activation with its regression
-    head; a later mask loss must not move it.
+    head; a later mask loss must not move it. Angle fields go the other way and
+    are deliberately **unactivated and unbounded**: R1 Eq. 13 predicts
+    ``theta_hat = z``, so any range normalization belongs to the decode
+    (:func:`~lucid_yolo.models.heads.obb.decode_rboxes`, A23), not here.
 
     Attributes:
         o2m_cls: One-to-many class logits, shape ``(B, A, num_classes)``.
@@ -374,6 +546,10 @@ class DualHeadOutput:
             ``None`` when coefficients are disabled.
         o2o_coeff: One-to-one tanh mask coefficients, shape ``(B, A, K)``, or
             ``None`` when coefficients are disabled.
+        o2m_angle: One-to-many raw orientation angles in radians, shape
+            ``(B, A, 1)``, or ``None`` when the angle branch is disabled.
+        o2o_angle: One-to-one raw orientation angles in radians, shape
+            ``(B, A, 1)``, or ``None`` when the angle branch is disabled.
     """
 
     o2m_cls: Tensor
@@ -382,6 +558,8 @@ class DualHeadOutput:
     o2o_box: Tensor
     o2m_coeff: Tensor | None = None
     o2o_coeff: Tensor | None = None
+    o2m_angle: Tensor | None = None
+    o2o_angle: Tensor | None = None
 
 
 class DualDetectionHead(nn.Module):
@@ -400,6 +578,9 @@ class DualDetectionHead(nn.Module):
         num_coeffs: Optional mask-coefficient count. ``None`` preserves the
             detection-only head exactly; callers explicitly pass
             :data:`DEFAULT_NUM_COEFFS` to enable coefficients.
+        predict_angle: Build both branches' orientation stems (A20). ``False``
+            preserves the detection-only head exactly; the oriented model passes
+            ``True``.
 
     Examples:
         >>> import torch
@@ -409,6 +590,8 @@ class DualDetectionHead(nn.Module):
         ...     out = head(feats)
         >>> out.o2o_cls.shape, out.o2o_box.shape
         (torch.Size([1, 8400, 80]), torch.Size([1, 8400, 4]))
+        >>> out.o2o_angle is None  # the angle branch is opt-in
+        True
     """
 
     def __init__(
@@ -416,12 +599,14 @@ class DualDetectionHead(nn.Module):
         in_channels: tuple[int, int, int],
         num_classes: int,
         num_coeffs: int | None = None,
+        predict_angle: bool = False,
     ) -> None:
         super().__init__()
         self.num_classes = num_classes
         self.num_coeffs = num_coeffs
-        self.o2o = _DetectionBranch(in_channels, num_classes, num_coeffs)
-        self.o2m = _DetectionBranch(in_channels, num_classes, num_coeffs)
+        self.predict_angle = predict_angle
+        self.o2o = _DetectionBranch(in_channels, num_classes, num_coeffs, predict_angle)
+        self.o2m = _DetectionBranch(in_channels, num_classes, num_coeffs, predict_angle)
 
     def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> DualHeadOutput:
         """Run both branches over the neck features.
@@ -432,15 +617,11 @@ class DualDetectionHead(nn.Module):
 
         Returns:
             A :class:`DualHeadOutput` with dense class logits, raw ltrb
-            distances, and optional tanh mask coefficients for both branches.
+            distances, and — for whichever optional stems were built — tanh mask
+            coefficients and raw orientation angles, for both branches.
         """
-        if self.num_coeffs is None:
-            o2m_cls, o2m_box = self.o2m(features)
-            o2o_cls, o2o_box = self.o2o(features)
-            return DualHeadOutput(o2m_cls=o2m_cls, o2m_box=o2m_box, o2o_cls=o2o_cls, o2o_box=o2o_box)
-
-        o2m_cls, o2m_box, o2m_coeff = self.o2m(features)
-        o2o_cls, o2o_box, o2o_coeff = self.o2o(features)
+        o2m_cls, o2m_box, o2m_coeff, o2m_angle = self.o2m(features)
+        o2o_cls, o2o_box, o2o_coeff, o2o_angle = self.o2o(features)
         return DualHeadOutput(
             o2m_cls=o2m_cls,
             o2m_box=o2m_box,
@@ -448,6 +629,8 @@ class DualDetectionHead(nn.Module):
             o2o_box=o2o_box,
             o2m_coeff=o2m_coeff,
             o2o_coeff=o2o_coeff,
+            o2m_angle=o2m_angle,
+            o2o_angle=o2o_angle,
         )
 
 
