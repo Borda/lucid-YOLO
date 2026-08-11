@@ -1,10 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Meta tests: dependency-license audit rejects copyleft (WP-004).
+"""Meta tests: dependency-license audit rejects copyleft (WP-004, WP-063).
 
 Guards the Apache-compatibility policy: the copyleft pattern must catch the
 GPL family and spare permissive licenses, and ``find_copyleft_violations`` must
 flag an AGPL-classified distribution while leaving the live (clean) environment
 untouched.
+
+A second surface is guarded since WP-063: what a wheel *vendors*, as opposed to
+what its metadata declares. ``shapely`` says ``BSD 3-Clause`` and ships GEOS under
+LGPLv2.1; the metadata-only audit passed on it for as long as it existed. These
+tests pin the three rules that make the bundled check meaningful — declarations are
+read, prose is not; the GCC Runtime Library Exception is permissive for every
+package; and the per-package allowlist excuses only what it names (D15).
 """
 
 import importlib.util
@@ -31,9 +38,16 @@ audit = _load_audit()
 class _StubMetadata:
     """Minimal stand-in for ``importlib.metadata`` message objects."""
 
-    def __init__(self, name: str, classifiers: tuple[str, ...] = (), license_text: str = "") -> None:
+    def __init__(
+        self,
+        name: str,
+        classifiers: tuple[str, ...] = (),
+        license_text: str = "",
+        license_files: tuple[str, ...] = (),
+    ) -> None:
         self._fields = {"Name": name, "License": license_text, "License-Expression": ""}
         self._classifiers = list(classifiers)
+        self._license_files = list(license_files)
 
     def get(self, key: str, default: object = None) -> object:
         return self._fields.get(key, default)
@@ -41,14 +55,21 @@ class _StubMetadata:
     def get_all(self, key: str, default: object = None) -> object:
         if key == "Classifier":
             return list(self._classifiers)
+        if key == "License-File":
+            return list(self._license_files)
         return default
 
 
 class _StubDist:
     """Minimal stand-in for an installed distribution."""
 
-    def __init__(self, metadata_obj: _StubMetadata) -> None:
+    def __init__(self, metadata_obj: _StubMetadata, documents: dict[str, str] | None = None) -> None:
         self.metadata = metadata_obj
+        self._documents = documents or {}
+
+    def read_text(self, path: str) -> str | None:
+        """Return a bundled document's text, mimicking ``Distribution.read_text``."""
+        return self._documents.get(path)
 
 
 COPYLEFT_SAMPLES = ("AGPL-3.0", "GPLv2", "LGPL-2.1", "GNU General Public License")
@@ -126,3 +147,70 @@ def test_short_gpl_license_field_is_flagged() -> None:
 def test_live_environment_is_clean() -> None:
     """The active environment carries no GPL-family dependency."""
     assert audit.find_copyleft_violations(list(metadata.distributions())) == []
+
+
+def _bundling_dist(name: str, body: str, filename: str = "LICENSE.txt") -> _StubDist:
+    """A distribution declaring a permissive license while vendoring ``body``."""
+    return _StubDist(
+        _StubMetadata(
+            name,
+            classifiers=("License :: OSI Approved :: BSD License",),
+            license_files=(filename,),
+        ),
+        documents={f"licenses/{filename}": body},
+    )
+
+
+def test_bundled_copyleft_is_flagged_though_the_metadata_is_permissive() -> None:
+    """A wheel declaring BSD while vendoring an LGPL binary is reported.
+
+    The shapely case that motivated the check: every metadata field says BSD, so
+    the declared-license audit passes and the LGPL sits in the environment unseen.
+    """
+    stub = _bundling_dist("vendors-lgpl", "Name: libthing\nFiles: libthing.so\nLicense: LGPL-2.1-or-later\n")
+
+    violations = audit.find_bundled_violations([stub])
+
+    assert violations == [("vendors-lgpl", "LICENSE.txt: LGPL-2.1-or-later")]
+
+
+def test_bundled_license_prose_is_not_scanned() -> None:
+    """A vendored copy of the LGPL text itself is not a declaration.
+
+    A full GPL text names "GPL" on dozens of lines. Scanning the body would flag
+    every wheel shipping any license document, and a gate that fires on everything
+    teaches its reader to bypass it.
+    """
+    stub = _bundling_dist("ships-the-text", "GNU LESSER GENERAL PUBLIC LICENSE\nVersion 2.1\n...prose...\n")
+
+    assert audit.find_bundled_violations([stub]) == []
+
+
+def test_gcc_runtime_exception_is_permissive_for_any_package() -> None:
+    """GPL-3 under the GCC Runtime Library Exception is not a finding, allowlist or not.
+
+    The exception exists precisely to let GPL-3 runtime objects be linked into
+    programs under any license, so it is recognized by expression rather than by
+    package: a new dependency built by gcc needs no allowlist entry (D15).
+    """
+    stub = _bundling_dist(
+        "not-on-any-allowlist",
+        "Name: GCC runtime library\nFiles: libgfortran.dylib\nLicense: GPL-3.0-or-later WITH GCC-exception-3.1\n",
+    )
+
+    assert "not-on-any-allowlist" not in audit.BUNDLED_ALLOWLIST
+    assert audit.find_bundled_violations([stub]) == []
+
+
+def test_allowlisted_package_is_excused_only_for_bundled_findings() -> None:
+    """An allowlisted distribution's vendored copyleft passes; an unlisted one's does not."""
+    body = "Name: libthing\nFiles: libthing.so\nLicense: LGPL-2.1-or-later\n"
+    listed = next(iter(audit.BUNDLED_ALLOWLIST))
+
+    assert audit.find_bundled_violations([_bundling_dist(listed, body)]) == []
+    assert audit.find_bundled_violations([_bundling_dist("someone-else", body)]) != []
+
+
+def test_live_environment_bundles_nothing_unallowed() -> None:
+    """The active environment vendors no copyleft binary outside the allowlist."""
+    assert audit.find_bundled_violations(list(metadata.distributions())) == []

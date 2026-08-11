@@ -12,6 +12,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS = REPO_ROOT / "docs"
 
+#: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
+#: contiguity alone would not notice the last row being deleted, since what remains
+#: stays contiguous. Raise it when adding a decision; never lower it.
+_DECISION_FLOOR = 15
+
 REQUIRED_FILES = (
     DOCS / "PROVENANCE.md",
     DOCS / "ASSUMPTIONS.md",
@@ -124,9 +129,20 @@ def test_provenance_carries_allowlist_ids() -> None:
 
 
 def test_decisions_carry_all_ids() -> None:
-    """DECISIONS.md lists D1-D14 and the four ADRs."""
+    """DECISIONS.md numbers its decisions contiguously from D1, never shrinks, and keeps the four ADRs.
+
+    Two properties, deliberately kept separate. Contiguity catches a duplicated or
+    skipped id, and it holds however many decisions the register grows to — a
+    hardcoded upper bound would fail every time one is added, which is a test
+    demanding maintenance rather than reporting a defect. The floor is what a bare
+    contiguity check would miss: dropping the *last* row leaves the remainder
+    perfectly contiguous, so the count is asserted never to fall below what the
+    register has already reached. Raise the floor when adding a decision; that edit
+    is the deliberate act, not a chore.
+    """
     text = (DOCS / "DECISIONS.md").read_text(encoding="utf-8")
     d_ids = {int(m) for m in re.findall(r"^\| D(\d+) \|", text, flags=re.MULTILINE)}
-    assert d_ids == set(range(1, 15)), f"decision ids: {sorted(d_ids)}"
+    assert d_ids == set(range(1, max(d_ids) + 1)), f"decision ids are not contiguous from 1: {sorted(d_ids)}"
+    assert max(d_ids) >= _DECISION_FLOOR, f"decisions shrank below D{_DECISION_FLOOR}: {sorted(d_ids)}"
     for adr in ("ADR-001", "ADR-002", "ADR-003", "ADR-004"):
         assert f"## {adr}" in text, f"missing {adr} section"
