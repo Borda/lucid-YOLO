@@ -19,6 +19,15 @@ metric pass, :func:`~lucid_yolo.eval.coco_eval.evaluate_bbox_and_segm`; the
 ground-truth masks come from
 :func:`~lucid_yolo.eval.annotations.annotation_mask`, which decodes COCO's
 polygon and RLE encodings alike.
+
+The oriented half is :mod:`lucid_yolo.eval.dota_eval` (WP-063, A24): exact
+polygon-intersection rotated IoU (:func:`~lucid_yolo.eval.dota_eval.rotated_iou`)
+and the COCO-style accumulator that runs on it
+(:func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map`), reached through the
+adapters :func:`~lucid_yolo.eval.dota_eval.rotated_detections_to_predictions` and
+:func:`~lucid_yolo.eval.dota_eval.tiled_targets_to_ground_truth`. That module
+scores one evaluation unit at a time; merging detections across overlapping tiles
+back onto whole DOTA images is WP-088's, and its docstring says so.
 """
 
 from lucid_yolo.eval.annotations import (
@@ -37,9 +46,21 @@ from lucid_yolo.eval.coco_eval import (
     evaluate_bbox_and_segm,
     evaluate_segm,
 )
+from lucid_yolo.eval.dota_eval import (
+    IOU_THRESHOLDS,
+    MAX_DETECTIONS,
+    RECALL_POINTS,
+    evaluate_rotated_map,
+    rotated_detections_to_predictions,
+    rotated_iou,
+    tiled_targets_to_ground_truth,
+)
 from lucid_yolo.eval.segment_decode import decode_instance_masks, masks_to_original
 
 __all__ = [
+    "IOU_THRESHOLDS",
+    "MAX_DETECTIONS",
+    "RECALL_POINTS",
     "DualPathEvaluator",
     "EvalImage",
     "LazyTargets",
@@ -50,8 +71,12 @@ __all__ = [
     "empty_target",
     "evaluate_bbox",
     "evaluate_bbox_and_segm",
+    "evaluate_rotated_map",
     "evaluate_segm",
     "letterboxed_batches",
     "load_eval_annotations",
     "masks_to_original",
+    "rotated_detections_to_predictions",
+    "rotated_iou",
+    "tiled_targets_to_ground_truth",
 ]
