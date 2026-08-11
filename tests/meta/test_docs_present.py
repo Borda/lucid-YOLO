@@ -41,6 +41,47 @@ def test_assumption_ids_parse_contiguous() -> None:
     assert max(ids) >= 26, "register must carry at least A1-A26"
 
 
+def _table_cells(line: str) -> list[str]:
+    """Split one markdown table row into its cells, honoring backslash-escaped pipes."""
+    cells, current, escaped = [], "", False
+    for char in line.strip().strip("|"):
+        if escaped:
+            current, escaped = current + char, False
+        elif char == "\\":
+            escaped = True
+        elif char == "|":
+            cells.append(current.strip())
+            current = ""
+        else:
+            current += char
+    return [*cells, current.strip()]
+
+
+def test_assumption_rows_fill_every_column() -> None:
+    """Every register row carries all six columns, with a recognized status in the last.
+
+    A row written one cell short does not look broken: the formatter pads it back to six,
+    and the id and contiguity gates above keep passing because neither reads past the
+    first column. What actually happens is that every value shifts left -- the validation
+    plan lands under "Public source", the status under "Validation" -- so the register
+    reads as though a sourced assumption were unsourced. Two rows shipped that way before
+    this gate existed (A25, A42).
+    """
+    rows = [
+        _table_cells(line)
+        for line in (DOCS / "ASSUMPTIONS.md").read_text(encoding="utf-8").splitlines()
+        if re.match(r"^\| A\d+ \|", line)
+    ]
+    assert rows, "no assumption rows found"
+
+    malformed = [(row[0], len(row)) for row in rows if len(row) != 6]
+    assert not malformed, f"rows without exactly six columns: {malformed}"
+    unstatused = [(row[0], row[5]) for row in rows if row[5] not in {"open", "active", "validated", "revised"}]
+    assert not unstatused, f"rows whose last column is not a status: {unstatused}"
+    unsourced = [row[0] for row in rows if not row[3]]
+    assert not unsourced, f"rows with an empty public-source column: {unsourced}"
+
+
 def test_roadmap_wp_ids_unique_and_complete() -> None:
     """ROADMAP.md rows carry WP ids 001..091, each exactly once (068-091 added 2026-08-02..07)."""
     text = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")

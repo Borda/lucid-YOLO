@@ -13,6 +13,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 - Rotated-aware augmentation: random affine, mosaic and mixup now carry rotated boxes instead of refusing them, warping each box through its four corners and re-fitting a long-edge box — exact under a similarity, an explicit fit under shear (WP-058).
 - ProbIoU rotated-box loss: both forms the source paper proposes, the bounded Hellinger distance and the unbounded Bhattacharyya distance, evaluated in a cancellation-free form that holds float32 accuracy from square boxes out to 1000:1 elongation and stays finite on degenerate input (WP-059).
 - Square-object angle loss: the auxiliary double-angle term that resolves what the rotated IoU loss cannot, weighted towards near-square targets by a log-Gaussian in the aspect ratio and zero at every quarter turn, so a square is never penalized for choosing either of its two indistinguishable orientations. The two representatives a square can arrive as score bit-identically, not merely to tolerance (WP-060).
+- Rotated candidate selection in the Task-Aligned Assigner and its STAL subclass: an oriented ground truth now decides candidacy by point-in-rotated-rect containment instead of by its axis-aligned envelope, through one optional argument that leaves the accepted axis-aligned path bit-identical when omitted. The end-to-end one-to-one assigner inherits it with no code of its own (WP-061).
+- A gate on the assumption register's own shape: a row written one column short is padded back by the formatter and reads as though a sourced assumption were unsourced, which two rows had already done (WP-061).
 
 ### Changed
 

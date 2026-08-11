@@ -3,7 +3,7 @@
 
 from lucid_yolo.assign.grid import make_anchor_points
 from lucid_yolo.assign.one_to_one import UniqueAssigner
-from lucid_yolo.assign.stal import SmallTargetAssigner, surrogate_boxes
+from lucid_yolo.assign.stal import SmallTargetAssigner, surrogate_boxes, surrogate_rboxes
 from lucid_yolo.assign.tal import AssignResult, TaskAlignedAssigner
 
 __all__ = [
@@ -13,4 +13,5 @@ __all__ = [
     "UniqueAssigner",
     "make_anchor_points",
     "surrogate_boxes",
+    "surrogate_rboxes",
 ]

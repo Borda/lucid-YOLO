@@ -31,6 +31,14 @@ with ``alpha = 1`` and ``beta = 6`` (A2). Assignment proceeds per image:
 Background convention for the returned tensors: ``gt_index`` and
 ``target_labels`` are ``-1``, ``target_boxes`` are zero, and ``align_weights``
 are zero at every non-positive anchor.
+
+Oriented ground truths (WP-061, A25) enter through the optional ``gt_rboxes``
+argument of :meth:`TaskAlignedAssigner.__call__`, which swaps the centre-inside
+test for the point-in-rotated-rect test of
+:func:`~lucid_yolo.data.rotated_geom.points_in_rboxes`. It changes **step 1 only**:
+the alignment metric, the IoU, the returned targets and the weights all keep
+running on the axis-aligned ``gt_boxes``. Omitting the argument leaves every
+tensor operation on the axis-aligned path exactly as it was.
 """
 
 from __future__ import annotations
@@ -41,10 +49,14 @@ import torch
 from torch import Tensor
 from torch.nn import functional as F
 
+from lucid_yolo.data.rotated_geom import points_in_rboxes
+
 __all__ = ["AssignResult", "TaskAlignedAssigner"]
 
 #: Column count of an ``xyxy`` axis-aligned box.
 _BOX_DIM = 4
+#: Column count of a long-edge rotated box ``(cx, cy, w, h, theta)``.
+_RBOX_DIM = 5
 
 
 @dataclass(frozen=True)
@@ -105,6 +117,50 @@ def _box_iou_cross(gt_boxes: Tensor, pred_boxes: Tensor, eps: float) -> Tensor:
     return intersection / (union + eps)
 
 
+def _rotated_inside(anchor_points: Tensor, gt_rboxes: Tensor) -> Tensor:
+    """Point-in-rotated-rect containment for every GT and anchor; ``(B, N, A)``.
+
+    Calls :func:`~lucid_yolo.data.rotated_geom.points_in_rboxes` once per **image**
+    rather than once on the batch flattened into its box axis. The primitive
+    materializes a ``(P, M, 2)`` offset tensor, so folding ``B`` into ``M`` would grow
+    that intermediate by a factor of ``B`` for anchor/box pairs no image ever reads.
+    The loop is over images — a handful — never over boxes.
+
+    Args:
+        anchor_points: ``(A, 2)`` anchor-centre ``(x, y)`` pixels.
+        gt_rboxes: ``(B, N, 5)`` rotated ground truths ``(cx, cy, w, h, theta)``.
+
+    Returns:
+        ``(B, N, A)`` bool tensor, ``True`` where the anchor centre lies inside or
+        exactly on the boundary of the rotated ground truth.
+
+    Examples:
+        >>> import torch
+        >>> points = torch.tensor([[0.0, 0.0], [4.0, 0.0]])
+        >>> rboxes = torch.tensor([[[0.0, 0.0, 6.0, 2.0, 0.0]]])  # 6x2 box at the origin
+        >>> _rotated_inside(points, rboxes).tolist()  # (1, 1, 2): the second point is out
+        [[[True, False]]]
+    """
+    per_image = [points_in_rboxes(anchor_points, rboxes) for rboxes in gt_rboxes]  # each (A, N)
+    return torch.stack(per_image).transpose(1, 2)  # (B, A, N) -> (B, N, A)
+
+
+def _check_rbox_batch(gt_rboxes: Tensor, gt_boxes: Tensor) -> None:
+    """Raise :class:`ValueError` unless ``gt_rboxes`` is ``(B, N, 5)`` alongside ``gt_boxes``.
+
+    The rotated ground truths pair one-to-one with the axis-aligned ones: entry
+    ``(b, n)`` of each describes the same object, the rotated one deciding candidacy
+    and the axis-aligned one everything downstream.
+
+    Examples:
+        >>> import torch
+        >>> _check_rbox_batch(torch.zeros((2, 3, 5)), torch.zeros((2, 3, 4)))
+    """
+    expected = (*gt_boxes.shape[:2], _RBOX_DIM)
+    if tuple(gt_rboxes.shape) != expected:
+        raise ValueError(f"gt_rboxes must be {expected} to match gt_boxes; got {tuple(gt_rboxes.shape)}")
+
+
 class TaskAlignedAssigner:
     """Task-Aligned label assigner for the anchor-free detection head.
 
@@ -154,6 +210,7 @@ class TaskAlignedAssigner:
         gt_boxes: Tensor,
         gt_labels: Tensor,
         gt_mask: Tensor,
+        gt_rboxes: Tensor | None = None,
     ) -> AssignResult:
         """Assign ground truths to anchors for a batch of images.
 
@@ -167,6 +224,13 @@ class TaskAlignedAssigner:
                 padded slots are ignored.
             gt_mask: ``(B, N)`` bool; ``True`` marks a real ground truth, ``False``
                 a padding slot that is never assigned.
+            gt_rboxes: Optional ``(B, N, 5)`` rotated ground truths
+                ``(cx, cy, w, h, theta)`` in the long-edge convention, entry ``(b, n)``
+                describing the same object as ``gt_boxes[b, n]``. When given, candidacy
+                switches to point-in-rotated-rect containment (WP-061, A25) and every
+                other stage — IoU, alignment metric, targets, weights — keeps running on
+                ``gt_boxes``. When omitted (the default) the assignment is the
+                axis-aligned one, unchanged.
 
         Returns:
             An :class:`AssignResult` with per-anchor foreground mask, assigned
@@ -185,27 +249,56 @@ class TaskAlignedAssigner:
             >>> out = assigner(scores, boxes, points, empty_boxes, empty_labels, empty_mask)
             >>> bool(out.fg_mask.any())
             False
+
+            Rotated candidacy drops an anchor the axis-aligned box would have kept:
+
+            >>> two = TaskAlignedAssigner(topk=2)
+            >>> points = torch.tensor([[0.0, 0.0], [3.0, 3.0]])
+            >>> gt = torch.tensor([[[-4.0, -4.0, 4.0, 4.0]]])  # 8x8, both anchors inside
+            >>> rotated = torch.tensor([[[0.0, 0.0, 8.0, 2.0, 0.0]]])  # same centre, flat
+            >>> scores, preds = torch.full((1, 2, 1), 0.9), gt.expand(1, 2, 4).contiguous()
+            >>> labels, mask = torch.tensor([[0]]), torch.tensor([[True]])
+            >>> two(scores, preds, points, gt, labels, mask).fg_mask
+            tensor([[True, True]])
+            >>> two(scores, preds, points, gt, labels, mask, rotated).fg_mask
+            tensor([[ True, False]])
         """
         with torch.no_grad():
             batch, num_anchors = pred_scores.shape[0], pred_scores.shape[1]
             if gt_boxes.shape[1] == 0:
                 return self._empty_result(batch, num_anchors, pred_boxes.dtype, pred_boxes.device)
 
-            candidate_mask = self._candidate_mask(anchor_points, gt_boxes, gt_mask)
+            candidate_mask = self._candidate_mask(anchor_points, gt_boxes, gt_mask, gt_rboxes)
             align_metric, iou = self._alignment_metric(pred_scores, pred_boxes, gt_boxes, gt_labels, candidate_mask)
             mask_pos = self._select_topk(align_metric, candidate_mask)
             mask_pos = self._resolve_conflicts(mask_pos, align_metric)
             mask_pos = self._finalize_mask(mask_pos, align_metric)
             return self._build_result(mask_pos, align_metric, iou, gt_boxes, gt_labels)
 
-    def _candidate_mask(self, anchor_points: Tensor, gt_boxes: Tensor, gt_mask: Tensor) -> Tensor:
+    def _candidate_mask(
+        self,
+        anchor_points: Tensor,
+        gt_boxes: Tensor,
+        gt_mask: Tensor,
+        gt_rboxes: Tensor | None = None,
+    ) -> Tensor:
         """Eligibility mask ``(B, N, A)``: anchor centre inside a real GT box.
 
         Subclasses (see :class:`lucid_yolo.assign.stal.SmallTargetAssigner`) override
         this single step to filter against a surrogate box while leaving every
         downstream stage on the original ground truth; the base implementation is
         stateless and ignores ``self``.
+
+        With ``gt_rboxes`` supplied the containment test becomes the
+        point-in-rotated-rect test of
+        :func:`~lucid_yolo.data.rotated_geom.points_in_rboxes` and ``gt_boxes`` is not
+        read here at all — it stays the box every later stage scores against. Both
+        tests are edge-inclusive, so an anchor exactly on a boundary counts as a
+        candidate either way (A25 inherits that choice from the primitive).
         """
+        if gt_rboxes is not None:
+            _check_rbox_batch(gt_rboxes, gt_boxes)
+            return _rotated_inside(anchor_points, gt_rboxes) & gt_mask.unsqueeze(-1)
         px = anchor_points[:, 0]  # (A,)
         py = anchor_points[:, 1]  # (A,)
         x1 = gt_boxes[..., 0].unsqueeze(-1)  # (B, N, 1)

@@ -26,6 +26,13 @@ Everything after candidate selection is the base assigner's: the alignment
 metric ``t = s**alpha * u**beta`` uses the IoU ``u`` of predictions against the
 original box, the returned ``target_boxes`` are the original ground truth, and
 the normalized ``align_weights`` derive from that original-box IoU.
+
+For oriented ground truths (WP-061) the same surrogate is built by
+:func:`surrogate_rboxes` on the rotated ``(w, h)`` and the containment test is the
+rotated one. R1 sec. 3.3.3 states Eq. 4-6 generically over a box's dimensions and
+never restates it for oriented boxes; reading those dimensions as the rotated
+``(w, h)`` — the box's own edge lengths, not the sides of its axis-aligned envelope
+— is this project's decision, registered as A25 and not the paper's words.
 """
 
 from __future__ import annotations
@@ -34,8 +41,12 @@ import torch
 from torch import Tensor
 
 from lucid_yolo.assign.tal import TaskAlignedAssigner
+from lucid_yolo.data.rotated_geom import canonicalize
 
-__all__ = ["SmallTargetAssigner", "surrogate_boxes"]
+__all__ = ["SmallTargetAssigner", "surrogate_boxes", "surrogate_rboxes"]
+
+#: Column count of a long-edge rotated box ``(cx, cy, w, h, theta)``.
+_RBOX_DIM = 5
 
 
 def surrogate_boxes(gt_boxes: Tensor, s_min: float, s_ref: float) -> Tensor:
@@ -76,6 +87,51 @@ def surrogate_boxes(gt_boxes: Tensor, s_min: float, s_ref: float) -> Tensor:
     return torch.stack((cx - half_w, cy - half_h, cx + half_w, cy + half_h), dim=-1)
 
 
+def surrogate_rboxes(gt_rboxes: Tensor, s_min: float, s_ref: float) -> Tensor:
+    """Build centre- and angle-preserving rotated surrogates with per-dimension clamping.
+
+    The rotated counterpart of :func:`surrogate_boxes`: each rotated box keeps its
+    centre and its ``theta``, and an edge shorter than ``s_min`` is replaced by
+    ``s_ref``. Used only for the STAL candidate filter on oriented ground truths;
+    scoring, targets, and regression keep the original boxes.
+
+    A25 — the clamped dimensions are the box's **own** ``(w, h)``, the rotated edge
+    lengths, not the sides of its axis-aligned envelope. R1 sec. 3.3.3 gives Eq. 4-6
+    generically over a box's dimensions and never restates it for oriented boxes, so
+    this reading is the project's, not the paper's.
+
+    Inflating ``h`` past ``w`` would leave the long-edge convention (``w >= h``), so
+    the result is passed through :func:`~lucid_yolo.data.rotated_geom.canonicalize`,
+    which swaps the pair and turns ``theta`` by ``pi/2`` — the same rectangle, named
+    the way the rest of the codebase expects. Containment is invariant under that
+    move, so the candidate set does not depend on it.
+
+    Args:
+        gt_rboxes: ``(..., 5)`` rotated boxes ``(cx, cy, w, h, theta)``. Any leading
+            batch/ground-truth axes are preserved.
+        s_min: Edge length below which a dimension is inflated (the smallest stride,
+            ``8.0`` at 640 input).
+        s_ref: Replacement edge length for an inflated dimension (the next stride,
+            ``16.0`` at 640 input).
+
+    Returns:
+        A ``(..., 5)`` tensor of canonical rotated surrogate boxes sharing
+        ``gt_rboxes``'s dtype, device, and leading shape.
+
+    Examples:
+        >>> import torch
+        >>> boxes = torch.tensor([[[10.0, 10.0, 10.0, 4.0, 0.0]]])  # 10 long, 4 thin
+        >>> # h -> 16 overtakes w, so the canonical answer swaps the pair: theta += pi/2
+        >>> [round(v, 4) for v in surrogate_rboxes(boxes, 8.0, 16.0)[0, 0].tolist()]
+        [10.0, 10.0, 16.0, 10.0, 1.5708]
+    """
+    cx, cy, width, height, theta = gt_rboxes.unbind(-1)
+    width_tilde = torch.where(width < s_min, torch.full_like(width, s_ref), width)
+    height_tilde = torch.where(height < s_min, torch.full_like(height, s_ref), height)
+    inflated = torch.stack((cx, cy, width_tilde, height_tilde, theta), dim=-1)
+    return canonicalize(inflated.reshape(-1, _RBOX_DIM)).reshape(inflated.shape)
+
+
 class SmallTargetAssigner(TaskAlignedAssigner):
     """Task-Aligned assigner with small-target-aware candidate filtering (STAL).
 
@@ -85,6 +141,11 @@ class SmallTargetAssigner(TaskAlignedAssigner):
     ``s_ref``. All other stages — alignment metric, top-k, conflict resolution,
     target boxes, and normalized weights — are inherited unchanged and operate on
     the original ground-truth boxes.
+
+    Passing ``gt_rboxes`` to :meth:`~lucid_yolo.assign.tal.TaskAlignedAssigner.__call__`
+    switches the same filter to rotated ground truths: the surrogate is built by
+    :func:`surrogate_rboxes` on the rotated ``(w, h)`` and the containment test becomes
+    point-in-rotated-rect (A25).
 
     Args:
         topk: Number of highest-alignment anchors kept per ground truth.
@@ -127,12 +188,26 @@ class SmallTargetAssigner(TaskAlignedAssigner):
         self.s_min = s_min
         self.s_ref = s_ref
 
-    def _candidate_mask(self, anchor_points: Tensor, gt_boxes: Tensor, gt_mask: Tensor) -> Tensor:
+    def _candidate_mask(
+        self,
+        anchor_points: Tensor,
+        gt_boxes: Tensor,
+        gt_mask: Tensor,
+        gt_rboxes: Tensor | None = None,
+    ) -> Tensor:
         """Eligibility mask against the surrogate box; ``(B, N, A)``.
 
-        The only overridden stage: the centre-inside test uses surrogate boxes
-        (small dimensions inflated to ``s_ref``) so tiny ground truths gain
-        candidates. Every downstream stage still sees the original ``gt_boxes``.
+        The only overridden stage: the containment test uses surrogate boxes (small
+        dimensions inflated to ``s_ref``) so tiny ground truths gain candidates. Every
+        downstream stage still sees the original ``gt_boxes``.
+
+        With ``gt_rboxes`` supplied the surrogate is the rotated one
+        (:func:`surrogate_rboxes`, clamped on the rotated ``(w, h)`` per A25) and the
+        base class runs its rotated containment test; ``gt_boxes`` is handed over
+        untouched because that path does not read it.
         """
+        if gt_rboxes is not None:
+            surrogate_r = surrogate_rboxes(gt_rboxes, self.s_min, self.s_ref)
+            return super()._candidate_mask(anchor_points, gt_boxes, gt_mask, surrogate_r)
         surrogate = surrogate_boxes(gt_boxes, self.s_min, self.s_ref)
         return super()._candidate_mask(anchor_points, surrogate, gt_mask)
