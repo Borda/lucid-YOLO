@@ -12,6 +12,7 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 - Overlapping 1024 px crop tiling for aerial imagery, with the source paper's partial-object rule: an instance clipped to under 70% of its area is flagged difficult rather than dropped, and re-fitted to a long-edge box. Crop overlap is a parameter; the visible fraction is carried alongside each instance (WP-057).
 - Rotated-aware augmentation: random affine, mosaic and mixup now carry rotated boxes instead of refusing them, warping each box through its four corners and re-fitting a long-edge box — exact under a similarity, an explicit fit under shear (WP-058).
 - ProbIoU rotated-box loss: both forms the source paper proposes, the bounded Hellinger distance and the unbounded Bhattacharyya distance, evaluated in a cancellation-free form that holds float32 accuracy from square boxes out to 1000:1 elongation and stays finite on degenerate input (WP-059).
+- Square-object angle loss: the auxiliary double-angle term that resolves what the rotated IoU loss cannot, weighted towards near-square targets by a log-Gaussian in the aspect ratio and zero at every quarter turn, so a square is never penalized for choosing either of its two indistinguishable orientations. The two representatives a square can arrive as score bit-identically, not merely to tolerance (WP-060).
 
 ### Changed
 

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """losses subpackage — see blueprint section 7 layout."""
 
+from lucid_yolo.losses.angle_loss import aspect_ratio_weight, square_angle_loss, wrap_angle_delta
 from lucid_yolo.losses.ciou import box_iou_aligned, ciou_loss, complete_iou
 from lucid_yolo.losses.detection_loss import DetectionBranchLoss, DetectionLossOutput
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
@@ -16,6 +17,7 @@ __all__ = [
     "DualLossOutput",
     "ProgressiveLossSchedule",
     "SemanticAuxOutput",
+    "aspect_ratio_weight",
     "box_iou_aligned",
     "ciou_loss",
     "complete_iou",
@@ -25,4 +27,6 @@ __all__ = [
     "probiou_hellinger_loss",
     "progressive_alpha",
     "semantic_aux_loss",
+    "square_angle_loss",
+    "wrap_angle_delta",
 ]
