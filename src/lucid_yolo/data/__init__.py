@@ -6,6 +6,13 @@ from __future__ import annotations
 from lucid_yolo.data.affine import AffineParams, FusedAffineLetterbox, RandomAffine
 from lucid_yolo.data.augment import HorizontalFlip, HSVJitter, hsv_to_rgb, rgb_to_hsv
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
+from lucid_yolo.data.dota import (
+    DOTA_CLASSES,
+    DotaObject,
+    dota_targets,
+    load_dota_targets,
+    parse_dota_label_file,
+)
 from lucid_yolo.data.download import download_coco
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.mixup import CopyPaste, Mixup
@@ -27,10 +34,12 @@ from lucid_yolo.data.transforms import (
 from lucid_yolo.data.verify import VerifyResult, verify_coco_root
 
 __all__ = [
+    "DOTA_CLASSES",
     "AffineParams",
     "CocoDetectionDataset",
     "Compose",
     "CopyPaste",
+    "DotaObject",
     "FusedAffineLetterbox",
     "GeometricTransform",
     "HSVJitter",
@@ -45,8 +54,11 @@ __all__ = [
     "boxes_from_polygons",
     "build_scale_policy",
     "canonicalize",
+    "dota_targets",
     "download_coco",
     "hsv_to_rgb",
+    "load_dota_targets",
+    "parse_dota_label_file",
     "points_in_rboxes",
     "polygons_to_rboxes",
     "rasterize_polygon",

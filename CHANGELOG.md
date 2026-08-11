@@ -6,6 +6,23 @@ ever planned, promised, or tagged — per ADR-002 (docs/DECISIONS.md).
 
 ## [Unreleased]
 
+### Added
+
+- Long-edge rotated-box primitives: canonicalization to `w >= h` with the angle on
+  `[-45, 135)` degrees, quadrilateral conversion in both directions, and a
+  vectorized point-in-rotated-rect test. Three conventions the paper leaves open
+  are fixed here and inherited by the whole oriented path — the angle turns
+  `+x` towards `+y`, containment is edge-inclusive, and an exact square folds
+  towards zero (WP-055).
+- DOTA-v1.0 label parsing: the 15 categories in the published order, metadata
+  headers skipped, category names normalized across their hyphenated and
+  underscored spellings, and each annotated quadrilateral converted to a
+  canonical long-edge box. Rotated boxes are kept on the same instance axis as
+  the axis-aligned envelopes and labels, so one mask filters every modality
+  (WP-056).
+- `make check-data DATASET=dota` — DOTA root layout, image/label pairing and
+  published-count validation beside the existing COCO path (WP-056).
+
 ## [0.2.0] - 2026-08-10
 
 ### Added

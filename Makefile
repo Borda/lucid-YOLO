@@ -7,6 +7,7 @@ UV        := uv
 MINOR     ?=
 TASK      ?= det
 DATA_ROOT ?=
+DATASET   ?= coco
 
 .PHONY: setup lint test test-gpu precommit gate gate-gpu golden golden-gpu freeze-goldens overfit shapes check-data build clean
 
@@ -76,10 +77,11 @@ overfit:
 shapes:
 	$(PY) scripts/shapes_regression.py --task $(TASK) $(if $(FREEZE),--freeze,)
 
-# Real-dataset layout validation (WP-014; synthetic stand-in per docs/ASSUMPTIONS.md A26).
+# Real-dataset layout validation (WP-014/056; synthetic stand-in per docs/ASSUMPTIONS.md A26).
+# DATASET selects the layout: coco (default) or dota.
 check-data:
-	@test -n "$(DATA_ROOT)" || { echo "usage: make check-data DATA_ROOT=/path/to/coco"; exit 1; }
-	$(PY) scripts/check_data.py --data-root $(DATA_ROOT)
+	@test -n "$(DATA_ROOT)" || { echo "usage: make check-data DATA_ROOT=/path/to/data [DATASET=coco|dota]"; exit 1; }
+	$(PY) scripts/check_data.py --data-root $(DATA_ROOT) --dataset $(DATASET)
 
 # Standard PEP 517 build (setuptools backend): sdist + wheel into dist/.
 build:

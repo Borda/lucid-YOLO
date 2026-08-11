@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Validate a real COCO 2017 dataset root before a ``[DATA]`` run (WP-014).
+"""Validate a real COCO 2017 or DOTA-v1.0 dataset root before a ``[DATA]`` run (WP-014, WP-056).
 
 Datasets are never committed and never auto-downloaded (AGENTS.md sec. 3); this
 script is the ``make check-data`` gate that confirms a provisioned root actually
-matches the COCO 2017 layout of blueprint sec. 14.3 before any ``[DATA]`` work
-runs against it. For each split it checks that
+matches the layout of blueprint sec. 14.3 before any ``[DATA]`` work runs against
+it. For each COCO split it checks that
 
     * the images directory exists and holds the expected number of image files
       (118,287 for ``train2017``, 5,000 for ``val2017``);
@@ -12,10 +12,26 @@ runs against it. For each split it checks that
     * the image count declared inside the annotation JSON matches the number of
       image files on disk.
 
-The check core is importable (:func:`check_coco_root` returns a
-:class:`DataCheck` whose ``ok`` flag drives the exit status); :func:`main` is a
-thin CLI over it. The expected per-split counts are parameters (defaulting to the
-real COCO 2017 totals) so the logic is unit-testable against a tiny fake layout.
+For DOTA-v1.0 (``--dataset dota``) each split directory must hold ``images/`` and
+``labelTxt/``, every image must have a label file of the same stem and vice
+versa, every object line must parse (:mod:`lucid_yolo.data.dota`), and the totals
+across the checked splits must match the published 2,806 images / 188,282
+instances / 15 classes of AGENTS.md sec. 3.
+
+    Those published totals describe the dataset **as published**. Whether a
+    partially provisioned root — one split, or the annotated splits only — can
+    meet them is settled at ``[DATA]`` time against real data, not here; the
+    counts are parameters so a partial provisioning states its own expectation.
+    Instances are counted from the label files directly, *every* object line
+    including the ones flagged ``difficult``, because the published total does
+    not break those out (A39 governs what a *loader* does with the flag, which is
+    a different question from what is on disk).
+
+The check core is importable (:func:`check_coco_root` and :func:`check_dota_root`
+return a :class:`DataCheck` whose ``ok`` flag drives the exit status);
+:func:`main` is a thin CLI over them. The expected counts are parameters
+(defaulting to the real dataset totals) so the logic is unit-testable against a
+tiny fake layout.
 
 Relationship to :mod:`lucid_yolo.data.verify`:
     This script is the developer-only ``make check-data`` gate and validates the
@@ -31,6 +47,7 @@ Examples:
     Validate a provisioned root (exit 1 on any mismatch)::
 
         python scripts/check_data.py --data-root /data/coco
+        python scripts/check_data.py --data-root /data/dota --dataset dota
 """
 
 from __future__ import annotations
@@ -38,14 +55,26 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from lucid_yolo.data.dota import DOTA_CLASSES, parse_dota_label_file
 
 #: Expected image counts for the two COCO 2017 splits (blueprint sec. 14.3).
 COCO_TRAIN_COUNT = 118287
 COCO_VAL_COUNT = 5000
+#: Published DOTA-v1.0 totals (AGENTS.md sec. 3; R18).
+DOTA_IMAGE_COUNT = 2806
+DOTA_INSTANCE_COUNT = 188282
+DOTA_CLASS_COUNT = len(DOTA_CLASSES)
+#: DOTA split directories checked by default; each holds ``images/`` and ``labelTxt/``.
+DOTA_SPLITS = ("train", "val")
 #: Image file suffixes counted on disk (COCO 2017 ships ``.jpg``).
 _IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")
+#: Label file suffix of a DOTA ``labelTxt`` directory.
+_LABEL_SUFFIXES = (".txt",)
+#: Unmatched names listed in a pairing problem before the message is truncated.
+_MAX_LISTED_NAMES = 3
 
 
 @dataclass(frozen=True)
@@ -73,21 +102,63 @@ class SplitCheck:
         """Return whether the split passed every check."""
         return not self.problems
 
+    @property
+    def summary(self) -> str:
+        """Return the one-line count summary printed for a passing split."""
+        return f"{self.found_images} images"
+
+
+@dataclass(frozen=True)
+class DotaSplitCheck:
+    """Validation outcome for one DOTA-v1.0 split directory.
+
+    Attributes:
+        name: Split name (e.g. ``"train"``).
+        found_images: Image files found under ``images/`` (``-1`` if it is
+            missing).
+        found_labels: Label files found under ``labelTxt/`` (``-1`` if it is
+            missing).
+        instances: Object lines parsed across the split's label files (``-1``
+            when the label directory is missing); difficult instances included.
+        classes: Class ids seen in this split.
+        problems: Human-readable problem descriptions; empty when the split is OK.
+    """
+
+    name: str
+    found_images: int
+    found_labels: int
+    instances: int
+    classes: frozenset[int]
+    problems: list[str]
+
+    @property
+    def ok(self) -> bool:
+        """Return whether the split passed every check."""
+        return not self.problems
+
+    @property
+    def summary(self) -> str:
+        """Return the one-line count summary printed for a passing split."""
+        return f"{self.found_images} images, {self.instances} instances, {len(self.classes)} classes"
+
 
 @dataclass(frozen=True)
 class DataCheck:
     """Aggregate validation outcome across all splits.
 
     Attributes:
-        splits: The per-split :class:`SplitCheck` results.
+        splits: The per-split results.
+        problems: Root-level problems that belong to no single split (the
+            cross-split totals); empty when there are none.
     """
 
-    splits: list[SplitCheck]
+    splits: list[SplitCheck] | list[DotaSplitCheck]
+    problems: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        """Return whether every split passed."""
-        return all(split.ok for split in self.splits)
+        """Return whether every split passed and no root-level problem was found."""
+        return not self.problems and all(split.ok for split in self.splits)
 
 
 def _count_images(images_dir: Path) -> int:
@@ -189,6 +260,175 @@ def check_coco_root(
     return DataCheck(splits=[train, val])
 
 
+def _stems(directory: Path, suffixes: tuple[str, ...]) -> set[str] | None:
+    """Return the file stems directly under ``directory``, or ``None`` if it is missing.
+
+    Args:
+        directory: Candidate directory.
+        suffixes: Lower-cased suffixes a file must carry to be counted.
+
+    Returns:
+        The set of stems of matching files, or ``None`` when the directory does
+        not exist.
+
+    Examples:
+        >>> from pathlib import Path
+        >>> _stems(Path("/nonexistent"), (".txt",)) is None
+        True
+    """
+    if not directory.is_dir():
+        return None
+    return {path.stem for path in directory.iterdir() if path.suffix.lower() in suffixes}
+
+
+def _pairing_problems(name: str, image_stems: set[str], label_stems: set[str]) -> list[str]:
+    """Report images without a label file and label files without an image.
+
+    Args:
+        name: Split name for messages.
+        image_stems: Stems found under ``images/``.
+        label_stems: Stems found under ``labelTxt/``.
+
+    Returns:
+        One problem string per non-empty direction of the mismatch; empty when
+        the two sets are equal.
+
+    Examples:
+        >>> _pairing_problems("train", {"P0001"}, set())
+        ["train: 1 image(s) without a label file: ['P0001']"]
+    """
+    problems = []
+    for missing, message in (
+        (image_stems - label_stems, "image(s) without a label file"),
+        (label_stems - image_stems, "label file(s) without an image"),
+    ):
+        if missing:
+            listed = sorted(missing)[:_MAX_LISTED_NAMES]
+            problems.append(f"{name}: {len(missing)} {message}: {listed}")
+    return problems
+
+
+def _scan_labels(labels_dir: Path) -> tuple[int, frozenset[int], list[str]]:
+    """Parse every label file in ``labels_dir``, counting instances and classes.
+
+    Args:
+        labels_dir: The split's ``labelTxt`` directory.
+
+    Returns:
+        A ``(instances, classes, problems)`` triple. ``instances`` counts every
+        object line, difficult ones included; ``problems`` holds one entry per
+        label file that failed to parse, so a malformed file is reported rather
+        than raised.
+
+    Examples:
+        >>> from pathlib import Path
+        >>> _scan_labels(Path("/nonexistent"))
+        (0, frozenset(), [])
+    """
+    instances = 0
+    classes: set[int] = set()
+    problems: list[str] = []
+    for path in sorted(labels_dir.glob("*.txt")):
+        try:
+            objects = parse_dota_label_file(path)
+        except (OSError, ValueError) as error:
+            problems.append(f"label file failed to parse: {error}")
+            continue
+        instances += len(objects)
+        classes.update(obj.label for obj in objects)
+    return instances, frozenset(classes), problems
+
+
+def check_dota_split(name: str, split_dir: Path) -> DotaSplitCheck:
+    """Validate one DOTA-v1.0 split directory's layout, pairing and label files.
+
+    Args:
+        name: Split name for messages.
+        split_dir: The split directory, expected to hold ``images/`` and
+            ``labelTxt/``.
+
+    Returns:
+        A :class:`DotaSplitCheck` capturing the counts and any problems found.
+
+    Examples:
+        ```pycon
+        >>> from pathlib import Path
+        >>> check_dota_split("train", Path("/nonexistent")).ok
+        False
+
+        ```
+    """
+    images_dir, labels_dir = split_dir / "images", split_dir / "labelTxt"
+    image_stems = _stems(images_dir, _IMAGE_SUFFIXES)
+    label_stems = _stems(labels_dir, _LABEL_SUFFIXES)
+    problems: list[str] = []
+    if image_stems is None:
+        problems.append(f"images directory missing: {images_dir}")
+    if label_stems is None:
+        problems.append(f"labelTxt directory missing: {labels_dir}")
+    if image_stems is not None and label_stems is not None:
+        problems.extend(_pairing_problems(name, image_stems, label_stems))
+    instances, classes, parse_problems = _scan_labels(labels_dir) if label_stems is not None else (-1, frozenset(), [])
+    problems.extend(parse_problems)
+    return DotaSplitCheck(
+        name=name,
+        found_images=-1 if image_stems is None else len(image_stems),
+        found_labels=-1 if label_stems is None else len(label_stems),
+        instances=instances,
+        classes=classes,
+        problems=problems,
+    )
+
+
+def check_dota_root(
+    data_root: Path,
+    splits: tuple[str, ...] = DOTA_SPLITS,
+    expected_images: int = DOTA_IMAGE_COUNT,
+    expected_instances: int = DOTA_INSTANCE_COUNT,
+    expected_classes: int = DOTA_CLASS_COUNT,
+) -> DataCheck:
+    """Validate a DOTA-v1.0 root: per-split layout plus the published totals.
+
+    Each split is checked by :func:`check_dota_split`; the totals across the
+    checked splits are then compared with the published counts of AGENTS.md
+    sec. 3 (2,806 images / 188,282 instances / 15 classes). Those describe the
+    dataset **as published** — a partially provisioned root states its own
+    expectation through the parameters rather than by weakening the default.
+
+    Args:
+        data_root: Directory holding the split directories.
+        splits: Split directory names to check (defaults to the annotated
+            ``train``/``val`` pair).
+        expected_images: Expected image count summed over ``splits``.
+        expected_instances: Expected object-line count summed over ``splits``,
+            difficult instances included.
+        expected_classes: Expected number of distinct classes seen.
+
+    Returns:
+        A :class:`DataCheck` aggregating the splits and the totals.
+
+    Examples:
+        ```pycon
+        >>> from pathlib import Path
+        >>> check_dota_root(Path("/nonexistent")).ok
+        False
+
+        ```
+    """
+    checks = [check_dota_split(name, data_root / name) for name in splits]
+    images = sum(max(check.found_images, 0) for check in checks)
+    instances = sum(max(check.instances, 0) for check in checks)
+    classes = frozenset[int]().union(*(check.classes for check in checks))
+    problems = []
+    if images != expected_images:
+        problems.append(f"expected {expected_images} images across {list(splits)}, found {images}")
+    if instances != expected_instances:
+        problems.append(f"expected {expected_instances} instances across {list(splits)}, found {instances}")
+    if len(classes) != expected_classes:
+        problems.append(f"expected {expected_classes} classes across {list(splits)}, found {len(classes)}")
+    return DataCheck(splits=checks, problems=problems)
+
+
 def format_report(result: DataCheck, data_root: Path) -> str:
     """Render a human-readable verdict for ``result``.
 
@@ -202,15 +442,16 @@ def format_report(result: DataCheck, data_root: Path) -> str:
     lines = [f"check-data: {data_root}"]
     for split in result.splits:
         if split.ok:
-            lines.append(f"  PASS {split.name} — {split.found_images} images")
+            lines.append(f"  PASS {split.name} — {split.summary}")
         else:
             lines.extend(f"  FAIL {problem}" for problem in split.problems)
+    lines.extend(f"  FAIL {problem}" for problem in result.problems)
     lines.append("PASS: dataset layout valid" if result.ok else "FAIL: dataset layout invalid")
     return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Validate the COCO root named on the command line.
+    """Validate the dataset root named on the command line.
 
     Args:
         argv: Command-line arguments (defaults to ``sys.argv[1:]``).
@@ -218,10 +459,16 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         ``0`` when the layout is valid, ``1`` otherwise.
     """
-    parser = argparse.ArgumentParser(description="Validate a COCO 2017 dataset root.")
-    parser.add_argument("--data-root", type=Path, required=True, help="COCO 2017 root directory")
+    parser = argparse.ArgumentParser(description="Validate a COCO 2017 or DOTA-v1.0 dataset root.")
+    parser.add_argument("--data-root", type=Path, required=True, help="dataset root directory")
+    parser.add_argument(
+        "--dataset",
+        choices=("coco", "dota"),
+        default="coco",
+        help="dataset layout to validate (default: coco)",
+    )
     args = parser.parse_args(argv)
-    result = check_coco_root(args.data_root)
+    result = check_coco_root(args.data_root) if args.dataset == "coco" else check_dota_root(args.data_root)
     print(format_report(result, args.data_root))
     return 0 if result.ok else 1
 
