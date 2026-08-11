@@ -1,14 +1,11 @@
 # Decision Record
 
-Architecture- and policy-level decisions. D1–D11 are transcribed from the
-governing blueprint (v1.5, 2026-07-10); D12 records execution-session
-amendments (2026-07-31). ADRs expand the three decisions with lasting
-architectural consequences.
+Architecture- and policy-level decisions. D1–D11 are transcribed from the governing blueprint (v1.5, 2026-07-10); D12 records execution-session amendments (2026-07-31). ADRs expand the three decisions with lasting architectural consequences.
 
 ## Decisions
 
 | ID | Decision | Resolution |
-|---|---|---|
+| -- | -- | -- |
 | D1 | Scope | Detection + instance segmentation + OBB, delivered as sequential release-train milestones (0.1 → 0.2 → 0.3, see D10) on top of the fully gated detector. Pose and classification remain future 0.x work; YOLOE-26 out of scope entirely. |
 | D2 | Reproduction claim | Faithful method reproduction (from-scratch training), not exact-number reproduction. Targets are the paper's relative/ablation claims and the from-scratch reference in R1 Table 4. No Objects365 pretraining, no evolutionary hyperparameter search. |
 | D3 | Scale strategy | Family-generic code. Iterate/debug at n-scale, headline runs at s-scale (all paper ablations are s-scale, including seg and OBB). |
@@ -28,94 +25,46 @@ architectural consequences.
 
 **Status**: accepted (blueprint v1.2).
 
-**Context**: YOLO-lineage reference implementations describe model topology in
-YAML DSLs. This project must neither consult nor resemble that expressive
-artifact.
+**Context**: YOLO-lineage reference implementations describe model topology in YAML DSLs. This project must neither consult nor resemble that expressive artifact.
 
-**Decision**: model topology and blocks are typed Python — builder functions
-plus a 5-row scale-multiplier dataclass registry. YAML (via
-LightningCLI/jsonargparse) covers only run-level configuration: data paths,
-tier schedules, optimizer/loss gains, augmentation strengths.
+**Decision**: model topology and blocks are typed Python — builder functions plus a 5-row scale-multiplier dataclass registry. YAML (via LightningCLI/jsonargparse) covers only run-level configuration: data paths, tier schedules, optimizer/loss gains, augmentation strengths.
 
-**Consequences**: (i) clean-room — a layer-list YAML DSL would structurally
-converge on the reference implementation's model-YAML format; (ii) the paper
-defines exactly one topology with five multiplier rows — a configurable graph
-engine is over-engineering; (iii) the Phase 2/7/8 param/FLOP gates test Python
-constructors directly, and mypy covers what a DSL cannot. No model-topology
-config format may ever be created (standing prohibition, AGENTS.md).
+**Consequences**: (i) clean-room — a layer-list YAML DSL would structurally converge on the reference implementation's model-YAML format; (ii) the paper defines exactly one topology with five multiplier rows — a configurable graph engine is over-engineering; (iii) the Phase 2/7/8 param/FLOP gates test Python constructors directly, and mypy covers what a DSL cannot. No model-topology config format may ever be created (standing prohibition, AGENTS.md).
 
 ## ADR-002 — Perpetual 0.x release train (D10)
 
 **Status**: accepted (blueprint v1.3).
 
-**Context**: the project tracks a living specification — the paper plus this
-project's assumption register. A 1.0 would imply an API-stability contract and
-a completeness claim a research reproduction should not make.
+**Context**: the project tracks a living specification — the paper plus this project's assumption register. A 1.0 would imply an API-stability contract and a completeness claim a research reproduction should not make.
 
-**Decision**: SemVer 0.MINOR.PATCH forever. Each 0.MINOR is a gated capability
-milestone (breaking changes permitted, called out in release notes); PATCH
-covers fixes, docs, and assumption-register revisions whose results stay
-within golden tolerances. Release train: 0.1.0 = detector (Phase 6 gate),
-0.2.0 = +segmentation (Phase 7), 0.3.0 = +OBB (Phase 8), 0.4.0+ = rolling.
+**Decision**: SemVer 0.MINOR.PATCH forever. Each 0.MINOR is a gated capability milestone (breaking changes permitted, called out in release notes); PATCH covers fixes, docs, and assumption-register revisions whose results stay within golden tolerances. Release train: 0.1.0 = detector (Phase 6 gate), 0.2.0 = +segmentation (Phase 7), 0.3.0 = +OBB (Phase 8), 0.4.0+ = rolling.
 
-**Consequences**: each 0.MINOR freezes its golden metrics; later releases must
-never regress any frozen golden — frozen goldens are immutable, a genuine
-correction ships as the next 0.MINOR with an explicit changelog note. Every
-release ships with resolved run configs + seeds, its report section, a
-changelog, and weights where dataset licenses permit. No 1.0 is ever planned,
-promised, or tagged.
+**Consequences**: each 0.MINOR freezes its golden metrics; later releases must never regress any frozen golden — frozen goldens are immutable, a genuine correction ships as the next 0.MINOR with an explicit changelog note. Every release ships with resolved run configs + seeds, its report section, a changelog, and weights where dataset licenses permit. No 1.0 is ever planned, promised, or tagged.
 
 ## ADR-003 — Autonomous execution under human gates (D11)
 
 **Status**: accepted (blueprint v1.5); amended by D12(a) for local git flow.
 
-**Context**: the roadmap decomposes into 67 work packages (docs/ROADMAP.md),
-each independently implementable and gateable.
+**Context**: the roadmap decomposes into 67 work packages (docs/ROADMAP.md), each independently implementable and gateable.
 
-**Decision**: an agent executes WPs in dependency order without per-step
-approval, subject to the contract in AGENTS.md. Each WP is one commit that
-must leave `main` green. Three classes require explicit human action and are
-marked [HUMAN]: (a) compute-heavy tier runs (>4 GPU-hours), (b) release tags,
-(c) legal/nexus review (O3) and dataset-licensed weight publication (O4).
+**Decision**: an agent executes WPs in dependency order without per-step approval, subject to the contract in AGENTS.md. Each WP is one commit that must leave `main` green. Three classes require explicit human action and are marked \[HUMAN\]: (a) compute-heavy tier runs (>4 GPU-hours), (b) release tags, (c) legal/nexus review (O3) and dataset-licensed weight publication (O4).
 
-**Consequences**: agents never widen the source allowlist, never create
-model-topology configs, and stop rather than guess (escalation protocol in
-AGENTS.md and docs/ESCALATION.md). The assumption register plus the
-escalation log is itself research output a from-code port could not produce.
+**Consequences**: agents never widen the source allowlist, never create model-topology configs, and stop rather than guess (escalation protocol in AGENTS.md and docs/ESCALATION.md). The assumption register plus the escalation log is itself research output a from-code port could not produce.
 
 ## ADR-004 — Reference implementations readable, never copyable (D13)
 
-**Context.** The blueprint's v1.4 tightening (D5) restricted implementation
-sources to the three papers, their cited primary literature, and neutral tooling
-documentation. Three Det-smoke attempts then stalled at 4-6 val mAP50-95 against a
->25 criterion. Two root causes were found by measurement alone (WP-078 pixel-frame
-L1, WP-079 augmentation-RNG collapse), but the papers do not fix every
-normalization and assignment convention precisely enough to rule out a third.
+**Context.** The blueprint's v1.4 tightening (D5) restricted implementation sources to the three papers, their cited primary literature, and neutral tooling documentation. Three Det-smoke attempts then stalled at 4-6 val mAP50-95 against a
 
-**Decision.** Ultralytics-independent detection implementations under a
-permissive license — MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, and
-nothing else — are admissible as **reading** references for diagnosis. Each must
-be LICENSE- and provenance-verified before it is opened and registered in
-PROVENANCE.md. Copyleft (AGPL, GPL, LGPL), source-available, research-only,
-non-commercial, commercially licensed and unlicensed code stay inadmissible at
-any cost: the licence gate is decided before the content is known, so no
-diagnostic value can ever justify opening one. A repository whose license cannot
-be established is inadmissible by default. Copying code from any external detection repository remains
-prohibited (sec. 7), and the Ultralytics denylist stays absolute in every form:
-repository surfaces, package contents, docs site, and released weights.
+> 25 criterion. Two root causes were found by measurement alone (WP-078 pixel-frame L1, WP-079 augmentation-RNG collapse), but the papers do not fix every normalization and assignment convention precisely enough to rule out a third.
 
-**Consequences.** The clean-room position now rests on two claims instead of one:
-nothing from Ultralytics was consulted (unchanged, auditable via the fetch log),
-and nothing from any external repository was copied (enforced by the standing
-prohibition and the provenance trail). Reading a permissively licensed
-implementation to learn a convention is the ordinary practice the two-team
-clean-room pattern already contemplates for the specification side; what it must
-never become is transcription.
+**Decision.** Ultralytics-independent detection implementations under a permissive license — MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, and nothing else — are admissible as **reading** references for diagnosis. Each must be LICENSE- and provenance-verified before it is opened and registered in PROVENANCE.md. Copyleft (AGPL, GPL, LGPL), source-available, research-only, non-commercial, commercially licensed and unlicensed code stay inadmissible at any cost: the licence gate is decided before the content is known, so no diagnostic value can ever justify opening one. A repository whose license cannot be established is inadmissible by default. Copying code from any external detection repository remains prohibited (sec. 7), and the Ultralytics denylist stays absolute in every form: repository surfaces, package contents, docs site, and released weights.
+
+**Consequences.** The clean-room position now rests on two claims instead of one: nothing from Ultralytics was consulted (unchanged, auditable via the fetch log), and nothing from any external repository was copied (enforced by the standing prohibition and the provenance trail). Reading a permissively licensed implementation to learn a convention is the ordinary practice the two-team clean-room pattern already contemplates for the specification side; what it must never become is transcription.
 
 ## Open items
 
 | ID | Question | Deadline | Default |
-|---|---|---|---|
+| -- | -- | -- | -- |
 | O1 | GPU budget → tier commitment per task | before Phase 6 | All three A+B tiers, B on rented spot instances, sequenced Det → Seg → OBB; each 0.MINOR ships at A-tier if B still queued |
 | O2 | Project name | resolved 2026-08-02 (D12f) | `lucid-yolo`; YOLO26 implementation exposed under feature name `e2e` |
 | O3 | Employer nexus + counsel review of README/NOTICE naming | before the repository or any tag is public (before v0.1.0) | blocked-on-human |

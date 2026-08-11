@@ -81,7 +81,7 @@
 # poetry.toml
 # pyenv
 # pytype static type analyzer
-# uv.lock
+uv.lock
 *$py.class
 *.aof
 *.cover

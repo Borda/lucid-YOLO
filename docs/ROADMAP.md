@@ -1,23 +1,13 @@
 # Work-Package Roadmap
 
-The agent's work queue: 91 numbered work packages, one commit each, executed in
-dependency order per the AGENTS.md loop, plus lettered rows recording follow-up
-work that landed after its package had closed. Transcribed from the governing
-blueprint (sec. 15) with a live status column.
+The agent's work queue: 91 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording follow-up work that landed after its package had closed. Transcribed from the governing blueprint (sec. 15) with a live status column.
 
-Legend: **Dep** = prerequisite WPs · **[DATA]** needs a real dataset (synthetic
-stand-in per A26 for offline development only) · **[GPU]** needs an accelerator
-(MPS first, D12c) · **[HUMAN]** requires human action — never started
-autonomously. DoD = the test id(s) that must pass; every WP additionally
-requires `make gate` green. Status icons: ⬜ todo · 🔄 in-progress · ✅ done ·
-⛔ blocked (see docs/ESCALATION.md) · ⊘ superseded, its scope delivered by
-another WP that names it. The status column is flipped to ✅ in the same commit
-that completes its WP.
+Legend: **Dep** = prerequisite WPs · **[DATA]** needs a real dataset (synthetic stand-in per A26 for offline development only) · **[GPU]** needs an accelerator (MPS first, D12c) · **[HUMAN]** requires human action — never started autonomously. DoD = the test id(s) that must pass; every WP additionally requires `make gate` green. Status icons: ⬜ todo · 🔄 in-progress · ✅ done · ⛔ blocked (see docs/ESCALATION.md) · ⊘ superseded, its scope delivered by another WP that names it. The status column is flipped to ✅ in the same commit that completes its WP.
 
 ## Phase 0 — Foundation (WP-001…007)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
-|---|---|---|---|---|---|
+| -- | -- | -- | -- | -- | -- |
 | 001 | `chore(repo): scaffold src layout, pyproject, Makefile` | Package skeleton, pinned deps, Makefile targets, pre-commit config | `make lint` green on empty typed package | — | ✅ |
 | 002 | `docs(legal): add LICENSE, NOTICE, README non-affiliation` | Apache-2.0, NOTICE with Redmon attribution (R20), README header verbatim | `tests/meta/test_license_headers.py` | 001 | ✅ |
 | 003 | `docs(policy): seed PROVENANCE, ASSUMPTIONS, DECISIONS, AGENTS, ROADMAP` | Source allowlist, register A1–A26, D1–D12 + ADR-001/002/003, AGENTS.md, this file | `tests/meta/test_docs_present.py` | 001 | ✅ |
@@ -29,7 +19,7 @@ that completes its WP.
 ## Phase 1 — Data pipeline (WP-008…015)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
-|---|---|---|---|---|---|
+| -- | -- | -- | -- | -- | -- |
 | 008 | `feat(data): target containers and type-generic transform API` | `Targets` dataclass (boxes, labels, masks, rboxes); transform protocol over every target type | `tests/data/test_targets.py` | 007 | ✅ |
 | 009 | `feat(data): letterbox resize with exact inverse` | Aspect-preserving pad/resize + inverse map (A10) | `test_letterbox.py::test_roundtrip_subpixel` | 008 | ✅ |
 | 010 | `feat(data): random affine for boxes and masks` | scale/translate/shear/degrees per Table S3; joint box+polygon transform, clipping | `test_affine.py::test_box_mask_consistency` | 009 | ✅ |
@@ -42,7 +32,7 @@ that completes its WP.
 ## Phase 2 — Architecture (WP-016…023)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
-|---|---|---|---|---|---|
+| -- | -- | -- | -- | -- | -- |
 | 016 | `feat(models): Conv, DWConv, Bottleneck primitives` | Conv-BN-SiLU, depthwise variant, residual bottleneck | `test_blocks.py::test_primitives` | 003 | ✅ |
 | 017 | `feat(models): C3k2 block` | CSP split, n inner blocks, e ratio, c3k switch (A3) | `test_blocks.py::test_c3k2_shapes` | 016 | ✅ |
 | 018 | `feat(models): PSABlock and C2PSA` | Attention + FFN block; split/concat wrapper (A3) | `test_blocks.py::test_c2psa` | 016 | ✅ |
@@ -55,10 +45,10 @@ that completes its WP.
 ## Phase 3 — Assignment and losses (WP-024…030)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
-|---|---|---|---|---|---|
+| -- | -- | -- | -- | -- | -- |
 | 024 | `feat(losses): CIoU` | CIoU per R10 (A1), batched, autograd-safe | `test_ciou.py::test_against_closed_form` | 003 | ✅ |
-| 025 | `feat(assign): anchor grid and Task-Aligned Assigner` | Centers at (i+0.5)*stride (A11); t = s^1 * u^6 (A2); topk selection | `test_tal.py::test_alignment_and_topk` | 024 | ✅ |
-| 026 | `feat(assign): STAL surrogate candidate filtering` | Eq. 4–6; per-dimension clamp d<8 -> 16; original box preserved for scoring/regression | `test_stal.py::test_tiny_box_gains_candidates`, `::test_per_dim_clamp`, `::test_targets_unchanged` | 025 | ✅ |
+| 025 | `feat(assign): anchor grid and Task-Aligned Assigner` | Centers at (i+0.5)\*stride (A11); t = s^1 * u^6 (A2); topk selection | `test_tal.py::test_alignment_and_topk` | 024 | ✅ |
+| 026 | `feat(assign): STAL surrogate candidate filtering` | Eq. 4–6; per-dimension clamp d\<8 -> 16; original box preserved for scoring/regression | `test_stal.py::test_tiny_box_gains_candidates`, `::test_per_dim_clamp`, `::test_targets_unchanged` | 025 | ✅ |
 | 027 | `feat(losses): detection branch loss` | CIoU + L1 (dfl-gain field, A13) + BCE, TAL-weighted | `test_detection_loss.py::test_components` | 026 | ✅ |
 | 028 | `feat(losses): dual-branch composition` | o2m topk=10 / o2o topk=7->1 wiring; static alpha combination (schedule lands WP-035) | `test_dual_loss.py::test_one_positive_per_gt` | 027 | ✅ |
 | 029 | `test(assign): synthetic assignment goldens` | 6x6 px GT: STAL >=1 candidate, vanilla TAL exactly 0 at stride 8 | `goldens/assignment_cases.json` frozen | 028 | ✅ |
@@ -67,7 +57,7 @@ that completes its WP.
 ## Phase 4 — MuSGD (WP-031…033)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
-|---|---|---|---|---|---|
+| -- | -- | -- | -- | -- | -- |
 | 031 | `feat(optim): Newton-Schulz orthogonalization` | Pure function from R7/R8, 5 iterations (A5), fp32 under AMP | `test_newton_schulz.py::test_orthogonality` | 003 | ✅ |
 | 032 | `feat(optim): MuSGD with parameter-type split` | >=2D: w_muon*Muon + w_sgd*SGD (A6, A7); 1D: pure SGD, no weight decay (A12) | `test_musgd.py::test_param_split`, `::test_step_shapes` | 031 | ✅ |
 | 033 | `test(optim): toy convergence golden vs SGD` | Fixed synthetic regression + micro-CNN; MuSGD reaches threshold in fewer steps | `goldens/optim_toy.json` frozen | 032 | ✅ |
@@ -75,7 +65,7 @@ that completes its WP.
 ## Phase 5 — Lightning training loop (WP-034…040)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
-|---|---|---|---|---|---|
+| -- | -- | -- | -- | -- | -- |
 | 034 | `feat(ptl): LightningModule with task-conditional losses` | Automatic optimization; det losses active, seg/obb hooks inert | `test_module.py::test_training_step` | 030,032 | ✅ |
 | 035 | `feat(ptl): ProgressiveLossSchedule hook` | Eq. 3 in `on_train_epoch_start`, (0.8,0.2)->(0.1,0.9) | `test_proglos.py::test_alpha_at_t0_mid_end` | 034 | ✅ |
 | 036 | `feat(ptl): CloseMosaic callback` | Disables mosaic for final `close_mosaic` epochs | `test_close_mosaic.py::test_flip_epoch` | 034 | ✅ |
@@ -87,7 +77,7 @@ that completes its WP.
 ## Phase 6 — Evaluation, release 0.1.0 (WP-041…046)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
-|---|---|---|---|---|---|
+| -- | -- | -- | -- | -- | -- |
 | 041 | `feat(decode): score-based top-k E2E decoding` | No IoU, no NMS, cap 300 (R3 sec. 4, A9) | `test_topk_e2e.py::test_no_nms_path` | 022 | ✅ |
 | 042 | `feat(decode): NMS path for the dense branch` | Conf threshold + class-wise NMS (torchvision) | `test_nms_path.py` | 041 | ✅ |
 | 043 | `feat(eval): pycocotools bbox evaluator, both paths` | One command evaluates E2E and non-E2E from one checkpoint | `test_coco_eval.py::test_dual_path_report` | 042 | ✅ |
@@ -96,7 +86,7 @@ that completes its WP.
 | 069 | `refactor(eval): torchmetrics MAP with faster-coco-eval backend` | Replace pycocotools evaluator internals with `torchmetrics.detection.MeanAveragePrecision(backend="faster_coco_eval")`; `DualPathEvaluator` API preserved; pycocotools dep dropped (added 2026-08-02, user request) | WP-044 oracle ladder green on new backend | 043,044 | ✅ |
 | 070 | `perf(data): fused affine+letterbox single-warp` | Compose the letterbox affine into the random affine so the train geometric base resamples once (`FusedAffineLetterbox`); boxes/polygons byte-identical, image pixels non-antialiased (A32); 4.4x geometric-path speedup (added 2026-08-02, user request) | `tests/data/test_fused_warp.py`; data goldens recomputed | 011,013,014 | ✅ |
 | 071 | `perf(data): packed + uint8 batch transport` | Ragged `list[Targets]` flattened to 8 dense tensors (`PackedTargets`) and images quantized uint8 for the DataLoader IPC hop (A33); `on_after_batch_transfer` restores float images at consumer precision + ragged targets on device; segments/batch ~600 -> 9, bytes/batch 4x down — clears containerized shm ceilings (added 2026-08-02, user request) | `tests/data/test_coco.py` pack/quantize round-trips | 014 | ✅ |
-| 072 | `feat(optim): A8 LR schedule — warmup + linear decay` | Per-step LambdaLR: linear warmup over `warmup_epochs` then linear decay lr0 -> lr0*lrf (A8 revised, warmup folds in the A31 deferral); overfit-100 recipe pins the schedule off so its golden stays frozen (added 2026-08-03 after Det-smoke attempt 1 plateaued at 3.96 mAP on the constant-LR deferral) | `tests/optim/test_schedule.py`; overfit golden unchanged | 034,038 | ✅ |
+| 072 | `feat(optim): A8 LR schedule — warmup + linear decay` | Per-step LambdaLR: linear warmup over `warmup_epochs` then linear decay lr0 -> lr0\*lrf (A8 revised, warmup folds in the A31 deferral); overfit-100 recipe pins the schedule off so its golden stays frozen (added 2026-08-03 after Det-smoke attempt 1 plateaued at 3.96 mAP on the constant-LR deferral) | `tests/optim/test_schedule.py`; overfit golden unchanged | 034,038 | ✅ |
 | 073 | `perf(data): compact annotation store + val-loader worker cap` | `CocoDetectionDataset` precomputes per-image `Targets` at construction and drops the raw JSON annotation dicts — millions of small Python objects whose refcount traffic materializes copy-on-write pages in every persistent DataLoader worker until the host OOMs (observed: Colab 176 GB box killed at validation boundaries, e1 at 48 workers / e24 at 32). Val loader runs on `val_num_workers` (default `min(num_workers, 4)`) so the persistent val pool no longer doubles the worker population (added 2026-08-04, Det-smoke attempt-2 crash diagnosis) | `tests/data/test_coco.py` val-cap tests; dataset output unchanged (data goldens untouched) | 014 | ✅ |
 | 076 | `perf(data): epoch-recycled loader workers` | `persistent_workers` now defaults **off** (opt-in constructor/CLI knob): respawning the pool costs seconds per 9-min epoch while a persistent pool accumulates per-worker memory — allocator high-water growth, arena fragmentation, residual copy-on-write pages — until long containerized runs OOM (observed: Colab kills at e24/e38 even after WP-073's compact store; recycling hard-resets all per-worker creep every epoch) (added 2026-08-04, Det-smoke attempt-2 crash saga) | `tests/data/test_coco.py` persistent-workers default/opt-in tests | 014,073 | ✅ |
 | 077 | `feat(ptl): epoch val mAP in the progress bar` | `validation_step` decodes the one-to-one branch (E2E `TopKDecoder`) from the same forward as the loss and accumulates `torchmetrics` `MeanAveragePrecision` (`faster_coco_eval` backend); `on_validation_epoch_end` logs `val/mAP` to the progress bar. Letterbox-coordinate proxy for run monitoring (IoU invariant to per-image uniform scaling); acceptance figure stays `scripts/eval_det.py`. Metric states non-persistent — `state_dict` and older checkpoints unaffected (added 2026-08-04, user request) | `test_module.py` fast-dev-run logs `val/mAP`; state-dict-unchanged test | 041,043 | ✅ |
@@ -115,7 +105,7 @@ that completes its WP.
 ## Phase 7 — Instance segmentation, release 0.2.0 (WP-047…054)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
-|---|---|---|---|---|---|
+| -- | -- | -- | -- | -- | -- |
 | 047 | `feat(models): mask coefficient branch` | K=32 tanh coefficients per location (A14, A16), opt-in behind `num_coeffs`: `None` builds no stem, so the accepted detector's module tree, 205600 parameters and forward output are bit-identical. Stem mirrors the class stem without the sigmoid prior-probability bias, registered as A34. Landed ahead of its listed dep 046, which is a release-ordering gate rather than a technical prerequisite (2026-08-06) | `test_segment_head.py::test_coeff_shapes`; off-by-default state-dict/parameter identity; `params_flops_det.json` unchanged | 046 | ✅ |
 | 048 | `feat(models): multi-scale proto pathway` | Eq. 8: F_proto = X1 + sum U(phi_l(X_l)) as a standalone `ProtoFusion`, wired into nothing yet so the accepted detector cannot move. P3 is added unprojected (no phi_1); P4/P5 take bare 1x1 projections into P3's width and interpolate to P3's exact size rather than a fixed scale factor, so odd and non-square maps stay aligned. Projection form and upsample mode registered as A35 (2026-08-06) | `test_proto.py::test_fusion_eq8` (closed-form, mutation-checked); identity when projections vanish; odd/non-square target size | 047 | ✅ |
 | 049 | `feat(models): prototype generation stack` | Eq. 9: `ProtoNet` maps the fused feature to K raw prototype maps at twice P3, i.e. 160x160 at 640 (A15). Three 3x3 `ConvBNAct` units, a 2x nearest upsample, a fourth 3x3 unit at the proto grid, then 1x1 to K — registered as A18, which replaces its former "protonet-style conv stack" placeholder. Output is deliberately unactivated: coefficients already carry tanh (A16), so squashing prototypes too would compress the linear mask combination twice. `scale_factor=2` is correct here where `ProtoFusion` interpolates to a target size, because A15 defines the grid as exactly twice P3 rather than as matching another tensor. Still wired into nothing (2026-08-06) | `test_proto.py::test_proto_resolution` (odd non-square case included); unactivated output; upsample-before-final-conv proven both structurally and by 2x2-block refinement | 048 | ✅ |
@@ -136,12 +126,12 @@ that completes its WP.
 ## Phase 8 — Oriented detection, release 0.3.0 (WP-055…064)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
-|---|---|---|---|---|---|
-| 055 | `feat(data): rotated geometry primitives` | `rotated_geom.py`: long-edge canonicalization (w>=h, theta in [-45,135) deg), point-in-rotated-rect, and quad<->box conversion both ways (A23). The paper pins the range and w>=h and nothing else, so three conventions are chosen here and inherited downstream: theta turns from +x towards +y (clockwise as displayed, one handedness with the pixel axes); containment is edge-inclusive, which WP-061's candidate selection inherits; an exact square folds towards zero. The square tie-break keys on exact `w == h`, so a quad reconstructed from DOTA's eight coordinates can return either pi/2-separated representative of the same rectangle — WP-060's angle loss, aimed precisely at near-square objects, must not assume which. Canonicalization is exactly idempotent, not merely to tolerance, and the angle range is a guarantee rather than a near-certainty: shifting by multiples of pi cannot rescue an angle within an ulp of either bound (the remainder rounds to pi and the shift returns its own input), which a similarity round trip of a box at exactly -45 deg reaches in practice, so a final clamp closes it at a cost of one ulp (2026-08-11) | `test_rotated_geom.py::test_theta_pi_equivalence`, `::test_canonicalization`; ring-order invariance over all eight orderings of a quad; round-trip; rotated box excludes a point its envelope includes; both range bounds walked two ulps either way | 054 | ✅ |
+| -- | -- | -- | -- | -- | -- |
+| 055 | `feat(data): rotated geometry primitives` | `rotated_geom.py`: long-edge canonicalization (w>=h, theta in \[-45,135) deg), point-in-rotated-rect, and quad\<->box conversion both ways (A23). The paper pins the range and w>=h and nothing else, so three conventions are chosen here and inherited downstream: theta turns from +x towards +y (clockwise as displayed, one handedness with the pixel axes); containment is edge-inclusive, which WP-061's candidate selection inherits; an exact square folds towards zero. The square tie-break keys on exact `w == h`, so a quad reconstructed from DOTA's eight coordinates can return either pi/2-separated representative of the same rectangle — WP-060's angle loss, aimed precisely at near-square objects, must not assume which. Canonicalization is exactly idempotent, not merely to tolerance, and the angle range is a guarantee rather than a near-certainty: shifting by multiples of pi cannot rescue an angle within an ulp of either bound (the remainder rounds to pi and the shift returns its own input), which a similarity round trip of a box at exactly -45 deg reaches in practice, so a final clamp closes it at a cost of one ulp (2026-08-11) | `test_rotated_geom.py::test_theta_pi_equivalence`, `::test_canonicalization`; ring-order invariance over all eight orderings of a quad; round-trip; rotated box excludes a point its envelope includes; both range bounds walked two ulps either way | 054 | ✅ |
 | 056 | `feat(data): DOTA parsing and long-edge conversion` [DATA] | `dota.py`: the 15 categories in R18's published order (the index is the class id, names normalized on read since label files hyphenate them), header lines skipped, quad -> canonical long-edge box through WP-055. Establishes the **instance-axis invariant** the rest of the oriented path relies on: `rboxes[i]` is the same instance as `boxes[i]`/`labels[i]`, so one mask filters every modality; `boxes` is the envelope of the annotated quad, not of the fitted rectangle, and is not clipped (a label file carries no image size). `polygons` stays empty. A malformed line or unknown category raises with file and line number rather than being dropped. `check_data.py` gains a `--dataset dota` layout and count path. New A39 defers the `difficult` flag: `keep_difficult` is a required keyword, so no call site inherits a silent default (2026-08-11) | `test_dota_parse.py` (31 tests, all against synthetic fixtures); `check-data` counts verified against a fixture root only -- **the real 2,806 / 188,282 / 15 clause is unverified, DOTA is not on this machine** | 055 | ✅ |
 | 057 | `feat(data): 1024 px overlapping crop tiling` [DATA] | `tiling.py`: integer window placement (a pure function of size, patch and overlap, with the trailing window flush against the far edge so coverage holds for any overlap and any image, including one shorter than the patch), plus R18's partial-object rule — clip the rotated box to the window by Sutherland-Hodgman, `U = clipped area / original area`, drop `U == 0`, **flag** `U < 0.7` difficult rather than dropping it, re-fit through WP-055. Tiling is therefore what creates difficult instances, which is what makes A39 load-bearing. `U` is surfaced as `visible_fraction` since the re-fitted box's area does not recover it. A21 revised: overlap is now a parameter defaulting to 200, and the row records that 200 is attested by neither cited source — R18 publishes stride 512 — making it a sensitivity item for the OBB tier. No disk writer: emitting the derived set is the caller's directory choice (2026-08-11) | `test_tiling.py::test_coverage_no_gaps` (8 sizes incl. 4000x3000 at the A21 defaults); shapely clipped-area oracle; straddle fractions summing to 1; threshold pinned either side of 0.7. **Real DOTA never tiled -- not on this machine** | 056 | ✅ |
-| 058 | `feat(data): rotated-aware augmentation` | `rotated_aug.py` holds the shared rotated arithmetic and `affine.py`/`mosaic.py`/`mixup.py` lose the `NotImplementedError` each raised on a non-empty `rboxes`. A general affine sends a rectangle to a parallelogram, so a rotated box goes through as four corners and is re-fitted — exact under a similarity, a fit under shear with per-corner residual `2|q|sin(s/2)`, asserted against that derived identity rather than a chosen tolerance. Fixes a live flip defect: mirroring negated `theta` without re-wrapping, so any box above 45 deg left the long-edge range; nothing had hit it because no rotated box could reach a flip through a real pipeline. New A40 records three choices — the fit, that augmentation **drops** clipped instances where WP-057 flags them (training time carries no difficult field, and the drop uses the axis-aligned path's own `min_box_size`/`min_visibility` rule so one policy governs both modalities), and that `boxes` becomes the envelope of the rotated geometry once `rboxes` exist, since after a rotation the envelope of a warped envelope describes nothing real. CopyPaste keeps its guard on purpose: its paste unit is a rasterized polygon and the oriented path carries none (2026-08-11) | `test_rotated_aug.py::test_roundtrip` plus 59 more; canonical output over the whole angle sweep through every transform; mirrored corners compared as geometry, not as angles; similarity exact vs the derived shear bound; every 0.2 golden and both checksums unmoved | 057 | ✅ |
-| 059 | `feat(losses): ProbIoU rotated loss` | Gaussian-box ProbIoU (R17, A19): both losses R17 proposes, `L1 = H_D = 1 - ProbIoU` bounded and `L2 = B_D` unbounded, exposed side by side because R17 suggests starting on the second and switching to the first and WP-088 owns that choice. The DoD moved (2026-08-11): ProbIoU is a Hellinger-distance similarity between two Gaussians, and R17 asserts no equality with polygon overlap, so a 1e-4 shapely agreement test could not pass and a correlation threshold would be invented — the shapely oracle belongs to WP-063's exact rotated IoU (A24) and ProbIoU gets its own exact oracles. R17's formulas are *evaluated* through cancellation-free identities (2x2 adjugate linearity for `B1`'s numerator, the `det(S1+S2)` expansion, and `det S = w^2h^2/144` for `B2`), which is what makes float32 sufficient — the literal form loses 377% of `B_D` at a 1e-4 perturbation and returns `NaN` on parts of a 1000:1 aspect sweep, and float64 internals are not available on MPS (D12c). New A41 records the 1e-4 side floor for degenerate boxes | `test_probiou.py::test_matches_numerical_integration_of_the_definition` (`B_C` against a whitened-frame quadrature of `integral sqrt(pq)`, 2e-14 relative), `::test_matches_literal_transcription_of_r17` (float64, 1e-12), `::test_a_box_against_itself_scores_exactly_one` (bit-exact over the angle range and aspects to 200:1), `::test_the_two_losses_are_one_quantity`, `::test_bhattacharyya_gradient_vanishes_only_at_coincidence`, `::test_float32_accuracy_is_aspect_ratio_independent`, `::test_degenerate_boxes_stay_finite_forwards_and_backwards`; 75 tests | 055 |✅ |
+| 058 | `feat(data): rotated-aware augmentation` | `rotated_aug.py` holds the shared rotated arithmetic and `affine.py`/`mosaic.py`/`mixup.py` lose the `NotImplementedError` each raised on a non-empty `rboxes`. A general affine sends a rectangle to a parallelogram, so a rotated box goes through as four corners and is re-fitted — exact under a similarity, a fit under shear with per-corner residual `2\|q\|sin(s/2)`, asserted against that derived identity rather than a chosen tolerance. Fixes a live flip defect: mirroring negated `theta` without re-wrapping, so any box above 45 deg left the long-edge range; nothing had hit it because no rotated box could reach a flip through a real pipeline. New A40 records three choices — the fit, that augmentation **drops** clipped instances where WP-057 flags them (training time carries no difficult field, and the drop uses the axis-aligned path's own `min_box_size`/`min_visibility` rule so one policy governs both modalities), and that `boxes` becomes the envelope of the rotated geometry once `rboxes` exist, since after a rotation the envelope of a warped envelope describes nothing real. CopyPaste keeps its guard on purpose: its paste unit is a rasterized polygon and the oriented path carries none (2026-08-11) | `test_rotated_aug.py::test_roundtrip` plus 59 more; canonical output over the whole angle sweep through every transform; mirrored corners compared as geometry, not as angles; similarity exact vs the derived shear bound; every 0.2 golden and both checksums unmoved | 057 | ✅ |
+| 059 | `feat(losses): ProbIoU rotated loss` | Gaussian-box ProbIoU (R17, A19): both losses R17 proposes, `L1 = H_D = 1 - ProbIoU` bounded and `L2 = B_D` unbounded, exposed side by side because R17 suggests starting on the second and switching to the first and WP-088 owns that choice. The DoD moved (2026-08-11): ProbIoU is a Hellinger-distance similarity between two Gaussians, and R17 asserts no equality with polygon overlap, so a 1e-4 shapely agreement test could not pass and a correlation threshold would be invented — the shapely oracle belongs to WP-063's exact rotated IoU (A24) and ProbIoU gets its own exact oracles. R17's formulas are *evaluated* through cancellation-free identities (2x2 adjugate linearity for `B1`'s numerator, the `det(S1+S2)` expansion, and `det S = w^2h^2/144` for `B2`), which is what makes float32 sufficient — the literal form loses 377% of `B_D` at a 1e-4 perturbation and returns `NaN` on parts of a 1000:1 aspect sweep, and float64 internals are not available on MPS (D12c). New A41 records the 1e-4 side floor for degenerate boxes | `test_probiou.py::test_matches_numerical_integration_of_the_definition` (`B_C` against a whitened-frame quadrature of `integral sqrt(pq)`, 2e-14 relative), `::test_matches_literal_transcription_of_r17` (float64, 1e-12), `::test_a_box_against_itself_scores_exactly_one` (bit-exact over the angle range and aspects to 200:1), `::test_the_two_losses_are_one_quantity`, `::test_bhattacharyya_gradient_vanishes_only_at_coincidence`, `::test_float32_accuracy_is_aspect_ratio_independent`, `::test_degenerate_boxes_stay_finite_forwards_and_backwards`; 75 tests | 055 | ✅ |
 | 060 | `feat(losses): square-object angle loss` | Eq. 14–15, lambda=3 (A22 weight=1.0); mod-pi wrap; omega aspect factor | `test_angle_loss.py::test_wrap_range`, `::test_omega_profile`, `::test_sin2_extrema`, `::test_boundary_continuity` | 059 | ⬜ |
 | 061 | `feat(assign): rotated containment for TAL and STAL` | Point-in-rotated-rect candidates; STAL clamp on rotated (w,h) (A25) | `test_rotated_assign.py::test_tiny_rotated_gt` | 058,060 | ⬜ |
 | 062 | `feat(models): OBB head, direct angle, NMS-free decode` | Angle branch (A20); theta = z (Eq. 13); one-to-one decode + canonicalization; vs Table S11 at 1024 | `test_obb_head.py`, `test_param_flops.py::test_obb_vs_tableS11` — **golden frozen** | 061 | ⬜ |
@@ -154,7 +144,7 @@ that completes its WP.
 Deliberately after all three task phases rather than inside each. A predict path is where preprocessing and coordinate-frame mistakes surface, so building all three against one settled decode surface catches disagreements between them that a per-phase predict cannot see. It also keeps the release train clean: 0.1.0 already shipped, and retrofitting a detector-only predict into it now would mean carrying segmentation code in a detection release.
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
-|---|---|---|---|---|---|
+| -- | -- | -- | -- | -- | -- |
 | 089 | `feat(predict): detection inference on a single image` | Checkpoint plus image file to detections, as a library call and a `lucid-predict` CLI. Reuses `Letterbox` and `to_letterboxed_original` rather than re-deriving the inverse — a second copy of that geometry is the WP-053a defect class. Both decode paths selectable | `test_predict.py::test_known_object_lands_in_original_coordinates` | 046 | ⬜ |
 | 090 | `feat(predict): segmentation inference` | Extends predict with instance masks in original coordinates, reusing `decode_instance_masks` and `masks_to_original` | `test_predict_seg.py::test_mask_matches_box` | 089, 054 | ⬜ |
 | 091 | `feat(predict): oriented-detection inference` | Extends predict with rotated boxes, canonicalized post-decode (A23) | `test_predict_obb.py` | 089, 064 | ⬜ |
@@ -164,27 +154,17 @@ Deliberately after all three task phases rather than inside each. A predict path
 ## Phase 10 — Consolidation, release 0.4.0, then rolling (WP-065…067)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
-|---|---|---|---|---|---|
+| -- | -- | -- | -- | -- | -- |
 | 065 | `docs(report): consolidated multi-task reproduction note` | Merge det/seg/obb sections; assumption outcomes; deviations and hypotheses | `test_docs_present.py::test_report_sections` | 064 | ⬜ |
 | 066 | `feat(export): ONNX export smoke test for E2E paths` | Verifies the paper's export claim; no NMS ops in the graph | `test_onnx_export.py::test_e2e_graph_ops` | 065 | ⬜ |
 | 067 | `release: v0.4.0 consolidated note and examples` [HUMAN] | `supervision` example notebook (boxes/masks/rboxes); tag; roadmap reopened for the next 0.MINOR | `release.yml` green on `v0.4.0` | 066 | ⬜ |
 
-Beyond 0.4.0 the train continues on the same discipline — pose/RLE (R14),
-classification, export matrix, RF100-VL generalization (WP-074/075) — each a
-new phase of WPs and its own gated 0.MINOR. No 1.0, ever (ADR-002).
+Beyond 0.4.0 the train continues on the same discipline — pose/RLE (R14), classification, export matrix, RF100-VL generalization (WP-074/075) — each a new phase of WPs and its own gated 0.MINOR. No 1.0, ever (ADR-002).
 
 ## Critical path and parallelism
 
-Strictly sequential: 001 -> 007 -> 015 -> 023 -> 030 -> 033 -> 040 -> 046.
-WP-016…019 (blocks), WP-024 (CIoU), and WP-031 (Newton–Schulz) have no
-interdependencies and may be executed in any order once WP-003 lands. Phases 7
-and 8 are strictly gated on releases 0.1.0 and 0.2.0 respectively — task heads
-never land on an unproven detector.
+Strictly sequential: 001 -> 007 -> 015 -> 023 -> 030 -> 033 -> 040 -> 046. WP-016…019 (blocks), WP-024 (CIoU), and WP-031 (Newton–Schulz) have no interdependencies and may be executed in any order once WP-003 lands. Phases 7 and 8 are strictly gated on releases 0.1.0 and 0.2.0 respectively — task heads never land on an unproven detector.
 
 ## Failure budget
 
-If a WP's DoD cannot be met after two documented assumption iterations,
-escalate (AGENTS.md sec. 4). Fidelity-gate WPs (023, 052, 062) are the
-expected escalation sites: they are where the papers' block-level ambiguity
-meets a hard published number, and where an honest reproduction earns its
-credibility.
+If a WP's DoD cannot be met after two documented assumption iterations, escalate (AGENTS.md sec. 4). Fidelity-gate WPs (023, 052, 062) are the expected escalation sites: they are where the papers' block-level ambiguity meets a hard published number, and where an honest reproduction earns its credibility.

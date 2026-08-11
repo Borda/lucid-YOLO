@@ -1,8 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
+
 ## Work package
 
 - WP id:
-- Commit subject follows `<type>(<scope>): <detail>` (<= 72 chars):
+- Commit subject follows `<type>(<scope>): <detail>` (\<= 72 chars):
 
 ## Clean-room checklist
 
