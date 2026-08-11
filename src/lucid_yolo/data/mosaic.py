@@ -32,9 +32,20 @@ Targets:
     :meth:`~lucid_yolo.data.targets.Targets.concat`, which requires consistent
     polygon presence across all inputs.
 
-Rotated boxes:
-    Rotated-aware assembly is Phase 8 work (WP-058); a non-empty ``rboxes`` on any
-    input raises :class:`NotImplementedError` rather than mangling angles.
+Rotated boxes (WP-058):
+    Placement is a pure translation, which preserves the long-edge form exactly, so
+    a rotated box is shifted rather than re-fitted
+    (:func:`~lucid_yolo.data.rotated_aug.shift_rboxes`). What the canvas edge does to
+    it is the interesting part: the box is clipped by WP-057's clipper and re-fitted
+    at its own orientation, ``boxes`` becomes the envelope of the clipped region, and
+    the ``min_box_size`` / ``min_visibility`` rule above decides survival — the same
+    rule, over both modalities. This is where augmentation **diverges from WP-057**:
+    R18's rule *flags* a clipped part difficult and keeps it, but that is dataset
+    preparation, and :class:`~lucid_yolo.data.targets.Targets` carries no ``difficult``
+    field for a training-time transform to flag into, so an instance below the
+    threshold is dropped instead (A40). Filtering means the rotated path needs
+    WP-056's instance-axis invariant; an input breaking it raises
+    :class:`ValueError`.
 
 Testability:
     Centre sampling is driven by an optional :class:`torch.Generator`, so a seeded
@@ -48,6 +59,12 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
+from lucid_yolo.data.rotated_aug import (
+    check_rotated_pairing,
+    clip_rboxes_to_canvas,
+    rbox_envelopes,
+    shift_rboxes,
+)
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.data.transforms import boxes_from_polygons
 
@@ -75,9 +92,11 @@ class MosaicAssembly:
     signature deliberately differs from that protocol. The images may differ in
     size but must share a channel count, dtype and device.
 
-    Rotated boxes are **not** supported: rotated-aware assembly with long-edge
-    re-canonicalisation is Phase 8 (WP-058), so any input carrying a non-empty
-    ``rboxes`` raises :class:`NotImplementedError`.
+    Rotated boxes are shifted with their image, clipped to the canvas and filtered
+    by the same two thresholds (WP-058, module docstring), with ``boxes`` recomputed
+    as the envelope of the rotated geometry. Because that path filters, an input
+    whose ``rboxes`` do not share the instance axis with its ``boxes``, or that
+    carries polygons alongside them, raises :class:`ValueError`.
 
     Args:
         target_size: The base size ``S``; the assembled canvas is ``2S x 2S``.
@@ -131,18 +150,18 @@ class MosaicAssembly:
             items: Exactly four ``(image, targets)`` pairs. Each ``image`` is a CHW
                 float tensor (in the same value range as the grey fill, i.e.
                 ``[0, 1]``); the images may differ in spatial size but must share a
-                channel count, dtype and device. Every ``targets.rboxes`` must be
-                empty, and polygon presence must be consistent across all four (a
-                requirement of :meth:`~lucid_yolo.data.targets.Targets.concat`).
+                channel count, dtype and device. Non-empty ``rboxes`` must share the
+                instance axis with that input's ``boxes``, and polygon presence must
+                be consistent across all four (a requirement of
+                :meth:`~lucid_yolo.data.targets.Targets.concat`).
 
         Returns:
             The ``(C, 2S, 2S)`` stitched image and the shifted, clipped, filtered
             and merged targets.
 
         Raises:
-            ValueError: If ``items`` does not hold exactly four pairs.
-            NotImplementedError: If any input carries a non-empty ``rboxes``
-                (rotated-aware assembly is WP-058).
+            ValueError: If ``items`` does not hold exactly four pairs, or an input's
+                non-empty ``rboxes`` break WP-056's instance-axis invariant.
 
         Examples:
             ```pycon
@@ -174,15 +193,11 @@ class MosaicAssembly:
         return canvas, Targets.concat(placed)
 
     def _check_items(self, items: list[tuple[Tensor, Targets]]) -> None:
-        """Validate the input count and reject rotated boxes."""
+        """Validate the input count and every input's rotated instance-axis pairing."""
         if len(items) != _MOSAIC_IMAGE_COUNT:
             raise ValueError(f"MosaicAssembly requires exactly {_MOSAIC_IMAGE_COUNT} items; got {len(items)}")
         for _image, targets in items:
-            if targets.rboxes.shape[0] > 0:
-                raise NotImplementedError(
-                    "MosaicAssembly does not support rotated boxes; rotated-aware assembly "
-                    "with long-edge re-canonicalisation lands in Phase 8 (WP-058)."
-                )
+            check_rotated_pairing(targets)
 
     def _sample_center(self) -> tuple[int, int]:
         """Sample an integer centre ``(cx, cy)`` uniformly from ``[0.5S, 1.5S]`` per axis."""
@@ -228,10 +243,22 @@ class MosaicAssembly:
         ]
 
     def _place_targets(self, targets: Targets, off_x: int, off_y: int, canvas_size: int) -> Targets:
-        """Shift, clip and filter one image's targets; dispatch on polygon presence."""
+        """Shift, clip and filter one image's targets; dispatch on rotated/polygon presence."""
+        if targets.rboxes.shape[0] > 0:
+            return self._place_rotated(targets, off_x, off_y, canvas_size)
         if targets.polygons:
             return self._place_with_polygons(targets, off_x, off_y, canvas_size)
         return self._place_boxes_only(targets, off_x, off_y, canvas_size)
+
+    def _place_rotated(self, targets: Targets, off_x: int, off_y: int, canvas_size: int) -> Targets:
+        """Rotated path: shift exactly, clip to the canvas, filter both axes as one."""
+        shifted = shift_rboxes(targets.rboxes, float(off_x), float(off_y))
+        pre_boxes = rbox_envelopes(shifted)
+        rboxes, post_boxes = clip_rboxes_to_canvas(shifted, float(canvas_size), float(canvas_size))
+        keep = self._keep_mask(pre_boxes, post_boxes)
+        full = Targets(boxes=post_boxes, labels=targets.labels.clone(), rboxes=rboxes)
+        # WP-056's invariant, checked on the way in, is what makes one mask serve both axes.
+        return full.filter(keep, rkeep=keep)
 
     def _place_with_polygons(self, targets: Targets, off_x: int, off_y: int, canvas_size: int) -> Targets:
         """Polygon path: shift rings, clamp to canvas, recompute boxes, filter."""

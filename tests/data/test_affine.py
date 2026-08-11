@@ -167,15 +167,15 @@ class TestVisibilityFilter:
 
 
 class TestRotatedBoxesGuard:
-    """Rotated boxes are rejected until Phase 8 (WP-058)."""
+    """The rotated path filters, so it demands WP-056's instance-axis invariant."""
 
-    def test_rboxes_raise_not_implemented(self) -> None:
-        """A non-empty rboxes tensor raises NotImplementedError naming WP-058."""
+    def test_unpaired_rboxes_raise_value_error(self) -> None:
+        """Rotated boxes that do not share the instance axis with boxes are rejected."""
         rboxes = torch.tensor([[10.0, 20.0, 8.0, 4.0, 0.3]])
         targets = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64), rboxes=rboxes)
         affine = RandomAffine(degrees=10.0)
 
-        with pytest.raises(NotImplementedError, match="WP-058"):
+        with pytest.raises(ValueError, match="instance axis"):
             affine(_image(), targets)
 
 

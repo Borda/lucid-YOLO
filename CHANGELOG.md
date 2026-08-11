@@ -27,6 +27,16 @@ ever planned, promised, or tagged — per ADR-002 (docs/DECISIONS.md).
   difficult rather than dropped, and re-fitted to a long-edge box. Crop overlap
   is a parameter; the visible fraction is carried alongside each instance
   (WP-057).
+- Rotated-aware augmentation: random affine, mosaic and mixup now carry rotated
+  boxes instead of refusing them, warping each box through its four corners and
+  re-fitting a long-edge box — exact under a similarity, an explicit fit under
+  shear (WP-058).
+
+### Fixed
+
+- Horizontal flip left rotated boxes outside the long-edge angle range: it
+  negated the angle without re-wrapping, so any box past 45 degrees came out
+  non-canonical (WP-058).
 
 ## [0.2.0] - 2026-08-10
 

@@ -18,6 +18,14 @@ from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.mixup import CopyPaste, Mixup
 from lucid_yolo.data.mosaic import MosaicAssembly
 from lucid_yolo.data.rasterize import rasterize_polygon, rasterize_polygons
+from lucid_yolo.data.rotated_aug import (
+    check_rotated_pairing,
+    clip_rboxes_to_canvas,
+    mirror_rboxes,
+    rbox_envelopes,
+    shift_rboxes,
+    warp_rboxes,
+)
 from lucid_yolo.data.rotated_geom import (
     canonicalize,
     points_in_rboxes,
@@ -68,20 +76,26 @@ __all__ = [
     "boxes_from_polygons",
     "build_scale_policy",
     "canonicalize",
+    "check_rotated_pairing",
+    "clip_rboxes_to_canvas",
     "crop_image",
     "crop_targets",
     "dota_targets",
     "download_coco",
     "hsv_to_rgb",
     "load_dota_targets",
+    "mirror_rboxes",
     "parse_dota_label_file",
     "points_in_rboxes",
     "polygons_to_rboxes",
     "rasterize_polygon",
     "rasterize_polygons",
+    "rbox_envelopes",
     "rboxes_to_polygons",
     "rgb_to_hsv",
+    "shift_rboxes",
     "tile_image_targets",
     "tile_windows",
     "verify_coco_root",
+    "warp_rboxes",
 ]

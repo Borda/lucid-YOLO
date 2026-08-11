@@ -99,7 +99,7 @@ class TestMixupPassThrough:
 
 
 class TestMixupGuards:
-    """Wrong image sizes and rotated boxes are rejected."""
+    """Wrong image sizes and wrong item counts are rejected."""
 
     def test_mismatched_sizes_raise(self) -> None:
         """A triggered blend of differently sized images raises ValueError."""
@@ -109,15 +109,6 @@ class TestMixupGuards:
 
         with pytest.raises(ValueError, match="same-size"):
             mixup([a, b])
-
-    def test_rboxes_raise_not_implemented(self) -> None:
-        """A non-empty rboxes on either input raises NotImplementedError naming WP-058."""
-        rboxes = torch.tensor([[4.0, 4.0, 3.0, 2.0, 0.2]])
-        with_rbox = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64), rboxes=rboxes)
-        mixup = Mixup(p=1.0)
-
-        with pytest.raises(NotImplementedError, match="WP-058"):
-            mixup([(torch.ones(3, _SIDE, _SIDE), with_rbox), (torch.zeros(3, _SIDE, _SIDE), Targets.empty())])
 
     def test_wrong_item_count_raises(self) -> None:
         """A single pair (not two) raises ValueError naming the required count."""
@@ -209,12 +200,12 @@ class TestCopyPasteGuards:
     """Rotated boxes and mismatched sizes are rejected."""
 
     def test_rboxes_raise_not_implemented(self) -> None:
-        """A non-empty rboxes on either input raises NotImplementedError naming WP-058."""
+        """A non-empty rboxes on either input is rejected: the paste unit is a polygon mask."""
         rboxes = torch.tensor([[4.0, 4.0, 3.0, 2.0, 0.2]])
         with_rbox = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64), rboxes=rboxes)
         copy_paste = CopyPaste(p=1.0)
 
-        with pytest.raises(NotImplementedError, match="WP-058"):
+        with pytest.raises(NotImplementedError, match="polygon"):
             copy_paste([(torch.zeros(3, _SIDE, _SIDE), Targets.empty()), (torch.ones(3, _SIDE, _SIDE), with_rbox)])
 
     def test_mismatched_sizes_raise(self) -> None:

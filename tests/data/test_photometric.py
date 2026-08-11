@@ -165,7 +165,7 @@ class TestHorizontalFlip:
             assert torch.allclose(dst[:, 1], src[:, 1])
 
     def test_rbox_centre_mirror_and_theta_negation(self) -> None:
-        """Rotated boxes reflect cx -> W - cx and negate theta; w/h stay put."""
+        """Rotated boxes reflect cx -> W - cx and negate theta (both in range); w/h stay put."""
         flip = HorizontalFlip(p=1.0, generator=_generator())
         targets = _targets()
         width = 10
@@ -201,11 +201,12 @@ class TestHorizontalFlip:
         assert decisions_a == decisions_b
         assert all(isinstance(d, bool) for d in decisions_a)
 
-    def test_theta_negation_is_exact_for_carried_range(self) -> None:
-        """A carried long-edge angle mirrors to exactly its negation (no re-wrap yet)."""
+    def test_mirrored_angle_above_quarter_pi_is_re_canonicalized(self) -> None:
+        """An angle above pi/4 mirrors to pi - theta, inside the range the bare negation left (WP-058)."""
         flip = HorizontalFlip(p=1.0, generator=_generator())
         theta = 3.0 * math.pi / 8.0
         rboxes = torch.tensor([[20.0, 10.0, 15.0, 5.0, theta]])
         targets = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64), rboxes=rboxes)
         _, out = flip(torch.rand(3, 4, 40), targets)
-        assert out.rboxes[0, 4].item() == pytest.approx(-theta)
+        assert out.rboxes[0, 4].item() == pytest.approx(math.pi - theta)
+        assert -math.pi / 4.0 <= out.rboxes[0, 4].item() < 3.0 * math.pi / 4.0

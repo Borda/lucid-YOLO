@@ -172,14 +172,14 @@ class TestGuards:
         with pytest.raises(ValueError, match="exactly 4"):
             mosaic([(_image(), Targets.empty()) for _ in range(3)])
 
-    def test_rboxes_raise_not_implemented(self) -> None:
-        """A non-empty rboxes tensor on any input raises NotImplementedError naming WP-058."""
+    def test_unpaired_rboxes_raise_value_error(self) -> None:
+        """Rotated boxes that do not share an input's instance axis are rejected (WP-056)."""
         rboxes = torch.tensor([[10.0, 20.0, 8.0, 4.0, 0.3]])
         with_rbox = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64), rboxes=rboxes)
         items = [(_image(), Targets.empty()) for _ in range(3)] + [(_image(), with_rbox)]
         mosaic = MosaicAssembly(target_size=_TARGET)
 
-        with pytest.raises(NotImplementedError, match="WP-058"):
+        with pytest.raises(ValueError, match="instance axis"):
             mosaic(items)
 
 

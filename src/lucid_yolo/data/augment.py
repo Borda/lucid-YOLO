@@ -18,13 +18,13 @@ the YOLO-lineage recipe ([R1] Table S3: ``fliplr=0.5`` plus per-channel HSV gain
     A geometric mirror about the vertical axis. With probability ``p`` it reverses the
     image columns and mirrors every carried modality: axis-aligned boxes swap and
     reflect their x-extent (``x1' = W - x2``, ``x2' = W - x1``), polygon points reflect
-    (``x' = W - x``), and rotated boxes reflect their centre (``cx' = W - cx``) with the
-    angle negated (``theta' = -theta``). The mirror is *exact* for the carried
-    long-edge representation, so — unlike :class:`~lucid_yolo.data.affine.RandomAffine` —
-    there is no rotated-box guard here. Re-canonicalising the mirrored angle back into
-    the ``[-pi/4, 3*pi/4)`` long-edge range is a separate concern that lands with the
-    rest of rotated-box canonicalization in Phase 8 (WP-055/WP-058); the value carried
-    out of this transform is the raw negated angle.
+    (``x' = W - x``), and rotated boxes go through
+    :func:`~lucid_yolo.data.rotated_aug.mirror_rboxes` — centre reflected, angle negated,
+    result re-canonicalized. The mirror itself is *exact* for the carried long-edge
+    representation, so no instance is ever dropped here and no guard is needed. The
+    re-canonicalization is WP-058 closing a WP-013 defect: the bare negation this
+    transform used to carry out left every box with ``theta > pi/4`` outside the
+    ``[-pi/4, 3*pi/4)`` long-edge range.
 
 Both transforms draw every random quantity from an optional :class:`torch.Generator`,
 so a seeded generator gives byte-identical output (the determinism policy of blueprint
@@ -36,6 +36,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
+from lucid_yolo.data.rotated_aug import mirror_rboxes
 from lucid_yolo.data.targets import Targets
 
 __all__ = ["HSVJitter", "HorizontalFlip", "hsv_to_rgb", "rgb_to_hsv"]
@@ -272,14 +273,15 @@ class HorizontalFlip:
     With probability ``p`` (drawn per call) the image columns are reversed and every
     target modality is mirrored about the vertical axis at ``x = W / 2``: boxes swap and
     reflect their x-extent (``x1' = W - x2``, ``x2' = W - x1``), polygon points reflect
-    (``x' = W - x``), and rotated-box centres reflect (``cx' = W - cx``) with the angle
-    negated (``theta' = -theta``). With probability ``1 - p`` the image and targets pass
-    through unchanged.
+    (``x' = W - x``), and rotated boxes reflect their centre (``cx' = W - cx``) with the
+    angle negated and re-canonicalized (WP-058). With probability ``1 - p`` the image and
+    targets pass through unchanged.
 
-    The rotated-box mirror is exact for the carried long-edge representation, so there
-    is no rotated-box guard here (contrast :class:`~lucid_yolo.data.affine.RandomAffine`).
-    Re-canonicalising the negated angle into ``[-pi/4, 3*pi/4)`` is deferred to Phase 8
-    (WP-055/WP-058); the raw ``-theta`` is what this transform carries out.
+    The rotated-box mirror is exact — an isometry maps the rectangle to a rectangle, and
+    ``-theta`` names the mirrored long edge up to the half turn a rectangle is invariant
+    under — so nothing is dropped and, unlike
+    :class:`~lucid_yolo.data.affine.RandomAffine`, this transform imposes no instance-axis
+    requirement on the rotated modality.
 
     Args:
         p: Probability of flipping. Defaults to ``0.5``.
@@ -357,7 +359,5 @@ class HorizontalFlip:
             mirrored = ring.clone()
             mirrored[:, 0] = width - ring[:, 0]
             polygons.append(mirrored)
-        rboxes = targets.rboxes.clone()
-        rboxes[:, 0] = width - rboxes[:, 0]
-        rboxes[:, 4] = -rboxes[:, 4]
+        rboxes = mirror_rboxes(targets.rboxes, width)
         return Targets(boxes=boxes, labels=targets.labels.clone(), polygons=polygons, rboxes=rboxes)

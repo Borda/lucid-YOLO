@@ -33,9 +33,16 @@ copy-paste ``0.1``); larger scales grow stronger (mixup up to ``0.2``, copy-past
 up to ``0.6``). Those probabilities are supplied by the datamodule config; this
 module only implements the operations.
 
-Rotated boxes:
-    Rotated-aware assembly is Phase 8 work (WP-058); a non-empty ``rboxes`` on
-    either input raises :class:`NotImplementedError` rather than mangling angles.
+Rotated boxes (WP-058):
+    The two operations part company here. :class:`Mixup` moves no geometry at all —
+    it blends pixels and concatenates target sets — so rotated boxes ride through it
+    untouched and canonical, on their own instance axis, exactly as boxes and labels
+    do; nothing is clipped and nothing is dropped, so it needs no rotated machinery.
+    :class:`CopyPaste` still rejects them, and not as deferred work: its unit of
+    transfer is a rasterised **polygon mask**, and the oriented path carries no
+    polygons (WP-056), so there is no rotated instance it could paste and no ring it
+    could invent for one. Pasting into a rotated-carrying destination would silently
+    drop that destination's ``rboxes``, which is the failure the guard prevents.
 
 Determinism:
     Every random quantity — the trigger draw, the ``Beta`` blend factor and the
@@ -102,8 +109,9 @@ class Mixup:
     consistent polygon presence (a :meth:`~lucid_yolo.data.targets.Targets.concat`
     rule).
 
-    Rotated boxes are **not** supported: any input carrying a non-empty ``rboxes``
-    raises :class:`NotImplementedError` (rotated-aware assembly is Phase 8, WP-058).
+    Rotated boxes are carried through unchanged (WP-058): the blend moves no
+    geometry, so both inputs' ``rboxes`` are concatenated exactly as their boxes and
+    labels are, still canonical, with nothing clipped or dropped.
 
     Args:
         p: Probability of blending on a given call.
@@ -145,9 +153,9 @@ class Mixup:
 
         Args:
             items: Exactly two ``(image, targets)`` pairs. The two images must share
-                shape, dtype and device; every ``targets.rboxes`` must be empty, and
-                polygon presence must be consistent across both (a
-                :meth:`~lucid_yolo.data.targets.Targets.concat` requirement).
+                shape, dtype and device; polygon presence must be consistent across
+                both (a :meth:`~lucid_yolo.data.targets.Targets.concat` requirement).
+                Rotated boxes, if any, are concatenated untouched.
 
         Returns:
             Either the blended ``(image, targets)`` — the convex pixel blend and the
@@ -157,7 +165,6 @@ class Mixup:
         Raises:
             ValueError: If ``items`` does not hold exactly two pairs, or the two
                 images differ in shape.
-            NotImplementedError: If either input carries a non-empty ``rboxes``.
 
         Examples:
             ```pycon
@@ -212,8 +219,10 @@ class CopyPaste:
     This is an **assembly, not** a :class:`~lucid_yolo.data.transforms.GeometricTransform`:
     it consumes two pairs rather than one. Both images must share the same shape.
 
-    Rotated boxes are **not** supported: any input carrying a non-empty ``rboxes``
-    raises :class:`NotImplementedError` (rotated-aware assembly is Phase 8, WP-058).
+    Rotated boxes are **not** supported, for the reason the module docstring gives:
+    the paste unit is a polygon mask and the oriented path carries no polygons
+    (WP-056), so any input with a non-empty ``rboxes`` raises
+    :class:`NotImplementedError` rather than have its rotated modality dropped.
 
     Args:
         p: Per-candidate-instance paste probability.
@@ -285,6 +294,7 @@ class CopyPaste:
             ```
         """
         _check_pair(items)
+        _reject_rboxes(items)
         (image_a, targets_a), (image_b, targets_b) = items
         if image_a.shape != image_b.shape:
             raise ValueError(
@@ -323,19 +333,40 @@ class CopyPaste:
 
 
 def _check_pair(items: list[tuple[Tensor, Targets]]) -> None:
-    """Validate the two-item count and reject rotated boxes on either input.
+    """Validate that exactly two ``(image, targets)`` pairs were supplied.
 
     Args:
         items: The candidate list of ``(image, targets)`` pairs.
 
     Raises:
         ValueError: If ``items`` does not hold exactly two pairs.
-        NotImplementedError: If either input carries a non-empty ``rboxes``.
+
+    Examples:
+        >>> import torch
+        >>> from lucid_yolo.data.targets import Targets
+        >>> _check_pair([(torch.zeros(3, 2, 2), Targets.empty())] * 2)
     """
     if len(items) != _PAIR_IMAGE_COUNT:
         raise ValueError(f"expected exactly {_PAIR_IMAGE_COUNT} items; got {len(items)}")
+
+
+def _reject_rboxes(items: list[tuple[Tensor, Targets]]) -> None:
+    """Reject rotated boxes on either copy-paste input (module docstring, WP-058).
+
+    Args:
+        items: The two ``(image, targets)`` pairs, destination first.
+
+    Raises:
+        NotImplementedError: If either input carries a non-empty ``rboxes``.
+
+    Examples:
+        >>> import torch
+        >>> from lucid_yolo.data.targets import Targets
+        >>> _reject_rboxes([(torch.zeros(3, 2, 2), Targets.empty())] * 2)
+    """
     for _image, targets in items:
         if targets.rboxes.shape[0] > 0:
             raise NotImplementedError(
-                "Mixup/CopyPaste do not support rotated boxes; rotated-aware assembly lands in Phase 8 (WP-058)."
+                "CopyPaste does not support rotated boxes: it transfers rasterised polygon masks and the "
+                "oriented path carries no polygons (WP-056), so a rotated instance has nothing to paste."
             )

@@ -33,10 +33,20 @@ Targets:
     keep mask is applied across boxes, labels and polygons through
     :meth:`~lucid_yolo.data.targets.Targets.filter`.
 
-Rotated boxes:
-    Rotated-aware augmentation (re-canonicalising the long-edge angle after a warp)
-    is Phase 8 work (WP-058); this transform raises :class:`NotImplementedError`
-    when ``targets.rboxes`` is non-empty rather than silently mangling angles.
+Rotated boxes (WP-058):
+    A general affine does not map a rectangle to a rectangle — the sampled shear
+    sends one to a parallelogram — so a rotated box cannot be warped by
+    transporting ``(w, h, theta)``. The rotated path instead expands each box to
+    the four corners the image warp moves, pushes them through the same matrix,
+    and re-fits a canonical long-edge box
+    (:func:`~lucid_yolo.data.rotated_aug.warp_rboxes`); the fit is exact under a
+    similarity and approximate under shear, as that module states. The warped box
+    is then clipped to the canvas with WP-057's clipper, ``boxes`` is recomputed
+    as the envelope of the rotated geometry, and the *same* ``min_box_size`` /
+    ``min_visibility`` rule the axis-aligned path uses decides which instances
+    survive — one policy over both modalities (A40). Because that rule drops
+    instances, the rotated path requires WP-056's instance-axis invariant
+    (``rboxes`` 1:1 with ``boxes``, no polygons) and rejects targets that break it.
 
 Testability:
     Sampling is fully driven by an optional :class:`torch.Generator`, so a seeded
@@ -66,6 +76,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from lucid_yolo.data.letterbox import Letterbox
+from lucid_yolo.data.rotated_aug import check_rotated_pairing, clip_rboxes_to_canvas, rbox_envelopes, warp_rboxes
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.data.transforms import apply_affine_to_points, boxes_from_polygons
 
@@ -180,9 +191,11 @@ class RandomAffine:
     through the one matrix. Boxes/polygons are clipped to the canvas and filtered by
     ``min_box_size`` and ``min_visibility``.
 
-    Rotated boxes are **not** supported here: rotated-aware augmentation with
-    long-edge re-canonicalisation is Phase 8 (WP-058), so a non-empty
-    ``targets.rboxes`` raises :class:`NotImplementedError`.
+    Rotated boxes take the module docstring's corner-warp-and-re-fit path (WP-058)
+    and are clipped and filtered by the same two thresholds, with ``boxes``
+    recomputed as the envelope of the rotated geometry. That path filters, so it
+    requires ``rboxes`` 1:1 with ``boxes`` and no polygons (WP-056); anything else
+    raises :class:`ValueError`.
 
     Args:
         degrees: Maximum absolute rotation in degrees. Defaults to ``0.0``.
@@ -250,15 +263,16 @@ class RandomAffine:
         Args:
             image: CHW image tensor (float, in the same value range as the grey
                 fill, i.e. ``[0, 1]``).
-            targets: Geometry to warp alongside the image. ``rboxes`` must be empty.
+            targets: Geometry to warp alongside the image. Non-empty ``rboxes`` must
+                share the instance axis with ``boxes`` and carry no polygons.
 
         Returns:
             The warped ``(C, H, W)`` image (same canvas size as the input) and the
             warped, clipped and filtered targets.
 
         Raises:
-            NotImplementedError: If ``targets.rboxes`` is non-empty (rotated-aware
-                augmentation is WP-058).
+            ValueError: If ``rboxes`` is non-empty and breaks WP-056's instance-axis
+                invariant (length mismatch, or polygons alongside).
 
         Examples:
             ```pycon
@@ -274,7 +288,7 @@ class RandomAffine:
 
             ```
         """
-        self._reject_rboxes(targets)
+        check_rotated_pairing(targets)
         _, height, width = image.shape
         matrix = self._sample_matrix(height, width)
         out_image = self._warp_image(image, matrix, height, width)
@@ -298,7 +312,8 @@ class RandomAffine:
 
         Args:
             image: CHW image tensor (float, in the grey-fill value range ``[0, 1]``).
-            targets: Geometry to warp alongside the image. ``rboxes`` must be empty.
+            targets: Geometry to warp alongside the image. Non-empty ``rboxes`` must
+                share the instance axis with ``boxes`` and carry no polygons.
             post_matrix: ``(3, 3)`` affine mapping source-canvas pixels to the
                 output canvas, composed after the random affine for the image warp.
             out_h: Output canvas height in pixels.
@@ -309,7 +324,8 @@ class RandomAffine:
             clipped and filtered targets (before ``post_matrix``).
 
         Raises:
-            NotImplementedError: If ``targets.rboxes`` is non-empty (WP-058).
+            ValueError: If ``rboxes`` is non-empty and breaks WP-056's instance-axis
+                invariant (length mismatch, or polygons alongside).
 
         Examples:
             ```pycon
@@ -323,21 +339,13 @@ class RandomAffine:
 
             ```
         """
-        self._reject_rboxes(targets)
+        check_rotated_pairing(targets)
         _, in_h, in_w = image.shape
         matrix = self._sample_matrix(in_h, in_w)
         image_matrix = post_matrix.to(matrix.dtype) @ matrix
         out_image = self._warp_image(image, image_matrix, out_h, out_w)
         out_targets = self._warp_targets(targets, matrix, in_h, in_w)
         return out_image, out_targets
-
-    def _reject_rboxes(self, targets: Targets) -> None:
-        """Raise if ``targets`` carries rotated boxes (rotated-aware warp is WP-058)."""
-        if targets.rboxes.shape[0] > 0:
-            raise NotImplementedError(
-                "RandomAffine does not support rotated boxes; rotated-aware augmentation "
-                "with long-edge re-canonicalisation lands in Phase 8 (WP-058)."
-            )
 
     def _sample_matrix(self, height: int, width: int) -> Tensor:
         """Sample one affine, stash it on ``last_params``/``last_matrix``, return the matrix."""
@@ -405,10 +413,23 @@ class RandomAffine:
         return (to_norm @ inverse @ from_norm)[:2, :]
 
     def _warp_targets(self, targets: Targets, matrix: Tensor, height: int, width: int) -> Targets:
-        """Warp, clip and filter every modality; dispatch on polygon presence."""
+        """Warp, clip and filter every modality; dispatch on rotated-box/polygon presence."""
+        if targets.rboxes.shape[0] > 0:
+            return self._warp_rotated(targets, matrix, height, width)
         if targets.polygons:
             return self._warp_with_polygons(targets, matrix, height, width)
         return self._warp_boxes_only(targets, matrix, height, width)
+
+    def _warp_rotated(self, targets: Targets, matrix: Tensor, height: int, width: int) -> Targets:
+        """Rotated path: re-fit the warped corners, clip to the canvas, filter both axes."""
+        warped = warp_rboxes(targets.rboxes, matrix)
+        pre_boxes = rbox_envelopes(warped)
+        rboxes, post_boxes = clip_rboxes_to_canvas(warped, float(height), float(width))
+        keep = self._keep_mask(pre_boxes, post_boxes)
+        full = Targets(boxes=post_boxes, labels=targets.labels.clone(), rboxes=rboxes)
+        # One mask over both axes: WP-056's invariant is what makes `rkeep=keep` correct,
+        # and `check_rotated_pairing` has already refused anything that breaks it.
+        return full.filter(keep, rkeep=keep)
 
     def _warp_with_polygons(self, targets: Targets, matrix: Tensor, height: int, width: int) -> Targets:
         """Polygon path: warp rings, clamp to canvas, recompute boxes, filter."""
@@ -507,8 +528,10 @@ class FusedAffineLetterbox:
     resizes are conventionally non-antialiased, and dropping the antialias pass is
     a large part of the measured speedup.
 
-    Rotated boxes are rejected (the affine raises :class:`NotImplementedError`;
-    rotated-aware augmentation is Phase 8, WP-058).
+    Rotated boxes ride the wrapped affine's rotated path (WP-058) and are then
+    mapped through the letterbox affine, whose uniform scale and translation
+    preserve the long-edge form: centres warped, ``w``/``h`` scaled by ``r``,
+    ``theta`` unchanged and still canonical.
 
     Args:
         target_size: Output square side (a single ``int``) or explicit
@@ -579,14 +602,16 @@ class FusedAffineLetterbox:
         Args:
             image: CHW image tensor (float, in the grey-fill value range ``[0, 1]``);
                 the source canvas (mosaic assembly or single base image).
-            targets: Geometry to warp alongside the image. ``rboxes`` must be empty.
+            targets: Geometry to warp alongside the image. Non-empty ``rboxes`` must
+                share the instance axis with ``boxes`` and carry no polygons.
 
         Returns:
             The ``(C, target_h, target_w)`` letterboxed image resampled once, and
             the warped, clipped and filtered targets in output-canvas coordinates.
 
         Raises:
-            NotImplementedError: If ``targets.rboxes`` is non-empty (WP-058).
+            ValueError: If ``rboxes`` is non-empty and breaks WP-056's instance-axis
+                invariant (length mismatch, or polygons alongside).
 
         Examples:
             ```pycon
