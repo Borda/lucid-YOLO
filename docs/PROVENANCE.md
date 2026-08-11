@@ -42,7 +42,7 @@ verification, not a blanket clearance of every file in the repository.
 | R9 | Bochkovskiy, A. et al., *YOLOv4*, arXiv:2004.10934 (2020) | Mosaic augmentation; CIoU adoption in the lineage |
 | R10 | Zheng, Z. et al., *Distance-IoU Loss*, arXiv:1911.08287 (AAAI 2020) | CIoU definition (A1) |
 | R11 | Hidayatullah, P. et al., *YOLOv8 to YOLO11: A Comprehensive Architecture In-depth Comparative Review*, arXiv:2501.13400 (2025) | C3k2/C2PSA/SPPF internals in the YOLO11 lineage (A3) |
-| R13 | Zhou, Y. et al., *MMRotate*, arXiv:2205.14672 (ACM MM 2022) | Long-edge angle convention; rotated-box tooling conventions (A21, A23) |
+| R13 | Zhou, Y. et al., *MMRotate*, arXiv:2204.13317 (ACM MM 2022) | Long-edge angle convention; rotated-box tooling conventions (A21, A23) |
 | R14 | Li, J. et al., *Human Pose Regression with Residual Log-Likelihood Estimation*, arXiv:2107.11291 (ICCV 2021) | RLE (future pose milestone only) |
 | R16 | Bolya, D. et al., *YOLACT: Real-time Instance Segmentation*, arXiv:1904.02689 (ICCV 2019) | Prototype–coefficient mask formulation; protonet, K, coefficient, mask-loss conventions (A14–A18) |
 | R17 | Llerena, J. M. et al., *Gaussian Bounding Boxes and Probabilistic IoU*, arXiv:2106.06072 (2021) | ProbIoU rotated loss (A19) |

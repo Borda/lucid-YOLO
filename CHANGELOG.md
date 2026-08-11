@@ -22,6 +22,11 @@ ever planned, promised, or tagged — per ADR-002 (docs/DECISIONS.md).
   (WP-056).
 - `make check-data DATASET=dota` — DOTA root layout, image/label pairing and
   published-count validation beside the existing COCO path (WP-056).
+- Overlapping 1024 px crop tiling for aerial imagery, with the source paper's
+  partial-object rule: an instance clipped to under 70% of its area is flagged
+  difficult rather than dropped, and re-fitted to a long-edge box. Crop overlap
+  is a parameter; the visible fraction is carried alongside each instance
+  (WP-057).
 
 ## [0.2.0] - 2026-08-10
 

@@ -25,6 +25,16 @@ from lucid_yolo.data.rotated_geom import (
     rboxes_to_polygons,
 )
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.data.tiling import (
+    CROP_OVERLAP,
+    DIFFICULT_AREA_FRACTION,
+    PATCH_SIZE,
+    TiledTargets,
+    crop_image,
+    crop_targets,
+    tile_image_targets,
+    tile_windows,
+)
 from lucid_yolo.data.transforms import (
     Compose,
     GeometricTransform,
@@ -34,7 +44,10 @@ from lucid_yolo.data.transforms import (
 from lucid_yolo.data.verify import VerifyResult, verify_coco_root
 
 __all__ = [
+    "CROP_OVERLAP",
+    "DIFFICULT_AREA_FRACTION",
     "DOTA_CLASSES",
+    "PATCH_SIZE",
     "AffineParams",
     "CocoDetectionDataset",
     "Compose",
@@ -49,11 +62,14 @@ __all__ = [
     "MosaicAssembly",
     "RandomAffine",
     "Targets",
+    "TiledTargets",
     "VerifyResult",
     "apply_affine_to_points",
     "boxes_from_polygons",
     "build_scale_policy",
     "canonicalize",
+    "crop_image",
+    "crop_targets",
     "dota_targets",
     "download_coco",
     "hsv_to_rgb",
@@ -65,5 +81,7 @@ __all__ = [
     "rasterize_polygons",
     "rboxes_to_polygons",
     "rgb_to_hsv",
+    "tile_image_targets",
+    "tile_windows",
     "verify_coco_root",
 ]
