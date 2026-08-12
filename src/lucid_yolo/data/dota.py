@@ -220,6 +220,10 @@ def dota_targets(objects: Sequence[DotaObject], *, keep_difficult: bool) -> Targ
         boxes=boxes_from_polygons(quads),
         labels=torch.tensor([obj.label for obj in kept], dtype=torch.int64),
         rboxes=polygons_to_rboxes(torch.stack(quads, dim=0)),
+        # Carried, never acted on here (A39). Under `keep_difficult=True` this is the only
+        # thing that still distinguishes a difficult instance from an ordinary one, and A48
+        # makes the evaluation loader depend on that distinction surviving to the metric.
+        difficult=torch.tensor([obj.difficult for obj in kept], dtype=torch.bool),
     )
 
 

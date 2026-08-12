@@ -1,0 +1,29 @@
+{
+  "captured_from": "fcf3040 (pre-WP-088 source tree, exported with `git archive`)",
+  "torch_num_threads": 1,
+  "model_seed": 0,
+  "batch_seed": 1,
+  "img_size": 160,
+  "num_classes": 4,
+  "depth": 0.34,
+  "width": 0.25,
+  "max_channels": 256,
+  "gains": {
+    "box": 7.5,
+    "cls": 0.5,
+    "l1": 6.0,
+    "alpha": 0.5
+  },
+  "total": 22.801105499267578,
+  "components": {
+    "train/loss": 22.801105499267578,
+    "train/o2m_box": 4.122600039124791e-09,
+    "train/o2m_cls": 46.05000686645508,
+    "train/o2m_l1": 3.168771911532531e-08,
+    "train/o2o_box": 0.004791006445884705,
+    "train/o2o_cls": 44.787109375,
+    "train/o2o_l1": 0.024620383977890015
+  },
+  "grad_l2": 52.111158077994695,
+  "state_dict_keys": 714
+}

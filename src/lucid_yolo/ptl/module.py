@@ -35,8 +35,41 @@ Forward and loss wiring:
 Task conditioning:
     ``task`` selects the active supervision, and every task's extra contribution
     flows through :meth:`DetectionLitModule._task_extra_loss`. ``"detect"`` adds
-    nothing (a zero scalar, so the total is exactly the dual detection loss) and
-    ``"obb"`` keeps that inert stub until Phase 8 fills it.
+    nothing — a zero scalar, so the total is exactly the dual detection loss.
+
+    ``"obb"`` (WP-088) is the one task that does not merely *add*. Term by term
+    against the detection objective, with the enumeration
+    :mod:`lucid_yolo.losses.oriented_loss` states in full:
+
+    ================  ==========  ==================================================
+    term              fate        how it is arranged here
+    ================  ==========  ==================================================
+    ``L_cls``         kept        Unchanged, at ``cls_gain``, over the same
+                                  assignment.
+    ``L_box``         replaced    :class:`DualBranchLoss` is constructed with
+                                  ``box_gain = 0``, so its Complete-IoU term is
+                                  computed (and logged, as a diagnostic) but enters
+                                  no total; ``box_gain`` is spent instead on the
+                                  rotated ProbIoU term of the assembled A44 box.
+    ``L_l1``          replaced    Likewise ``l1_gain = 0`` inside the dual loss and
+                                  ``l1_gain`` spent on the stride-normalized L1
+                                  retargeted onto the rotated box's own
+                                  ``(cx, cy, w, h)`` — the axis-aligned envelope
+                                  target fights the rotated term at every non-zero
+                                  ``theta`` (A50).
+    ``L_angle``       added       R1 Eq. 15 at ``angle_gain`` (A22's ``1.0``).
+    assignment        kept        One assignment, with rotated **candidacy** only
+                                  (A25): ``gt_rboxes`` reaches the assigners and
+                                  nothing else.
+    ================  ==========  ==================================================
+
+    Zeroing the two gains inside the dual loss rather than subtracting its box
+    terms afterwards is deliberate: ``(c + b) - b`` is not ``c`` in floating point,
+    so a subtraction would leave the classification term carrying the rounding of a
+    number that is meant not to be there. The consequence to know about is that
+    ``self.loss.box_gain`` reads ``0.0`` under ``task="obb"`` while
+    ``hparams["box_gain"]`` carries the gain the rotated term actually uses — the
+    hyperparameter names the *slot*, not the formula in it.
 
     ``"segment"`` (WP-087) adds ``mask_gain * mask + semantic_gain * semantic``
     (A38). :meth:`DetectionLitModule.forward_segmentation` produces the prototype
@@ -49,9 +82,10 @@ Task conditioning:
     :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` and the pooled
     per-class union by :func:`~lucid_yolo.losses.semantic_loss.semantic_aux_loss`.
 
-    The positives are **not** re-assigned: :class:`DualLossOutput` carries the two
-    :class:`~lucid_yolo.assign.tal.AssignResult` values the box terms were scored
-    against, and the mask term gathers its targets by those. A second assignment
+    The positives are **not** re-assigned, under either task: :class:`DualLossOutput`
+    carries the two :class:`~lucid_yolo.assign.tal.AssignResult` values the box terms
+    were scored against, and the mask, rotated and angle terms alike gather their
+    targets by those. A second assignment
     would be a second selection path, free to pair an anchor's mask with a
     different instance than its box — a defect no loss value reveals. Both
     branches' coefficients are supervised, each against its own assignment and
@@ -88,6 +122,7 @@ Provenance: R1 sec. 3.2, R1 Eq. 2-3, R1 Tables S2/S5. Assumptions: A8.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import torch
@@ -98,13 +133,21 @@ from torchmetrics.detection import MeanAveragePrecision
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.decode.common import BOX_CORNERS, SCORE_COLUMN
 from lucid_yolo.decode.topk_e2e import TopKDecoder
+from lucid_yolo.eval.dota_eval import MAX_DETECTIONS, evaluate_rotated_map, rotated_detections_to_predictions
 from lucid_yolo.eval.segment_decode import decode_instance_masks
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
 from lucid_yolo.losses.mask_loss import instance_mask_loss
+from lucid_yolo.losses.oriented_loss import (
+    DEFAULT_ROTATED_IOU_FORM,
+    ROTATED_IOU_FORMS,
+    OrientedLossOutput,
+    oriented_branch_terms,
+)
 from lucid_yolo.losses.progressive import ProgressiveLossSchedule
 from lucid_yolo.losses.semantic_loss import semantic_aux_loss
 from lucid_yolo.models.build import SegmentOutput, build_detection_stages, build_segmentation_stages
 from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS, DualHeadOutput, decode_ltrb
+from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
@@ -116,16 +159,21 @@ if TYPE_CHECKING:
     from lucid_yolo.assign.tal import AssignResult
     from lucid_yolo.data.targets import Targets
 
-__all__ = ["DetectionLitModule", "pad_targets"]
+__all__ = ["DetectionLitModule", "pad_rboxes", "pad_targets"]
 
 #: Feature-level input-pixel strides of the P3/P4/P5 detection head (8, 16, 32).
 _STRIDES: tuple[int, int, int] = (8, 16, 32)
 
-#: Task names the module accepts; only ``"detect"`` carries active extra losses.
+#: Task names the module accepts. All three are wired: ``"detect"`` is the dual
+#: detection objective alone, ``"segment"`` adds the WP-087 mask terms, ``"obb"``
+#: swaps the two box terms for the WP-088 rotated ones and adds the angle term.
 _TASKS: tuple[str, ...] = ("detect", "segment", "obb")
 
 #: Column count of an ``xyxy`` axis-aligned box.
 _BOX_DIM = 4
+
+#: Column count of a long-edge rotated box ``(cx, cy, w, h, theta)``.
+_RBOX_DIM = 5
 
 #: Column index of the integral class label within the A9 detection tuple.
 _LABEL_COLUMN = 5
@@ -184,6 +232,64 @@ def pad_targets(targets: list[Targets]) -> tuple[Tensor, Tensor, Tensor]:
     return gt_boxes, gt_labels, gt_mask
 
 
+def pad_rboxes(targets: list[Targets]) -> Tensor:
+    """Pad a ragged batch's rotated boxes into one dense ``(B, N_max, 5)`` tensor (WP-088).
+
+    The rotated companion of :func:`pad_targets`, kept as its own function rather than
+    a fourth element of that tuple: only ``task="obb"`` needs it, and widening a return
+    every caller unpacks would put an oriented concern in the detection path.
+
+    The padding is by the **instance** axis, not by a rotated-box axis of its own. WP-056
+    pins ``rboxes[i]`` to the same object as ``boxes[i]`` and ``labels[i]``, and that
+    pairing is the whole reason the assignment computed on the axis-aligned envelopes may
+    be reused to gather rotated targets. An image whose two axes disagree is therefore a
+    hard error here rather than something to reconcile: whichever way it were resolved,
+    some anchor would be supervised towards another instance's orientation.
+
+    Args:
+        targets: The length-``B`` per-image target list, each carrying one rotated box
+            per instance. All tensors must share one device.
+
+    Returns:
+        ``(B, N_max, 5)`` float32 long-edge rotated boxes on the targets' device, padded
+        with zero rows exactly where :func:`pad_targets` pads with ``False``.
+
+    Raises:
+        ValueError: If any image's rotated-box count differs from its instance count —
+            including the all-important case of *zero* rotated boxes beside real ones,
+            which is what a detection loader hands an oriented run.
+
+    Examples:
+        >>> import torch
+        >>> from lucid_yolo.data.targets import Targets
+        >>> one = Targets(
+        ...     boxes=torch.tensor([[0.0, 0.0, 4.0, 2.0]]),
+        ...     labels=torch.tensor([3]),
+        ...     rboxes=torch.tensor([[2.0, 1.0, 4.0, 2.0, 0.0]]),
+        ... )
+        >>> pad_rboxes([one, Targets.empty()]).shape
+        torch.Size([2, 1, 5])
+        >>> pad_rboxes([Targets(boxes=torch.zeros(1, 4), labels=torch.zeros(1, dtype=torch.int64))])
+        Traceback (most recent call last):
+        ...
+        ValueError: image 0 carries 1 instances but 0 rotated boxes; task='obb' needs one per instance
+    """
+    counts = [int(target.boxes.shape[0]) for target in targets]
+    for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
+        if int(target.rboxes.shape[0]) != count:
+            raise ValueError(
+                f"image {index} carries {count} instances but {int(target.rboxes.shape[0])} rotated boxes; "
+                f"task='obb' needs one per instance"
+            )
+    max_n = max(counts) if counts else 0
+    device = targets[0].rboxes.device if targets else torch.device("cpu")
+    padded = torch.zeros((len(targets), max_n, _RBOX_DIM), dtype=torch.float32, device=device)
+    for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
+        if count:
+            padded[index, :count] = target.rboxes
+    return padded
+
+
 #: A step batch. The datamodule's transfer hook produces the three-element form; the
 #: two-element form is the hand-built feed a direct caller passes to
 #: :meth:`DetectionLitModule.training_step`.
@@ -217,6 +323,44 @@ def _split_batch(batch: StepBatch) -> tuple[Tensor, list[Targets], list[Tensor] 
     return images, targets, rest[0] if rest else None
 
 
+@dataclass(frozen=True)
+class _StepContext:
+    """Everything one step computed once and its task-conditional terms may read.
+
+    The three tasks need overlapping but different slices of a step: the mask terms
+    want the prototypes and the ground-truth boxes in pixels, the oriented terms want
+    the raw angles and the anchor grid, and neither wants the other's. Passing them as
+    positional arguments put :meth:`DetectionLitModule._task_extra_loss` at seven
+    required parameters before the oriented path added any, and the eighth would have
+    been a lint failure standing in for a design one — a dispatch point whose signature
+    grows with every task is a dispatch point that will eventually be typed wrongly.
+
+    Attributes:
+        head_out: The dense dual-head output of this step's forward.
+        seg_out: The segmentation forward output, or ``None`` for a task with no
+            mask branches.
+        targets: The batch's ragged per-image targets.
+        gt_boxes: ``(B, N, 4)`` padded ground-truth boxes in input pixels.
+        gt_rboxes: ``(B, N, 5)`` padded rotated ground truths, or ``None`` when the
+            task does not supervise orientation.
+        anchor_points: ``(A, 2)`` anchor centres in input pixels.
+        strides: ``(A,)`` per-anchor level stride.
+        image_size: The batch's ``(height, width)`` in input pixels.
+        masks: The loader's per-image instance masks, or ``None`` to rasterise them
+            in the step.
+    """
+
+    head_out: DualHeadOutput
+    seg_out: SegmentOutput | None
+    targets: list[Targets]
+    gt_boxes: Tensor
+    gt_rboxes: Tensor | None
+    anchor_points: Tensor
+    strides: Tensor
+    image_size: tuple[int, int]
+    masks: list[Tensor] | None
+
+
 class DetectionLitModule(LightningModule):
     """Lightning detector: model stack, dual-branch loss, and MuSGD (WP-034).
 
@@ -238,12 +382,15 @@ class DetectionLitModule(LightningModule):
         width: Width multiplier scaling channel counts.
         max_channels: Channel cap applied before the width multiply.
         num_classes: Number of object classes the head predicts.
-        task: Supervision task; one of ``"detect"``, ``"segment"`` (both active)
-            or ``"obb"`` (accepted, inert extra-loss stub until Phase 8).
-            ``"segment"`` additionally builds the head's mask-coefficient stems
-            and the three :func:`~lucid_yolo.models.build.build_segmentation_stages`
-            branches as ``proto_fusion``/``protonet``/``semantic``, and supervises
-            them with the two terms below. Defaults to ``"detect"``.
+        task: Supervision task; one of ``"detect"``, ``"segment"`` or ``"obb"``,
+            all three active. ``"segment"`` additionally builds the head's
+            mask-coefficient stems and the three
+            :func:`~lucid_yolo.models.build.build_segmentation_stages` branches as
+            ``proto_fusion``/``protonet``/``semantic``, and supervises them with the
+            two mask terms below. ``"obb"`` instead builds both head branches'
+            orientation stems (``predict_angle``, A20) and swaps the two box terms
+            for their rotated counterparts (see the module docstring's table).
+            Defaults to ``"detect"``.
         lr: Base learning rate for MuSGD (``lr0``; the A8 schedule decays from
             it). Defaults to ``0.01``.
         lrf: Final LR fraction of the A8 linear decay — the LR ends at
@@ -256,9 +403,15 @@ class DetectionLitModule(LightningModule):
             ``5e-4``.
         w_muon: Additive gain on the MuSGD Muon branch. Defaults to ``0.5``.
         w_sgd: Additive gain on the MuSGD SGD branch. Defaults to ``0.5``.
-        box_gain: CIoU-term gain shared by both loss branches. Defaults to ``7.5``.
+        box_gain: Gain on the **IoU term** of both loss branches — the axis-aligned
+            Complete-IoU under ``"detect"``/``"segment"``, and under ``"obb"`` the
+            rotated ProbIoU that replaces it in the same slot (A49; the module
+            docstring explains why the slot rather than the formula is what the name
+            refers to). Defaults to ``7.5``.
         cls_gain: Classification-term gain shared by both branches. Defaults to ``0.5``.
-        l1_gain: L1-box-term gain shared by both branches. Defaults to ``6.0``.
+        l1_gain: Gain on the **L1 box term** of both branches: against the
+            axis-aligned target under ``"detect"``/``"segment"``, and under ``"obb"``
+            against the rotated box's own ``(cx, cy, w, h)`` (A50). Defaults to ``6.0``.
         alpha: Initial one-to-many branch weight seeding the dual loss (used
             before training and whenever the epoch schedule is inactive).
             Defaults to ``0.5``.
@@ -270,9 +423,17 @@ class DetectionLitModule(LightningModule):
             ignored otherwise (A38). Defaults to ``2.5``.
         semantic_gain: Weight on the auxiliary semantic term under
             ``task="segment"``, ignored otherwise (A38). Defaults to ``0.5``.
+        angle_gain: Weight on R1 Eq. 15's square-object angle term under
+            ``task="obb"``, ignored otherwise. Defaults to ``1.0`` (A22 — R1 does
+            not state one, and :func:`~lucid_yolo.losses.angle_loss.square_angle_loss`
+            returns the term pre-gain precisely so this caller owns it).
+        rotated_iou_form: Which of R17's two rotated-IoU losses the ``"obb"`` box
+            term uses, ``"hellinger"`` (bounded, the A49 default) or
+            ``"bhattacharyya"`` (unbounded). Ignored otherwise.
 
     Raises:
-        ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``.
+        ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
+            or ``rotated_iou_form`` is not a known rotated-IoU form.
 
     Examples:
         >>> import torch
@@ -308,14 +469,25 @@ class DetectionLitModule(LightningModule):
         alpha_final: float = 0.1,
         mask_gain: float = 2.5,
         semantic_gain: float = 0.5,
+        angle_gain: float = 1.0,
+        rotated_iou_form: str = DEFAULT_ROTATED_IOU_FORM,
     ) -> None:
         super().__init__()
         if task not in _TASKS:
             raise ValueError(f"task must be one of {_TASKS}, got {task!r}")
+        if rotated_iou_form not in ROTATED_IOU_FORMS:
+            raise ValueError(f"rotated_iou_form must be one of {sorted(ROTATED_IOU_FORMS)}, got {rotated_iou_form!r}")
         self.save_hyperparameters()
         self._task = task
         self._mask_gain: float = mask_gain
         self._semantic_gain: float = semantic_gain
+        self._angle_gain: float = angle_gain
+        self._rotated_iou_form: str = rotated_iou_form
+        #: Under ``"obb"`` the two box gains move out of the dual detection loss and
+        #: onto the rotated terms; the dual loss is then constructed with zeros in
+        #: their place so its axis-aligned box terms enter no total (module docstring).
+        self._rbox_gain: float = box_gain
+        self._rl1_gain: float = l1_gain
         self._lr = lr
         self._lrf = lrf
         self._warmup_epochs = warmup_epochs
@@ -329,14 +501,26 @@ class DetectionLitModule(LightningModule):
         #: what it was before the segmentation branches existed (the Det-smoke
         #: checkpoint still loads).
         num_coeffs = DEFAULT_NUM_COEFFS if task == "segment" else None
+        #: The oriented task opts into the A20 angle stems through the **same** factory
+        #: the detection and segmentation tasks use, and the stages stay flat attributes.
+        #: Holding an `OrientedDetector` here instead would prefix every state-dict key
+        #: with its attribute name and invalidate the accepted checkpoints — the WP-087
+        #: finding, which `test_module_composition.py` pins for detection and
+        #: `test_obb_training.py` now pins for the oriented head's own keys.
         self.backbone, self.neck, self.head = build_detection_stages(
-            depth, width, max_channels, num_classes, num_coeffs=num_coeffs
+            depth, width, max_channels, num_classes, num_coeffs=num_coeffs, predict_angle=task == "obb"
         )
         if task == "segment":
             self.proto_fusion, self.protonet, self.semantic = build_segmentation_stages(
                 self.neck.channels, num_classes, DEFAULT_NUM_COEFFS
             )
-        self.loss = DualBranchLoss(box_gain=box_gain, cls_gain=cls_gain, l1_gain=l1_gain, alpha=alpha)
+        oriented = task == "obb"
+        self.loss = DualBranchLoss(
+            box_gain=0.0 if oriented else box_gain,
+            cls_gain=cls_gain,
+            l1_gain=0.0 if oriented else l1_gain,
+            alpha=alpha,
+        )
         self._loss_schedule = ProgressiveLossSchedule(alpha_init=alpha_init, alpha_final=alpha_final)
 
         #: E2E decoder + epoch mAP over the one-to-one branch (WP-077). Neither
@@ -363,15 +547,25 @@ class DetectionLitModule(LightningModule):
         #: untouched metric raises, and a loader without mask targets never feeds it.
         self._val_segm_seen = False
 
+        #: Epoch rotated mAP accumulators, for ``"obb"`` only (WP-088). Plain lists
+        #: rather than a :class:`~torchmetrics.Metric`: the WP-063 protocol is not a
+        #: torchmetrics implementation, it fixes four constants that library defaults
+        #: get wrong (A46-A48), and mAP is not a per-batch quantity that can be
+        #: averaged — the whole epoch's ranked detections have to meet at once. Both
+        #: lists hold CPU tensors and are cleared at every epoch end.
+        self._val_rotated_preds: list[dict[str, Tensor]] = []
+        self._val_rotated_targets: list[dict[str, Tensor]] = []
+
         #: Per-image-size cache of ``(anchor_points, stride_per_anchor)`` on CPU.
         self._anchor_cache: dict[tuple[int, int], tuple[Tensor, Tensor]] = {}
 
     @property
     def task(self) -> str:
-        """Supervision task this module was built for, ``"detect"`` or ``"segment"``.
+        """Supervision task this module was built for: ``"detect"``, ``"segment"`` or ``"obb"``.
 
         Read-only, and the supported way for a consumer to ask whether a loaded
-        checkpoint has a mask branch — :meth:`forward_segmentation` gates on this
+        checkpoint has a mask branch or an angle branch —
+        :meth:`forward_segmentation` gates on this
         same value, so the caller's question and the module's own behaviour cannot
         answer differently. Reading ``hparams["task"]`` instead would be a
         stringly-typed lookup into a bag that is only as complete as the
@@ -534,6 +728,12 @@ class DetectionLitModule(LightningModule):
         flag to ``model.task``, and a batch without them is scored on boxes only
         rather than rasterised a second time here.
 
+        An ``"obb"`` module accumulates the WP-063 rotated mAP the same way
+        (:meth:`_update_val_rotated`), for the same reason: ``val/mAP`` reads the
+        A44 composition's *pre-rotation* rectangle, so a run whose orientations
+        were random and one whose orientations were right would log the identical
+        curve, and the acceptance number would first appear hours after the run.
+
         Args:
             batch: The datamodule batch ``(images, list[Targets], masks)``; the
                 two-element ``(images, list[Targets])`` form rasterises in the step.
@@ -563,7 +763,54 @@ class DetectionLitModule(LightningModule):
         if self._val_segm is not None and seg_out is not None and masks is not None:
             image_size = (int(images.shape[-2]), int(images.shape[-1]))
             self._update_val_segm(seg_out, detections, anchor_indices, targets, masks, image_size)
+        if self._task == "obb":
+            self._update_val_rotated(head_out, targets, anchor_points, strides)
         return loss
+
+    def _update_val_rotated(
+        self, head_out: DualHeadOutput, targets: list[Targets], anchor_points: Tensor, strides: Tensor
+    ) -> None:
+        """Accumulate one batch's oriented detections and ground truth for the epoch mAP.
+
+        The decode is the **deployed** one: :func:`~lucid_yolo.models.heads.obb.decode_rboxes`
+        assembles the one-to-one branch's boxes (A44) and
+        :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` ranks them, gathering each
+        angle by the anchor index its own box was ranked by. A second ranking here would
+        be free to pair one anchor's heading with another's box — a detection with the
+        right centre, the right score and a silently wrong orientation.
+
+        Scoring stays in **letterbox** coordinates, exactly as ``val/mAP`` does (WP-077).
+        A letterbox is one isotropic scale plus a translation, so it maps every rotated
+        box and every ground truth by the same similarity and leaves rotated IoU — a
+        ratio of areas — unchanged; un-letterboxing both sides with
+        :func:`~lucid_yolo.decode.common.rboxes_to_letterboxed_original` would divide the
+        same number by itself. That helper is what an *original-coordinate* report needs,
+        and it is where the acceptance figure is measured.
+
+        The R18 difficult flags come from the targets rather than being defaulted here
+        (A48): an ignorable ground truth that arrives as an ordinary one turns every
+        detection of it into a false positive.
+
+        Args:
+            head_out: This batch's dense dual-head output.
+            targets: The batch's per-image ground truth, carrying ``rboxes``, ``labels``
+                and the difficult flags.
+            anchor_points: ``(A, 2)`` anchor centres in input pixels.
+            strides: ``(A,)`` per-anchor level stride.
+        """
+        angles = head_out.o2o_angle
+        assert angles is not None  # an "obb" module always builds the angle stems
+        rboxes = decode_rboxes(head_out.o2o_box, angles, anchor_points, strides)
+        detections = o2o_rotated_topk(head_out.o2o_cls, rboxes, k=MAX_DETECTIONS)
+        self._val_rotated_preds.extend(rotated_detections_to_predictions(detections.detach()))
+        self._val_rotated_targets.extend(
+            {
+                "rboxes": target.rboxes.detach().cpu(),
+                "labels": target.labels.detach().cpu().to(torch.long),
+                "difficult": target.difficult.detach().cpu(),
+            }
+            for target in targets
+        )
 
     def _update_val_segm(
         self,
@@ -640,7 +887,8 @@ class DetectionLitModule(LightningModule):
         """Compute and log the epoch's E2E ``val/mAP`` (progress-bar metric), then reset.
 
         A ``"segment"`` run additionally logs ``val/segm_mAP``, whenever any batch
-        of the epoch carried ground-truth masks.
+        of the epoch carried ground-truth masks; an ``"obb"`` run logs the WP-063
+        ``val/rotated_mAP`` and ``val/rotated_mAP50`` over everything the epoch saw.
         """
         computed = self._val_map.compute()
         self.log("val/mAP", computed["map"].to(torch.float32), prog_bar=True)
@@ -649,6 +897,24 @@ class DetectionLitModule(LightningModule):
             self.log("val/segm_mAP", self._val_segm.compute()["map"].to(torch.float32), prog_bar=True)
             self._val_segm.reset()
             self._val_segm_seen = False
+        if self._val_rotated_preds:
+            self._log_rotated_map()
+
+    def _log_rotated_map(self) -> None:
+        """Score the epoch's accumulated oriented detections and clear the buffers.
+
+        ``val/rotated_mAP50`` is put on the progress bar rather than ``val/rotated_mAP``
+        because the DoD of the oriented path is stated at IoU 0.50; both are logged, so
+        the stricter figure is in ``metrics.csv`` either way. The buffers are cleared
+        unconditionally — a metric that silently carried last epoch's detections into
+        this one would improve monotonically for reasons that have nothing to do with
+        the model.
+        """
+        stats = evaluate_rotated_map(self._val_rotated_preds, self._val_rotated_targets)
+        self.log("val/rotated_mAP50", torch.tensor(stats["map_50"], dtype=torch.float32), prog_bar=True)
+        self.log("val/rotated_mAP", torch.tensor(stats["map"], dtype=torch.float32))
+        self._val_rotated_preds.clear()
+        self._val_rotated_targets.clear()
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         """Return MuSGD, paired with the A8 warmup + linear-decay LR schedule.
@@ -708,6 +974,7 @@ class DetectionLitModule(LightningModule):
         gt_boxes = gt_boxes.to(images.device)
         gt_labels = gt_labels.to(images.device)
         gt_mask = gt_mask.to(images.device)
+        gt_rboxes = pad_rboxes(targets).to(images.device) if self._task == "obb" else None
         out = self.loss(
             head_out.o2m_cls,
             o2m_boxes,
@@ -718,64 +985,116 @@ class DetectionLitModule(LightningModule):
             gt_labels,
             gt_mask,
             strides=strides,
+            gt_rboxes=gt_rboxes,
         )
-        image_size = (int(images.shape[-2]), int(images.shape[-1]))
-        total = out.total + self._task_extra_loss(seg_out, targets, out, gt_boxes, image_size, stage, masks)
+        context = _StepContext(
+            head_out=head_out,
+            seg_out=seg_out,
+            targets=targets,
+            gt_boxes=gt_boxes,
+            gt_rboxes=gt_rboxes,
+            anchor_points=anchor_points,
+            strides=strides,
+            image_size=(int(images.shape[-2]), int(images.shape[-1])),
+            masks=masks,
+        )
+        total = out.total + self._task_extra_loss(context, out, stage)
         self._log_loss(out, total, stage, images.shape[0])
         return total, head_out, seg_out
 
-    def _task_extra_loss(
-        self,
-        seg_out: SegmentOutput | None,
-        targets: list[Targets],
-        out: DualLossOutput,
-        gt_boxes: Tensor,
-        image_size: tuple[int, int],
-        stage: str,
-        masks: list[Tensor] | None,
-    ) -> Tensor:
-        """Return the task-conditional extra loss: segmentation terms, else zero.
+    def _task_extra_loss(self, context: _StepContext, out: DualLossOutput, stage: str) -> Tensor:
+        """Return the task-conditional extra loss: the segment or oriented terms, else zero.
 
         For ``"segment"`` this is ``mask_gain * mask + semantic_gain * semantic``
-        (A38), with both pre-gain terms logged. For ``"detect"`` and ``"obb"``
-        ``seg_out`` is ``None`` and the contribution is a zero scalar, so the total
-        is exactly the dual detection loss — ``"obb"`` keeps the WP-034 stub until
-        Phase 8 fills it.
+        (A38); for ``"obb"`` it is ``box_gain * rbox + l1_gain * rl1 + angle_gain *
+        angle``, which together with the dual loss's classification term — the only
+        term left with a non-zero gain under that task — *is* the whole oriented
+        objective rather than an addition to a detection one (module docstring).
+        ``"detect"`` contributes a zero scalar, so its total stays exactly the dual
+        detection loss. Every pre-gain term is logged.
 
         Args:
-            seg_out: The segmentation forward output, or ``None`` for a task with
-                no mask branches.
-            targets: The batch targets, supplying the polygons and class ids.
+            context: The step's shared quantities (see :class:`_StepContext`).
             out: The dual-branch loss output, read for its ``alpha`` and — the
                 point of the WP-087 plumbing — for the two assignments the box
                 terms were scored against.
-            gt_boxes: The ``(B, N, 4)`` padded ground-truth boxes in input pixels.
-            image_size: The batch's ``(height, width)`` in input pixels.
             stage: Metric prefix (``"train"``/``"val"``) for the logged terms.
-            masks: The loader's per-image instance masks, or ``None`` to rasterise
-                them here.
 
         Returns:
-            A scalar tensor on the prediction device: the gain-weighted sum for
-            ``"segment"``, a zero otherwise.
+            A scalar tensor on the prediction device.
         """
-        if seg_out is None:
-            del targets, gt_boxes, image_size, stage, masks  # inert: no extra supervision for detection
+        if self._task == "obb":
+            return self._oriented_extra_loss(context, out, stage)
+        if context.seg_out is None:
             return torch.zeros_like(out.total)
-        mask_term, semantic_term = self._segment_terms(seg_out, targets, out, gt_boxes, image_size, masks)
-        self.log(f"{stage}/mask", mask_term, batch_size=len(targets))
-        self.log(f"{stage}/semantic", semantic_term, batch_size=len(targets))
+        mask_term, semantic_term = self._segment_terms(context, out)
+        self.log(f"{stage}/mask", mask_term, batch_size=len(context.targets))
+        self.log(f"{stage}/semantic", semantic_term, batch_size=len(context.targets))
         return self._mask_gain * mask_term + self._semantic_gain * semantic_term
 
-    def _segment_terms(
-        self,
-        seg_out: SegmentOutput,
-        targets: list[Targets],
-        out: DualLossOutput,
-        gt_boxes: Tensor,
-        image_size: tuple[int, int],
-        masks: list[Tensor] | None,
-    ) -> tuple[Tensor, Tensor]:
+    def _oriented_extra_loss(self, context: _StepContext, out: DualLossOutput, stage: str) -> Tensor:
+        """Weight and log the three oriented terms, blended by the WP-035 ``alpha``.
+
+        Each branch is scored against **its own** assignment and the two are combined
+        by the same ``alpha * o2m + (1 - alpha) * o2o`` split
+        :class:`~lucid_yolo.losses.dual_loss.DualBranchLoss` applies to the box terms,
+        for the reason WP-087 gives for the mask term: the one-to-one branch is the
+        one the NMS-free oriented decode reads, so supervising the one-to-many angle
+        stems alone would ship an untrained orientation, and blending with the same
+        ramp moves orientation supervision *with* box supervision rather than against
+        it. Both branches' stems therefore receive gradient at every step, which is
+        exactly what ``test_obb_training.py`` asserts.
+
+        Args:
+            context: The step's shared quantities.
+            out: The dual-branch loss output supplying both assignments and ``alpha``.
+            stage: Metric prefix for the logged terms.
+
+        Returns:
+            The gain-weighted oriented contribution, a scalar on the prediction device.
+        """
+        head_out, alpha = context.head_out, out.alpha
+        o2m_angle, o2o_angle = head_out.o2m_angle, head_out.o2o_angle
+        assert o2m_angle is not None  # an "obb" module always builds both angle stems
+        assert o2o_angle is not None
+        assert context.gt_rboxes is not None  # the step pads them for exactly this task
+        o2m = self._branch_oriented_terms(head_out.o2m_box, o2m_angle, out.o2m_assign, context)
+        o2o = self._branch_oriented_terms(head_out.o2o_box, o2o_angle, out.o2o_assign, context)
+        rbox = alpha * o2m.rbox + (1.0 - alpha) * o2o.rbox
+        rl1 = alpha * o2m.rl1 + (1.0 - alpha) * o2o.rl1
+        angle = alpha * o2m.angle + (1.0 - alpha) * o2o.angle
+        batch_size = len(context.targets)
+        self.log(f"{stage}/rbox", rbox, batch_size=batch_size)
+        self.log(f"{stage}/rl1", rl1, batch_size=batch_size)
+        self.log(f"{stage}/angle", angle, batch_size=batch_size)
+        return self._rbox_gain * rbox + self._rl1_gain * rl1 + self._angle_gain * angle
+
+    def _branch_oriented_terms(
+        self, distances: Tensor, angles: Tensor, assign: AssignResult, context: _StepContext
+    ) -> OrientedLossOutput:
+        """Assemble one branch's oriented boxes (A44) and score them against its assignment.
+
+        The assembly is :func:`~lucid_yolo.models.heads.obb.decode_rboxes` — the
+        deployed composition, not a training-only copy of it — so what the loss pulls
+        towards the ground truth is precisely what inference will emit. Its
+        canonicalization is invisible to both box terms (a canonical box is the same
+        rectangle, hence the same Gaussian and the same ``(cx, cy, w, h)`` up to the
+        long-edge swap the target underwent too), which is why the raw Eq. 13 angle is
+        passed separately for the Eq. 14 residual rather than read back off the
+        canonical box.
+        """
+        assert context.gt_rboxes is not None  # gated by the caller
+        rboxes = decode_rboxes(distances, angles, context.anchor_points, context.strides)
+        return oriented_branch_terms(
+            rboxes,
+            angles.squeeze(-1),
+            context.gt_rboxes,
+            assign,
+            context.strides,
+            form=self._rotated_iou_form,
+        )
+
+    def _segment_terms(self, context: _StepContext, out: DualLossOutput) -> tuple[Tensor, Tensor]:
         """Return the pre-gain ``(mask, semantic)`` terms for a segmentation batch.
 
         The instance masks are rasterized **once** per batch, on the prototype grid
@@ -793,8 +1112,12 @@ class DetectionLitModule(LightningModule):
         and the WP-035 ramp moves the mask supervision with the box supervision
         rather than against it.
         """
+        seg_out, targets = context.seg_out, context.targets
+        assert seg_out is not None  # the caller reaches this only for "segment"
+        image_size, gt_boxes = context.image_size, context.gt_boxes
         prototypes = seg_out.prototypes
         proto_grid = (int(prototypes.shape[-2]), int(prototypes.shape[-1]))
+        masks = context.masks
         if masks is None:
             masks = [instance_mask_targets(target, image_size, proto_grid) for target in targets]
         masks = [image_masks.to(prototypes.device) for image_masks in masks]

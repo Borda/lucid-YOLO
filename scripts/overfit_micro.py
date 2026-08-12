@@ -50,7 +50,24 @@ Segmentation (``--task seg``, WP-087):
     unsupervised one-to-one coefficient stem all show up here in minutes instead
     of after a COCO run.
 
-Provenance: blueprint sec. 5.8-5.11, R1 Eq. 2-3. Assumptions: A8, A26, A38.
+Oriented detection (``--task obb``, WP-088):
+    The same loop with ``task="obb"``, gated on the **train rotated mAP50** of the
+    WP-063 protocol. The slice is generated with ``fuse-augmentations``' own ``obb``
+    task, which writes each object's rotated box as a four-corner ``segmentation``
+    ring, and is read through the loader's oriented mode — so what this gate measures
+    is the loader, the assignment, the rotated objective, the decode and the metric in
+    one line, rather than any of them in isolation (the Phase 8 defect was that every
+    one of them was correct alone).
+
+    It uses its own slice directory. Sharing the segmentation slice would silently
+    score oriented training against annotations whose rings are not quadrilaterals,
+    and the first symptom would be a number rather than an error.
+
+    ``[DATA]`` note: DOTA is the tier dataset for this task, and the synthetic
+    rotated scenes are its A26-sanctioned development stand-in — this gate is a
+    wiring check, never a claim about DOTA.
+
+Provenance: blueprint sec. 5.8-5.11, R1 Eq. 2-3. Assumptions: A8, A26, A38, A49, A50.
 """
 
 from __future__ import annotations
@@ -75,8 +92,14 @@ from lucid_yolo.data.coco import CocoDetectionDataset
 from lucid_yolo.data.rasterize import rasterize_polygons
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode.topk_e2e import TopKDecoder
+from lucid_yolo.eval.dota_eval import (
+    MAX_DETECTIONS,
+    evaluate_rotated_map,
+    rotated_detections_to_predictions,
+)
 from lucid_yolo.eval.segment_decode import decode_instance_masks
 from lucid_yolo.models.heads.detect import DualHeadOutput, decode_ltrb, o2o_topk_with_indices
+from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.registry import scale_spec
 from lucid_yolo.ptl.callbacks import CloseMosaicCallback
 from lucid_yolo.ptl.datamodule import DetectionDataModule
@@ -103,6 +126,23 @@ _SEG_PRODUCER_SPEC = "scripts.overfit_micro:overfit_micro_seg"
 
 #: Gitignored cache the synthetic slice is materialized into (never committed).
 _SLICE_DIR = REPO_ROOT / ".cache" / "overfit_slice"
+
+#: The oriented gate's own slice (WP-088). Deliberately not the one above: that slice's
+#: rings are many-vertex segmentation polygons, which the oriented reader rejects, and a
+#: shared directory would make "which slice is cached here" depend on run order.
+_OBB_SLICE_DIR = REPO_ROOT / ".cache" / "overfit_slice_obb"
+
+#: The oriented golden, the third of the accelerator-only set.
+_OBB_GOLDEN_PATH = REPO_ROOT / "goldens" / "gpu" / "overfit_micro_obb.json"
+
+#: Producer spec of the oriented golden.
+_OBB_PRODUCER_SPEC = "scripts.overfit_micro:overfit_micro_obb"
+
+#: Train rotated mAP50 the oriented overfit must clear (the WP-088 DoD).
+_ROTATED_MAP50_FLOOR = 0.9
+
+#: Golden tolerance on the achieved rotated mAP50 (integer counts are pinned exactly).
+_ROTATED_MAP50_TOL = 0.05
 
 #: Number of images in the overfit slice (the "~100" of the WP name).
 _NUM_IMAGES = 100
@@ -245,17 +285,21 @@ def load_recipe(path: Path = _RECIPE_PATH) -> Recipe:
     )
 
 
-def generate_slice(slice_dir: Path = _SLICE_DIR) -> Path:
-    """Materialize the fixed ~100-image synthetic detection slice under ``slice_dir``.
+def generate_slice(slice_dir: Path = _SLICE_DIR, generator_task: str = "segmentation") -> Path:
+    """Materialize the fixed ~100-image synthetic slice under ``slice_dir``.
 
     Uses ``fuse-augmentations`` with ``task="segmentation"`` so every annotation
     carries a polygon ring (the reader keeps only polygon instances), giving a
-    seeded, byte-reproducible slice (A26). Idempotent: an existing slice with its
-    annotation file is reused rather than regenerated.
+    seeded, byte-reproducible slice (A26). ``generator_task="obb"`` writes the same
+    scenes with each object's rotated box as a four-corner ring instead, which is
+    what the oriented reader fits its long-edge boxes to. Idempotent: an existing
+    slice with its annotation file is reused rather than regenerated.
 
     Args:
         slice_dir: Parent directory the ``train`` split is written into. Defaults to
             the gitignored ``.cache/overfit_slice``.
+        generator_task: The ``fuse-augmentations`` task, ``"segmentation"`` (the
+            default, used by the detection and mask gates) or ``"obb"``.
 
     Returns:
         The ``train`` split directory (holds the images and ``_annotations.coco.json``).
@@ -273,7 +317,7 @@ def generate_slice(slice_dir: Path = _SLICE_DIR) -> Path:
             slice_dir,
             num_images=_NUM_IMAGES,
             fmt="coco",
-            task="segmentation",
+            task=generator_task,
             class_mode="shape",
             split_ratios=SplitRatios(train=1.0, val=0.0, test=0.0),
             seed=_SLICE_SEED,
@@ -288,7 +332,9 @@ def _num_classes(split: Path) -> int:
     return len(dataset.category_id_to_label)
 
 
-def build_datamodule(split: Path, recipe: Recipe, *, mask_targets: bool = False) -> DetectionDataModule:
+def build_datamodule(
+    split: Path, recipe: Recipe, *, mask_targets: bool = False, rotated_targets: bool = False
+) -> DetectionDataModule:
     """Build a datamodule pointing both splits at the single overfit slice.
 
     Args:
@@ -297,6 +343,9 @@ def build_datamodule(split: Path, recipe: Recipe, *, mask_targets: bool = False)
         mask_targets: Rasterise the instance masks in the loader, as a segmentation
             training run does. Set for the ``seg`` gate so the frozen mask IoU covers
             the loader-side path the real runs take, not only the in-step fallback.
+        rotated_targets: Read each annotation's four-corner ring as a rotated box, as
+            an oriented training run does. Set for the ``obb`` gate, for the same
+            reason: the gate is meant to cover the loader, not to bypass it.
 
     Returns:
         A :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule` with ``num_workers=0``
@@ -319,6 +368,7 @@ def build_datamodule(split: Path, recipe: Recipe, *, mask_targets: bool = False)
         val_ann_file=annotation,
         seed=recipe.seed,
         mask_targets=mask_targets,
+        rotated_targets=rotated_targets,
     )
 
 
@@ -645,9 +695,61 @@ def evaluate_mask_iou(module: DetectionLitModule, datamodule: DetectionDataModul
     return (iou_total / instance_total if instance_total else 0.0), instance_total
 
 
+def evaluate_rotated_map50(module: DetectionLitModule, datamodule: DetectionDataModule) -> tuple[float, int]:
+    """Measure the train-set rotated mAP50 over the letterbox-only slice (WP-088).
+
+    Runs the trained module over the val loader (the same 100 images with only the
+    letterbox transform) through the **deployed** oriented path:
+    :func:`~lucid_yolo.models.heads.obb.decode_rboxes` assembles the one-to-one
+    branch's boxes (A44) and :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk`
+    ranks them, gathering each angle by the anchor its own box was ranked by. Scoring
+    is WP-063's protocol (:func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map`),
+    with the R18 difficult flags taken from the targets rather than defaulted (A48).
+
+    Scoring runs in letterbox coordinates: a letterbox is one isotropic scale plus a
+    translation, and rotated IoU is a ratio of areas, so mapping both sides back
+    through :func:`~lucid_yolo.decode.common.rboxes_to_letterboxed_original` would
+    divide the same number by itself.
+
+    Args:
+        module: The trained ``task="obb"`` module.
+        datamodule: The datamodule whose val loader yields the letterboxed slice.
+
+    Returns:
+        A ``(rotated_map50, total_instances)`` pair.
+
+    Examples:
+        >>> evaluate_rotated_map50(module, datamodule)  # doctest: +SKIP
+        (0.93, 592)
+    """
+    device = module.device
+    module.eval()
+    anchor_points, strides = _anchor_grid(device)
+    preds: list[dict[str, Tensor]] = []
+    ground_truth: list[dict[str, Tensor]] = []
+    with torch.no_grad():
+        for batch in datamodule.val_dataloader():
+            images, targets, _ = datamodule.on_after_batch_transfer(batch, 0)
+            head_out: DualHeadOutput = module(images.to(device))
+            assert head_out.o2o_angle is not None  # an "obb" module always builds the angle stems
+            rboxes = decode_rboxes(head_out.o2o_box, head_out.o2o_angle, anchor_points, strides)
+            detections = o2o_rotated_topk(head_out.o2o_cls, rboxes, k=MAX_DETECTIONS)
+            preds.extend(rotated_detections_to_predictions(detections))
+            ground_truth.extend(
+                {
+                    "rboxes": target.rboxes.cpu(),
+                    "labels": target.labels.cpu().to(torch.long),
+                    "difficult": target.difficult.cpu(),
+                }
+                for target in targets
+            )
+    instances = sum(int(entry["rboxes"].shape[0]) for entry in ground_truth)
+    return evaluate_rotated_map(preds, ground_truth)["map_50"], instances
+
+
 @dataclass(frozen=True)
 class TaskSpec:
-    """Everything that differs between the detection and segmentation overfit gates.
+    """Everything that differs between the three overfit gates.
 
     Attributes:
         module_task: The :class:`~lucid_yolo.ptl.module.DetectionLitModule` task.
@@ -658,6 +760,8 @@ class TaskSpec:
         golden_path: Where ``--freeze`` writes the golden.
         producer: Producer spec recorded inside the golden file.
         scorer: Callable measuring the trained module over the val loader.
+        generator_task: The ``fuse-augmentations`` task the slice is generated with.
+        slice_dir: Where that slice is cached; one directory per annotation shape.
     """
 
     module_task: str
@@ -668,6 +772,8 @@ class TaskSpec:
     golden_path: Path
     producer: str
     scorer: Callable[[DetectionLitModule, DetectionDataModule], tuple[float, int]]
+    generator_task: str = "segmentation"
+    slice_dir: Path = _SLICE_DIR
 
 
 #: The two wired gates, keyed by the ``--task`` value.
@@ -692,6 +798,18 @@ TASK_SPECS: dict[str, TaskSpec] = {
         producer=_SEG_PRODUCER_SPEC,
         scorer=evaluate_mask_iou,
     ),
+    "obb": TaskSpec(
+        module_task="obb",
+        metric="train_rotated_map50",
+        label="rotated mAP50",
+        floor=_ROTATED_MAP50_FLOOR,
+        tolerance=_ROTATED_MAP50_TOL,
+        golden_path=_OBB_GOLDEN_PATH,
+        producer=_OBB_PRODUCER_SPEC,
+        scorer=evaluate_rotated_map50,
+        generator_task="obb",
+        slice_dir=_OBB_SLICE_DIR,
+    ),
 }
 
 
@@ -700,7 +818,12 @@ def _train_and_score(recipe: Recipe, split: Path, deterministic: bool, spec: Tas
     seed_everything(recipe.seed, workers=True)
     num_classes = _num_classes(split)
     module = build_module(recipe, num_classes, module_task=spec.module_task)
-    datamodule = build_datamodule(split, recipe, mask_targets=spec.module_task == "segment")
+    datamodule = build_datamodule(
+        split,
+        recipe,
+        mask_targets=spec.module_task == "segment",
+        rotated_targets=spec.module_task == "obb",
+    )
     _make_trainer(recipe, deterministic).fit(module, datamodule=datamodule)
     score, instances = spec.scorer(module, datamodule)
     return score, instances, num_classes
@@ -734,7 +857,7 @@ def run_overfit(task: str = "det") -> dict[str, float]:
     """
     spec = TASK_SPECS[task]
     recipe = load_recipe()
-    split = generate_slice()
+    split = generate_slice(spec.slice_dir, spec.generator_task)
     try:
         score, instances, num_classes = _train_and_score(recipe, split, True, spec)
     except RuntimeError:
@@ -766,6 +889,24 @@ def overfit_micro_det() -> dict[str, float]:
         ['epochs', 'img_size', 'num_classes', 'num_images', 'num_instances', 'train_recall_at_050']
     """
     return run_overfit("det")
+
+
+def overfit_micro_obb() -> dict[str, float]:
+    """Golden producer: the overfit-100 oriented metrics (WP-088).
+
+    The oriented counterpart of :func:`overfit_micro_det`, with the same
+    accelerator-only status: it retrains the slice from scratch, so its golden lives
+    under ``goldens/gpu/`` and the default offline harness never recomputes it.
+
+    Returns:
+        The metric mapping from :func:`run_overfit`.
+
+    Examples:
+        >>> metrics = overfit_micro_obb()  # doctest: +SKIP
+        >>> sorted(metrics)  # doctest: +SKIP
+        ['epochs', 'img_size', 'num_classes', 'num_images', 'num_instances', 'train_rotated_map50']
+    """
+    return run_overfit("obb")
 
 
 def overfit_micro_seg() -> dict[str, float]:
@@ -817,7 +958,9 @@ def main(argv: list[str] | None = None) -> int:
         unsupported task is requested).
     """
     parser = argparse.ArgumentParser(description="Overfit a fixed ~100-image slice and gate on a train metric.")
-    parser.add_argument("--task", default="det", help="gate to run: 'det' (recall) or 'seg' (mask IoU)")
+    parser.add_argument(
+        "--task", default="det", help="gate to run: 'det' (recall), 'seg' (mask IoU) or 'obb' (rotated mAP50)"
+    )
     parser.add_argument("--freeze", action="store_true", help="write the task's goldens/gpu/ file on success")
     args = parser.parse_args(argv)
 

@@ -209,7 +209,10 @@ def test_collate_batch_is_a_small_constant_segment_count() -> None:
     _images, packed = collate_detection([(torch.zeros(3, 8, 8), target) for target in _ragged_targets()])
     packed_tensors = sum(isinstance(getattr(packed, field.name), torch.Tensor) for field in dataclasses.fields(packed))
     segment_count = 1 + packed_tensors  # the stacked images tensor plus the packed target tensors
-    assert segment_count == 9
+    # 10 since WP-088 added the R18 difficult flags to the transport (was 9). The number
+    # is pinned only to catch a *ragged* modality creeping back in: what matters is that
+    # it does not move with the instance count, which the bound below states.
+    assert segment_count == 10
     assert segment_count < 12
 
 

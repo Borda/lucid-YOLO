@@ -421,14 +421,19 @@ def _assemble(parts: list[_Part]) -> TiledTargets:
             difficult=torch.zeros((0,), dtype=torch.bool),
             visible_fraction=torch.zeros((0,), dtype=torch.float32),
         )
+    # The flag is written into *both* places on purpose: `TiledTargets.difficult` is what
+    # WP-063's adapter reads, while `Targets.difficult` (WP-088) is what travels through a
+    # loader. Filling one and defaulting the other would leave two answers to one question.
+    difficult = torch.tensor([part.difficult for part in parts], dtype=torch.bool)
     targets = Targets(
         boxes=torch.stack([part.box for part in parts], dim=0),
         labels=torch.tensor([part.label for part in parts], dtype=torch.int64),
         rboxes=torch.stack([part.rbox for part in parts], dim=0),
+        difficult=difficult,
     )
     return TiledTargets(
         targets=targets,
-        difficult=torch.tensor([part.difficult for part in parts], dtype=torch.bool),
+        difficult=difficult,
         visible_fraction=torch.tensor([part.fraction for part in parts], dtype=torch.float32),
     )
 

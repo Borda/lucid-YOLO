@@ -308,7 +308,16 @@ class Letterbox:
         boxes = self._warp(targets.boxes.reshape(-1, 2), matrix).reshape(-1, 4)
         polygons = [self._warp(ring, matrix) for ring in targets.polygons]
         rboxes = self._warp_rboxes(targets.rboxes, matrix, geom.r)
-        return Targets(boxes=boxes, labels=targets.labels.clone(), polygons=polygons, rboxes=rboxes)
+        # The instance axis is untouched by a letterbox, so the R18 difficult flags carry
+        # over row for row. This is the one geometric transform on the *evaluation* path,
+        # which is exactly where A48 needs the flag to survive (WP-088).
+        return Targets(
+            boxes=boxes,
+            labels=targets.labels.clone(),
+            polygons=polygons,
+            rboxes=rboxes,
+            difficult=targets.difficult.clone(),
+        )
 
     def _warp_rboxes(self, rboxes: Tensor, matrix: Tensor, r: float) -> Tensor:
         """Warp rotated boxes: centres as points, ``w``/``h`` scaled by ``r``, ``theta`` fixed."""

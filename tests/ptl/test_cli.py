@@ -115,7 +115,13 @@ def _config_cli(path: Path, *extra: str) -> DetectionCLI:
 def test_configs_dir_is_non_empty() -> None:
     """Every shipped config is discovered (guards against an empty glob)."""
     names = {path.name for path in _CONFIG_PATHS}
-    assert {"det_smoke.yaml", "det_ablations.yaml", "overfit_100.yaml", "seg_smoke.yaml"} <= names
+    assert {
+        "det_smoke.yaml",
+        "det_ablations.yaml",
+        "overfit_100.yaml",
+        "seg_smoke.yaml",
+        "obb_smoke.yaml",
+    } <= names
 
 
 @pytest.mark.parametrize("config_path", _CONFIG_PATHS, ids=lambda path: path.name)
@@ -242,3 +248,23 @@ def test_mask_targets_follows_the_model_task(config_name: str, expected: bool) -
     cli = _config_cli(_CONFIGS_DIR / config_name)
 
     assert cli.datamodule._mask_targets is expected
+
+
+@pytest.mark.parametrize(
+    ("config_name", "expected"),
+    [
+        pytest.param("obb_smoke.yaml", True, id="obb-reads-rotated-targets"),
+        pytest.param("det_smoke.yaml", False, id="detect-does-not"),
+    ],
+)
+def test_rotated_targets_follows_the_model_task(config_name: str, expected: bool) -> None:
+    """``model.task`` decides whether the loader reads rotated boxes, with no second knob.
+
+    The failure this guards is silent in exactly the WP-088 way: a loader left in
+    axis-aligned mode hands an ``obb`` run empty ``rboxes``, which is not a shape error
+    anywhere — the step would simply raise on the padding check, or worse, a future
+    fallback would train the plain detection objective while the angle stems idled.
+    """
+    cli = _config_cli(_CONFIGS_DIR / config_name)
+
+    assert cli.datamodule._rotated_targets is expected

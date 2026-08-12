@@ -248,8 +248,13 @@ class PackedTargets:
     Attributes:
         boxes_cat: ``(sum_N, 4)`` float32 ``xyxy`` boxes of every image, concatenated.
         labels_cat: ``(sum_N,)`` int64 class ids aligned with ``boxes_cat``.
+        difficult_cat: ``(sum_N,)`` bool R18 difficult flags aligned with
+            ``boxes_cat`` (WP-088). Transported rather than defaulted on arrival
+            because A48 makes the oriented evaluation depend on the flag: a
+            difficult ground truth that reaches the metric as an ordinary one turns
+            every detection of it into a false positive.
         boxes_per_image: ``(B,)`` int64 instance count per image; splits
-            ``boxes_cat``/``labels_cat`` back into ``B`` images.
+            ``boxes_cat``/``labels_cat``/``difficult_cat`` back into ``B`` images.
         rboxes_cat: ``(sum_M, 5)`` float32 long-edge rotated boxes, concatenated.
         rboxes_per_image: ``(B,)`` int64 rotated-box count per image; splits
             ``rboxes_cat``.
@@ -284,6 +289,7 @@ class PackedTargets:
 
     boxes_cat: Tensor
     labels_cat: Tensor
+    difficult_cat: Tensor
     boxes_per_image: Tensor
     rboxes_cat: Tensor
     rboxes_per_image: Tensor
@@ -332,6 +338,7 @@ def pack_targets(targets: list[Targets]) -> PackedTargets:
     return PackedTargets(
         boxes_cat=boxes_cat,
         labels_cat=labels_cat,
+        difficult_cat=torch.cat([target.difficult for target in targets], dim=0),
         boxes_per_image=counts([int(target.boxes.shape[0]) for target in targets]),
         rboxes_cat=rboxes_cat,
         rboxes_per_image=counts([int(target.rboxes.shape[0]) for target in targets]),
@@ -375,6 +382,7 @@ def unpack_targets(packed: PackedTargets) -> list[Targets]:
 
     boxes = torch.split(packed.boxes_cat, boxes_per_image)
     labels = torch.split(packed.labels_cat, boxes_per_image)
+    difficult = torch.split(packed.difficult_cat, boxes_per_image)
     rboxes = torch.split(packed.rboxes_cat, rboxes_per_image)
     rings = list(torch.split(packed.polygon_points_cat, points_per_ring)) if points_per_ring else []
 
@@ -384,7 +392,13 @@ def unpack_targets(packed: PackedTargets) -> list[Targets]:
         image_rings = rings[ring_cursor : ring_cursor + ring_count]
         ring_cursor += ring_count
         targets.append(
-            Targets(boxes=boxes[index], labels=labels[index], polygons=list(image_rings), rboxes=rboxes[index])
+            Targets(
+                boxes=boxes[index],
+                labels=labels[index],
+                polygons=list(image_rings),
+                rboxes=rboxes[index],
+                difficult=difficult[index],
+            )
         )
     return targets
 
@@ -571,14 +585,32 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
             :func:`~lucid_yolo.data.coco.build_scale_policy` (``scale``, ``mixup``,
             ``copy_paste``).
         seed: Seed for the single :class:`torch.Generator` driving every draw.
+        oriented: Whether the base dataset yields rotated targets. It suppresses
+            copy-paste, which cannot act on a modality that carries no polygons
+            (WP-056); every other stage is unchanged, and in particular the draw
+            sequence is not — the copy-paste probability is *consulted* as always,
+            it simply never fires.
     """
 
-    def __init__(self, base: CocoDetectionDataset, img_size: int, policy: dict[str, float], seed: int) -> None:
+    def __init__(
+        self,
+        base: CocoDetectionDataset,
+        img_size: int,
+        policy: dict[str, float],
+        seed: int,
+        oriented: bool = False,
+    ) -> None:
         self._base = base
         self._img_size = int(img_size)
         self.mosaic_p = float(_MOSAIC_PROB)
         self._mixup_prob = policy["mixup"]
-        self._copy_paste_prob = policy["copy_paste"]
+        # Copy-paste is structurally unavailable on the oriented path, not merely
+        # unhelpful: it transfers *rasterised polygon masks*, and WP-056 keeps rotated
+        # targets without polygons on purpose, so a rotated instance has nothing to
+        # paste. `CopyPaste` says exactly that by raising, which means the composition —
+        # not the transform — is what has to know. Mosaic and mixup are unaffected: both
+        # carry `rboxes` through (WP-058).
+        self._copy_paste_prob = 0.0 if oriented else policy["copy_paste"]
         self._generator = torch.Generator().manual_seed(seed)
         self._mosaic = MosaicAssembly(self._img_size, generator=self._generator)
         self._fused = FusedAffineLetterbox(
@@ -693,6 +725,12 @@ class DetectionDataModule(LightningDataModule):
             to ``False`` (WP-076): respawning costs seconds per epoch while a
             persistent pool accumulates per-worker memory for the whole run —
             the observed slow-creep OOM on long containerized runs.
+        rotated_targets: Read every annotation's four-point ring as a rotated box
+            (:class:`~lucid_yolo.data.coco.CocoDetectionDataset`'s ``oriented`` mode,
+            WP-088), so both loaders emit ``Targets`` whose ``rboxes`` pair 1:1 with
+            their ``boxes``. Off by default because it requires a quadrilateral ring
+            per instance; the CLI turns it on for ``model.task="obb"``. Costs no extra
+            transport — the packed batch has carried a rotated-box axis since WP-055.
         mask_targets: Rasterise the segmentation mask targets in the loader workers
             (:func:`collate_detection`) instead of leaving that CPU work in the
             training process. Off by default because it requires a polygon ring per
@@ -728,9 +766,11 @@ class DetectionDataModule(LightningDataModule):
         val_num_workers: int | None = None,
         persistent_workers: bool = False,
         mask_targets: bool = False,
+        rotated_targets: bool = False,
     ) -> None:
         super().__init__()
         self._mask_targets = bool(mask_targets)
+        self._rotated_targets = bool(rotated_targets)
         self._batch_size = int(batch_size)
         self._img_size = int(img_size)
         self._prefetch_factor = int(prefetch_factor)
@@ -766,9 +806,14 @@ class DetectionDataModule(LightningDataModule):
             stage: The Lightning stage (``"fit"``/``"validate"``/…); unused, both
                 splits are always built so repeated calls are idempotent.
         """
-        base = CocoDetectionDataset(self._train_images_dir, self._train_ann_file)
-        self._train = _TrainPipeline(base, self._img_size, self._policy, self._seed)
-        self._val = CocoDetectionDataset(self._val_images_dir, self._val_ann_file, transforms=Letterbox(self._img_size))
+        base = CocoDetectionDataset(self._train_images_dir, self._train_ann_file, oriented=self._rotated_targets)
+        self._train = _TrainPipeline(base, self._img_size, self._policy, self._seed, oriented=self._rotated_targets)
+        self._val = CocoDetectionDataset(
+            self._val_images_dir,
+            self._val_ann_file,
+            transforms=Letterbox(self._img_size),
+            oriented=self._rotated_targets,
+        )
 
     def on_after_batch_transfer(
         self, batch: tuple[Tensor, PackedTargets] | tuple[Tensor, list[Targets]], dataloader_idx: int

@@ -21,6 +21,24 @@ Crowd / RLE policy:
     exactly one ring, so :class:`~lucid_yolo.data.targets.Targets` sees a consistent
     "one ring per box" set (or an empty set) rather than a mix.
 
+Oriented reading (``oriented=True``, WP-088):
+    A COCO file written for an oriented task carries each object's rotated box as a
+    **four-point** ``segmentation`` ring — the same quadrilateral encoding DOTA's
+    eight-coordinate label lines use (R18), in COCO's container. Under ``oriented``
+    every ring is fitted to a canonical long-edge box by
+    :func:`~lucid_yolo.data.rotated_geom.polygons_to_rboxes` and the axis-aligned
+    ``boxes`` are recomputed as the **envelope of that same ring** rather than read
+    from the ``bbox`` field, so ``boxes[i]`` and ``rboxes[i]`` describe one object by
+    construction — the instance-axis invariant :mod:`lucid_yolo.data.dota` states and
+    every rotated transform (WP-058) relies on. A ring that is not a quadrilateral
+    raises: it is an annotation this reader cannot turn into a rotated box, and
+    dropping it silently would shrink the dataset without saying so.
+
+    ``polygons`` is left empty on this path, exactly as in
+    :func:`~lucid_yolo.data.dota.dota_targets`: the quad is already carried by
+    ``rboxes`` up to the rectangle fit, and a second copy is one more modality every
+    warp would have to keep consistent for no reader.
+
 :func:`build_scale_policy` returns the size-aware augmentation strengths of
 [R1] Table S3 (blueprint sec. 5.9): the ``n`` recipe is mildest and larger
 variants grow stronger. The exact per-variant tuples are this project's reading
@@ -39,13 +57,13 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from torchvision.io import ImageReadMode, read_image
 
+from lucid_yolo.data.rotated_geom import polygons_to_rboxes
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.data.transforms import GeometricTransform, boxes_from_polygons
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
-
-    from lucid_yolo.data.transforms import GeometricTransform
 
 __all__ = ["CocoDetectionDataset", "build_scale_policy"]
 
@@ -53,6 +71,8 @@ __all__ = ["CocoDetectionDataset", "build_scale_policy"]
 _POINT_STRIDE = 2
 #: Minimum vertices for a polygon to bound any area.
 _MIN_RING_POINTS = 3
+#: Vertices of the quadrilateral an oriented annotation encodes its rotated box as.
+_QUAD_CORNERS = 4
 #: 8-bit image scale factor mapping ``uint8`` pixels into ``[0, 1]`` float.
 _UINT8_MAX = 255.0
 
@@ -144,6 +164,9 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         annotation_file: Path to the COCO ``instances_*.json`` file.
         transforms: Optional per-image geometric transform applied to every
             sample. Defaults to ``None`` (raw decoded sample).
+        oriented: Read each annotation's four-point ring as a rotated box (WP-088;
+            see the module docstring). ``False`` (the default) leaves the reader,
+            and every target it has ever produced, exactly as it was.
 
     Attributes:
         category_id_to_label: Mapping from COCO category id to contiguous label.
@@ -163,9 +186,11 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         images_dir: Path,
         annotation_file: Path,
         transforms: GeometricTransform | None = None,
+        oriented: bool = False,
     ) -> None:
         self._images_dir = images_dir
         self._transforms = transforms
+        self._oriented = bool(oriented)
         with annotation_file.open(encoding="utf-8") as handle:
             payload = json.load(handle)
         self.category_id_to_label, self.label_to_category_id = _build_category_maps(payload["categories"])
@@ -240,9 +265,12 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             polygons.append(ring)
         if not boxes:
             return Targets.empty()
+        label_tensor = torch.tensor(labels, dtype=torch.int64)
+        if self._oriented:
+            return _oriented_targets(polygons, label_tensor, record.file_name)
         return Targets(
             boxes=torch.tensor(boxes, dtype=torch.float32),
-            labels=torch.tensor(labels, dtype=torch.int64),
+            labels=label_tensor,
             polygons=polygons,
         )
 
@@ -260,6 +288,47 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         box = _xywh_to_xyxy(ann["bbox"], record.height, record.width)  # type: ignore[arg-type]
         label = self.category_id_to_label[int(ann["category_id"])]  # type: ignore[call-overload]
         return box, label, ring
+
+
+def _oriented_targets(rings: list[Tensor], labels: Tensor, file_name: str) -> Targets:
+    """Fit one image's quadrilateral rings to rotated boxes and their shared envelopes.
+
+    Both axis-aligned and rotated boxes are derived from the *same* ring, which is what
+    makes ``boxes[i]`` and ``rboxes[i]`` provably one object rather than two annotations
+    that happen to be listed in the same order. Reading ``boxes`` from COCO's ``bbox``
+    field instead would pair the rotated fit with whatever the writer chose to put there
+    — on the generated oriented slice that is measurably not the quad's envelope.
+
+    Args:
+        rings: One ``(P, 2)`` ring per instance, in annotation order.
+        labels: ``(N,)`` int64 class ids aligned with ``rings``.
+        file_name: Image file name, named in the error when a ring is not a quad.
+
+    Returns:
+        Targets whose ``boxes``, ``labels`` and ``rboxes`` share one instance axis and
+        whose ``polygons`` is empty.
+
+    Raises:
+        ValueError: If any ring does not have exactly four points.
+
+    Examples:
+        >>> import torch
+        >>> quad = torch.tensor([[3.0, 2.0], [7.0, 2.0], [7.0, 4.0], [3.0, 4.0]])
+        >>> targets = _oriented_targets([quad], torch.tensor([1]), "img.jpg")
+        >>> targets.boxes.tolist(), [round(v, 4) for v in targets.rboxes[0].tolist()]
+        ([[3.0, 2.0, 7.0, 4.0]], [5.0, 3.0, 4.0, 2.0, 0.0])
+    """
+    sides = {int(ring.shape[0]) for ring in rings}
+    if sides != {_QUAD_CORNERS}:
+        raise ValueError(
+            f"{file_name}: oriented reading needs a {_QUAD_CORNERS}-point ring per instance; "
+            f"got ring sizes {sorted(sides)}"
+        )
+    return Targets(
+        boxes=boxes_from_polygons(rings),
+        labels=labels,
+        rboxes=polygons_to_rboxes(torch.stack(rings, dim=0)),
+    )
 
 
 def _build_category_maps(categories: list[dict[str, object]]) -> tuple[dict[int, int], dict[int, int]]:

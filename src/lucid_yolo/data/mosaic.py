@@ -256,7 +256,9 @@ class MosaicAssembly:
         pre_boxes = rbox_envelopes(shifted)
         rboxes, post_boxes = clip_rboxes_to_canvas(shifted, float(canvas_size), float(canvas_size))
         keep = self._keep_mask(pre_boxes, post_boxes)
-        full = Targets(boxes=post_boxes, labels=targets.labels.clone(), rboxes=rboxes)
+        full = Targets(
+            boxes=post_boxes, labels=targets.labels.clone(), rboxes=rboxes, difficult=targets.difficult.clone()
+        )
         # WP-056's invariant, checked on the way in, is what makes one mask serve both axes.
         return full.filter(keep, rkeep=keep)
 
@@ -268,7 +270,12 @@ class MosaicAssembly:
         clipped_rings = [ring.clamp(0.0, float(canvas_size)) for ring in shifted_rings]
         post_boxes = boxes_from_polygons(clipped_rings)
         keep = self._keep_mask(pre_boxes, post_boxes)
-        full = Targets(boxes=post_boxes, labels=targets.labels.clone(), polygons=clipped_rings)
+        full = Targets(
+            boxes=post_boxes,
+            labels=targets.labels.clone(),
+            polygons=clipped_rings,
+            difficult=targets.difficult.clone(),
+        )
         return full.filter(keep)
 
     def _place_boxes_only(self, targets: Targets, off_x: int, off_y: int, canvas_size: int) -> Targets:
@@ -277,7 +284,7 @@ class MosaicAssembly:
         pre_boxes = targets.boxes + shift
         post_boxes = pre_boxes.clamp(0.0, float(canvas_size))
         keep = self._keep_mask(pre_boxes, post_boxes)
-        full = Targets(boxes=post_boxes, labels=targets.labels.clone())
+        full = Targets(boxes=post_boxes, labels=targets.labels.clone(), difficult=targets.difficult.clone())
         return full.filter(keep)
 
     def _keep_mask(self, pre_boxes: Tensor, post_boxes: Tensor) -> Tensor:

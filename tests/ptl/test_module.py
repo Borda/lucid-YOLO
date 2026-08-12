@@ -35,6 +35,7 @@ from lucid_yolo.losses.dual_loss import DualLossOutput
 from lucid_yolo.models.heads.detect import decode_ltrb
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.ptl import DetectionLitModule, collate_detection, pad_targets, unpack_batch
+from lucid_yolo.ptl.module import _StepContext
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -219,19 +220,33 @@ def test_invalid_task_raises() -> None:
         _tiny_module(task="pose")
 
 
-@pytest.mark.parametrize("task", [pytest.param("detect", id="detect"), pytest.param("obb", id="obb")])
-def test_task_extra_loss_is_inert_zero(task: str) -> None:
-    """The task extra-loss stub returns a zero scalar for the tasks with no extra supervision.
+def test_task_extra_loss_is_inert_zero_for_detection() -> None:
+    """The task extra-loss dispatch returns a zero scalar for the one task with no extra term.
 
-    ``segment`` is excluded: WP-087 made its contribution live, and
-    ``tests/ptl/test_seg_training.py`` covers it.
+    ``segment`` and ``obb`` are excluded: WP-087 and WP-088 made their contributions
+    live, and ``test_seg_training.py`` / ``test_obb_training.py`` cover them. Detection
+    is the task whose total must stay *exactly* the dual detection loss, so the zero is
+    asserted rather than assumed.
     """
-    module = _tiny_module(task=task)
+    module = _tiny_module(task="detect")
     images, targets = _synthetic_batch()
     gt_boxes, _, _ = pad_targets(targets)
-    extra = module._task_extra_loss(
-        None, targets, _dual_loss_output(module, images, targets), gt_boxes, (_IMG_SIZE, _IMG_SIZE), "train", None
+    head_out = module(images)
+    anchor_points, strides = module._anchor_grid(_IMG_SIZE, _IMG_SIZE, images.device)
+    context = _StepContext(
+        head_out=head_out,
+        seg_out=None,
+        targets=targets,
+        gt_boxes=gt_boxes,
+        gt_rboxes=None,
+        anchor_points=anchor_points,
+        strides=strides,
+        image_size=(_IMG_SIZE, _IMG_SIZE),
+        masks=None,
     )
+
+    extra = module._task_extra_loss(context, _dual_loss_output(module, images, targets), "train")
+
     assert extra.ndim == 0
     assert float(extra) == 0.0
 

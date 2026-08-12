@@ -426,7 +426,9 @@ class RandomAffine:
         pre_boxes = rbox_envelopes(warped)
         rboxes, post_boxes = clip_rboxes_to_canvas(warped, float(height), float(width))
         keep = self._keep_mask(pre_boxes, post_boxes)
-        full = Targets(boxes=post_boxes, labels=targets.labels.clone(), rboxes=rboxes)
+        full = Targets(
+            boxes=post_boxes, labels=targets.labels.clone(), rboxes=rboxes, difficult=targets.difficult.clone()
+        )
         # One mask over both axes: WP-056's invariant is what makes `rkeep=keep` correct,
         # and `check_rotated_pairing` has already refused anything that breaks it.
         return full.filter(keep, rkeep=keep)
@@ -438,7 +440,12 @@ class RandomAffine:
         clipped_rings = [self._clip_points(ring, height, width) for ring in warped_rings]
         post_boxes = boxes_from_polygons(clipped_rings)
         keep = self._keep_mask(pre_boxes, post_boxes)
-        full = Targets(boxes=post_boxes, labels=targets.labels.clone(), polygons=clipped_rings)
+        full = Targets(
+            boxes=post_boxes,
+            labels=targets.labels.clone(),
+            polygons=clipped_rings,
+            difficult=targets.difficult.clone(),
+        )
         return full.filter(keep)
 
     def _warp_boxes_only(self, targets: Targets, matrix: Tensor, height: int, width: int) -> Targets:
@@ -446,7 +453,7 @@ class RandomAffine:
         pre_boxes = self._transform_box_corners(targets.boxes, matrix)
         post_boxes = self._clip_boxes(pre_boxes, height, width)
         keep = self._keep_mask(pre_boxes, post_boxes)
-        full = Targets(boxes=post_boxes, labels=targets.labels.clone())
+        full = Targets(boxes=post_boxes, labels=targets.labels.clone(), difficult=targets.difficult.clone())
         return full.filter(keep)
 
     def _keep_mask(self, pre_boxes: Tensor, post_boxes: Tensor) -> Tensor:

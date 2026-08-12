@@ -25,6 +25,14 @@ for this work package: it lands as the WP-035 progressive-loss hook, which sets
 this attribute per epoch. Exposing ``alpha`` as a bare attribute is exactly the
 seam that hook writes to.
 
+Oriented ground truths (WP-088) ride through on the optional ``gt_rboxes`` argument
+of :meth:`DualBranchLoss.__call__`, which is forwarded unchanged to both assigners.
+It reaches **only** their candidate filter (A25): with it, an anchor is eligible when
+its centre lies inside the rotated ground truth rather than inside the axis-aligned
+envelope. The rotated *objective* is not assembled here — it is composed by the
+oriented training step from :mod:`lucid_yolo.losses.oriented_loss`, against the very
+assignments this class returns.
+
 The two assigners are exposed as :attr:`DualBranchLoss.o2m_assigner` and
 :attr:`DualBranchLoss.o2o_assigner` so callers can inspect or reconfigure the
 assignment independently of the loss. Both consume per-anchor class
@@ -155,6 +163,7 @@ class DualBranchLoss:
         gt_labels: Tensor,
         gt_mask: Tensor,
         strides: Tensor | None = None,
+        gt_rboxes: Tensor | None = None,
     ) -> DualLossOutput:
         """Score both branches against their own assignments and combine them.
 
@@ -172,6 +181,15 @@ class DualBranchLoss:
                 both branch losses so their L1 terms are measured in stride
                 units (A13 revision, WP-078). The training path always passes
                 strides.
+            gt_rboxes: Optional ``(B, N, 5)`` rotated ground truths in the
+                long-edge convention, entry ``(b, n)`` describing the same object
+                as ``gt_boxes[b, n]``. Forwarded verbatim to **both** assigners,
+                where it switches candidacy to point-in-rotated-rect containment
+                (WP-061, A25) and nothing else: the IoU, the alignment metric, the
+                targets and the weights keep running on the axis-aligned
+                envelopes. Omitted (the default) leaves the assignment, and
+                therefore every tensor operation on this path, exactly as it was —
+                which is what keeps the detection objective bit-identical.
 
         Returns:
             A :class:`DualLossOutput` with the combined ``total``, each branch's
@@ -193,8 +211,12 @@ class DualBranchLoss:
             >>> bool(torch.isfinite(logits.grad).all())
             True
         """
-        o2m_assign = self.o2m_assigner(o2m_logits.sigmoid(), o2m_boxes, anchor_points, gt_boxes, gt_labels, gt_mask)
-        o2o_assign = self.o2o_assigner(o2o_logits.sigmoid(), o2o_boxes, anchor_points, gt_boxes, gt_labels, gt_mask)
+        o2m_assign = self.o2m_assigner(
+            o2m_logits.sigmoid(), o2m_boxes, anchor_points, gt_boxes, gt_labels, gt_mask, gt_rboxes
+        )
+        o2o_assign = self.o2o_assigner(
+            o2o_logits.sigmoid(), o2o_boxes, anchor_points, gt_boxes, gt_labels, gt_mask, gt_rboxes
+        )
         o2m_out = self._o2m_loss(o2m_logits, o2m_boxes, o2m_assign, strides)
         o2o_out = self._o2o_loss(o2o_logits, o2o_boxes, o2o_assign, strides)
         total = self.alpha * o2m_out.total + (1.0 - self.alpha) * o2o_out.total

@@ -18,6 +18,27 @@ Conventions:
       only *carries* rotated boxes; canonicalization (the ``w >= h`` / angle-range
       guarantee) is implemented and enforced in WP-055, so ``__post_init__`` here
       validates shape and dtype only, never the angle range.
+    * ``difficult`` — R18's per-instance ``difficult`` flag, on the shared instance
+      axis. Omitted means "no instance is difficult", which is what every
+      non-oriented dataset means (WP-088).
+
+The ``difficult`` channel (A48, A51):
+    R18 marks instances a detector is not penalised for missing *or* for finding,
+    and :func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map` implements that rule
+    — but only if the flag reaches it. Filtering difficult instances at load instead
+    (``keep_difficult=False``) deletes the ground truth an ignorable detection would
+    have matched, so every such detection is scored as a false positive and the
+    metric is silently depressed. A48 therefore makes ``keep_difficult=True`` a
+    requirement of the *evaluation* loader, and this field is the channel that
+    obligation needs: without somewhere to put the flag, keeping the instance and
+    dropping the instance are the same thing downstream.
+
+    The flag survives :meth:`Targets.filter`, :meth:`Targets.concat`,
+    :meth:`Targets.clone`, the letterbox transform (the only geometric transform on
+    the evaluation path) and the loader's packed transport. Train-time
+    multi-image assemblies rebuild their instance axis and are documented at each
+    site; the flag is not consumed in training at all (A39 leaves that policy open),
+    so this WP evaluates per tile and trains on whatever the loader kept.
 
 Angles are radians throughout. Images are CHW ``float`` tensors elsewhere in the
 pipeline; this container is image-agnostic and stores geometry only.
@@ -55,6 +76,11 @@ def _empty_rboxes() -> Tensor:
     return torch.zeros((0, _RBOX_DIM), dtype=torch.float32)
 
 
+def _empty_flags() -> Tensor:
+    """Return an empty ``(0,)`` bool flag tensor (the "no instance is difficult" default)."""
+    return torch.zeros((0,), dtype=torch.bool)
+
+
 def _validate_mask(mask: Tensor, expected_len: int, name: str) -> None:
     """Validate a boolean selection mask against an expected axis length.
 
@@ -90,6 +116,10 @@ class Targets:
             masks) or ``N`` (one ring per box).
         rboxes: ``(M, 5)`` float32 long-edge rotated boxes
             ``(cx, cy, w, h, theta)``; empty ``(0, 5)`` when there are none.
+        difficult: ``(N,)`` bool R18 difficult flags on the shared instance axis.
+            Defaults to empty, which ``__post_init__`` expands to an all-``False``
+            row per instance — so "omitted" and "nothing is difficult" are the same
+            statement and every consumer may read the field unconditionally.
 
     Examples:
         ```pycon
@@ -110,12 +140,14 @@ class Targets:
     labels: Tensor
     polygons: list[Tensor] = field(default_factory=list)
     rboxes: Tensor = field(default_factory=_empty_rboxes)
+    difficult: Tensor = field(default_factory=_empty_flags)
 
     def __post_init__(self) -> None:
         """Validate shapes and dtypes of every modality; raise on any mismatch."""
         self._validate_boxes_labels()
         self._validate_polygons()
         self._validate_rboxes()
+        self._resolve_difficult()
 
     def _validate_boxes_labels(self) -> None:
         """Check box/label shapes, dtypes and their shared length."""
@@ -150,6 +182,23 @@ class Targets:
         if self.rboxes.dtype != torch.float32:
             raise TypeError(f"rboxes must be float32; got {self.rboxes.dtype}")
 
+    def _resolve_difficult(self) -> None:
+        """Expand an omitted ``difficult`` to one ``False`` per instance, then validate it.
+
+        Filling the default here rather than leaving it empty is what lets every
+        consumer index the field alongside ``labels`` without first asking whether the
+        producer supplied it — the alternative is an ``Optional`` that each of them
+        re-defaults, differently.
+        """
+        count = self.boxes.shape[0]
+        if self.difficult.numel() == 0 and count:
+            self.difficult = torch.zeros((count,), dtype=torch.bool)
+            return
+        if self.difficult.dtype != torch.bool:
+            raise TypeError(f"difficult must be bool; got {self.difficult.dtype}")
+        if self.difficult.ndim != 1 or self.difficult.shape[0] != count:
+            raise ValueError(f"difficult must be 1-D of length {count}; got shape {tuple(self.difficult.shape)}")
+
     def clone(self) -> Targets:
         """Return a deep copy whose every tensor is independent of ``self``.
 
@@ -174,6 +223,7 @@ class Targets:
             labels=self.labels.clone(),
             polygons=[poly.clone() for poly in self.polygons],
             rboxes=self.rboxes.clone(),
+            difficult=self.difficult.clone(),
         )
 
     def filter(self, keep: Tensor, rkeep: Tensor | None = None) -> Targets:
@@ -224,6 +274,7 @@ class Targets:
             labels=self.labels[keep].clone(),
             polygons=selected_polygons,
             rboxes=self._filter_rboxes(rkeep),
+            difficult=self.difficult[keep].clone(),
         )
 
     def _filter_rboxes(self, rkeep: Tensor | None) -> Tensor:
@@ -272,6 +323,7 @@ class Targets:
             labels=torch.cat([t.labels for t in items], dim=0),
             polygons=cls._concat_polygons(items),
             rboxes=torch.cat([t.rboxes for t in items], dim=0),
+            difficult=torch.cat([t.difficult for t in items], dim=0),
         )
 
     @staticmethod

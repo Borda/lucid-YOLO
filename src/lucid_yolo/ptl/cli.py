@@ -164,6 +164,11 @@ class DetectionCLI(LightningCLI):
         # first box without a ring, and one that did not for a segmentation run would
         # silently put that CPU work back on the critical path.
         parser.link_arguments("model.task", "data.mask_targets", compute_fn=lambda task: task == "segment")
+        # The oriented counterpart (WP-088), linked for the same reason: the task already
+        # states whether rotated boxes are supervised, and a loader that disagreed would
+        # either raise on the first non-quadrilateral ring or hand an obb run empty
+        # `rboxes` — which trains the plain detection objective and reports nothing wrong.
+        parser.link_arguments("model.task", "data.rotated_targets", compute_fn=lambda task: task == "obb")
 
     def instantiate_trainer(self, **kwargs: Any) -> Trainer:
         """Instantiate the trainer with the ``--progress_bar`` choice and default loggers.

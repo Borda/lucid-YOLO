@@ -16,16 +16,18 @@ Three pieces compose the protocol, mirroring the axis-aligned
 - :func:`rotated_detections_to_predictions` and :func:`tiled_targets_to_ground_truth` —
   the adapters from the A45 oriented detection tuple and from WP-057's tiled targets.
 
-Scope — what this module is **not** (WP-088):
+Scope — what this module is **not** (WP-064):
     It scores predictions against ground truth **as supplied**, one evaluation unit at a
     time. It does **not** merge detections from the overlapping 1024 px tiles of
     :func:`~lucid_yolo.data.tiling.tile_windows` back onto whole DOTA images. That step is
     genuinely underspecified on an NMS-free path — two overlapping tiles both detect the
     same object at full confidence and there is no suppression stage to remove the
-    duplicate — and it is deferred to WP-088 together with the policy it needs. Until then
-    the honest reading of a number this module produces is **per-tile** mAP, not
-    whole-image mAP, and the two are not interchangeable: a tile-level score never pays
-    the duplicate-detection cost that whole-image evaluation charges.
+    duplicate — so it needs a policy decided rather than inherited. WP-063 deferred it to
+    WP-088, whose scope never took it up; it belongs to WP-064, the tier that first quotes
+    a whole-image number. Until that lands the honest reading of a number this module
+    produces is **per-tile** mAP, not whole-image mAP, and the two are not interchangeable:
+    a tile-level score never pays the duplicate-detection cost that whole-image evaluation
+    charges.
 
 Protocol constants, fixed here as decisions:
     R1 states the evaluation target ("rotated mAP50-95 on DOTA-v1.0 val", Tables 10-11)
@@ -120,7 +122,7 @@ Precision, and why there is no float64 here:
     — a cliff that merely starts later. Shifting *before* makes the kernel scale-free, at
     the cost of canonicalizing ``M * N`` boxes rather than ``M + N``. That price is worth
     paying now rather than later: tiles are 1024 px local, so nothing in this work package
-    exercises the cliff, but WP-088 evaluates on whole DOTA images whose coordinates reach
+    exercises the cliff, but WP-064 evaluates on whole DOTA images whose coordinates reach
     10^4, and a metric that quietly loses three digits at that scale would be found by
     nobody.
 

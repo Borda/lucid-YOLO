@@ -360,4 +360,11 @@ class HorizontalFlip:
             mirrored[:, 0] = width - ring[:, 0]
             polygons.append(mirrored)
         rboxes = mirror_rboxes(targets.rboxes, width)
-        return Targets(boxes=boxes, labels=targets.labels.clone(), polygons=polygons, rboxes=rboxes)
+        # A mirror keeps the instance axis, so the per-instance R18 flags ride along.
+        return Targets(
+            boxes=boxes,
+            labels=targets.labels.clone(),
+            polygons=polygons,
+            rboxes=rboxes,
+            difficult=targets.difficult.clone(),
+        )

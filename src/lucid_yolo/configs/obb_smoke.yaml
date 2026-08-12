@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+# OBB-smoke tier (blueprint sec. 10 tier A): ~50 DOTA epochs, oriented boxes. `variant`
+# below is this file's default scale, not a claim about the run -- `--variant`
+# overrides it.
+# The det_smoke.yaml recipe with `task: obb`. The classification objective and the
+# assignment are unchanged; the two box terms are the rotated ones (WP-088) and the
+# R1 Eq. 15 angle term rides on top -- see the DetectionLitModule docstring for the
+# per-term table. `box_gain`/`l1_gain` name the IoU and L1 *slots*, which under this
+# task hold ProbIoU (A49) and the rotated L1 (A50). Acceptance: stable training and a
+# rotated mAP50 that tracks the box mAP; the fast wiring gate is
+# `scripts/overfit_micro.py --task obb` (train rotated mAP50 >= 0.9), which runs in
+# minutes and must pass before any DOTA launch. ADR-001 boundary: this file carries
+# only run-level configuration -- topology is named by `variant` only and lives in
+# lucid_yolo/models/registry.py, never here.
+seed_everything: 0
+
+# Registry row, not a topology (ADR-001). Expands via scale_spec() onto the
+# module's depth/width/max_channels and the datamodule augmentation policy.
+variant: n
+
+trainer:
+  max_epochs: 50 # blueprint sec. 10 tier A: ~50 epochs, mirroring Det-smoke
+  # determinism: CLI default (default_determinism) — strict on CPU/CUDA, warn_only on MPS
+  gradient_clip_val: 10.0 # A31: bounds the violent opening steps of the from-scratch recipe
+  callbacks:
+    # Disable mosaic for the final epochs (blueprint sec. 5.9, R1 Table S3: close_mosaic 8-10).
+    - class_path: lucid_yolo.ptl.callbacks.CloseMosaicCallback
+      init_args:
+        close_mosaic: 10
+    # EMA weights, used for eval (blueprint D4).
+    - class_path: lucid_yolo.ptl.callbacks.EMACallback
+
+model:
+  task: obb # builds both branches' angle stems and swaps in the rotated box terms
+  num_classes: 15 # DOTA-v1.0 (R18): len(lucid_yolo.data.dota.DOTA_CLASSES)
+  lr: 0.01 # blueprint sec. 5.8 (R1 Tables S2/S5): lr0
+  lrf: 0.01 # A8: linear decay to lr0*lrf over the run (WP-072)
+  warmup_epochs: 3 # A8/A31: opening linear LR warmup, generic from-scratch practice
+  momentum: 0.95 # blueprint sec. 5.8: momentum ~0.94-0.95
+  weight_decay: 0.0005 # blueprint sec. 5.8: weight_decay 5e-4
+  box_gain: 7.5 # A49: the IoU slot, here the rotated ProbIoU; A13's value carries over
+  cls_gain: 0.5 # blueprint sec. 5.7: cls gain, unchanged by the task
+  l1_gain: 6.0 # A50: the L1 slot, retargeted onto the rotated box's own (cx, cy, w, h)
+  angle_gain: 1.0 # A22: R1 Eq. 15's weight in the total objective (the paper states none)
+  rotated_iou_form: hellinger # A49: R17's bounded L1 = H_D; "bhattacharyya" is the unbounded L2
+  alpha_init: 0.8 # blueprint sec. 5.7 (R1 Eq. 2-3): ProgLoss ramp start, weights (0.8, 0.2)
+  alpha_final: 0.1 # blueprint sec. 5.7: ProgLoss ramp end, weights (0.1, 0.9)
+
+data:
+  # PLACEHOLDER -- a COCO-layout root whose `segmentation` rings are the four-corner
+  # quadrilaterals of the oriented annotation (the loader's `rotated_targets` mode,
+  # linked from `model.task`). DOTA's own labelTxt tree is read by
+  # lucid_yolo.data.dota and tiled by lucid_yolo.data.tiling into that layout;
+  # neither is ever downloaded (AGENTS.md sec. 3).
+  data_root: /path/to/dota_tiles
+  batch_size: 16 # PLACEHOLDER -- tune to accelerator memory
+  img_size: 1024 # R18 sec. 4 / R1 sec. 4.4: the DOTA crop side
+  # num_workers: auto (min(batch_size, cpu count)); set 0 for byte-identical deterministic epochs

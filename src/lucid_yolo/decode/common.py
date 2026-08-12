@@ -31,9 +31,11 @@ __all__ = [
     "BOX_CORNERS",
     "DET_WIDTH",
     "PAD_ANCHOR_INDEX",
+    "RBOX_COLUMNS",
     "SCORE_COLUMN",
     "pad_anchor_indices",
     "pad_detections",
+    "rboxes_to_letterboxed_original",
     "to_letterboxed_original",
 ]
 
@@ -42,6 +44,9 @@ DET_WIDTH = 6
 
 #: Number of box-coordinate columns (the ``xyxy`` corners) of a detection tuple.
 BOX_CORNERS = 4
+
+#: Number of box columns of the A45 oriented tuple ``(cx, cy, w, h, theta)``.
+RBOX_COLUMNS = 5
 
 #: Column index of the confidence score within the A9 detection tuple.
 SCORE_COLUMN = 4
@@ -174,3 +179,67 @@ def to_letterboxed_original(
     mapped_points = letterbox.inverse_map(corner_points, orig_size, letterboxed_size)
     mapped_boxes = mapped_points.reshape(batch, num_det, BOX_CORNERS)
     return torch.cat((mapped_boxes, detections[..., BOX_CORNERS:]), dim=-1)
+
+
+def rboxes_to_letterboxed_original(
+    detections: Tensor,
+    orig_size: tuple[int, int],
+    letterboxed_size: tuple[int, int],
+    allow_upscale: bool = True,
+) -> Tensor:
+    """Un-letterbox **oriented** detections back to original-image coordinates (A10, A45).
+
+    The rotated twin of :func:`to_letterboxed_original`, for the A45 tuple
+    ``[cx, cy, w, h, theta, score, class]``. A letterbox is one isotropic scale plus a
+    translation, so its inverse maps a rectangle onto a rectangle exactly: the centre
+    goes through the same point inverse the axis-aligned corners use, the two extents
+    divide by the same ratio, and **``theta`` is unchanged** — an isotropic map turns
+    no angle. That is why this is an exact inverse rather than a re-fit, and why the
+    long-edge convention survives it: ``w >= h`` is preserved by scaling both by one
+    positive number.
+
+    The ratio is not passed in but recovered from the two sizes through
+    :class:`~lucid_yolo.data.letterbox.Letterbox`'s own geometry, so the forward
+    transform stays the single definition of what a letterbox is (the WP-053a rule
+    against a second copy of that arithmetic). Score and class pass through untouched,
+    and score-zero padding rows are mapped like any other row — they are identified
+    downstream by their score, never by their coordinates.
+
+    Args:
+        detections: Oriented detections of shape ``(B, N, 7)`` in letterboxed-canvas
+            pixels, as :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` emits them.
+        orig_size: Original image ``(height, width)``.
+        letterboxed_size: Letterboxed canvas ``(height, width)`` the boxes live in.
+        allow_upscale: The letterbox ``allow_upscale`` setting used at resize time;
+            must match so the inverse recovers the exact geometry. Defaults to ``True``.
+
+    Returns:
+        Detections of shape ``(B, N, 7)`` with centres and extents in original-image
+        coordinates, ``theta``, ``score`` and ``class`` unchanged.
+
+    Raises:
+        ValueError: If ``detections`` is not a 3-D tensor with at least
+            :data:`RBOX_COLUMNS` trailing columns.
+
+    Examples:
+        >>> import torch
+        >>> # A 2x4 image letterboxed into a 4x4 canvas: ratio 1, 1px top/bottom pads.
+        >>> dets = torch.tensor([[[2.0, 2.0, 4.0, 2.0, 0.3, 0.9, 1.0]]])
+        >>> mapped = rboxes_to_letterboxed_original(dets, orig_size=(2, 4), letterboxed_size=(4, 4))
+        >>> mapped[0, 0, :5]  # the centre drops by the top pad; theta is untouched
+        tensor([2.0000, 1.0000, 4.0000, 2.0000, 0.3000])
+        >>> mapped[0, 0, 5:]  # score and class survive the round trip
+        tensor([0.9000, 1.0000])
+    """
+    if detections.ndim != 3 or detections.shape[-1] < RBOX_COLUMNS:
+        raise ValueError(f"detections must be (B, N, >={RBOX_COLUMNS}); got shape {tuple(detections.shape)}")
+    batch, num_det, _ = detections.shape
+    letterbox = Letterbox(letterboxed_size, allow_upscale=allow_upscale)
+    centres = letterbox.inverse_map(detections[..., :2].reshape(-1, 2), orig_size, letterboxed_size)
+    # The extents scale by the same ratio the centres do; read it off the inverse rather
+    # than recomputing `min(out_h / H, out_w / W)` here, which would be that second copy.
+    origin = letterbox.inverse_map(detections.new_zeros((2, 2)), orig_size, letterboxed_size)[0]
+    unit = letterbox.inverse_map(detections.new_ones((2, 2)), orig_size, letterboxed_size)[0]
+    inverse_ratio = unit[0] - origin[0]
+    extents = detections[..., 2:4] * inverse_ratio
+    return torch.cat((centres.reshape(batch, num_det, 2), extents, detections[..., 4:]), dim=-1)
