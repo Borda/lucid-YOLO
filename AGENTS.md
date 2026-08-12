@@ -14,6 +14,8 @@ This is the first file an agent (or engineer) executing the roadmap reads. It mi
 6. Flip the WP row to `done` in `docs/ROADMAP.md` (part of the same commit).
 7. **Stop and report.** Do not chain into the next WP unless the operator has authorized continuous execution for the session.
 
+**The staged set must equal the gate-tested set.** Step 4 certifies a tree, not an intention, so any edit made between the gate run and `git commit` invalidates the green — including a documentation edit, which is the form this actually takes. A docs-only *commit* is exempt from the gate; a docs edit riding along inside a code commit is not, and neither is a roadmap flip made at step 6 after step 4 already ran. Re-run the gate, or at minimum the meta tests, before staging. The failure surfaces one commit later on someone else's branch as a red `main` with no obvious owner: `fcf3040` shipped that way, and the next agent spent a full run reporting a blocker it was forbidden to fix.
+
 Pushes to the remote are batched at phase boundaries and each push requires explicit human confirmation (D12a). Release tags are always [HUMAN].
 
 ## 2. Environment
@@ -70,3 +72,9 @@ Internal identifiers use descriptive names derived from the papers' terminology 
 ## 7. Standing prohibitions
 
 Never: consult or install `ultralytics` or any mirror; create a model-topology config format (ADR-001); copy code from any external detection repository (check LICENSE and provenance before consulting *any* external detection repo — this includes third-party YOLO-seg/YOLO-OBB forks); plan, promise, or tag a 1.0 (ADR-002); modify a frozen golden; start a [HUMAN] WP; commit datasets or downloaded weights; leave `main` red; download, fine-tune, distill from, or compare against released Ultralytics checkpoints.
+
+## 8. Delegated work packages
+
+A completion notification is not a completion. When a WP is delegated, the harness reports the task `completed` whether the agent finished or stopped mid-sentence on a partial edit — the notification carries a `result` field that looks like a report, so an unfinished run reads as a finished one that summarized badly. This happened four times in Phase 8, twice discovered only by inspecting the worktree.
+
+Before treating a delegated WP as done, check the worktree's `git status` against what the spec asked for; a missing test file or an untouched entry-point module is the tell. Resume with a message naming what is still missing rather than respawning — the agent picks up from its own transcript with full context. The spawn prompt's "report when done or when stuck" clause helps and does not prevent this.
