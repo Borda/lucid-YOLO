@@ -27,7 +27,17 @@ and the COCO-style accumulator that runs on it
 adapters :func:`~lucid_yolo.eval.dota_eval.rotated_detections_to_predictions` and
 :func:`~lucid_yolo.eval.dota_eval.tiled_targets_to_ground_truth`. That module
 scores one evaluation unit at a time; merging detections across overlapping tiles
-back onto whole DOTA images is WP-088's, and its docstring says so.
+back onto whole DOTA images is WP-064's, and its docstring says so.
+
+:mod:`lucid_yolo.eval.checkpoint` is the step every acceptance script starts with
+(:func:`~lucid_yolo.eval.checkpoint.load_eval_module`,
+:func:`~lucid_yolo.eval.checkpoint.pick_device`): read a Lightning checkpoint, optionally
+overlay the EMA shadow stored inside it, and resolve a device. It lives here rather than
+in whichever script needed it first, so the oriented and detection instruments cannot
+drift apart on what "the EMA numbers" means. It is deliberately **not** re-exported from
+this package: it imports :class:`~lucid_yolo.ptl.module.DetectionLitModule`, which
+imports :mod:`lucid_yolo.eval.dota_eval`, so hoisting it here closes an import cycle
+through this very module. Import it by its own path.
 """
 
 from lucid_yolo.eval.annotations import (

@@ -44,59 +44,19 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import torch
 from torch import Tensor, nn
 
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.decode.nms_path import NMSDecoder
 from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.eval.annotations import letterboxed_batches, load_eval_annotations
+from lucid_yolo.eval.checkpoint import load_eval_module, pick_device
 from lucid_yolo.eval.coco_eval import DualPathEvaluator
 from lucid_yolo.models.build import SegmentOutput
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-
-def _load_module(checkpoint: Path, use_ema: bool) -> tuple[DetectionLitModule, dict[str, object]]:
-    """Load the LightningModule from ``checkpoint``, optionally with EMA weights.
-
-    Args:
-        checkpoint: Path to the Lightning ``.ckpt`` file.
-        use_ema: When ``True``, overlay the :class:`EMACallback` shadow stored in
-            the checkpoint onto the module's parameters and buffers.
-
-    Returns:
-        The eval-mode module and a small provenance dict (epoch, step, EMA use).
-
-    Raises:
-        ValueError: If ``use_ema`` is requested but the checkpoint carries no
-            EMA shadow.
-    """
-    module = DetectionLitModule.load_from_checkpoint(checkpoint, map_location="cpu")
-    payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    info: dict[str, object] = {
-        "checkpoint": str(checkpoint),
-        "epoch": int(payload["epoch"]),
-        "global_step": int(payload["global_step"]),
-        "ema": use_ema,
-    }
-    if use_ema:
-        shadow = None
-        for name, state in payload.get("callbacks", {}).items():
-            if "EMACallback" in name:
-                shadow = state.get("shadow")
-        if not shadow:
-            raise ValueError(f"--ema requested but {checkpoint} carries no EMACallback shadow")
-        tensors: dict[str, Tensor] = {name: param for name, param in module.named_parameters()}
-        tensors.update(module.named_buffers())
-        with torch.no_grad():
-            for name, value in shadow.items():
-                tensors[name].copy_(value)
-        info["ema_updates"] = int(payload["callbacks"]["EMACallback"]["num_updates"])
-    module.eval()
-    return module, info
 
 
 class _SegmentationForward(nn.Module):
@@ -121,6 +81,7 @@ class _SegmentationForward(nn.Module):
         module: A checkpoint-loaded module whose ``task`` is ``"segment"``.
 
     Examples:
+        >>> import torch
         >>> from lucid_yolo.ptl.module import DetectionLitModule
         >>> module = DetectionLitModule(
         ...     depth=0.34, width=0.25, max_channels=1024, num_classes=4, task="segment"
@@ -138,17 +99,6 @@ class _SegmentationForward(nn.Module):
     def forward(self, images: Tensor) -> SegmentOutput:
         """Run the detection and mask branches over ``images``."""
         return self.module.forward_segmentation(images)
-
-
-def _pick_device(requested: str) -> torch.device:
-    """Resolve ``auto`` to the fastest available backend, else pass through."""
-    if requested != "auto":
-        return torch.device(requested)
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -174,13 +124,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     images_dir = args.data_root / "val2017"
     # The checkpoint loads first: whether the ground truth needs masks at all is
     # the checkpoint's property, not the caller's.
-    module, info = _load_module(args.checkpoint, use_ema=args.ema)
+    module, info = load_eval_module(args.checkpoint, use_ema=args.ema)
     segmentation = module.task == "segment" and args.masks
     info["masks"] = segmentation
     images, targets, label_to_category = load_eval_annotations(ann_file, with_masks=segmentation)
     if args.limit:
         images = images[: args.limit]
-    device = _pick_device(args.device)
+    device = pick_device(args.device)
     letterbox = Letterbox(args.img_size)
     model: nn.Module = _SegmentationForward(module) if segmentation else module
     evaluator = DualPathEvaluator(model, TopKDecoder(), NMSDecoder(), label_to_category, letterbox)
