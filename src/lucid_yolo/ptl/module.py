@@ -57,7 +57,7 @@ Task conditioning:
                                   ``(cx, cy, w, h)`` — the axis-aligned envelope
                                   target fights the rotated term at every non-zero
                                   ``theta`` (A50).
-    ``L_angle``       added       R1 Eq. 15 at ``angle_gain`` (A22's ``1.0``).
+    ``L_angle``       added       R1 Eq. 15 at ``angle_gain`` (A22's ``0.25``).
     assignment        kept        One assignment, with rotated **candidacy** only
                                   (A25): ``gt_rboxes`` reaches the assigners and
                                   nothing else.
@@ -424,9 +424,14 @@ class DetectionLitModule(LightningModule):
         semantic_gain: Weight on the auxiliary semantic term under
             ``task="segment"``, ignored otherwise (A38). Defaults to ``0.5``.
         angle_gain: Weight on R1 Eq. 15's square-object angle term under
-            ``task="obb"``, ignored otherwise. Defaults to ``1.0`` (A22 — R1 does
+            ``task="obb"``, ignored otherwise. Defaults to ``0.25`` (A22 — R1 does
             not state one, and :func:`~lucid_yolo.losses.angle_loss.square_angle_loss`
-            returns the term pre-gain precisely so this caller owns it).
+            returns the term pre-gain precisely so this caller owns it). Lowered
+            from ``1.0`` by WP-093, which measured the term destabilizing angle
+            regression on **elongated** targets: at ``1.0`` the oriented overfit
+            cleared its floor on 1 of 5 seeds with a 0.667 spread, at ``0.25`` on
+            4 of 5 with 0.096. See A22 for the dose-response and why the remedy is
+            this gain rather than ``lambda``, which R1 does state.
         rotated_iou_form: Which of R17's two rotated-IoU losses the ``"obb"`` box
             term uses, ``"hellinger"`` (bounded, the A49 default) or
             ``"bhattacharyya"`` (unbounded). Ignored otherwise.
@@ -469,7 +474,7 @@ class DetectionLitModule(LightningModule):
         alpha_final: float = 0.1,
         mask_gain: float = 2.5,
         semantic_gain: float = 0.5,
-        angle_gain: float = 1.0,
+        angle_gain: float = 0.25,
         rotated_iou_form: str = DEFAULT_ROTATED_IOU_FORM,
     ) -> None:
         super().__init__()

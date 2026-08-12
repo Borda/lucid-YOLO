@@ -108,6 +108,29 @@ def test_roadmap_wp_ids_unique_and_complete() -> None:
     assert len(ids) >= _WP_FLOOR, f"roadmap shrank below {_WP_FLOOR} work packages: {len(ids)}"
 
 
+def test_roadmap_rows_fill_every_column() -> None:
+    """Every numbered roadmap row carries all six columns.
+
+    An unescaped pipe inside a code span opens a table cell, so a row that reads fine in
+    the source renders its tail into the wrong columns on GitHub and drops the overflow.
+    This has now happened twice: once to a WP-058 row, and once to WP-093's own row, where
+    ``|d_theta|`` in a code span was expanded by the formatter into cell delimiters and
+    left the row with four cells instead of six.
+
+    Neither existing gate could see it. :func:`test_roadmap_wp_ids_unique_and_complete`
+    reads only the first column, and :func:`test_roadmap_statuses_valid` matches the last
+    one by regex, so a row can lose its middle entirely with both of them green.
+    """
+    rows = [
+        (line[:9], _table_cells(line))
+        for line in (DOCS / "ROADMAP.md").read_text(encoding="utf-8").splitlines()
+        if re.match(r"^\| \d{3}[a-z]? \|", line)
+    ]
+    assert rows, "no roadmap rows found"
+    malformed = [(head, len(cells)) for head, cells in rows if len(cells) != 6]
+    assert not malformed, f"roadmap rows without exactly six columns: {malformed}"
+
+
 def test_roadmap_statuses_valid() -> None:
     """Every roadmap row ends in a recognized status icon."""
     text = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")

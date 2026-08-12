@@ -41,7 +41,7 @@ model:
   box_gain: 7.5 # A49: the IoU slot, here the rotated ProbIoU; A13's value carries over
   cls_gain: 0.5 # blueprint sec. 5.7: cls gain, unchanged by the task
   l1_gain: 6.0 # A50: the L1 slot, retargeted onto the rotated box's own (cx, cy, w, h)
-  angle_gain: 1.0 # A22: R1 Eq. 15's weight in the total objective (the paper states none)
+  angle_gain: 0.25 # A22: R1 Eq. 15's weight (the paper states none); WP-093 lowered it from 1.0
   rotated_iou_form: hellinger # A49: R17's bounded L1 = H_D; "bhattacharyya" is the unbounded L2
   alpha_init: 0.8 # blueprint sec. 5.7 (R1 Eq. 2-3): ProgLoss ramp start, weights (0.8, 0.2)
   alpha_final: 0.1 # blueprint sec. 5.7: ProgLoss ramp end, weights (0.1, 0.9)

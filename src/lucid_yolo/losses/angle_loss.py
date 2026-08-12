@@ -37,11 +37,23 @@ at both 0 and 90deg, so it penalizes being *diagonally* wrong without asking a s
 choose between its two indistinguishable orientations.
 
 Weight in the total objective
-    A22: the scalar weight of ``L_angle`` in the total objective is ``1.0``, and R1 does
+    A22: the scalar weight of ``L_angle`` in the total objective is ``0.25``, and R1 does
     not state it — a registered gap, not a derivation. :func:`square_angle_loss` therefore
     returns the **pre-gain** term, following
     :class:`~lucid_yolo.losses.detection_loss.DetectionLossOutput`'s convention, and the
     caller that assembles the oriented objective (WP-088) owns the gain.
+
+    It was ``1.0`` until WP-093 measured that value destabilizing angle regression on
+    **elongated** targets rather than merely over-weighting it: the oriented overfit
+    cleared its floor on 1 of 5 seeds at ``1.0`` against 4 of 5 at ``0.25``, and the
+    run-to-run spread fell from 0.667 to 0.096. The reason is visible in the function
+    itself — ``sin^2(2 d_theta)`` is zero at both ``0`` and ``pi/2``, so for an elongated
+    box a quarter turn scores as a perfect answer and only the rotated IoU term objects,
+    while the gradient ``2 sin(4 d_theta)`` reverses sign at ``pi/4``. The paragraph above
+    quotes R1's expectation that ``omega_i`` keeps this away from elongated boxes; at
+    ``lambda = 3`` a 2:1 box still carries ``omega = 0.948``, so in that band it does not.
+    ``lambda`` is **not** the knob to reach for — R1 states and ablates it — the gain is
+    the registered gap, and A22 carries the dose-response.
 
 The wrapped range, and the tie
     Eq. 14 as written leans on ``round``, whose tie rule is unstated. It matters:

@@ -202,6 +202,20 @@ def test_each_oriented_gain_enters_the_total_at_its_weight(gain: str, term: str,
     assert dropped == pytest.approx(value * recorder.values[term], rel=_LEVERAGE_RTOL)
 
 
+def test_the_angle_gain_default_is_the_registered_a22_value() -> None:
+    """The angle term's default weight is A22's measured ``0.25``, not the assumed ``1.0``.
+
+    Every other test here passes its gains explicitly, so until this one nothing read the
+    default at all — it could have drifted back with the whole suite green. That matters
+    more than for a hyperparameter nobody argued over: A22 is a registered gap R1 never
+    fills, and ``0.25`` is the value WP-093 *measured* rather than assumed, after the
+    inherited ``1.0`` was shown to destabilise angle regression on elongated targets (the
+    oriented overfit cleared its floor on 1 of 5 seeds at ``1.0`` against 4 of 5 at
+    ``0.25``, with the run-to-run spread falling from 0.667 to 0.096).
+    """
+    assert DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=1, task="obb")._angle_gain == 0.25
+
+
 def test_obb_state_dict_is_the_detection_state_dict_plus_the_angle_stems() -> None:
     """Dropping the angle-stem keys from an ``obb`` module leaves exactly a ``detect`` module's.
 
