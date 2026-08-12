@@ -124,6 +124,54 @@ def test_label_remap_is_contiguous(detseg_fixture_dir: Path) -> None:
     assert torch.all(targets.labels >= 0) and torch.all(targets.labels < len(labels))
 
 
+def test_an_ordinary_coco_file_reads_as_nothing_difficult(detseg_fixture_dir: Path) -> None:
+    """A file with no ``difficult`` key means "no instance is difficult" (A51)."""
+    _, targets = _first_nonempty(_dataset(detseg_fixture_dir))
+    assert targets.difficult.shape == (targets.boxes.shape[0],)
+    assert not bool(targets.difficult.any())
+
+
+@pytest.mark.parametrize("oriented", [pytest.param(False, id="axis-aligned"), pytest.param(True, id="oriented")])
+def test_the_difficult_key_reaches_the_targets_channel(tmp_path: Path, oriented: bool) -> None:
+    """R18's flag, written per annotation, lands on the A51 channel on both readings.
+
+    The flag says something about the annotation rather than about the box modality, so
+    the oriented and axis-aligned paths must agree on it — the tiled DOTA layout (WP-094)
+    is read oriented, and losing the flag there would silently turn every ignorable
+    ground truth into a scored one at the metric (A48).
+    """
+    split = tmp_path / "val"
+    split.mkdir()
+    from torchvision.io import write_png  # noqa: PLC0415 - test-local, the reader does not need it
+
+    write_png(torch.zeros(3, 8, 8, dtype=torch.uint8), str(split / "tile.png"))
+    quad = [1.0, 1.0, 3.0, 1.0, 3.0, 3.0, 1.0, 3.0]
+    (split / "instances.json").write_text(
+        json.dumps(
+            {
+                "images": [{"id": 1, "file_name": "tile.png", "height": 8, "width": 8}],
+                "annotations": [
+                    {"id": 1, "image_id": 1, "category_id": 1, "bbox": [1, 1, 2, 2], "segmentation": [quad]},
+                    {
+                        "id": 2,
+                        "image_id": 1,
+                        "category_id": 1,
+                        "bbox": [4, 4, 2, 2],
+                        "segmentation": [[4.0, 4.0, 6.0, 4.0, 6.0, 6.0, 4.0, 6.0]],
+                        "difficult": 1,
+                    },
+                ],
+                "categories": [{"id": 1, "name": "plane"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _, targets = CocoDetectionDataset(split, split / "instances.json", oriented=oriented)[0]
+
+    assert targets.difficult.tolist() == [False, True]
+
+
 @pytest.mark.parametrize(
     ("variant", "expected"),
     [

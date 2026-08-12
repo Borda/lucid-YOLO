@@ -39,6 +39,16 @@ Oriented reading (``oriented=True``, WP-088):
     ``rboxes`` up to the rectangle fit, and a second copy is one more modality every
     warp would have to keep consistent for no reader.
 
+The ``difficult`` key (A51, A53, WP-094):
+    An annotation may carry a ``difficult`` flag, which this reader forwards onto the
+    A51 channel of :class:`~lucid_yolo.data.targets.Targets`. It is not part of the COCO
+    schema — it is R18's per-instance flag, written by the tiled-layout build
+    (``scripts/build_dota_tiles.py``) because tiling *creates* difficult instances that
+    exist in no label file (A39). Absent, every instance reads non-difficult, so an
+    ordinary COCO file behaves exactly as before. The flag is carried on both readings,
+    oriented and axis-aligned, since it says something about the annotation rather than
+    about the box modality; A48 is what eventually acts on it, at the metric.
+
 :func:`build_scale_policy` returns the size-aware augmentation strengths of
 [R1] Table S3 (blueprint sec. 5.9): the ``n`` recipe is mildest and larger
 variants grow stronger. The exact per-variant tuples are this project's reading
@@ -255,30 +265,38 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         boxes: list[list[float]] = []
         labels: list[int] = []
         polygons: list[Tensor] = []
+        flags: list[bool] = []
         for ann in annotations:
             parsed = self._parse_annotation(ann, record)
             if parsed is None:
                 continue
-            box, label, ring = parsed
+            box, label, ring, difficult = parsed
             boxes.append(box)
             labels.append(label)
             polygons.append(ring)
+            flags.append(difficult)
         if not boxes:
             return Targets.empty()
         label_tensor = torch.tensor(labels, dtype=torch.int64)
+        difficult_tensor = torch.tensor(flags, dtype=torch.bool)
         if self._oriented:
-            return _oriented_targets(polygons, label_tensor, record.file_name)
+            return _oriented_targets(polygons, label_tensor, record.file_name, difficult_tensor)
         return Targets(
             boxes=torch.tensor(boxes, dtype=torch.float32),
             labels=label_tensor,
             polygons=polygons,
+            difficult=difficult_tensor,
         )
 
-    def _parse_annotation(self, ann: dict[str, object], record: _ImageRecord) -> tuple[list[float], int, Tensor] | None:
-        """Parse one annotation into ``(xyxy_box, label, ring)`` or ``None`` to skip.
+    def _parse_annotation(
+        self, ann: dict[str, object], record: _ImageRecord
+    ) -> tuple[list[float], int, Tensor, bool] | None:
+        """Parse one annotation into ``(xyxy_box, label, ring, difficult)`` or ``None`` to skip.
 
         Crowd annotations and annotations without a usable polygon ring are
-        skipped (returning ``None``) per the module's crowd/RLE policy.
+        skipped (returning ``None``) per the module's crowd/RLE policy. The
+        ``difficult`` flag defaults to ``False``, which is what every file that
+        does not carry R18's flag means (A51).
         """
         if int(cast("int", ann.get("iscrowd", 0))) == 1:
             return None
@@ -287,10 +305,11 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             return None
         box = _xywh_to_xyxy(ann["bbox"], record.height, record.width)  # type: ignore[arg-type]
         label = self.category_id_to_label[int(ann["category_id"])]  # type: ignore[call-overload]
-        return box, label, ring
+        difficult = bool(int(cast("int", ann.get("difficult", 0))))
+        return box, label, ring, difficult
 
 
-def _oriented_targets(rings: list[Tensor], labels: Tensor, file_name: str) -> Targets:
+def _oriented_targets(rings: list[Tensor], labels: Tensor, file_name: str, difficult: Tensor) -> Targets:
     """Fit one image's quadrilateral rings to rotated boxes and their shared envelopes.
 
     Both axis-aligned and rotated boxes are derived from the *same* ring, which is what
@@ -303,10 +322,11 @@ def _oriented_targets(rings: list[Tensor], labels: Tensor, file_name: str) -> Ta
         rings: One ``(P, 2)`` ring per instance, in annotation order.
         labels: ``(N,)`` int64 class ids aligned with ``rings``.
         file_name: Image file name, named in the error when a ring is not a quad.
+        difficult: ``(N,)`` bool R18 flags aligned with ``rings`` (A51).
 
     Returns:
-        Targets whose ``boxes``, ``labels`` and ``rboxes`` share one instance axis and
-        whose ``polygons`` is empty.
+        Targets whose ``boxes``, ``labels``, ``rboxes`` and ``difficult`` share one
+        instance axis and whose ``polygons`` is empty.
 
     Raises:
         ValueError: If any ring does not have exactly four points.
@@ -314,7 +334,7 @@ def _oriented_targets(rings: list[Tensor], labels: Tensor, file_name: str) -> Ta
     Examples:
         >>> import torch
         >>> quad = torch.tensor([[3.0, 2.0], [7.0, 2.0], [7.0, 4.0], [3.0, 4.0]])
-        >>> targets = _oriented_targets([quad], torch.tensor([1]), "img.jpg")
+        >>> targets = _oriented_targets([quad], torch.tensor([1]), "img.jpg", torch.tensor([False]))
         >>> targets.boxes.tolist(), [round(v, 4) for v in targets.rboxes[0].tolist()]
         ([[3.0, 2.0, 7.0, 4.0]], [5.0, 3.0, 4.0, 2.0, 0.0])
     """
@@ -328,6 +348,7 @@ def _oriented_targets(rings: list[Tensor], labels: Tensor, file_name: str) -> Ta
         boxes=boxes_from_polygons(rings),
         labels=labels,
         rboxes=polygons_to_rboxes(torch.stack(rings, dim=0)),
+        difficult=difficult,
     )
 
 

@@ -1,0 +1,361 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Build the tiled COCO layout the OBB-smoke tier trains on, from a DOTA-v1.0 root (WP-094).
+
+WP-057 built the tiling geometry and WP-056 the label parsing, and both deliberately
+write nothing: "the tiles themselves are a **build artifact** (AGENTS.md sec. 3), so
+nothing here writes to disk on its own." This script is the caller that decides where
+they land. Until it existed, :func:`~lucid_yolo.data.tiling.tile_image_targets` had no
+production consumer at all and ``obb_smoke.yaml``'s ``data_root`` was a placeholder
+pointing at a directory nothing could produce.
+
+What it emits:
+    A COCO-layout root — ``<split>/`` image directories beside
+    ``annotations/instances_<split>.json`` — whose ``segmentation`` is the four-corner
+    quadrilateral of the oriented annotation, which is exactly what
+    :class:`~lucid_yolo.data.coco.CocoDetectionDataset` reads under ``oriented=True``
+    (its "COCO file written for an oriented task" path). Nothing about the layout is
+    DOTA-specific, so the same recipe trains on any oriented dataset converted into it.
+
+Category ids (R18):
+    ``DOTA_CLASSES`` index plus one. The reader assigns dense labels by *sorted category
+    id*, so this offset preserves R18's published class order through the label space:
+    category ``i + 1`` becomes label ``i``. The offset itself is COCO convention (no
+    category 0); nothing downstream depends on it beyond the ordering it protects.
+
+The ``difficult`` flag (A53):
+    Tiling **creates** difficult instances — R18 flags any part below 0.7 of its original
+    area, so a label file with no difficult objects still produces tiles that have them —
+    and COCO has no field for that. Each annotation therefore carries a non-schema
+    ``difficult`` key, forwarded by the reader onto the A51 channel of
+    :class:`~lucid_yolo.data.targets.Targets` and acted on at the metric under A48.
+    ``visible_fraction`` (R18's ``U_i``) rides along on the same annotation: the fitted
+    box's area is not the clipped area, so the quantity the rule turns on is otherwise
+    unrecoverable, and a sweep over the threshold should not have to re-tile.
+
+Window provenance (A53):
+    Every image record carries ``source_image`` and ``window``. A per-tile number is not
+    comparable to anything published — in an NMS-free path two tiles detecting one object
+    have nothing to suppress the duplicate — so whole-image evaluation needs a merge step
+    (WP-064). That step needs to know which source image a tile came from and where it
+    sat; recovering it by parsing file names would make the naming a load-bearing
+    interface. The name still encodes it, for a human reading a directory listing.
+
+Empty tiles (A52):
+    Kept by default. A 1024 px window over a DOTA image frequently contains no annotated
+    object, and neither R1 nor R18 says whether such crops are trained on. Dropping them
+    would remove exactly the background the one-to-one branch must learn not to fire on;
+    keeping them costs disk. ``--drop-empty-tiles`` selects the other reading, and the
+    report prints how many tiles the choice covers either way.
+
+This script never downloads anything (AGENTS.md sec. 3) and is not shipped in the wheel,
+like ``check_data.py``: it is a developer-run build step for a ``[DATA]`` tier run.
+
+Examples:
+    Build both annotated splits at R18's own stride (1024 patch, 512 overlap)::
+
+        python scripts/build_dota_tiles.py --dota-root /data/dota --out /data/dota_tiles \\
+            --splits train,val --overlap 512
+
+    Smoke-size the build to the first 20 source images of each split::
+
+        python scripts/build_dota_tiles.py --dota-root /data/dota --out /data/dota_tiles --limit 20
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+import torch
+from torchvision.io import ImageReadMode, read_image, write_png
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT / "src") not in sys.path:  # pragma: no cover - import shim for a script run
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from lucid_yolo.data.dota import DOTA_CLASSES, load_dota_targets  # noqa: E402
+from lucid_yolo.data.rotated_geom import rboxes_to_polygons  # noqa: E402
+from lucid_yolo.data.tiling import CROP_OVERLAP, PATCH_SIZE, TiledTargets, tile_image_targets  # noqa: E402
+
+#: Image suffixes read from a DOTA ``images/`` directory. DOTA-v1.0 publishes PNG.
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+#: Separator between a source stem and its window origin in a tile file name.
+TILE_SEPARATOR = "__"
+#: Corner coordinates per quadrilateral, flattened into a COCO ``segmentation`` ring.
+_RING_VALUES = 8
+
+
+@dataclass(frozen=True)
+class SplitReport:
+    """What one split's build produced, for the printed report and the tests.
+
+    Attributes:
+        split: The split name, e.g. ``"train"``.
+        source_images: Source images read.
+        tiles: Tile images written.
+        empty_tiles: Tiles written that carry no annotation (A52).
+        instances: Annotations written across all tiles.
+        difficult: How many of those annotations carry R18's flag.
+
+    Examples:
+        >>> SplitReport("val", 1, 4, 1, 6, 2).empty_tiles
+        1
+    """
+
+    split: str
+    source_images: int
+    tiles: int
+    empty_tiles: int
+    instances: int
+    difficult: int
+
+
+def dota_categories() -> list[dict[str, object]]:
+    """Build the COCO ``categories`` list for DOTA-v1.0, in R18's published order.
+
+    Returns:
+        One ``{"id", "name", "supercategory"}`` entry per class, ids ``1..15``.
+
+    Examples:
+        >>> categories = dota_categories()
+        >>> len(categories), categories[0]["id"], categories[0]["name"]
+        (15, 1, 'plane')
+    """
+    return [{"id": index + 1, "name": name, "supercategory": "dota"} for index, name in enumerate(DOTA_CLASSES)]
+
+
+def tile_file_name(stem: str, window: torch.Tensor, suffix: str = ".png") -> str:
+    """Name one tile after its source stem and window origin.
+
+    Args:
+        stem: The source image's file stem.
+        window: The ``(4,)`` int64 ``(x0, y0, x1, y1)`` window.
+        suffix: Image suffix to write, including the dot.
+
+    Returns:
+        A file name of the form ``<stem>__<x0>_<y0><suffix>``.
+
+    Examples:
+        >>> import torch
+        >>> tile_file_name("P0007", torch.tensor([824, 0, 1848, 1024]))
+        'P0007__824_0.png'
+    """
+    x0, y0 = int(window[0]), int(window[1])
+    return f"{stem}{TILE_SEPARATOR}{x0}_{y0}{suffix}"
+
+
+def annotation_records(image_id: int, first_id: int, tiled: TiledTargets) -> list[dict[str, object]]:
+    """Turn one tile's targets into COCO annotation records.
+
+    ``segmentation`` is the rotated box's own quadrilateral (the oriented reading fits
+    ``rboxes`` back out of it, so the ring is the load-bearing field and ``bbox`` is
+    advisory); ``area`` is that quadrilateral's area, which for a rotated box is
+    ``w * h`` and not the axis-aligned envelope's area.
+
+    Args:
+        image_id: The tile's image id.
+        first_id: Id of the first annotation emitted here; ids run consecutively.
+        tiled: The window's targets, flags and visible fractions.
+
+    Returns:
+        One record per instance, in instance order.
+
+    Examples:
+        >>> import torch
+        >>> from lucid_yolo.data.targets import Targets
+        >>> from lucid_yolo.data.tiling import TiledTargets
+        >>> targets = Targets(
+        ...     boxes=torch.tensor([[1.0, 1.0, 3.0, 3.0]]),
+        ...     labels=torch.tensor([0]),
+        ...     rboxes=torch.tensor([[2.0, 2.0, 2.0, 2.0, 0.0]]),
+        ... )
+        >>> tiled = TiledTargets(targets, torch.tensor([True]), torch.tensor([0.5]))
+        >>> record = annotation_records(7, 1, tiled)[0]
+        >>> record["bbox"], record["area"], record["difficult"], record["category_id"]
+        ([1.0, 1.0, 2.0, 2.0], 4.0, 1, 1)
+    """
+    targets = tiled.targets
+    if targets.boxes.shape[0] == 0:
+        return []
+    rings = rboxes_to_polygons(targets.rboxes).reshape(-1, _RING_VALUES)
+    records: list[dict[str, object]] = []
+    for index in range(targets.boxes.shape[0]):
+        x0, y0, x1, y1 = (round(float(v), 4) for v in targets.boxes[index])
+        width, height = targets.rboxes[index, 2], targets.rboxes[index, 3]
+        records.append(
+            {
+                "id": first_id + index,
+                "image_id": image_id,
+                "category_id": int(targets.labels[index]) + 1,
+                "bbox": [x0, y0, round(x1 - x0, 4), round(y1 - y0, 4)],
+                "area": round(float(width * height), 4),
+                "iscrowd": 0,
+                "segmentation": [[round(float(v), 4) for v in rings[index]]],
+                "difficult": int(bool(tiled.difficult[index])),
+                "visible_fraction": round(float(tiled.visible_fraction[index]), 6),
+            }
+        )
+    return records
+
+
+def source_images(split_dir: Path) -> list[Path]:
+    """List a split's source images in a deterministic order.
+
+    Args:
+        split_dir: A DOTA split directory holding ``images/`` and ``labelTxt/``.
+
+    Returns:
+        Every readable image path under ``images/``, sorted by name.
+
+    Raises:
+        FileNotFoundError: If ``images/`` or ``labelTxt/`` is absent.
+
+    Examples:
+        >>> source_images(Path("/nonexistent"))  # doctest: +IGNORE_EXCEPTION_DETAIL
+        Traceback (most recent call last):
+        FileNotFoundError: ...
+    """
+    for name in ("images", "labelTxt"):
+        if not (split_dir / name).is_dir():
+            raise FileNotFoundError(f"{split_dir} is not a DOTA split: {name}/ is missing")
+    return sorted(path for path in (split_dir / "images").iterdir() if path.suffix.lower() in IMAGE_SUFFIXES)
+
+
+def convert_split(
+    split_dir: Path,
+    out_dir: Path,
+    split: str,
+    *,
+    patch: int = PATCH_SIZE,
+    overlap: int = CROP_OVERLAP,
+    keep_empty: bool = True,
+    limit: int | None = None,
+) -> SplitReport:
+    """Tile one DOTA split into the COCO layout and write its instances JSON.
+
+    Args:
+        split_dir: The source split directory (``images/`` and ``labelTxt/``).
+        out_dir: Root of the layout being written.
+        split: Split name, used for the image directory and the JSON file name.
+        patch: Crop side in pixels.
+        overlap: Nominal crop overlap in pixels (A21).
+        keep_empty: Whether tiles with no annotation are written (A52).
+        limit: Read at most this many source images; ``None`` reads all.
+
+    Returns:
+        The split's :class:`SplitReport`.
+
+    Examples:
+        >>> convert_split(Path("/nonexistent"), Path("/tmp/out"), "val")  # doctest: +IGNORE_EXCEPTION_DETAIL
+        Traceback (most recent call last):
+        FileNotFoundError: ...
+    """
+    paths = source_images(split_dir)[:limit]
+    images_out = out_dir / split
+    images_out.mkdir(parents=True, exist_ok=True)
+    (out_dir / "annotations").mkdir(parents=True, exist_ok=True)
+
+    images: list[dict[str, object]] = []
+    annotations: list[dict[str, object]] = []
+    empty = 0
+    for path in paths:
+        targets = load_dota_targets(split_dir / "labelTxt" / f"{path.stem}.txt", keep_difficult=True)
+        image = read_image(str(path), ImageReadMode.RGB)
+        for window, tile, tiled in tile_image_targets(
+            image, targets, difficult=targets.difficult, patch=patch, overlap=overlap
+        ):
+            records = annotation_records(len(images) + 1, len(annotations) + 1, tiled)
+            if not records:
+                empty += 1
+                if not keep_empty:
+                    continue
+            file_name = tile_file_name(path.stem, window)
+            write_png(tile.contiguous(), str(images_out / file_name))
+            images.append(_image_record(len(images) + 1, file_name, tile, window, path.name))
+            annotations.extend(records)
+
+    _write_instances(out_dir / "annotations" / f"instances_{split}.json", images, annotations, split)
+    return SplitReport(
+        split=split,
+        source_images=len(paths),
+        tiles=len(images),
+        empty_tiles=empty if keep_empty else 0,
+        instances=len(annotations),
+        difficult=sum(int(record["difficult"]) for record in annotations),  # type: ignore[call-overload]
+    )
+
+
+def _image_record(
+    image_id: int, file_name: str, tile: torch.Tensor, window: torch.Tensor, source: str
+) -> dict[str, object]:
+    """Build one COCO ``images`` record, carrying its window provenance (A53)."""
+    return {
+        "id": image_id,
+        "file_name": file_name,
+        "height": int(tile.shape[1]),
+        "width": int(tile.shape[2]),
+        "source_image": source,
+        "window": [int(v) for v in window],
+    }
+
+
+def _write_instances(
+    path: Path, images: list[dict[str, object]], annotations: list[dict[str, object]], split: str
+) -> None:
+    """Write one split's instances JSON, categories included."""
+    payload = {
+        "info": {"description": f"DOTA-v1.0 {split}, tiled (WP-094)", "version": "1.0"},
+        "images": images,
+        "annotations": annotations,
+        "categories": dota_categories(),
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def main() -> int:
+    """Build the tiled layout for every requested split.
+
+    Returns:
+        ``0`` on success; ``1`` when a split directory is not a DOTA split.
+
+    Examples:
+        >>> callable(main)
+        True
+    """
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--dota-root", type=Path, required=True, help="provisioned DOTA-v1.0 root")
+    parser.add_argument("--out", type=Path, required=True, help="where the tiled COCO layout is written")
+    parser.add_argument("--splits", default="train,val", help="comma-separated split names (default: train,val)")
+    parser.add_argument("--patch", type=int, default=PATCH_SIZE, help=f"crop side (default: {PATCH_SIZE})")
+    parser.add_argument("--overlap", type=int, default=CROP_OVERLAP, help=f"crop overlap (default: {CROP_OVERLAP})")
+    parser.add_argument("--drop-empty-tiles", action="store_true", help="skip tiles with no annotation (A52)")
+    parser.add_argument("--limit", type=int, default=None, help="read at most N source images per split")
+    args = parser.parse_args()
+
+    for split in (name.strip() for name in args.splits.split(",") if name.strip()):
+        try:
+            report = convert_split(
+                args.dota_root / split,
+                args.out,
+                split,
+                patch=args.patch,
+                overlap=args.overlap,
+                keep_empty=not args.drop_empty_tiles,
+                limit=args.limit,
+            )
+        except FileNotFoundError as error:
+            print(f"FAIL: {error}")
+            return 1
+        print(
+            f"{report.split}: {report.source_images} images -> {report.tiles} tiles "
+            f"({report.empty_tiles} empty), {report.instances} instances, {report.difficult} difficult"
+        )
+    print(f"wrote {args.out}")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    raise SystemExit(main())
