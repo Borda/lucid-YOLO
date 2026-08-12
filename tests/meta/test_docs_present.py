@@ -12,6 +12,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS = REPO_ROOT / "docs"
 
+#: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target:
+#: contiguity alone would not notice the last row being deleted. Raise it when adding
+#: a work package; never lower it.
+_WP_FLOOR = 92
+
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
 #: stays contiguous. Raise it when adding a decision; never lower it.
@@ -88,11 +93,19 @@ def test_assumption_rows_fill_every_column() -> None:
 
 
 def test_roadmap_wp_ids_unique_and_complete() -> None:
-    """ROADMAP.md rows carry WP ids 001..091, each exactly once (068-091 added 2026-08-02..07)."""
+    """ROADMAP.md numbers its work packages contiguously from 001, each exactly once, and never shrinks.
+
+    Contiguity and uniqueness are the real invariants and they hold at any size;
+    the count is pinned separately by a floor, so adding a work package does not
+    fail a test that is not reporting a defect. Dropping the last row would leave
+    the remainder contiguous, which is what the floor is for. Raise it when adding
+    a package — see :data:`_WP_FLOOR`.
+    """
     text = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")
     ids = [int(m) for m in re.findall(r"^\| (\d{3}) \|", text, flags=re.MULTILINE)]
     assert len(ids) == len(set(ids)), "duplicate WP ids in roadmap"
-    assert sorted(ids) == list(range(1, 92)), f"roadmap must list WP 001-091, got {len(ids)} rows"
+    assert sorted(ids) == list(range(1, max(ids) + 1)), f"roadmap ids are not contiguous from 1: {sorted(ids)}"
+    assert len(ids) >= _WP_FLOOR, f"roadmap shrank below {_WP_FLOOR} work packages: {len(ids)}"
 
 
 def test_roadmap_statuses_valid() -> None:

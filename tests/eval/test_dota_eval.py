@@ -478,9 +478,10 @@ class TestRecallGridBoundary:
         This is the case floating point gets wrong, and it is not exotic — any class whose
         found-to-annotated ratio reduces to hundredths hits it. Sampling the grid in
         float32 forfeits the ``k``-th point and returns ``k/101``; that was this module's
-        behaviour until the comparison was moved to integers, and it is still
-        ``evaluate_bbox``'s for 36 of the 101 boundaries, because torchmetrics builds its
-        recall thresholds with a float32 ``torch.linspace``.
+        behaviour until the comparison was moved to integers, and was ``evaluate_bbox``'s
+        for 36 of the 101 boundaries — torchmetrics builds its recall thresholds with a
+        float32 ``torch.linspace`` — until WP-092 handed that metric an exact grid through
+        its documented ``rec_thresholds`` argument.
         """
         preds, targets = _boundary_case(found, positives)
 
@@ -489,15 +490,21 @@ class TestRecallGridBoundary:
         assert stats["map_50"] == pytest.approx((grid_index + 1) / 101, abs=1e-6)
         assert stats["mar_300"] == pytest.approx(found / positives, abs=1e-6)
 
-    def test_divergence_from_the_axis_aligned_instrument_is_one_directional(self) -> None:
-        """At a boundary the reference forfeits, this module keeps the point — never less.
+    def test_agrees_with_the_axis_aligned_instrument_at_a_float32_boundary(self) -> None:
+        """At a boundary float32 forfeits, both instruments keep the point (WP-092).
 
-        Pins the known, understood disagreement rather than hiding it behind a loose
-        tolerance. ``evaluate_bbox`` reaches 13/20 through torchmetrics' float32 recall
-        grid, whose 65th entry is ``0.6500000357627869`` — above the ``0.65`` the recall
-        actually attains — so it samples 65 points where this module samples 66. If a
-        future torchmetrics builds that grid in float64 this test fails, which is the
-        notification worth having.
+        This pinned a **divergence** until WP-092. ``evaluate_bbox`` reached 13/20 through
+        torchmetrics' float32 recall grid, whose 65th entry is ``0.6500000357627869`` —
+        above the ``0.65`` the recall actually attains — so it sampled 65 points where
+        this module sampled 66, and the oriented instrument was the higher of the two by
+        ``1/101``. That test then failed the moment the axis-aligned reporter was handed
+        an exact grid, which is precisely the notification it was written to give.
+
+        Equality is asserted rather than a widened band. The two reach ``66/101`` by
+        different arithmetic — int64 rationals here, correctly rounded float64 division
+        there — and A46's claim is that those agree *exactly* on every input this project
+        can produce, not that they agree closely. A reopened gap means one of the two
+        grids regressed, and this is where that surfaces.
         """
         preds, targets = _boundary_case(found=13, positives=20)
         box_preds, box_targets = _boundary_case_axis_aligned(found=13, positives=20)
@@ -506,8 +513,8 @@ class TestRecallGridBoundary:
 
         axis_aligned = evaluate_bbox(box_preds, box_targets)
         assert rotated["map_50"] == pytest.approx(66 / 101, abs=1e-6)
-        assert axis_aligned["map_50"] == pytest.approx(65 / 101, abs=1e-6)
-        assert rotated["map_50"] > axis_aligned["map_50"]
+        assert axis_aligned["map_50"] == pytest.approx(66 / 101, abs=1e-6)
+        assert rotated["map_50"] == pytest.approx(axis_aligned["map_50"], abs=1e-6)
 
 
 class TestDifficultGroundTruths:

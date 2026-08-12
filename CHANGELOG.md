@@ -25,6 +25,7 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Fixed
 
+- Exact recall sampling for the detection instrument: `evaluate_bbox` now supplies the 101-point recall grid as correctly rounded hundredths instead of accepting the metric's float32 default, which overshot `k/100` at 36 of the 101 indices. A class whose recall landed exactly on one of those boundaries forfeited that point and `1/101` of its average precision, always downward — an ordinary case rather than an exotic one, since a class with 5, 10, 20, 25, 50 or 100 ground truths lands on a grid point at every recall it can attain. Both mAP instruments now forfeit no boundary, and agree exactly where they used to differ (WP-092, A46).
 - Horizontal flip left rotated boxes outside the long-edge angle range: it negated the angle without re-wrapping, so any box past 45 degrees came out non-canonical (WP-058).
 - A roadmap row carried an unescaped pipe inside a code span, which opens a table cell: the row had eight cells against a six-column header, so GitHub had been rendering its tail into the wrong columns and dropping the overflow (WP-058).
 

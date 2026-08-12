@@ -23,6 +23,10 @@ backend (WP-069):
   collapse it near 0, a localization-jitter ladder pins the metric's monotonic
   response to box error, wrong-ranked candidate scores degrade AP even with a
   perfect box present, and score-zero padding rows change nothing.
+- :class:`TestRecallGridBoundary` (the WP-092 DoD) — the 101-point recall grid at
+  the boundaries floating point decides wrongly, asserted against a hand-derived
+  ``(k + 1) / 101`` rather than against another implementation, plus the guard
+  that fails loudly if torchmetrics ever stops honouring ``rec_thresholds``.
 
 The oracle bands (perfect -> 1.0, small-jitter floor 0.5, shuffled/offset ceiling
 0.05, ranking -> 0.5) are unchanged from the WP-044 gate: the
@@ -39,14 +43,15 @@ from typing import TYPE_CHECKING
 import pytest
 import torch
 from torch import Tensor
+from torchmetrics.detection import MeanAveragePrecision
 from torchvision.io import ImageReadMode, read_image
 
 from lucid_yolo.data.coco import CocoDetectionDataset
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode import NMSDecoder, TopKDecoder
-from lucid_yolo.eval import DualPathEvaluator, detections_to_predictions, evaluate_bbox
-from lucid_yolo.eval.coco_eval import _METRIC_KEYS
+from lucid_yolo.eval import DualPathEvaluator, coco_eval, detections_to_predictions, evaluate_bbox
+from lucid_yolo.eval.coco_eval import _METRIC_KEYS, _RECALL_GRID
 from lucid_yolo.models.heads.detect import DualHeadOutput
 from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -66,6 +71,13 @@ _JITTER_SMALL_FLOOR = 0.5  # small jitter must stay above this map50-95 (observe
 _SHUFFLED_MAP_CEILING = 0.05  # shuffled-class predictions must stay under this map50-95.
 _RANKING_NUM_IMAGES = 3  # keep the score-ranking case small and fast (spec: 2-3 images).
 _PAD_ROWS = 3  # extra score-zero rows appended per image for the padding-invariance case.
+
+# Geometry of the exact-recall boundary fixture. The pitch far exceeds the box size, so
+# the targets are pairwise disjoint and each detection can only match its own copy —
+# which is what makes the attained recall exactly found/positives at every IoU threshold.
+_BOUNDARY_PITCH = 100.0
+_BOUNDARY_HALF_WIDTH = 10.0
+_BOUNDARY_HALF_HEIGHT = 5.0
 
 
 def _targets_by_image(doc: dict[str, object]) -> dict[int, dict[str, torch.Tensor]]:
@@ -431,3 +443,105 @@ class TestOracleRoundTrip:
         )
 
         assert evaluate_bbox(padded, target_list) == evaluate_bbox(unpadded, target_list)
+
+
+def _boundary_case(found: int, positives: int) -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
+    """Return prediction and target dicts whose attained recall is exactly ``found / positives``.
+
+    ``positives`` well-separated single-class targets, of which the first ``found`` are
+    returned as exact copies. Every detection is therefore a true positive at every IoU
+    threshold, precision is 1 all the way along, and the interpolated curve is flat — so
+    the average is purely a count of sampled grid points and can be derived by hand.
+    """
+    centres = torch.tensor([[_BOUNDARY_PITCH * index, _BOUNDARY_PITCH] for index in range(positives)])
+    half = torch.tensor([_BOUNDARY_HALF_WIDTH, _BOUNDARY_HALF_HEIGHT])
+    boxes = torch.cat([centres - half, centres + half], dim=1)
+    preds = [
+        {
+            "boxes": boxes[:found].clone(),
+            "scores": torch.linspace(0.9, 0.5, found),
+            "labels": torch.zeros(found, dtype=torch.long),
+        }
+    ]
+    targets = [{"boxes": boxes, "labels": torch.zeros(positives, dtype=torch.long)}]
+    return preds, targets
+
+
+class _IgnoresRecThresholds(MeanAveragePrecision):
+    """A metric that silently drops ``rec_thresholds`` — the regression the guard exists for."""
+
+    def __init__(self, **kwargs: object) -> None:
+        kwargs.pop("rec_thresholds", None)
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+
+
+class TestRecallGridBoundary:
+    """A46 on the axis-aligned instrument: the 101-point grid where float32 decides it wrongly."""
+
+    @pytest.mark.parametrize(
+        ("found", "positives", "grid_index"),
+        [
+            # Boundaries torchmetrics' float32 grid forfeits — the cases this WP fixes.
+            # Five distinct indices, so no single unlucky-for-float32 case carries the test.
+            pytest.param(7, 50, 14, id="seven-of-fifty"),
+            pytest.param(7, 25, 28, id="seven-of-twenty-five"),
+            pytest.param(13, 20, 65, id="thirteen-of-twenty"),
+            pytest.param(39, 50, 78, id="thirty-nine-of-fifty"),
+            pytest.param(21, 25, 84, id="twenty-one-of-twenty-five"),
+            # Boundaries float32 already happens to get right — controls that must not move.
+            pytest.param(1, 2, 50, id="half-of-two"),
+            pytest.param(3, 4, 75, id="three-of-four"),
+            pytest.param(19, 20, 95, id="nineteen-of-twenty"),
+        ],
+    )
+    def test_boundary_recall_is_sampled_exactly(self, found: int, positives: int, grid_index: int) -> None:
+        """A recall landing exactly on grid point ``k`` samples it, giving ``(k + 1) / 101``.
+
+        The expected value is derived by hand, not read off another implementation: the
+        envelope is flat at precision 1, the attained recall is exactly ``k / 100``, so
+        ``k + 1`` of the 101 points sample 1 and the remaining ones sample 0.
+
+        The tolerance is set by the metric's **output dtype**, not chosen to make the
+        assertion pass: ``MeanAveragePrecision`` returns float32 tensors, in which
+        ``66 / 101`` differs from the exact quotient by about 3e-8. The defect being
+        detected is a whole grid point, ``1 / 101`` ~ 9.9e-3 — five orders of magnitude
+        larger than the tolerance, so it cannot hide inside it.
+        """
+        preds, targets = _boundary_case(found, positives)
+
+        stats = evaluate_bbox(preds, targets)
+
+        assert stats["map_50"] == pytest.approx((grid_index + 1) / 101, abs=1e-6)
+        assert stats["mar_100"] == pytest.approx(found / positives, abs=1e-6)
+
+    def test_the_torchmetrics_default_grid_overshoots_at_thirty_six_boundaries(self) -> None:
+        """Pin the dependency defect this module works around, so its removal is noticed.
+
+        ``rec_thresholds=None`` makes torchmetrics build the grid with a **float32**
+        ``torch.linspace``; at 36 of the 101 indices the stored value is strictly greater
+        than the ``k / 100`` it represents. Should a future torchmetrics build that grid
+        in float64 — or exactly — this test fails, which is the notification worth having:
+        the workaround in :func:`~lucid_yolo.eval.coco_eval._new_metric` could then go.
+        """
+        default = torch.linspace(0.0, 1.00, round(1.00 / 0.01) + 1).tolist()
+
+        overshoot = {index for index in range(len(_RECALL_GRID)) if default[index] > _RECALL_GRID[index]}
+
+        assert len(overshoot) == 36
+        assert {14, 28, 65, 78, 84} <= overshoot  # the five indices parametrized above
+        assert not any(value > index / 100 for index, value in enumerate(_RECALL_GRID))
+
+    def test_guard_fires_when_the_metric_stops_honouring_rec_thresholds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A metric that accepts ``rec_thresholds`` and ignores it must fail loudly, not silently.
+
+        The fix rests on a documented constructor parameter, so a future torchmetrics that
+        **removed** it would raise ``TypeError`` at construction on its own. The dangerous
+        regression is the quiet one — the parameter still accepted, no longer honoured —
+        which would restore the downward bias with nothing to show for it. This substitutes
+        exactly that metric and requires the guard to raise.
+        """
+        monkeypatch.setattr(coco_eval, "MeanAveragePrecision", _IgnoresRecThresholds)
+        pred, target = _single_image_gt()
+
+        with pytest.raises(RuntimeError, match="rec_thresholds"):
+            evaluate_bbox([pred], [target])

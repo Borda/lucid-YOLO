@@ -36,23 +36,28 @@ Protocol constants, fixed here as decisions:
     2. **101-point interpolated recall** (:data:`RECALL_POINTS`), the COCO convention.
        Chosen so this instrument and the axis-aligned one — which is COCOeval-faithful
        through its ``faster_coco_eval`` backend — define mAP the same way, and a reader
-       comparing the two reports is comparing numbers rather than definitions. They agree
-       exactly on fixtures whose attained recall never lands on a grid point, and differ
-       by ``1/101`` of a class's AP when it does, because the **recall grid is sampled
-       here in exact integer arithmetic and there in floating point**. How many of the
-       101 boundaries a grid gets wrong depends on the dtype it was built in::
+       comparing the two reports is comparing numbers rather than definitions. Whether
+       they actually did depended on the dtype each grid was built in, because sampling
+       "has recall reached ``k/100``" is an equality test that rounding can settle::
 
-           torch.linspace float32  (torchmetrics, hence evaluate_bbox)   36 missed
-           numpy.linspace float64  (raw pycocotools / faster_coco_eval)  10 missed
-           exact integers          (this module)                          0 missed
+           torch.linspace float32  (torchmetrics default, no longer used)  36 missed
+           numpy.linspace float64  (raw pycocotools / faster_coco_eval)    10 missed
+           exact integers          (this module)                            0 missed
 
        A "missed" boundary is one where the stored grid value exceeds the correctly
        rounded ``k/100``, so a class whose recall reaches exactly ``k/100`` fails the
-       comparison and forfeits that point. The divergence is therefore one-directional —
-       this implementation is never the lower of the two — and it is the reference's
-       rounding rather than a second definition of mAP. :func:`_average_precision`
-       documents the arithmetic; ``tests/eval/test_dota_eval.py`` pins both the exact
-       values and the divergence.
+       comparison and forfeits that point — ``1/101`` of that class's AP, always
+       downward. Until WP-092 that made ``evaluate_bbox`` the lower of the two at 36
+       boundaries; it now supplies the metric an exact grid through its documented
+       ``rec_thresholds`` argument, so the axis-aligned instrument forfeits none either
+       and the two agree at every boundary they can reach. They arrive there by
+       different arithmetic — int64 rationals here, correctly rounded float64 division
+       there — so the agreement is a measured property rather than a shared code path,
+       which is why both sides pin it. :func:`_average_precision` documents the
+       arithmetic; ``tests/eval/test_dota_eval.py`` pins the exact values and the
+       agreement, and ``tests/eval/test_coco_eval.py`` pins the dependency defect so
+       that a torchmetrics which fixes its own grid is noticed rather than worked
+       around forever.
     3. **maxDets = 300** (:data:`MAX_DETECTIONS`), not COCO's 100. The oriented output
        caps at 300 detections per image
        (:func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk`), so a 100 cap would

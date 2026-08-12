@@ -46,7 +46,18 @@ predictions directly against target tensors. Segmentation adds a ``masks`` entry
 to those dicts (:func:`~lucid_yolo.eval.annotations.load_eval_annotations` with
 ``with_masks=True``), in the same original coordinates.
 
-Provenance: R1 sec. 3.2.1, R1 Table 7, R1 sec. 4.4, R22, R23. Assumptions: A9, A10, A37.
+The 101-point recall grid is configured rather than defaulted (WP-092, A46). torchmetrics
+builds it with a float32 ``torch.linspace``, which overshoots ``k/100`` at 36 of the 101
+indices, so a class whose attained recall lands exactly on one of those boundaries forfeits
+that point and ``1/101`` of its average precision — always downward, never up. That is not
+an exotic case: a class with 5, 10, 20, 25, 50 or 100 ground truths lands on a grid point
+at *every* recall it can attain, and 20-36% of those are forfeited. :data:`_RECALL_GRID`
+supplies the correctly rounded hundredths instead, through the metric's own documented
+``rec_thresholds`` argument, which makes this instrument agree exactly with the oriented one
+(:func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map`) at the boundaries where they used
+to differ. Only the ``map`` family moves; average recall never entered the grid.
+
+Provenance: R1 sec. 3.2.1, R1 Table 7, R1 sec. 4.4, R22, R23. Assumptions: A9, A10, A37, A46.
 """
 
 from __future__ import annotations
@@ -102,6 +113,37 @@ _METRIC_KEYS: tuple[str, ...] = (
 #: statistics deliberately keep their bare names, so a detection-only report and
 #: the bbox half of a segmentation report are read the same way.
 _SEGM_PREFIX = "segm_"
+
+#: Number of interpolated recall points in the COCO protocol: 0.00 to 1.00 by 0.01 (R12).
+_RECALL_POINTS = 101
+
+#: The COCO recall grid as **correctly rounded** hundredths (WP-092, A46).
+#:
+#: Passed to the metric rather than left to its default, because torchmetrics builds this
+#: grid with a **float32** ``torch.linspace`` and widens the result to Python floats: at 36
+#: of the 101 indices the stored threshold is then strictly greater than the ``k/100`` it
+#: stands for. The 65th is ``0.6500000357627869``, against the ``0.65`` that a recall of
+#: ``13/20`` attains exactly. A class landing on such a boundary fails the comparison,
+#: forfeits that point, and loses ``1/101`` of its average precision — a bias that is
+#: small, one-directional and always downward.
+#:
+#: Evaluating ``k/100`` in float64 removes that bias outright rather than tightening it,
+#: and the reason is arithmetic rather than empirical. IEEE division is correctly rounded,
+#: so ``hits/positives`` and ``k/100`` land on the *same* double whenever they are equal as
+#: rationals: the equality case — the only one floating point was getting wrong — is then
+#: decided exactly, with no epsilon to choose. The unequal cases stay exact too at every
+#: scale this instrument sees, since two distinct rationals with denominators at most ``Q``
+#: differ by at least ``1/(100 Q)`` while doubles near 1 resolve ``2**-52``; the comparison
+#: is settled by the values rather than by rounding for ``Q`` up to roughly ``4.5e13``,
+#: against COCO classes whose ground-truth counts are measured in tens of thousands.
+#:
+#: This does not make the axis-aligned instrument bit-identical to
+#: :func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map`, which decides the same question
+#: in int64 and is exact for *any* ``Q``; it makes the two agree on every input either can
+#: be given in practice. ``tests/eval/test_coco_eval.py::TestRecallGridBoundary`` pins the
+#: agreement at the boundaries, and the 36-index defect itself, so a torchmetrics that
+#: fixes its own grid is noticed rather than silently worked around forever.
+_RECALL_GRID: tuple[float, ...] = tuple(index / (_RECALL_POINTS - 1) for index in range(_RECALL_POINTS))
 
 #: Feature-level input-pixel strides of the P3/P4/P5 detection head (8, 16, 32).
 _STRIDES: tuple[int, int, int] = (8, 16, 32)
@@ -334,13 +376,49 @@ def evaluate_bbox_and_segm(
 
 
 def _new_metric(iou_type: str | tuple[str, ...]) -> MeanAveragePrecision:
-    """Construct the metric for one ``iou_type``.
+    """Construct the metric for one ``iou_type``, on the exact recall grid.
 
-    The single place the metric is configured, so the backend, the box format and
-    the detection-cap warning setting cannot differ between the one-shot entry
-    points and the streaming one :class:`DualPathEvaluator` drives.
+    The single place the metric is configured, so the backend, the box format, the
+    recall grid and the detection-cap warning setting cannot differ between the
+    one-shot entry points and the streaming one :class:`DualPathEvaluator` drives.
+    Passing :data:`_RECALL_GRID` here is therefore what gives ``bbox``, ``segm``,
+    the combined pass and the streaming path one definition of average precision
+    rather than four.
+
+    Why this route, and not the other two the work package weighed:
+        ``rec_thresholds`` is a **documented constructor parameter** of
+        :class:`~torchmetrics.detection.MeanAveragePrecision` (1.9), forwarded
+        verbatim to the backend as ``params.recThrs`` in float64 — not a private
+        attribute reached into after construction. The alternative of rebuilding
+        average precision from the backend's raw matching would replace one
+        supported keyword with a reimplementation of all twelve statistics against
+        genuinely undocumented internals, to arrive at the same numbers; and
+        carrying the bias in the report instead would be choosing to publish a
+        known-low figure while the correction sat behind a public argument.
+
+    What happens when this stops being true:
+        Removed parameter — ``MeanAveragePrecision`` raises ``TypeError`` at
+        construction, loudly, on its own. Accepted-but-ignored parameter — the
+        quiet regression, which would silently restore the downward bias — is
+        caught by the check below. Stored-but-unused is caught in the gate by
+        ``tests/eval/test_coco_eval.py::TestRecallGridBoundary``, which asserts the
+        sampled values rather than the configuration. None of the three can reach a
+        report as a slightly-too-low mAP.
     """
-    metric = MeanAveragePrecision(backend="faster_coco_eval", box_format="xyxy", iou_type=iou_type)  # type: ignore[arg-type]
+    metric = MeanAveragePrecision(
+        backend="faster_coco_eval",
+        box_format="xyxy",
+        iou_type=iou_type,  # type: ignore[arg-type]
+        rec_thresholds=list(_RECALL_GRID),
+    )
+    if tuple(metric.rec_thresholds) != _RECALL_GRID:
+        raise RuntimeError(
+            "MeanAveragePrecision did not honour the rec_thresholds it was given, so its "
+            "recall grid is not the exact one this module requires (A46). Refusing to "
+            f"report a silently biased mAP. Expected {_RECALL_POINTS} exact hundredths, "
+            f"got {list(metric.rec_thresholds)[:3]}... — pin torchmetrics to a version "
+            "whose rec_thresholds argument is honoured, or rework _new_metric."
+        )
     # The fixed 300-row decoder output routinely exceeds COCO's top-100 detection
     # cap; keeping only the 100 highest-scoring per image is the standard protocol
     # (COCOeval's maxDets), not a misconfiguration, so silence the per-call warning.
