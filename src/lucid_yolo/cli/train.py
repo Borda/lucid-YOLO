@@ -6,7 +6,7 @@
 :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule`, so a run is launched
 entirely from YAML::
 
-    python -m lucid_yolo.ptl.cli fit --config configs/det_smoke.yaml
+    python -m lucid_yolo.cli.train fit --config configs/det_smoke.yaml
 
 or, once the package is installed, through the ``lucid-yolo`` console script.
 
@@ -289,7 +289,7 @@ def main(args: ArgsType = None) -> DetectionCLI:
         the fit/validate loop has already executed by the time it is returned.
 
     Examples:
-        >>> from lucid_yolo.ptl.cli import main
+        >>> from lucid_yolo.cli.train import main
         >>> cli = main(["fit", "--config", "det_smoke"])  # doctest: +SKIP
     """
     if args is None:

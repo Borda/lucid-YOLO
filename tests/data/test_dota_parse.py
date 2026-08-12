@@ -17,33 +17,17 @@ No RNG is used beyond the seeded fixture generator: every parser input is writte
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import shutil
-import sys
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 import torch
 
+from lucid_yolo.cli import data as data_cli
 from lucid_yolo.data import DOTA_CLASSES, DotaObject, dota_targets, load_dota_targets, parse_dota_label_file
-
-_CHECK_DATA_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_data.py"
-
-
-def _load_check_data() -> ModuleType:
-    """Load ``scripts/check_data.py`` as a module (``scripts`` is not a package)."""
-    spec = importlib.util.spec_from_file_location("check_data", _CHECK_DATA_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["check_data"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-check_data = _load_check_data()
+from lucid_yolo.data import check as check_data
 
 #: Split of the OBB micro-set, and the Roboflow-style annotation file its generator emits.
 _FIXTURE_SPLIT = "train"
@@ -325,7 +309,7 @@ def test_check_data_reports_the_published_totals_it_was_not_given(dota_fixture: 
     assert not result.ok
     assert any(str(check_data.DOTA_IMAGE_COUNT) in problem for problem in result.problems)
     assert any(str(check_data.DOTA_INSTANCE_COUNT) in problem for problem in result.problems)
-    assert check_data.main(["--data-root", str(dota_fixture.root), "--dataset", "dota"]) == 1
+    assert data_cli.main(["check", "--data_root", str(dota_fixture.root), "--dataset", "dota"]) == 1
 
 
 def test_check_data_reports_an_image_without_a_label_file(dota_fixture: _DotaFixture) -> None:
@@ -368,5 +352,5 @@ def test_check_data_reports_missing_split_directories(tmp_path: Path) -> None:
 
 def test_check_data_coco_path_is_the_default(tmp_path: Path) -> None:
     """The CLI still validates a COCO root unless --dataset says otherwise."""
-    assert check_data.main(["--data-root", str(tmp_path)]) == 1
+    assert data_cli.main(["check", "--data_root", str(tmp_path)]) == 1
     assert not check_data.check_coco_root(tmp_path).ok

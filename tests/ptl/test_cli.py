@@ -25,9 +25,9 @@ import pytest
 import torch
 
 import lucid_yolo
+from lucid_yolo.cli.train import DetectionCLI, _resolve_config_args, default_determinism, main, packaged_config
 from lucid_yolo.data.coco import build_scale_policy
 from lucid_yolo.models.registry import scale_spec
-from lucid_yolo.ptl.cli import DetectionCLI, _resolve_config_args, default_determinism, main, packaged_config
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -40,7 +40,7 @@ _CONFIG_PATHS = sorted(_CONFIGS_DIR.glob("*.yaml"))
 def _build_cli(*args: str) -> DetectionCLI:
     """Build the detection CLI in non-running mode with the given extra args.
 
-    Mirrors :func:`lucid_yolo.ptl.cli.main` (same ``deterministic``/seed defaults)
+    Mirrors :func:`lucid_yolo.cli.train.main` (same ``deterministic``/seed defaults)
     but forces ``run=False`` so the model and datamodule are instantiated without
     launching ``fit``.
     """

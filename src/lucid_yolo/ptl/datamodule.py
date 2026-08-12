@@ -7,7 +7,7 @@ into the Phase 1 augmentation pipeline and exposes train/val
 layout of blueprint sec. 14.3 (``train2017/`` + ``annotations/instances_train2017.json``
 and the matching ``val2017``) and, per the dataset contract (AGENTS.md sec. 3),
 contains **no download logic**: a missing or mis-shaped root is validated by
-``make check-data`` before any ``[DATA]`` run, never fetched here.
+``lucid-data check`` before any ``[DATA]`` run, never fetched here.
 
 Multi-image augmentation composition:
     Mosaic, mixup and copy-paste each consume *several* images, so they cannot be

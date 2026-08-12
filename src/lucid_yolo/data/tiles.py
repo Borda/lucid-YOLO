@@ -47,38 +47,33 @@ Empty tiles (A52):
     keeping them costs disk. ``--drop-empty-tiles`` selects the other reading, and the
     report prints how many tiles the choice covers either way.
 
-This script never downloads anything (AGENTS.md sec. 3) and is not shipped in the wheel,
-like ``check_data.py``: it is a developer-run build step for a ``[DATA]`` tier run.
+This module never downloads anything (AGENTS.md sec. 3). It ships in the wheel as
+``lucid-data build-tiles`` (WP-096), because a remote tier run installs a wheel and the
+build is a step of that run, not of developing this repository.
 
 Examples:
     Build both annotated splits at R18's own stride (1024 patch, 512 overlap)::
 
-        python scripts/build_dota_tiles.py --dota-root /data/dota --out /data/dota_tiles \\
+        lucid-data build-tiles --root /data/dota --out /data/dota_tiles \\
             --splits train,val --overlap 512
 
     Smoke-size the build to the first 20 source images of each split::
 
-        python scripts/build_dota_tiles.py --dota-root /data/dota --out /data/dota_tiles --limit 20
+        lucid-data build-tiles --root /data/dota --out /data/dota_tiles --limit 20
 """
 
 from __future__ import annotations
 
-import argparse
 import json
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import torch
 from torchvision.io import ImageReadMode, read_image, write_png
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT / "src") not in sys.path:  # pragma: no cover - import shim for a script run
-    sys.path.insert(0, str(REPO_ROOT / "src"))
-
-from lucid_yolo.data.dota import DOTA_CLASSES, load_dota_targets  # noqa: E402
-from lucid_yolo.data.rotated_geom import rboxes_to_polygons  # noqa: E402
-from lucid_yolo.data.tiling import CROP_OVERLAP, PATCH_SIZE, TiledTargets, tile_image_targets  # noqa: E402
+from lucid_yolo.data.dota import DOTA_CLASSES, load_dota_targets
+from lucid_yolo.data.rotated_geom import rboxes_to_polygons
+from lucid_yolo.data.tiling import CROP_OVERLAP, PATCH_SIZE, TiledTargets, tile_image_targets
 
 #: Image suffixes read from a DOTA ``images/`` directory. DOTA-v1.0 publishes PNG.
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
@@ -315,36 +310,58 @@ def _write_instances(
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def main() -> int:
-    """Build the tiled layout for every requested split.
+#: Annotation readers ``build_tiles`` can tile from. ``source`` names the reader rather
+#: than the command doing so: what this writes is a plain COCO container with
+#: quadrilateral rings, so a second oriented dataset is a reader, not a second command
+#: with its own flags to keep in step.
+SOURCES = ("dota",)
+
+
+def build_tiles(
+    root: Path,
+    out: Path,
+    source: str = "dota",
+    splits: str = "train,val",
+    patch: int = PATCH_SIZE,
+    overlap: int = CROP_OVERLAP,
+    drop_empty_tiles: bool = False,
+    limit: int | None = None,
+) -> int:
+    """Tile an oriented dataset into the trainable COCO layout, split by split.
+
+    Args:
+        root: Provisioned dataset root, holding one directory per split.
+        out: Where the tiled COCO layout is written.
+        source: Annotation reader; only ``dota`` is implemented.
+        splits: Comma-separated split names.
+        patch: Crop side in pixels.
+        overlap: Nominal crop overlap in pixels (A21; R18's own protocol is 512).
+        drop_empty_tiles: Skip tiles that carry no annotation (A52).
+        limit: Read at most this many source images per split.
 
     Returns:
-        ``0`` on success; ``1`` when a split directory is not a DOTA split.
+        ``0`` on success; ``1`` when a split directory is not a split of ``source``.
+
+    Raises:
+        ValueError: If ``source`` is not a known reader.
 
     Examples:
-        >>> callable(main)
-        True
+        >>> build_tiles(Path("/nonexistent"), Path("/tmp/tiles"), splits="val")  # doctest: +ELLIPSIS
+        FAIL: ...
+        1
     """
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dota-root", type=Path, required=True, help="provisioned DOTA-v1.0 root")
-    parser.add_argument("--out", type=Path, required=True, help="where the tiled COCO layout is written")
-    parser.add_argument("--splits", default="train,val", help="comma-separated split names (default: train,val)")
-    parser.add_argument("--patch", type=int, default=PATCH_SIZE, help=f"crop side (default: {PATCH_SIZE})")
-    parser.add_argument("--overlap", type=int, default=CROP_OVERLAP, help=f"crop overlap (default: {CROP_OVERLAP})")
-    parser.add_argument("--drop-empty-tiles", action="store_true", help="skip tiles with no annotation (A52)")
-    parser.add_argument("--limit", type=int, default=None, help="read at most N source images per split")
-    args = parser.parse_args()
-
-    for split in (name.strip() for name in args.splits.split(",") if name.strip()):
+    if source not in SOURCES:
+        raise ValueError(f"unknown source {source!r}; known readers are {list(SOURCES)}")
+    for split in (name.strip() for name in splits.split(",") if name.strip()):
         try:
             report = convert_split(
-                args.dota_root / split,
-                args.out,
+                root / split,
+                out,
                 split,
-                patch=args.patch,
-                overlap=args.overlap,
-                keep_empty=not args.drop_empty_tiles,
-                limit=args.limit,
+                patch=patch,
+                overlap=overlap,
+                keep_empty=not drop_empty_tiles,
+                limit=limit,
             )
         except FileNotFoundError as error:
             print(f"FAIL: {error}")
@@ -353,9 +370,5 @@ def main() -> int:
             f"{report.split}: {report.source_images} images -> {report.tiles} tiles "
             f"({report.empty_tiles} empty), {report.instances} instances, {report.difficult} difficult"
         )
-    print(f"wrote {args.out}")
+    print(f"wrote {out}")
     return 0
-
-
-if __name__ == "__main__":  # pragma: no cover - CLI entry point
-    raise SystemExit(main())

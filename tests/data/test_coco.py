@@ -13,19 +13,18 @@ matching and the mismatching path, without spawning a subprocess).
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import json
 import os
-import sys
 from collections.abc import Iterator
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 import torch
 from pytorch_lightning import LightningModule, Trainer
 
+from lucid_yolo.cli import data as data_cli
 from lucid_yolo.data import Targets, boxes_from_polygons
+from lucid_yolo.data import check as check_data
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.ptl import datamodule as dm
 from lucid_yolo.ptl.datamodule import (
@@ -36,21 +35,6 @@ from lucid_yolo.ptl.datamodule import (
     unpack_batch,
     unpack_targets,
 )
-
-_CHECK_DATA_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_data.py"
-
-
-def _load_check_data() -> ModuleType:
-    """Load ``scripts/check_data.py`` as a module (``scripts`` is not a package)."""
-    spec = importlib.util.spec_from_file_location("check_data", _CHECK_DATA_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # dataclasses need the module registered before exec
-    spec.loader.exec_module(module)
-    return module
-
-
-check_data = _load_check_data()
 
 #: Image count of the detseg fixture split (tests/fixtures/synthetic.py).
 _FIXTURE_IMAGE_COUNT = 16
@@ -575,7 +559,7 @@ def test_check_data_fails_on_count_mismatch(tmp_path: Path) -> None:
     _write_fake_coco_root(tmp_path, train=2, val=1)
     result = check_data.check_coco_root(tmp_path)
     assert not result.ok
-    assert check_data.main(["--data-root", str(tmp_path)]) == 1
+    assert data_cli.main(["check", "--data_root", str(tmp_path)]) == 1
 
 
 def test_check_data_fails_on_missing_root(tmp_path: Path) -> None:

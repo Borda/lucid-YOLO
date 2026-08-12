@@ -722,7 +722,7 @@ class DetectionLitModule(LightningModule):
         as ``val/mAP`` by :meth:`on_validation_epoch_end`. Scoring runs in
         letterbox coordinates — IoU is invariant to each image's uniform
         letterbox scaling, so the number tracks the original-coordinate
-        protocol closely; the acceptance figure remains ``scripts/eval_det.py``
+        protocol closely; the acceptance figure remains ``lucid-eval``
         (original coordinates, both paths).
 
         A ``"segment"`` module additionally decodes the kept detections' masks
@@ -840,7 +840,7 @@ class DetectionLitModule(LightningModule):
         sides upsampled by four would cost sixteen times the memory to compare the
         same two fields at a finer sampling of the same boundary. That makes
         ``val/segm_mAP`` a proxy in exactly the sense ``val/mAP`` already is — the
-        acceptance figure is ``scripts/eval_det.py``, which scores masks at original
+        acceptance figure is ``lucid-eval``, which scores masks at original
         resolution.
 
         Masks are decoded one image at a time: every kept detection materialises a

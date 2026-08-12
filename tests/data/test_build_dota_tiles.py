@@ -14,33 +14,16 @@ the failure this build exists to prevent.
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 import torch
 
+from lucid_yolo.data import tiles as build
 from lucid_yolo.data.coco import CocoDetectionDataset
 from lucid_yolo.data.dota import DOTA_CLASSES
 from lucid_yolo.data.tiling import tile_windows
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    """Load a ``scripts/`` module by file path (``scripts`` is not a package)."""
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # dataclasses need the module registered before exec
-    spec.loader.exec_module(module)
-    return module
-
-
-build = _load_module("build_dota_tiles", REPO_ROOT / "scripts" / "build_dota_tiles.py")
 
 #: Patch and overlap used throughout: small enough to tile a 24 px image into four windows.
 PATCH = 16

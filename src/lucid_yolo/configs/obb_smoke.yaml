@@ -47,13 +47,13 @@ model:
   alpha_final: 0.1 # blueprint sec. 5.7: ProgLoss ramp end, weights (0.1, 0.9)
 
 data:
-  # PLACEHOLDER -- the tiled COCO layout `scripts/build_dota_tiles.py` writes (WP-094):
+  # PLACEHOLDER -- the tiled COCO layout `lucid-data build-tiles` writes (WP-094):
   # a root whose `segmentation` rings are the four-corner quadrilaterals of the oriented
   # annotation (the loader's `rotated_targets` mode, linked from `model.task`). DOTA's
   # own labelTxt tree is read by lucid_yolo.data.dota and tiled by
   # lucid_yolo.data.tiling into that layout; neither is ever downloaded (AGENTS.md
   # sec. 3). Build it with:
-  #   python scripts/build_dota_tiles.py --dota-root /path/to/dota --out /path/to/dota_tiles
+  #   lucid-data build-tiles --root /path/to/dota --out /path/to/dota_tiles
   # The four path overrides below name the split directories that build writes; without
   # them the datamodule looks for COCO 2017's `train2017`/`val2017` names.
   data_root: /path/to/dota_tiles

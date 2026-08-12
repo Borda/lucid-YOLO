@@ -11,35 +11,19 @@ SHA-256 verification hook, and the CLI argument parsing.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
-import importlib.util
 import io
 import json
-import sys
 import urllib.request
 import zipfile
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 
 import pytest
 
+from lucid_yolo.data import check as check_data
 from lucid_yolo.data import download as dl
-
-_CHECK_DATA_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_data.py"
-
-
-def _load_check_data() -> ModuleType:
-    """Load ``scripts/check_data.py`` as a module (``scripts`` is not a package)."""
-    spec = importlib.util.spec_from_file_location("check_data", _CHECK_DATA_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-check_data = _load_check_data()
 
 
 class _FakeResponse:
@@ -312,21 +296,28 @@ def test_parse_checksums_invalid_raises(item: str) -> None:
         dl._parse_checksums([item])
 
 
+def _deprecated_parser() -> argparse.ArgumentParser:
+    """Build the frozen ``lucid-download`` parser (dashed flags, deprecated in 0.3.0)."""
+    parser = argparse.ArgumentParser()
+    dl.add_arguments(parser)
+    return parser
+
+
 def test_cli_requires_data_root() -> None:
-    parser = dl._build_parser()
+    parser = _deprecated_parser()
     with pytest.raises(SystemExit):
         parser.parse_args([])
 
 
 def test_cli_defaults_to_val_with_annotations() -> None:
-    args = dl._build_parser().parse_args(["--data-root", "/data/coco"])
+    args = _deprecated_parser().parse_args(["--data-root", "/data/coco"])
     assert args.splits == ["val"]
     assert args.annotations is True
     assert args.force is False
 
 
 def test_cli_parses_splits_and_no_annotations() -> None:
-    args = dl._build_parser().parse_args(
+    args = _deprecated_parser().parse_args(
         ["--data-root", "/data/coco", "--splits", "train", "val", "--no-annotations", "--keep-archives", "--quiet"]
     )
     assert args.splits == ["train", "val"]
@@ -337,7 +328,7 @@ def test_cli_parses_splits_and_no_annotations() -> None:
 
 def test_cli_rejects_unknown_split() -> None:
     with pytest.raises(SystemExit):
-        dl._build_parser().parse_args(["--data-root", "/data/coco", "--splits", "test"])
+        _deprecated_parser().parse_args(["--data-root", "/data/coco", "--splits", "test"])
 
 
 def test_main_returns_zero_on_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

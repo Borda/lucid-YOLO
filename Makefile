@@ -78,10 +78,11 @@ shapes:
 	$(PY) scripts/shapes_regression.py --task $(TASK) $(if $(FREEZE),--freeze,)
 
 # Real-dataset layout validation (WP-014/056; synthetic stand-in per docs/ASSUMPTIONS.md A26).
-# DATASET selects the layout: coco (default) or dota.
+# DATASET selects the layout: coco (default) or dota. A convenience wrapper only — the
+# check ships as `lucid-data check`, so a remote tier run needs no checkout (WP-096).
 check-data:
 	@test -n "$(DATA_ROOT)" || { echo "usage: make check-data DATA_ROOT=/path/to/data [DATASET=coco|dota]"; exit 1; }
-	$(PY) scripts/check_data.py --data-root $(DATA_ROOT) --dataset $(DATASET)
+	$(PY) -m lucid_yolo.cli.data check --data_root $(DATA_ROOT) --dataset $(DATASET)
 
 # Standard PEP 517 build (setuptools backend): sdist + wheel into dist/.
 build:

@@ -26,9 +26,13 @@ when that image is reached, and the evaluator folds each batch into the metric
 immediately (masks are RLE-encoded into the metric state on update). Neither the
 targets nor the predictions are ever dense for the whole split at once.
 
+This is the path :func:`lucid_yolo.eval.cli.main` takes for a ``detect`` or ``segment``
+checkpoint (WP-096); the oriented one is :mod:`lucid_yolo.eval.rotated_eval`. Which of
+the two runs is decided by the checkpoint, in the same spirit as the mask decision above.
+
 Usage::
 
-    python scripts/eval_det.py CHECKPOINT --data-root ~/data/coco2017 \
+    lucid-eval CHECKPOINT --data-root ~/data/coco2017 \
         [--no-ema] [--no-masks] [--batch-size 32] [--img-size 640] \
         [--device mps] [--output report.json]
 
@@ -38,10 +42,8 @@ Provenance: R1 Table 7, R1 sec. 4.4 (dual-path protocol), R1 Table S9
 
 from __future__ import annotations
 
-import argparse
 import json
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from torch import Tensor, nn
@@ -50,13 +52,13 @@ from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.decode.nms_path import NMSDecoder
 from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.eval.annotations import letterboxed_batches, load_eval_annotations
-from lucid_yolo.eval.checkpoint import load_eval_module, pick_device
+from lucid_yolo.eval.checkpoint import pick_device
 from lucid_yolo.eval.coco_eval import DualPathEvaluator
 from lucid_yolo.models.build import SegmentOutput
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from pathlib import Path
 
 
 class _SegmentationForward(nn.Module):
@@ -101,46 +103,58 @@ class _SegmentationForward(nn.Module):
         return self.module.forward_segmentation(images)
 
 
-def main(argv: Sequence[str] | None = None) -> None:
-    """Run the dual-path COCO evaluation from the command line."""
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("checkpoint", type=Path, help="Lightning .ckpt to evaluate")
-    parser.add_argument("--data-root", type=Path, required=True, help="COCO root with val2017/ and annotations/")
-    parser.add_argument("--no-ema", dest="ema", action="store_false", help="evaluate raw weights, not the EMA shadow")
-    parser.add_argument(
-        "--no-masks",
-        dest="masks",
-        action="store_false",
-        help="score boxes only, even for a segmentation checkpoint",
-    )
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--img-size", type=int, default=640)
-    parser.add_argument("--device", default="auto", help="auto|cpu|mps|cuda")
-    parser.add_argument("--limit", type=int, default=0, help="evaluate only the first N images (0 = all)")
-    parser.add_argument("--output", type=Path, default=None, help="write the JSON report here")
-    args = parser.parse_args(argv)
+def run(
+    module: DetectionLitModule,
+    info: dict[str, object],
+    *,
+    data_root: Path,
+    img_size: int,
+    batch_size: int,
+    masks: bool,
+    device_name: str,
+    limit: int,
+    output: Path | None,
+) -> int:
+    """Run the dual-path COCO evaluation for an already-loaded checkpoint.
 
-    ann_file = args.data_root / "annotations" / "instances_val2017.json"
-    images_dir = args.data_root / "val2017"
-    # The checkpoint loads first: whether the ground truth needs masks at all is
-    # the checkpoint's property, not the caller's.
-    module, info = load_eval_module(args.checkpoint, use_ema=args.ema)
-    segmentation = module.task == "segment" and args.masks
+    Args:
+        module: The eval-mode module, loaded by :func:`lucid_yolo.cli.eval.evaluate`.
+        info: That loader's provenance dict, extended here and written to the report.
+        data_root: COCO root holding ``val2017/`` and ``annotations/``.
+        img_size: Letterbox side.
+        batch_size: Images per forward pass.
+        masks: Whether a segmentation checkpoint also scores masks.
+        device_name: Device string, or ``auto``.
+        limit: Score only the first N images; ``0`` scores all.
+        output: Optional path for the JSON report.
+
+    Returns:
+        ``0``; a failure here raises rather than returning a code.
+
+    Examples:
+        >>> callable(run)
+        True
+    """
+    ann_file = data_root / "annotations" / "instances_val2017.json"
+    images_dir = data_root / "val2017"
+    # Whether the ground truth needs masks at all is the checkpoint's property, not the
+    # caller's: --masks false can decline them, but nothing opts a detector *into* them.
+    segmentation = module.task == "segment" and masks
     info["masks"] = segmentation
     images, targets, label_to_category = load_eval_annotations(ann_file, with_masks=segmentation)
-    if args.limit:
-        images = images[: args.limit]
-    device = pick_device(args.device)
-    letterbox = Letterbox(args.img_size)
+    if limit:
+        images = images[:limit]
+    device = pick_device(device_name)
+    letterbox = Letterbox(img_size)
     model: nn.Module = _SegmentationForward(module) if segmentation else module
     evaluator = DualPathEvaluator(model, TopKDecoder(), NMSDecoder(), label_to_category, letterbox)
 
     print(
-        f"eval: {len(images)} images, device={device.type}, ema={args.ema}, "
-        f"img_size={args.img_size}, masks={segmentation}"
+        f"eval: {len(images)} images, device={device.type}, ema={info.get('ema')}, "
+        f"img_size={img_size}, masks={segmentation}"
     )
     start = time.perf_counter()
-    report = evaluator.evaluate(letterboxed_batches(images, images_dir, letterbox, args.batch_size), targets, device)
+    report = evaluator.evaluate(letterboxed_batches(images, images_dir, letterbox, batch_size), targets, device)
     elapsed = time.perf_counter() - start
     print(f"done in {elapsed:.1f}s ({len(images) / elapsed:.1f} img/s)")
 
@@ -155,11 +169,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     delta = report["nms"]["map"] - report["e2e"]["map"]
     print(f"E2E deficit vs NMS: {delta * 100:.2f} AP")
 
-    if args.output:
+    if output:
         payload = {"info": info, "images": len(images), "seconds": round(elapsed, 1), "report": report}
-        args.output.write_text(json.dumps(payload, indent=2) + "\n")
-        print(f"report -> {args.output}")
-
-
-if __name__ == "__main__":
-    main()
+        output.write_text(json.dumps(payload, indent=2) + "\n")
+        print(f"report -> {output}")
+    return 0

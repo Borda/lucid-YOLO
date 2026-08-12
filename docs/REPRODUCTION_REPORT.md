@@ -107,6 +107,8 @@ lucid-yolo fit --config det_smoke.yaml \
 python scripts/eval_det.py <checkpoint> --data-root <root>
 ```
 
+These are the commands **as run**, at the version named, and are left unedited for that reason. On 0.3.0 and later the same three steps are `lucid-data download --data_root <root> --splits train val --verify true`, the unchanged `lucid-yolo fit`, and `lucid-eval --checkpoint <checkpoint> --data_root <root>` (WP-096). `lucid-download` still works and still takes the dashed flags above; it is removed in 0.4.0.
+
 Seed 0 throughout. Cross-platform bitwise reproduction is not claimed (A26: libm last-bit rounding differs across OS and architecture); the run config, seeds, and metric reports are archived under `.experiments/det_smoke/`.
 
 ______________________________________________________________________
@@ -216,5 +218,7 @@ lucid-yolo fit --config seg_smoke.yaml \
   --trainer.precision bf16-mixed
 python scripts/eval_det.py <checkpoint> --data-root <root>
 ```
+
+As above, these are the commands as run and are left unedited; the 0.3.0 spellings are `lucid-data download` and `lucid-eval` (WP-096).
 
 Seed 0 throughout. The package version installed for run v9 is not recorded in any of its artifacts. Cross-platform bitwise reproduction is not claimed (A26); the metric report is archived under `.experiments/seg_smoke/`, and the run config, hyperparameters and epoch metrics under `lightning_logs/version_9/`.

@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Per-tile rotated evaluation of an oriented checkpoint (WP-095).
 
-The oriented counterpart of ``eval_det.py``. It loads an ``obb`` checkpoint, runs it over
-a split of the tiled layout ``build_dota_tiles.py`` writes, decodes the NMS-free
+The oriented counterpart of :mod:`lucid_yolo.eval.detect_eval`. It takes an ``obb``
+checkpoint, runs it over a split of the tiled layout ``lucid-data build-tiles`` writes,
+decodes the NMS-free
 one-to-one branch into rotated boxes and scores them with the WP-063 accumulator
 (:func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map`), which brings A46's exact
 101-point recall grid, A47's 300-detection cap and A48's difficult rule with it.
@@ -12,7 +13,7 @@ number is not comparable to a published one: an object crossing a tile boundary 
 counted twice, once as a clipped part in each tile. Merging tiles back into whole images
 needs a duplicate rule, and in an NMS-free path there is nothing to suppress the
 duplicate with — so that rule is a decision (WP-064 owns it), not an implementation
-detail this script may quietly pick. What this script is for is the acceptance figure
+detail an instrument may quietly pick. What this is for is the acceptance figure
 that the tier run itself gates on, and the regression instrument for it; the layout
 carries ``source_image`` and ``window`` on every tile so the merge can be built on top
 without re-tiling anything.
@@ -28,12 +29,16 @@ Coordinate frame:
 The epoch metric already exists (WP-088 logs ``val/rotated_mAP`` and
 ``val/rotated_mAP50`` from the validation loop) and is deliberately not what this is:
 that one runs on the training recipe's own loader, on whatever split the run configured,
-and reports at epoch granularity. This script takes a finished checkpoint, an explicit
-split, and the EMA weights a release is actually evaluated on.
+and reports at epoch granularity. This takes a finished checkpoint, an explicit split,
+and the EMA weights a release is actually evaluated on.
+
+``lucid-eval`` reaches this path when the checkpoint's own ``task`` is ``"obb"``
+(WP-096) — the caller names no task, for the same reason the detection path decides
+masks from the checkpoint rather than from a flag.
 
 Usage::
 
-    python scripts/eval_obb.py CHECKPOINT --data-root /data/dota_tiles \
+    lucid-eval CHECKPOINT --data-root /data/dota_tiles \
         [--split val] [--no-ema] [--batch-size 8] [--img-size 1024] \
         [--device mps] [--limit 200] [--output report.json]
 
@@ -42,7 +47,6 @@ Provenance: R18 sec. 4 (the tiled protocol), R1 sec. 4.4. Assumptions: A46, A47,
 
 from __future__ import annotations
 
-import argparse
 import json
 import time
 from pathlib import Path
@@ -51,14 +55,12 @@ from typing import TYPE_CHECKING
 import torch
 
 from lucid_yolo.assign import make_anchor_points
-from lucid_yolo.eval.checkpoint import load_eval_module, pick_device
+from lucid_yolo.eval.checkpoint import pick_device
 from lucid_yolo.eval.dota_eval import MAX_DETECTIONS, evaluate_rotated_map, rotated_detections_to_predictions
 from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from torch import Tensor
 
     from lucid_yolo.ptl.module import DetectionLitModule
@@ -177,40 +179,48 @@ def _anchor_grid(img_size: int, device: torch.device) -> tuple[Tensor, Tensor]:
     return points.to(device), strides.to(device)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the per-tile oriented evaluation from the command line.
+def run(
+    module: DetectionLitModule,
+    info: dict[str, object],
+    *,
+    data_root: Path,
+    split: str,
+    variant: str,
+    img_size: int,
+    batch_size: int,
+    device_name: str,
+    limit: int,
+    output: Path | None,
+) -> int:
+    """Run the per-tile oriented evaluation for an already-loaded checkpoint.
+
+    Args:
+        module: The eval-mode module, loaded by :func:`lucid_yolo.cli.eval.evaluate`.
+        info: That loader's provenance dict, extended here and written to the report.
+        data_root: Root of the tiled layout.
+        split: Split of that layout to score.
+        variant: Scale letter of the trained model.
+        img_size: Letterbox side; the tier's tiles are 1024 px.
+        batch_size: Tiles per forward pass.
+        device_name: Device string, or ``auto``.
+        limit: Score only the first N tiles; ``0`` scores all.
+        output: Optional path for the JSON report.
 
     Returns:
         ``0`` on success; ``1`` when the checkpoint is not an oriented one.
 
     Examples:
-        >>> callable(main)
+        >>> callable(run)
         True
     """
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("checkpoint", type=Path, help="Lightning .ckpt to evaluate")
-    parser.add_argument("--data-root", type=Path, required=True, help="tiled layout root (build_dota_tiles.py)")
-    parser.add_argument("--split", default="val", help="split to score (default: val)")
-    parser.add_argument("--no-ema", dest="ema", action="store_false", help="evaluate raw weights, not the EMA shadow")
-    parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--img-size", type=int, default=1024)
-    parser.add_argument("--variant", default="n", help="scale letter of the trained model")
-    parser.add_argument("--device", default="auto", help="auto|cpu|mps|cuda")
-    parser.add_argument("--limit", type=int, default=0, help="score only the first N tiles (0 = all)")
-    parser.add_argument("--output", type=Path, default=None, help="write the JSON report here")
-    args = parser.parse_args(argv)
-
-    module, info = load_eval_module(args.checkpoint, use_ema=args.ema)
-    device = pick_device(args.device)
-    datamodule = build_datamodule(
-        args.data_root, args.split, img_size=args.img_size, batch_size=args.batch_size, variant=args.variant
-    )
+    device = pick_device(device_name)
+    datamodule = build_datamodule(data_root, split, img_size=img_size, batch_size=batch_size, variant=variant)
     datamodule.setup("validate")
 
-    print(f"eval-obb: split={args.split}, device={device.type}, ema={args.ema}, img_size={args.img_size}")
+    print(f"eval-obb: split={split}, device={device.type}, ema={info.get('ema')}, img_size={img_size}")
     start = time.perf_counter()
     try:
-        metrics, tiles, instances = score_split(module, datamodule, device, img_size=args.img_size, limit=args.limit)
+        metrics, tiles, instances = score_split(module, datamodule, device, img_size=img_size, limit=limit)
     except ValueError as error:
         print(f"FAIL: {error}")
         return 1
@@ -220,18 +230,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"[per-tile] rotated mAP50-95={metrics['map']:.4f} mAP50={metrics['map_50']:.4f}")
     print("whole-image merge is WP-064's decision; this number is per tile")
 
-    if args.output:
+    if output:
         payload = {
-            "info": {**info, "split": args.split, "img_size": args.img_size, "per_tile": True},
+            "info": {**info, "split": split, "img_size": img_size, "per_tile": True},
             "tiles": tiles,
             "instances": instances,
             "seconds": round(elapsed, 1),
             "metrics": metrics,
         }
-        args.output.write_text(json.dumps(payload, indent=2) + "\n")
-        print(f"report -> {args.output}")
+        output.write_text(json.dumps(payload, indent=2) + "\n")
+        print(f"report -> {output}")
     return 0
-
-
-if __name__ == "__main__":  # pragma: no cover - CLI entry point
-    raise SystemExit(main())

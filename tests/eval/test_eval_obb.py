@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate for the oriented acceptance instrument (WP-095).
 
-Runs offline against a tiny tiled layout built by ``scripts/build_dota_tiles.py`` from a
+Runs offline against a tiny tiled layout built by :mod:`lucid_yolo.data.tiles` from a
 synthetic DOTA split, so the instrument is exercised over exactly the on-disk shape the
 tier run feeds it — an untrained module scores near zero, which is fine: what is under
 test is that ground truth, predictions and the accumulator meet correctly, not that a
@@ -16,33 +16,17 @@ the label space it expects. A wrong frame or a shifted label space fails that te
 
 from __future__ import annotations
 
-import importlib.util
 import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 import torch
 
+from lucid_yolo.data import tiles as build
+from lucid_yolo.eval import rotated_eval as evaluate
 from lucid_yolo.eval.dota_eval import evaluate_rotated_map
 from lucid_yolo.ptl.module import DetectionLitModule
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    """Load a ``scripts/`` module by file path (``scripts`` is not a package)."""
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # dataclasses need the module registered before exec
-    spec.loader.exec_module(module)
-    return module
-
-
-build = _load_module("build_dota_tiles", REPO_ROOT / "scripts" / "build_dota_tiles.py")
-evaluate = _load_module("eval_obb", REPO_ROOT / "scripts" / "eval_obb.py")
 
 #: Letterbox side and tile side used throughout: divisible by the level-32 stride.
 IMG_SIZE = 64

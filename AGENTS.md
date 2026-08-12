@@ -25,13 +25,15 @@ Pushes to the remote are batched at phase boundaries and each push requires expl
 - `make gate` — pre-commit (all linters, D12d) + offline pytest + golden suite + frozen-golden regression. **The single command that decides whether a commit may land.**
 - `make freeze-goldens MINOR=0.N` — release WPs only.
 - All unit gates run **offline**: no network, no dataset, no GPU. Only WPs marked **[DATA]** or **[GPU]** need more.
+- **Pre-release wheels for a tier run** carry a PEP 440 `.devN` suffix on the version they lead to, counting from zero (`0.3.0.dev0`), which sorts below that release so a plain `pip install lucid-yolo` never resolves to one. Bump `N` for every wheel that leaves this machine, rebuilds of the same tree included, and verify the installed version before launching anything long: a 15-hour run once trained on a stale wheel because the intended version was never published and pip silently took the newest that existed. Dev wheels are built and uploaded by hand (`uv build`); they are **not** tagged, since `release_guard.py` accepts `v0.MINOR.PATCH` only and a tag is a claim about a release.
+- **Three commands ship; `scripts/` does not.** `lucid-yolo` (train/validate), `lucid-data` (`download` · `check` · `build-tiles`) and `lucid-eval` (acceptance scoring, on the protocol the checkpoint's own task names) live in `lucid_yolo/cli/` and cover a whole tier run from a wheel alone (WP-096). What stays in `scripts/` is development tooling — goldens, overfit gates, figures, the release guard, the licence audit — and a remote run needs none of it. All three parse with jsonargparse, so flags are underscored (`--data_root`) exactly as `--data.batch_size` already was, and every command takes `--config`. `lucid-download` survives as a deprecated alias with its original dashed flags, removed in 0.4.0.
 
 ## 3. Dataset contract
 
-Datasets are never committed and never auto-downloaded by test code. `configs/data/*.yaml` carries the root path; `make check-data` validates layout and counts before any [DATA] WP runs against real data.
+Datasets are never committed and never auto-downloaded by test code. `configs/data/*.yaml` carries the root path; `lucid-data check` (also `make check-data`) validates layout and counts before any [DATA] WP runs against real data.
 
 - **COCO 2017** (R12): `train2017/`, `val2017/`, `annotations/instances_*.json`; 118,287 train / 5,000 val images.
-- **DOTA-v1.0** (R18): original images + labelTxt; 2,806 images / 188,282 instances / 15 classes. 1024 px tiling is a build artifact, never committed.
+- **DOTA-v1.0** (R18): original images + labelTxt; 2,806 images / 188,282 instances / 15 classes. 1024 px tiling is a build artifact, never committed — build it with `lucid-data build-tiles --root <root> --out <tiles>`, which writes the COCO layout `obb_smoke.yaml` names. The tier trains on the tiles, never on the original tree: DOTA images run to several thousand pixels a side in PNG, which has no random-access region decode, so cropping per sample would decode the whole image to yield one 1024 px window (WP-094).
 - Offline development against [DATA] WPs may use the synthetic stand-in generator (A26/D12b); **tier acceptance runs require real data** — missing real data blocks the tier, it is not worked around.
 
 ## 4. Escalation protocol (the anti-guessing rule)

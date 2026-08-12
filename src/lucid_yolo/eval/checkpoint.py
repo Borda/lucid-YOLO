@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Checkpoint loading and device selection shared by the acceptance scripts (WP-095).
 
-``scripts/eval_det.py`` grew these two steps first — read a Lightning checkpoint,
+``lucid_yolo.eval.detect_eval`` grew these two steps first — read a Lightning checkpoint,
 optionally overlay the EMA shadow the :class:`~lucid_yolo.ptl.callbacks.EMACallback`
 stored inside it, and resolve ``auto`` to the fastest available backend. The oriented
 instrument needs both, unchanged, and a second copy of a "find the shadow inside the

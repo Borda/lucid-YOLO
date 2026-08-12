@@ -3,7 +3,7 @@
 
 This module fetches the COCO 2017 archives from the project's canonical public
 host (``images.cocodataset.org``) and extracts them into a data root that
-:mod:`scripts.check_data` and :class:`~lucid_yolo.data.coco.CocoDetectionDataset`
+:mod:`lucid_yolo.data.check` and :class:`~lucid_yolo.data.coco.CocoDetectionDataset`
 already expect::
 
     <data_root>/
@@ -41,7 +41,7 @@ Examples:
 
     Or via the console script (both splits)::
 
-        lucid-download --data-root /data/coco --splits train val
+        lucid-data download --data_root /data/coco --splits train val
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ from typing import Any
 
 from lucid_yolo.data.verify import VerifyResult, format_report, verify_coco_root
 
-__all__ = ["download_coco", "main"]
+__all__ = ["add_arguments", "download_coco", "download_dataset", "main"]
 
 #: Official public COCO 2017 image host (blueprint sec. 14.3); no mirrors. The
 #: S3 path-style form is used because the ``images.cocodataset.org`` CNAME is an
@@ -318,7 +318,7 @@ def download_coco(
 
     Fetches each requested image split plus (by default) the shared annotations
     archive from the official public host and extracts them so the tree matches
-    the layout validated by :mod:`scripts.check_data`. Already-extracted archives
+    the layout validated by :mod:`lucid_yolo.data.check`. Already-extracted archives
     are skipped without network access unless ``force`` is set.
 
     Args:
@@ -384,9 +384,18 @@ def _parse_checksums(items: Iterable[str]) -> dict[str, str]:
     return checksums
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    """Build the ``lucid-download`` argument parser."""
-    parser = argparse.ArgumentParser(description="Download COCO 2017 into the lit-YOLO data layout.")
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register the ``lucid-data download`` flags on ``parser``.
+
+    Args:
+        parser: The subcommand parser to populate.
+
+    Examples:
+        >>> parser = argparse.ArgumentParser()
+        >>> add_arguments(parser)
+        >>> parser.parse_args(["--data-root", "/data/coco"]).splits
+        ['val']
+    """
     parser.add_argument("--data-root", type=Path, required=True, help="target root directory")
     parser.add_argument(
         "--splits",
@@ -418,7 +427,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="skip downloading; verify an existing --data-root and exit 0 (complete) or 1 (missing files)",
     )
     parser.add_argument("--quiet", action="store_true", help="suppress progress output")
-    return parser
 
 
 def _skipped_splits(data_root: Path, splits: Sequence[str], *, force: bool) -> set[str]:
@@ -474,15 +482,77 @@ def _run_verification(data_root: Path, splits: Sequence[str], skipped: set[str] 
     return 1
 
 
+def download_dataset(
+    data_root: Path,
+    splits: Sequence[str] = ("val",),
+    annotations: bool = True,
+    sha256: Sequence[str] = (),
+    force: bool = False,
+    keep_archives: bool = False,
+    verify: bool = False,
+    verify_only: bool = False,
+    quiet: bool = False,
+) -> int:
+    """Download COCO 2017 into the expected layout, or verify an existing root.
+
+    Args:
+        data_root: Target root directory.
+        splits: Image splits to fetch, from ``train`` and ``val``.
+        annotations: Fetch the annotations archive too.
+        sha256: Expected digests as ``NAME=HEX``, e.g. ``val2017.zip=<hex>``.
+        force: Re-download even if a split is already extracted.
+        keep_archives: Keep the downloaded ``.zip`` files after extraction.
+        verify: After downloading, confirm every annotated image was provisioned.
+        verify_only: Skip downloading; verify an existing ``data_root`` and exit.
+        quiet: Suppress progress output.
+
+    Returns:
+        ``0`` on success, ``1`` on a download/verification/extraction failure or an
+        incomplete dataset when ``verify`` / ``verify_only`` is requested.
+
+    Examples:
+        ```pycon
+        >>> download_dataset(Path("/data/coco"), ["val"])  # doctest: +SKIP
+        0
+
+        ```
+    """
+    splits = list(splits)
+    if verify_only:
+        return _run_verification(data_root, splits, None)
+    try:
+        checksums = _parse_checksums(list(sha256))
+        skipped = _skipped_splits(data_root, splits, force=force) if verify else set()
+        download_coco(
+            data_root,
+            splits,
+            annotations=annotations,
+            checksums=checksums,
+            force=force,
+            keep_archives=keep_archives,
+            progress=not quiet,
+        )
+    except (ValueError, OSError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    if verify:
+        return _run_verification(data_root, splits, skipped)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the COCO 2017 downloader command line.
+    """Run the deprecated ``lucid-download`` entry point.
+
+    ``lucid-download`` became ``lucid-data download`` in 0.3.0 (WP-096). The old console
+    script keeps working for one minor and prints where it went, because it is named in
+    published reproduction instructions and a command that vanishes between two 0.x
+    versions makes those instructions unreproducible rather than merely outdated.
 
     Args:
         argv: Command-line arguments (defaults to ``sys.argv[1:]``).
 
     Returns:
-        ``0`` on success, ``1`` on a download/verification/extraction failure or an
-        incomplete dataset when ``--verify`` / ``--verify-only`` is requested.
+        Whatever :func:`run` returns.
 
     Examples:
         ```pycon
@@ -491,28 +561,24 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         ```
     """
-    parser = _build_parser()
+    print(
+        "lucid-download is deprecated and will be removed in 0.4.0; use: lucid-data download ...",
+        file=sys.stderr,
+    )
+    parser = argparse.ArgumentParser(prog="lucid-download", description="Download COCO 2017 (use lucid-data download).")
+    add_arguments(parser)
     args = parser.parse_args(argv)
-    if args.verify_only:
-        return _run_verification(args.data_root, args.splits, None)
-    try:
-        checksums = _parse_checksums(args.sha256)
-        skipped = _skipped_splits(args.data_root, args.splits, force=args.force) if args.verify else set()
-        download_coco(
-            args.data_root,
-            args.splits,
-            annotations=args.annotations,
-            checksums=checksums,
-            force=args.force,
-            keep_archives=args.keep_archives,
-            progress=not args.quiet,
-        )
-    except (ValueError, OSError) as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 1
-    if args.verify:
-        return _run_verification(args.data_root, args.splits, skipped)
-    return 0
+    return download_dataset(
+        args.data_root,
+        args.splits,
+        annotations=args.annotations,
+        sha256=args.sha256,
+        force=args.force,
+        keep_archives=args.keep_archives,
+        verify=args.verify,
+        verify_only=args.verify_only,
+        quiet=args.quiet,
+    )
 
 
 if __name__ == "__main__":

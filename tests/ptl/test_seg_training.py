@@ -430,7 +430,7 @@ def test_validation_logs_a_mask_map_beside_the_box_map() -> None:
     Without this the only epoch metric of a ``task="segment"`` run is ``val/mAP``,
     which the mask branch cannot move: a run whose masks were degenerate and a run
     whose masks were perfect would log the identical curve, and the first sign of
-    either would be a post-hoc ``scripts/eval_det.py`` pass hours later.
+    either would be a post-hoc ``lucid-eval`` pass hours later.
     """
     images, targets = _synthetic_batch()
 

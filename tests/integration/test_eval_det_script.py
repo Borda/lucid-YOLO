@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""End-to-end gate on the ``scripts/eval_det.py`` entry point.
+"""End-to-end gate on the ``lucid-eval`` entry point (WP-045, WP-096).
 
-The library half of segmentation evaluation was gated by WP-053b and the script
-half was not, which is exactly where the two came apart: the script loaded ground
+The library half of segmentation evaluation was gated by WP-053b and the command
+half was not, which is exactly where the two came apart: the command loaded ground
 truth without masks, so a segmentation checkpoint scored as a detector and said
-nothing about it. These tests drive ``main`` the way a caller does -- a checkpoint
-on disk, a COCO-layout data root, an output report -- and assert on what the
-report contains.
+nothing about it. These tests drive :func:`lucid_yolo.cli.eval.main` the way a caller
+does -- a checkpoint on disk, a COCO-layout data root, an output report -- and assert
+on what the report contains.
 
 The failure this file exists to catch is silent by construction. Every way the
 mask path can drop out (ground truth loaded without masks, the module handed to
@@ -21,23 +21,17 @@ meaningless.
 from __future__ import annotations
 
 import json
-import sys
 from typing import TYPE_CHECKING
 
 import pytest
 import torch
 
+from lucid_yolo.cli import eval as eval_cli
 from lucid_yolo.eval.coco_eval import _METRIC_KEYS, _SEGM_PREFIX
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-_REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-from scripts import eval_det  # noqa: E402  (path arranged just above)
 
 _SPLIT = "train"
 _ANNOTATION = "_annotations.coco.json"
@@ -79,17 +73,19 @@ def _data_root(fixture_dir: Path, tmp_path: Path) -> Path:
 
 
 def _run(checkpoint: Path, root: Path, tmp_path: Path, *extra: str) -> dict[str, dict[str, float]]:
-    """Run the script and return the ``report`` half of its JSON output."""
+    """Run the command and return the ``report`` half of its JSON output."""
     output = tmp_path / f"report{len(extra)}.json"
-    eval_det.main(
+    eval_cli.main(
         [
+            "--checkpoint",
             str(checkpoint),
-            "--data-root",
+            "--data_root",
             str(root),
-            "--no-ema",
+            "--ema",
+            "false",
             "--limit",
             str(_LIMIT),
-            "--img-size",
+            "--img_size",
             str(_CANVAS),
             "--device",
             "cpu",
@@ -140,11 +136,11 @@ def test_detection_checkpoint_is_unchanged(detseg_fixture_dir: Path, tmp_path: P
 
 
 def test_no_masks_forces_the_detection_reading(detseg_fixture_dir: Path, tmp_path: Path) -> None:
-    """``--no-masks`` scores a segmentation checkpoint on boxes alone."""
+    """``--masks false`` scores a segmentation checkpoint on boxes alone."""
     torch.manual_seed(0)
     checkpoint = _write_checkpoint(_module("segment"), tmp_path / "segment.ckpt")
 
-    report = _run(checkpoint, _data_root(detseg_fixture_dir, tmp_path), tmp_path, "--no-masks")
+    report = _run(checkpoint, _data_root(detseg_fixture_dir, tmp_path), tmp_path, "--masks", "false")
 
     for stats in report.values():
         assert set(stats) == set(_METRIC_KEYS)

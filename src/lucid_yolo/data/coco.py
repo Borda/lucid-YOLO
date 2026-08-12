@@ -43,7 +43,7 @@ The ``difficult`` key (A51, A53, WP-094):
     An annotation may carry a ``difficult`` flag, which this reader forwards onto the
     A51 channel of :class:`~lucid_yolo.data.targets.Targets`. It is not part of the COCO
     schema — it is R18's per-instance flag, written by the tiled-layout build
-    (``scripts/build_dota_tiles.py``) because tiling *creates* difficult instances that
+    (``lucid-data build-tiles``) because tiling *creates* difficult instances that
     exist in no label file (A39). Absent, every instance reads non-difficult, so an
     ordinary COCO file behaves exactly as before. The flag is carried on both readings,
     oriented and axis-aligned, since it says something about the annotation rather than

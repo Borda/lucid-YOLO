@@ -2,7 +2,7 @@
 """Verify a provisioned COCO 2017 root actually holds every annotated image.
 
 This is the packaged dataset preflight the shipped downloader exposes via
-``lucid-download --verify`` / ``--verify-only``. For each requested split it
+``lucid-data download --verify`` / ``--verify_only``. For each requested split it
 parses the annotation JSON and confirms that every ``file_name`` the annotations
 enumerate is present on disk (a single :func:`os.scandir` per split directory and
 a set difference, so it stays fast on the 118,287-image train split). It reports
@@ -10,8 +10,8 @@ per-split totals — expected, present, missing count, and a short sample of the
 missing names — plus the annotation file's own existence, and drives a non-zero
 exit when anything is missing.
 
-Relationship to :mod:`scripts.check_data`:
-    :mod:`scripts.check_data` is the repo's ``make check-data`` gate and validates
+Relationship to :mod:`lucid_yolo.data.check`:
+    :mod:`lucid_yolo.data.check` is the ``lucid-data check`` gate and validates
     the layout by **counts** — fixed per-split image totals (118,287 / 5,000) and
     annotation-vs-disk count *parity*. This module performs the complementary
     **per-file existence** check instead: it names exactly which annotated images

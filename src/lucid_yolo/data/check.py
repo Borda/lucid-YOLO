@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Validate a real COCO 2017 or DOTA-v1.0 dataset root before a ``[DATA]`` run (WP-014, WP-056).
 
-Datasets are never committed and never auto-downloaded (AGENTS.md sec. 3); this
-script is the ``make check-data`` gate that confirms a provisioned root actually
-matches the layout of blueprint sec. 14.3 before any ``[DATA]`` work runs against
-it. For each COCO split it checks that
+Datasets are never committed and never auto-downloaded (AGENTS.md sec. 3); this is the
+``lucid-data check`` gate that confirms a provisioned root actually matches the layout of
+blueprint sec. 14.3 before any ``[DATA]`` work runs against it. For each COCO split it
+checks that
 
     * the images directory exists and holds the expected number of image files
       (118,287 for ``train2017``, 5,000 for ``val2017``);
@@ -28,33 +28,32 @@ instances / 15 classes of AGENTS.md sec. 3.
     a different question from what is on disk).
 
 The check core is importable (:func:`check_coco_root` and :func:`check_dota_root`
-return a :class:`DataCheck` whose ``ok`` flag drives the exit status);
-:func:`main` is a thin CLI over them. The expected counts are parameters
-(defaulting to the real dataset totals) so the logic is unit-testable against a
-tiny fake layout.
+return a :class:`DataCheck` whose ``ok`` flag drives the exit status); :func:`run` is a
+thin CLI over them. The expected counts are parameters (defaulting to the real dataset
+totals) so the logic is unit-testable against a tiny fake layout.
 
 Relationship to :mod:`lucid_yolo.data.verify`:
-    This script is the developer-only ``make check-data`` gate and validates the
-    layout by **counts** (fixed per-split totals plus annotation-vs-disk count
-    parity). The packaged :mod:`lucid_yolo.data.verify` module performs the
-    complementary **per-file existence** check exposed to pip-installed users via
-    ``lucid-download --verify`` / ``--verify-only``. The two are kept separate on
-    purpose: their logic differs materially (count parity vs. naming exactly which
-    annotated images are absent), and this script is intentionally not shipped in
-    the wheel.
+    This module validates the layout by **counts** — fixed per-split totals plus
+    annotation-vs-disk count parity — and answers "is this the dataset as published".
+    :mod:`lucid_yolo.data.verify` performs the complementary **per-file existence**
+    check and answers "which annotated images are missing", which is what a download
+    wants to know. The two stay separate because their logic differs materially, not
+    because one of them was developer-only: both ship, as ``lucid-data check`` and
+    ``lucid-data download --verify`` (WP-096).
+
+    Neither runs inside ``fit``. A counts gate asserts the *published* totals, so
+    coupling it to training would refuse a legitimate subset or smoke run at startup.
 
 Examples:
     Validate a provisioned root (exit 1 on any mismatch)::
 
-        python scripts/check_data.py --data-root /data/coco
-        python scripts/check_data.py --data-root /data/dota --dataset dota
+        lucid-data check --data-root /data/coco
+        lucid-data check --data-root /data/dota --dataset dota
 """
 
 from __future__ import annotations
 
-import argparse
 import json
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -450,28 +449,33 @@ def format_report(result: DataCheck, data_root: Path) -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Validate the dataset root named on the command line.
+#: Dataset layouts :func:`check_dataset` knows how to validate.
+DATASETS = ("coco", "dota")
+
+
+def check_dataset(data_root: Path, dataset: str = "coco") -> int:
+    """Validate a provisioned dataset root against its published layout.
 
     Args:
-        argv: Command-line arguments (defaults to ``sys.argv[1:]``).
+        data_root: Dataset root directory.
+        dataset: Which layout to validate, ``coco`` or ``dota``.
 
     Returns:
         ``0`` when the layout is valid, ``1`` otherwise.
+
+    Raises:
+        ValueError: If ``dataset`` is not a known layout.
+
+    Examples:
+        >>> code = check_dataset(Path("/nonexistent"))  # doctest: +ELLIPSIS
+        check-data: /nonexistent
+        ...
+        FAIL: dataset layout invalid
+        >>> code
+        1
     """
-    parser = argparse.ArgumentParser(description="Validate a COCO 2017 or DOTA-v1.0 dataset root.")
-    parser.add_argument("--data-root", type=Path, required=True, help="dataset root directory")
-    parser.add_argument(
-        "--dataset",
-        choices=("coco", "dota"),
-        default="coco",
-        help="dataset layout to validate (default: coco)",
-    )
-    args = parser.parse_args(argv)
-    result = check_coco_root(args.data_root) if args.dataset == "coco" else check_dota_root(args.data_root)
-    print(format_report(result, args.data_root))
+    if dataset not in DATASETS:
+        raise ValueError(f"unknown dataset {dataset!r}; known layouts are {list(DATASETS)}")
+    result = check_coco_root(data_root) if dataset == "coco" else check_dota_root(data_root)
+    print(format_report(result, data_root))
     return 0 if result.ok else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())

@@ -23,6 +23,10 @@ classifiers = [
 dependencies = [
   "torch>=2.4",
   "pytorch-lightning[extra]>=2.4",
+  # Declared directly, not leaned on transitively: LightningCLI brings it, but all three
+  # console scripts parse with it now (WP-096), and `[signatures]` is what reads the
+  # docstrings the help text is built from.
+  "jsonargparse[signatures]>=4.28",
   "torchvision>=0.19",
   "torchmetrics>=1.9",
   "faster-coco-eval>=1.7",
@@ -50,7 +54,12 @@ dev = [
 ]
 
 [project.scripts]
-lucid-yolo = "lucid_yolo.ptl.cli:main"
+lucid-yolo = "lucid_yolo.cli.train:main"
+lucid-data = "lucid_yolo.cli.data:main"
+lucid-eval = "lucid_yolo.cli.eval:main"
+# Deprecated in 0.3.0, removed in 0.4.0 (WP-096): `lucid-data download` replaces it. Kept
+# because published reproduction instructions name it, and a command that disappears
+# between two 0.x versions makes those instructions unreproducible rather than outdated.
 lucid-download = "lucid_yolo.data.download:main"
 
 [project.urls]

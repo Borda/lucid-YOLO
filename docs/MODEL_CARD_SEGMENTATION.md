@@ -49,7 +49,7 @@ The wiring gate that precedes any COCO launch is `scripts/overfit_micro.py --tas
 
 ## Evaluation
 
-COCO val2017, all 5000 images, at 640 px through `scripts/eval_det.py`, which runs one forward per batch and decodes both paths from it. Boxes and masks are scored by two `torchmetrics` `MeanAveragePrecision` instances on the `faster_coco_eval` backend, masks at original image resolution against ground truth decoded from the COCO polygons (R12). EMA weights; raw weights were not evaluated for this run.
+COCO val2017, all 5000 images, at 640 px through `lucid-eval`, which runs one forward per batch and decodes both paths from it. Boxes and masks are scored by two `torchmetrics` `MeanAveragePrecision` instances on the `faster_coco_eval` backend, masks at original image resolution against ground truth decoded from the COCO polygons (R12). EMA weights; raw weights were not evaluated for this run.
 
 | path | box mAP50-95 | box mAP50 | box mAP75 | segm mAP50-95 | segm mAP50 | segm mAP75 |
 | -- | -- | -- | -- | -- | -- | -- |
