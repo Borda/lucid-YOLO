@@ -763,65 +763,92 @@ def _class_curves(splits: Sequence[_ImageSplit]) -> tuple[Tensor, Tensor]:
     positives = sum(int((~split.difficult).sum()) for split in splits)
     scores = torch.cat([split.scores for split in splits])
     order = torch.argsort(scores, descending=True, stable=True)
-    results = [_threshold_curve(splits, order, positives, threshold) for threshold in IOU_THRESHOLDS]
+    matched = [_match_image(split) for split in splits]
+    true_positive = torch.cat([value[0] for value in matched], dim=1)[:, order]
+    false_positive = torch.cat([value[1] for value in matched], dim=1)[:, order]
+    results = [
+        _threshold_curve(hits, misses, positives) for hits, misses in zip(true_positive, false_positive, strict=True)
+    ]
     return torch.tensor([value[0] for value in results]), torch.tensor([value[1] for value in results])
 
 
-def _threshold_curve(
-    splits: Sequence[_ImageSplit],
-    order: Tensor,
-    positives: int,
-    threshold: float,
-) -> tuple[float, float]:
-    """Match at one IoU threshold and reduce the result to ``(average precision, recall)``.
+def _threshold_curve(true_positive: Tensor, false_positive: Tensor, positives: int) -> tuple[float, float]:
+    """Reduce one threshold's score-ordered match sequence to ``(average precision, recall)``.
 
-    ``splits`` carries one entry per image and is never empty here — see
-    :func:`_class_curves`, this function's only caller. An empty one would raise from
-    :func:`torch.cat` rather than pass silently, which is the failure this prefers.
+    Args:
+        true_positive: ``(N,)`` per-detection true-positive flags in descending score order.
+        false_positive: ``(N,)`` per-detection false-positive flags in the same order.
+        positives: The class's non-difficult ground-truth count.
 
     Examples:
         >>> import torch
-        >>> split = _ImageSplit(torch.tensor([0.9]), torch.zeros(1, 1), torch.tensor([False]))
-        >>> _threshold_curve([split], torch.tensor([0]), 1, 0.5)  # the detection misses
+        >>> miss = torch.tensor([False])
+        >>> _threshold_curve(miss, ~miss, 1)  # the only detection missed
         (0.0, 0.0)
     """
-    matched = [_match_image(split, threshold) for split in splits]
-    true_positive = torch.cat([value[0] for value in matched])[order]
-    false_positive = torch.cat([value[1] for value in matched])[order]
     scored = true_positive | false_positive
     return _average_precision(true_positive[scored], false_positive[scored], positives)
 
 
-def _match_image(split: _ImageSplit, threshold: float) -> tuple[Tensor, Tensor]:
-    """Greedily assign one image's detections to its ground truths at one threshold.
+def _match_image(split: _ImageSplit) -> tuple[Tensor, Tensor]:
+    """Greedily assign one image's detections to its ground truths, at every threshold at once.
 
     Decision 5 lives here. A detection claims the best still-unmatched **non-difficult**
-    ground truth at or above ``threshold``; failing that, an overlap with any difficult
+    ground truth at or above the threshold; failing that, an overlap with any difficult
     ground truth discards it (neither true nor false positive, and the difficult instance
     stays available for further detections); failing that it is a false positive.
+
+    The ten thresholds are matched **together** rather than in ten passes (WP-104). They
+    share the overlap matrix and the score order and differ only in what counts as a hit,
+    so a pass per threshold re-walks the same detections ten times to consume a different
+    subset of the same ground truths; carrying the availability state as ``(T, G)`` walks
+    them once. The greedy order is unchanged — it is still descending score within the
+    image, resolved independently per threshold — which is why this is a restructuring
+    and not a redefinition.
+
+    Detections that reach no ground truth at the **lowest** threshold skip the walk
+    entirely. Such a detection cannot become a true positive at any threshold, cannot be
+    discarded by a difficult instance at any threshold, and consumes nothing, so it is a
+    false positive everywhere and the zero-initialised rows already say so. On an
+    early-epoch model, where almost every one of the 300 emitted detections lands nowhere
+    near a target, that is nearly the whole loop.
+
+    Args:
+        split: One image's detections, overlaps and difficult flags for a single class.
+
+    Returns:
+        ``(T, D)`` true-positive and false-positive flags, one row per
+        :data:`IOU_THRESHOLDS` entry, in the split's own descending-score order.
 
     Examples:
         >>> import torch
         >>> iou = torch.tensor([[0.9, 0.0], [0.8, 0.0]])  # two detections, one good target
         >>> split = _ImageSplit(torch.tensor([0.9, 0.5]), iou, torch.tensor([False, False]))
-        >>> true_positive, false_positive = _match_image(split, 0.5)
-        >>> true_positive.tolist(), false_positive.tolist()  # the second is a duplicate
+        >>> true_positive, false_positive = _match_image(split)
+        >>> true_positive[0].tolist(), false_positive[0].tolist()  # at 0.50 the second duplicates
         ([True, False], [False, True])
+        >>> true_positive[-1].tolist()  # at 0.95 neither overlap is enough
+        [False, False]
     """
+    thresholds = torch.tensor(IOU_THRESHOLDS, dtype=split.iou.dtype)
     detections, ground_truths = split.iou.shape
-    true_positive = torch.zeros(detections, dtype=torch.bool)
-    discarded = torch.zeros(detections, dtype=torch.bool)
+    true_positive = torch.zeros(len(IOU_THRESHOLDS), detections, dtype=torch.bool)
+    discarded = torch.zeros_like(true_positive)
     if ground_truths == 0:
         return true_positive, ~true_positive
-    available = ~split.difficult
-    for detection in range(detections):
-        overlap = torch.where(available, split.iou[detection], torch.full_like(split.iou[detection], -1.0))
-        best = int(torch.argmax(overlap))
-        if float(overlap[best]) >= threshold:
-            true_positive[detection] = True
-            available[best] = False
-        else:
-            discarded[detection] = bool((split.iou[detection][split.difficult] >= threshold).any())
+    available = (~split.difficult).expand(len(IOU_THRESHOLDS), ground_truths).clone()
+    reachable = split.iou.max(dim=1).values >= float(thresholds.min())
+    for detection in reachable.nonzero().flatten().tolist():
+        overlaps = split.iou[detection]
+        candidates = torch.where(available, overlaps, torch.full_like(overlaps, -1.0))
+        best_overlap, best = candidates.max(dim=1)
+        hit = best_overlap >= thresholds
+        true_positive[hit, detection] = True
+        available[hit, best[hit]] = False
+        difficult_overlaps = overlaps[split.difficult]
+        if difficult_overlaps.numel():
+            reached = (difficult_overlaps.unsqueeze(0) >= thresholds.unsqueeze(1)).any(dim=1)
+            discarded[:, detection] = reached & ~hit
     return true_positive, ~(true_positive | discarded)
 
 

@@ -448,6 +448,78 @@ class TestAccumulator:
             evaluate_rotated_map([], [{"rboxes": torch.zeros(0, 5), "labels": torch.zeros(0, dtype=torch.long)}])
 
 
+class TestThresholdIndependence:
+    """The ten thresholds are matched in one pass (WP-104) and must still decide separately."""
+
+    def test_each_threshold_consumes_ground_truth_on_its_own(self) -> None:
+        """A ground truth claimed at a loose threshold is still free at a strict one.
+
+        One ground truth and two detections of it: the higher-scoring one overlaps by
+        about 0.62, the lower-scoring one exactly. At 0.50 the first claims the target and
+        the second is a duplicate, so the ranked run is ``[TP, FP]`` and AP is 1. At 0.75
+        the first misses, so the run is ``[FP, TP]``, every recall point is first reached
+        at rank 2, and AP is 1/2. Sharing one availability state across thresholds would
+        collapse the two into whichever ran last.
+
+        Three thresholds (0.50, 0.55, 0.60) score 1 and the remaining seven score 1/2, so
+        the mean is ``(3 + 3.5) / 10``.
+        """
+        target = [0.0, 0.0, 10.0, 10.0, 0.0]
+        partial = [2.345, 0.0, 10.0, 10.0, 0.0]  # IoU ~0.6201 — between two grid points
+        preds = [
+            {
+                "rboxes": torch.tensor([partial, target]),
+                "scores": torch.tensor([0.9, 0.5]),
+                "labels": torch.zeros(2, dtype=torch.long),
+            }
+        ]
+        targets = [
+            {
+                "rboxes": torch.tensor([target]),
+                "labels": torch.zeros(1, dtype=torch.long),
+                "difficult": torch.zeros(1, dtype=torch.bool),
+            }
+        ]
+
+        stats = evaluate_rotated_map(preds, targets)
+
+        assert stats["map_50"] == pytest.approx(1.0, abs=1e-6)
+        assert stats["map_75"] == pytest.approx(0.5, abs=1e-6)
+        assert stats["map"] == pytest.approx(0.65, abs=1e-6)
+        assert stats["mar_300"] == pytest.approx(1.0, abs=1e-6)
+
+    def test_a_detection_reaching_nothing_is_a_false_positive_and_consumes_nothing(self) -> None:
+        """The skipped-walk path: no overlap anywhere means false positive at every threshold.
+
+        WP-104 keeps such a detection out of the matching loop entirely, which is only
+        sound if it neither scores nor consumes. The higher-scoring detection is nowhere
+        near the target and the lower-scoring one matches it exactly, so the ranked run is
+        ``[FP, TP]`` at all ten thresholds and AP is 1/2 throughout — the target still
+        available for the detection behind it.
+        """
+        target = [0.0, 0.0, 10.0, 10.0, 0.0]
+        preds = [
+            {
+                "rboxes": torch.tensor([[900.0, 900.0, 10.0, 10.0, 0.0], target]),
+                "scores": torch.tensor([0.9, 0.5]),
+                "labels": torch.zeros(2, dtype=torch.long),
+            }
+        ]
+        targets = [
+            {
+                "rboxes": torch.tensor([target]),
+                "labels": torch.zeros(1, dtype=torch.long),
+                "difficult": torch.zeros(1, dtype=torch.bool),
+            }
+        ]
+
+        stats = evaluate_rotated_map(preds, targets)
+
+        assert stats["map"] == pytest.approx(0.5, abs=1e-6)
+        assert stats["map_50"] == pytest.approx(0.5, abs=1e-6)
+        assert stats["mar_300"] == pytest.approx(1.0, abs=1e-6)
+
+
 class TestRecallGridBoundary:
     """Decision 2 at the one place floating point cannot decide it: an exact grid hit."""
 
