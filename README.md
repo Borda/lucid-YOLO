@@ -19,6 +19,8 @@ make setup   # venv + editable install + pre-commit hooks
 make gate    # lint + pre-commit + tests + golden regression: the merge gate
 ```
 
+Datasets are never committed and never fetched by the test suite — docs/DATASETS.md says where COCO 2017 and DOTA-v1.0 come from and what has to be on disk before a `[DATA]` run. docs/TRAINING.md carries the launch command for each of the three tiers.
+
 The execution contract for contributors and agents lives in AGENTS.md; every design decision cites its public source (docs/PROVENANCE.md), and every point where the papers underdetermine the implementation is a recorded assumption (docs/ASSUMPTIONS.md).
 
 ## License

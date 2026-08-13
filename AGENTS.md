@@ -30,10 +30,10 @@ Pushes to the remote are batched at phase boundaries and each push requires expl
 
 ## 3. Dataset contract
 
-Datasets are never committed and never auto-downloaded by test code. `configs/data/*.yaml` carries the root path; `lucid-data check` (also `make check-data`) validates layout and counts before any [DATA] WP runs against real data.
+Datasets are never committed and never auto-downloaded by test code. `configs/data/*.yaml` carries the root path; `lucid-data check` (also `make check-data`) validates layout and counts before any [DATA] WP runs against real data. **Where each dataset comes from and what has to be on disk: `docs/DATASETS.md`.**
 
 - **COCO 2017** (R12): `train2017/`, `val2017/`, `annotations/instances_*.json`; 118,287 train / 5,000 val images.
-- **DOTA-v1.0** (R18): original images + labelTxt; 2,806 images / 188,282 instances / 15 classes. 1024 px tiling is a build artifact, never committed — build it with `lucid-data build-tiles --root <root> --out <tiles>`, which writes the COCO layout `obb_smoke.yaml` names. The tier trains on the tiles, never on the original tree: DOTA images run to several thousand pixels a side in PNG, which has no random-access region decode, so cropping per sample would decode the whole image to yield one 1024 px window (WP-094).
+- **DOTA-v1.0** (R18): original images + labelTxt; 2,806 images / 188,282 instances / 15 classes across all three splits, of which train and val are the annotated two thirds — the testing ground truth is withheld by the authors, so it is neither downloaded nor needed. Provisioning is manual (the distribution offers interactive Drive folders, not archive URLs) and the terms are academic use only. 1024 px tiling is a build artifact, never committed — build it with `lucid-data build-tiles --root <root> --out <tiles>`, which writes the COCO layout `obb_smoke.yaml` names. The tier trains on the tiles, never on the original tree: DOTA images run to several thousand pixels a side in PNG, which has no random-access region decode, so cropping per sample would decode the whole image to yield one 1024 px window (WP-094).
 - Offline development against [DATA] WPs may use the synthetic stand-in generator (A26/D12b); **tier acceptance runs require real data** — missing real data blocks the tier, it is not worked around.
 
 ## 4. Escalation protocol (the anti-guessing rule)
