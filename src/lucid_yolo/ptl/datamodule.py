@@ -66,6 +66,7 @@ Batch contract:
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -743,10 +744,14 @@ class DetectionDataModule(LightningDataModule):
         prefetch_factor: Batches each worker keeps prefetched (defaults to
             :data:`_PREFETCH_FACTOR`); ignored at ``num_workers=0`` where the
             DataLoader forbids it.
-        val_num_workers: Worker count for the validation loader only. ``None``
-            (default) resolves to ``min(num_workers, 4)`` — letterbox-only val
-            samples need few workers, and a small val pool avoids doubling the
-            resident worker population every epoch (WP-073).
+        val_num_workers: Worker count for the validation loader only, capped by
+            nothing — the flag an operator states to spend the whole machine on
+            validation. ``None`` (default) resolves to an auto-chosen
+            ``num_workers`` capped by :func:`_val_worker_cap` (WP-073, WP-102), and
+            to a *named* ``num_workers`` bounded by the in-flight memory budget of
+            :meth:`_val_loader_workers` (WP-103) — letterbox-only val samples need
+            few workers, and both worker populations are resident at the epoch
+            boundary where validation runs.
         persistent_workers: Keep loader workers alive across epochs. Defaults
             to ``False`` (WP-076): respawning costs seconds per epoch while a
             persistent pool accumulates per-worker memory for the whole run —
@@ -809,6 +814,7 @@ class DetectionDataModule(LightningDataModule):
                 self._prefetch_factor,
             )
         self._num_workers = int(num_workers)
+        self._val_workers_were_inherited = val_num_workers is None and not workers_were_chosen_here
         self._val_num_workers = self._resolve_val_workers(val_num_workers, workers_were_chosen_here)
         self._persistent_workers = bool(persistent_workers)
         self._seed = int(seed)
@@ -824,28 +830,69 @@ class DetectionDataModule(LightningDataModule):
         self._val: CocoDetectionDataset | None = None
 
     def _resolve_val_workers(self, requested: int | None, workers_were_chosen_here: bool) -> int:
-        """Decide the validation loader's worker count.
+        """Decide the validation loader's *intended* worker count.
 
-        The cap applies to what this class chose, never to what a caller named. An
-        operator who writes ``--data.num_workers 16`` has stated how much of the machine
-        this run may use, and silently running validation on a quarter of it is the
-        library second-guessing a decision that was not its to make — the surprise costs
-        more than the OOM it was avoiding, because it shows up as an idle GPU with no
-        message. When the count was auto-chosen the cap still applies, because then the
-        library owns the consequences of its own guess.
+        The letterbox cap applies to what this class chose, never to what a caller named.
+        An operator who writes ``--data.num_workers 16`` has stated how much of the
+        machine this run may use, and silently running validation on a quarter of it is
+        the library second-guessing a decision that was not its to make — the surprise
+        costs more than the OOM it was avoiding, because it shows up as an idle GPU with
+        no message. When the count was auto-chosen the cap still applies, because then
+        the library owns the consequences of its own guess.
+
+        An *inherited* count — named for training, never stated for validation — is
+        neither, and :meth:`_val_loader_workers` bounds it by the memory budget when the
+        loader is built (WP-103).
 
         Args:
             requested: Explicit ``val_num_workers``, or ``None`` to derive one.
             workers_were_chosen_here: Whether the train worker count was auto-chosen.
 
         Returns:
-            The validation loader's worker count.
+            The validation loader's worker count before any build-time memory budget.
         """
         if requested is not None:
             return int(requested)
         if not workers_were_chosen_here:
             return self._num_workers
         return min(self._num_workers, _val_worker_cap(self._img_size))
+
+    def _val_loader_workers(self) -> int:
+        """Return the worker count this validation loader may actually start (WP-103).
+
+        A count *inherited* from a named ``num_workers`` is bounded here by
+        :func:`_shm_capped_workers`, loudly. WP-102 was right that an operator's number
+        should reach the val loader and wrong about what to do with the guard: it deleted
+        the cap rather than the silence, and a named 32 at 1024 px queues about 51 GB for
+        validation alone (``32 x 2 x 4 x 3 x 64 x 1024**2``) on top of a train pool that
+        is still resident — the host dies. Parallelism is what an operator states with
+        that flag; gigabytes are what the flag *costs*, and the second is this class's
+        arithmetic to do. Naming ``val_num_workers`` outright is still sovereign, capped
+        by nothing, which is where an operator who wants the whole machine says so.
+
+        The budget is read **when the loader is built**, not at construction: by then the
+        training queue is resident, so :func:`os.statvfs` reports the space the second
+        pool will actually find rather than the space that existed before the first one
+        spawned. The overlap of the two pools is the failure mode, so it is the state the
+        decision has to be made against.
+
+        Returns:
+            The validation loader's worker count, bounded by the memory budget when the
+            count was inherited rather than stated.
+        """
+        workers = self._val_num_workers
+        if not self._val_workers_were_inherited:
+            return workers
+        capped = _shm_capped_workers(workers, self._batch_size, self._img_size, self._prefetch_factor)
+        if capped < workers:
+            warnings.warn(
+                f"validation would inherit num_workers={workers}, queueing about "
+                f"{workers * self._prefetch_factor * 4 * 3 * self._batch_size * self._img_size**2 / 1e9:.0f} GB "
+                f"of {self._img_size} px batches beside the training loader's own queue; "
+                f"using {capped} workers instead. Set --data.val_num_workers to override.",
+                stacklevel=2,
+            )
+        return capped
 
     def prepare_data(self) -> None:
         """No-op: datasets are provisioned out of band, never downloaded (AGENTS.md sec. 3)."""
@@ -971,17 +1018,18 @@ class DetectionDataModule(LightningDataModule):
     def val_dataloader(self) -> DataLoader[tuple[Tensor, Targets]]:
         """Return the unshuffled validation loader (letterbox-only samples).
 
-        The loader runs on its own (small) worker count — ``val_num_workers``,
-        default ``min(num_workers, 4)`` (WP-073): letterbox-only samples need a
-        fraction of the train pipeline's CPU, and since both loaders' workers
-        are persistent, inheriting the train count would keep a second full
-        worker population resident for the whole run.
+        The loader runs on its own worker count — ``val_num_workers``, defaulting to a
+        pixel-scaled cap on an auto-chosen train count (WP-073, WP-102) and to the
+        memory budget of :meth:`_val_loader_workers` on a named one (WP-103): letterbox
+        only samples need a fraction of the train pipeline's CPU, and both worker
+        populations are resident at the epoch boundary where validation runs.
         """
         if self._val is None:
             raise RuntimeError("setup() must be called before val_dataloader()")
-        workers = self._val_num_workers > 0
+        num_workers = self._val_loader_workers()
+        workers = num_workers > 0
         kwargs = self._loader_kwargs() | {
-            "num_workers": self._val_num_workers,
+            "num_workers": num_workers,
             "persistent_workers": self._persistent_workers and workers,
             "prefetch_factor": self._prefetch_factor if workers else None,
             "worker_init_fn": _init_worker if workers else None,

@@ -491,18 +491,52 @@ def test_dataloader_num_workers_auto_scales_with_batch(detseg_fixture_dir: Path)
     assert datamodule.train_dataloader().num_workers >= 1
 
 
-def test_a_named_worker_count_reaches_the_val_loader(detseg_fixture_dir: Path) -> None:
-    """A worker count the caller stated is honoured by both loaders (WP-102).
+def test_a_named_worker_count_reaches_the_val_loader(detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A worker count the caller stated is honoured by both loaders when it fits (WP-102).
 
-    The cap belongs to what this class chose, not to what an operator named: someone
-    writing ``--data.num_workers 8`` has said how much of the machine the run may use,
-    and quietly validating on half of it surfaces as an idle accelerator with no
+    The letterbox cap belongs to what this class chose, not to what an operator named:
+    someone writing ``--data.num_workers 8`` has said how much of the machine the run may
+    use, and quietly validating on half of it surfaces as an idle accelerator with no
     message, which costs more than the host-OOM the cap was avoiding.
     """
+    monkeypatch.setattr(dm, "_shm_capped_workers", lambda workers, *args, **kwargs: workers)
+
     datamodule = _datamodule(detseg_fixture_dir, num_workers=8)
     datamodule.setup("fit")
+
     assert datamodule.train_dataloader().num_workers == 8
     assert datamodule.val_dataloader().num_workers == 8
+
+
+def test_an_inherited_worker_count_is_bounded_by_the_memory_budget(
+    detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A count named for training and inherited by validation still fits the host (WP-103).
+
+    ``--data.num_workers 32`` at 1024 px queues about 51 GB for validation alone, beside
+    a training queue that is still resident at the epoch boundary. The operator stated
+    parallelism; the gigabytes it costs are this class's arithmetic.
+    """
+    monkeypatch.setattr(dm, "_shm_capped_workers", lambda workers, *args, **kwargs: min(workers, 3))
+
+    datamodule = _datamodule(detseg_fixture_dir, num_workers=8)
+    datamodule.setup("fit")
+
+    with pytest.warns(UserWarning, match="val_num_workers"):
+        assert datamodule.val_dataloader().num_workers == 3
+    assert datamodule.train_dataloader().num_workers == 8
+
+
+def test_a_named_val_worker_count_is_bounded_by_nothing(
+    detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``val_num_workers`` stated outright outranks the budget — the flag that says so (WP-103)."""
+    monkeypatch.setattr(dm, "_shm_capped_workers", lambda workers, *args, **kwargs: 1)
+
+    datamodule = _datamodule(detseg_fixture_dir, num_workers=8, val_num_workers=6)
+    datamodule.setup("fit")
+
+    assert datamodule.val_dataloader().num_workers == 6
 
 
 def test_an_auto_chosen_worker_count_is_still_capped_for_val(

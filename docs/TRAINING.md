@@ -72,8 +72,9 @@ lucid-yolo fit --config obb_smoke.yaml \
 lucid-eval --checkpoint <checkpoint> --data_root /content/dota_tiles --split val --output obb_report.json
 ```
 
-One difference from the COCO tiers, forced by the data rather than chosen:
+Two differences from the COCO tiers, forced by the data rather than chosen:
 
+- **Worker counts are memory, not just parallelism, at 1024 px.** A batch of 64 stacked 1024 px images is 805 MB, and every worker holds `prefetch_factor` of them in shared memory — so `--data.num_workers 32` queues about 51 GB per loader, and the validation pool spawns while the training one is still resident. A count named for training is bounded to what fits before validation inherits it, with a warning naming the number (WP-103); `--data.val_num_workers` overrides that bound outright when the machine has the room.
 - **Batch 16 at `img_size: 1024`**, against 128 at 640 for COCO. The tile side is R18's own crop size, and 16 is the placeholder `obb_smoke.yaml` ships — "tune to accelerator memory". No oriented tier run has measured a batch that fits, so it is a starting point rather than a figure: at 2.56x the pixels per image it is a third of the COCO batch's pixel budget, not a match for it. `--model.lr` stays at the config's 0.01 for the same reason — the 0.02 above is the batch-128 linear scaling, and it does not carry over to a batch nobody has settled yet.
 
 `lucid-eval` picks the rotated protocol from the checkpoint's own task, and with it the 1024 px letterbox and batch 8; an explicit `--img_size` or `--batch_size` still wins.
