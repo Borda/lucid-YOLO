@@ -54,13 +54,11 @@ data:
   # lucid_yolo.data.tiling into that layout; neither is ever downloaded (AGENTS.md
   # sec. 3). Build it with:
   #   lucid-data build-tiles --root /path/to/dota --out /path/to/dota_tiles
-  # The four path overrides below name the split directories that build writes; without
-  # them the datamodule looks for COCO 2017's `train2017`/`val2017` names.
+  # The root alone is enough: lucid_yolo.data.layout resolves `train`/`val` and their
+  # `annotations/instances_<split>.json` the same way it resolves COCO 2017's own
+  # spelling (WP-098). The per-split overrides remain available for a layout it does
+  # not know.
   data_root: /path/to/dota_tiles
-  train_images_dir: /path/to/dota_tiles/train
-  train_ann_file: /path/to/dota_tiles/annotations/instances_train.json
-  val_images_dir: /path/to/dota_tiles/val
-  val_ann_file: /path/to/dota_tiles/annotations/instances_val.json
   batch_size: 16 # PLACEHOLDER -- tune to accelerator memory
   img_size: 1024 # R18 sec. 4 / R1 sec. 4.4: the DOTA crop side
   # num_workers: auto (min(batch_size, cpu count)); set 0 for byte-identical deterministic epochs

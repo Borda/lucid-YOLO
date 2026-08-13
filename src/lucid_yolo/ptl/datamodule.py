@@ -78,6 +78,7 @@ from torch.utils.data import DataLoader, Dataset, get_worker_info
 from lucid_yolo.data.affine import FusedAffineLetterbox
 from lucid_yolo.data.augment import HorizontalFlip, HSVJitter
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
+from lucid_yolo.data.layout import resolve_split
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.mixup import CopyPaste, Mixup
 from lucid_yolo.data.mosaic import MosaicAssembly
@@ -702,13 +703,15 @@ class DetectionDataModule(LightningDataModule):
             (``"n"``…``"x"``); validated at construction.
         img_size: Square letterbox side for every emitted sample. Defaults to 640.
         train_images_dir: Override for the train images directory. Defaults to
-            ``data_root/"train2017"``.
-        train_ann_file: Override for the train annotation JSON. Defaults to
-            ``data_root/"annotations"/"instances_train2017.json"``.
-        val_images_dir: Override for the val images directory. Defaults to
-            ``data_root/"val2017"``.
-        val_ann_file: Override for the val annotation JSON. Defaults to
-            ``data_root/"annotations"/"instances_val2017.json"``.
+            whichever of ``data_root/"train2017"`` and ``data_root/"train"``
+            :func:`~lucid_yolo.data.layout.resolve_split` finds, so a tiled
+            oriented root needs no override at all.
+        train_ann_file: Override for the train annotation JSON. Resolved
+            alongside the images directory, never independently of it.
+        val_images_dir: Override for the val images directory. Resolved as the
+            train one is.
+        val_ann_file: Override for the val annotation JSON. Resolved alongside
+            the val images directory.
         seed: Seed for the training pipeline's generator and loader shuffling.
         pin_memory: Whether loader batches land in page-locked host memory for
             async host-to-device copies. ``None`` (default) resolves to ``True``
@@ -789,10 +792,12 @@ class DetectionDataModule(LightningDataModule):
         self._seed = int(seed)
         self._pin_memory = torch.cuda.is_available() if pin_memory is None else bool(pin_memory)
         self._policy = build_scale_policy(variant)
-        self._train_images_dir = train_images_dir or data_root / "train2017"
-        self._train_ann_file = train_ann_file or data_root / "annotations" / "instances_train2017.json"
-        self._val_images_dir = val_images_dir or data_root / "val2017"
-        self._val_ann_file = val_ann_file or data_root / "annotations" / "instances_val2017.json"
+        default_train_images, default_train_ann = resolve_split(data_root, "train")
+        default_val_images, default_val_ann = resolve_split(data_root, "val")
+        self._train_images_dir = train_images_dir or default_train_images
+        self._train_ann_file = train_ann_file or default_train_ann
+        self._val_images_dir = val_images_dir or default_val_images
+        self._val_ann_file = val_ann_file or default_val_ann
         self._train: _TrainPipeline | None = None
         self._val: CocoDetectionDataset | None = None
 

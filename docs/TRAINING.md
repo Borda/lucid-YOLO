@@ -4,6 +4,8 @@ Three tiers, one command. `lucid-yolo fit --config <name>.yaml` resolves the nam
 
 What the configs carry is run-level configuration only: schedule, optimizer and loss gains, and placeholder data paths. Topology is named by `variant` and lives in the registry, never in a config file (ADR-001). Every value below that overrides a config is an override *of a placeholder or of a batch-size-dependent value*, not a correction.
 
+`--data.data_root` is the only path any tier needs. The split directories and their annotation files are resolved from it by convention — COCO 2017's `train2017` spelling, the plain `train` the tiler writes, an `images/<split>` tree, or a per-split `_annotations.coco.json` export (`lucid_yolo.data.layout`). A layout none of those names still takes the four explicit overrides.
+
 Provisioning the datasets these recipes read: docs/DATASETS.md. What the accepted runs actually measured, with the exact commands as they were run at the time: docs/REPRODUCTION_REPORT.md.
 
 ## Always: point `default_root_dir` at storage that outlives the runtime
@@ -63,10 +65,6 @@ lucid-data build-tiles --root /content/dota --out /content/dota_tiles --splits t
 
 lucid-yolo fit --config obb_smoke.yaml \
   --data.data_root /content/dota_tiles \
-  --data.train_images_dir /content/dota_tiles/train \
-  --data.train_ann_file /content/dota_tiles/annotations/instances_train.json \
-  --data.val_images_dir /content/dota_tiles/val \
-  --data.val_ann_file /content/dota_tiles/annotations/instances_val.json \
   --data.batch_size 16 --data.num_workers 8 \
   --trainer.max_epochs 50 --trainer.precision bf16-mixed \
   --trainer.default_root_dir /content/drive/MyDrive/lucid_runs
@@ -74,9 +72,8 @@ lucid-yolo fit --config obb_smoke.yaml \
 lucid-eval --checkpoint <checkpoint> --data_root /content/dota_tiles --split val --output obb_report.json
 ```
 
-Two differences from the COCO tiers, both forced by the data rather than chosen:
+One difference from the COCO tiers, forced by the data rather than chosen:
 
-- **The four path overrides are required.** `obb_smoke.yaml` ships them as placeholders naming the split directories `build-tiles` writes; without them the datamodule looks for COCO 2017's `train2017`/`val2017` names.
 - **Batch 16 at `img_size: 1024`**, against 128 at 640 for COCO. The tile side is R18's own crop size, and 16 is the placeholder `obb_smoke.yaml` ships — "tune to accelerator memory". No oriented tier run has measured a batch that fits, so it is a starting point rather than a figure: at 2.56x the pixels per image it is a third of the COCO batch's pixel budget, not a match for it. `--model.lr` stays at the config's 0.01 for the same reason — the 0.02 above is the batch-128 linear scaling, and it does not carry over to a batch nobody has settled yet.
 
 `lucid-eval` picks the rotated protocol from the checkpoint's own task, and with it the 1024 px letterbox and batch 8; an explicit `--img_size` or `--batch_size` still wins.

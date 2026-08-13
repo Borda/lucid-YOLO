@@ -55,6 +55,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from lucid_yolo.assign import make_anchor_points
+from lucid_yolo.data.layout import resolve_split
 from lucid_yolo.eval.checkpoint import pick_device
 from lucid_yolo.eval.dota_eval import MAX_DETECTIONS, evaluate_rotated_map, rotated_detections_to_predictions
 from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
@@ -94,8 +95,7 @@ def build_datamodule(
         >>> type(datamodule).__name__
         'DetectionDataModule'
     """
-    images_dir = data_root / split
-    ann_file = data_root / "annotations" / f"instances_{split}.json"
+    images_dir, ann_file = resolve_split(data_root, split)
     return DetectionDataModule(
         data_root=data_root,
         batch_size=batch_size,
