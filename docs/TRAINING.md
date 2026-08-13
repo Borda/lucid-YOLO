@@ -23,7 +23,7 @@ Then `--trainer.default_root_dir /content/drive/MyDrive/lucid_runs` on every com
 ## Detection — COCO 2017
 
 ```bash
-lucid-data download --data_root /content/coco2017 --splits train val --verify true
+lucid-data download --data_root /content/coco2017 --splits '[train,val]' --verify true
 lucid-data check    --data_root /content/coco2017
 
 lucid-yolo fit --config det_smoke.yaml \
@@ -77,7 +77,7 @@ lucid-eval --checkpoint <checkpoint> --data_root /content/dota_tiles --split val
 Two differences from the COCO tiers, both forced by the data rather than chosen:
 
 - **The four path overrides are required.** `obb_smoke.yaml` ships them as placeholders naming the split directories `build-tiles` writes; without them the datamodule looks for COCO 2017's `train2017`/`val2017` names.
-- **Batch 16 at `img_size: 1024`**, against 128 at 640 for COCO. The tile side is R18's own crop size, so an image is 2.56x the pixels and the batch shrinks to match. `--model.lr` is therefore left at the config's 0.01: the 0.02 above is the batch-128 scaling, and it does not carry over.
+- **Batch 16 at `img_size: 1024`**, against 128 at 640 for COCO. The tile side is R18's own crop size, and 16 is the placeholder `obb_smoke.yaml` ships — "tune to accelerator memory". No oriented tier run has measured a batch that fits, so it is a starting point rather than a figure: at 2.56x the pixels per image it is a third of the COCO batch's pixel budget, not a match for it. `--model.lr` stays at the config's 0.01 for the same reason — the 0.02 above is the batch-128 linear scaling, and it does not carry over to a batch nobody has settled yet.
 
 `lucid-eval` picks the rotated protocol from the checkpoint's own task, and with it the 1024 px letterbox and batch 8; an explicit `--img_size` or `--batch_size` still wins.
 

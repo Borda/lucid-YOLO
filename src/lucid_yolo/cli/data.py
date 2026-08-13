@@ -3,7 +3,7 @@
 
 Three subcommands, in the order a tier run uses them::
 
-    lucid-data download --data_root /data/coco --splits train val --verify true
+    lucid-data download --data_root /data/coco --splits '[train,val]' --verify true
     lucid-data check --data_root /data/coco
     lucid-data build-tiles --root /data/dota --out /data/dota_tiles --overlap 512
 

@@ -7,22 +7,40 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 ### Added
 
 - Long-edge rotated-box primitives: canonicalization to `w >= h` with the angle on `[-45, 135)` degrees, quadrilateral conversion in both directions, and a vectorized point-in-rotated-rect test. Three conventions the paper leaves open are fixed here and inherited by the whole oriented path — the angle turns `+x` towards `+y`, containment is edge-inclusive, and an exact square folds towards zero (WP-055).
+
 - DOTA-v1.0 label parsing: the 15 categories in the published order, metadata headers skipped, category names normalized across their hyphenated and underscored spellings, and each annotated quadrilateral converted to a canonical long-edge box. Rotated boxes are kept on the same instance axis as the axis-aligned envelopes and labels, so one mask filters every modality (WP-056).
+
 - `make check-data DATASET=dota` — DOTA root layout, image/label pairing and published-count validation beside the existing COCO path (WP-056).
+
 - Overlapping 1024 px crop tiling for aerial imagery, with the source paper's partial-object rule: an instance clipped to under 70% of its area is flagged difficult rather than dropped, and re-fitted to a long-edge box. Crop overlap is a parameter; the visible fraction is carried alongside each instance (WP-057).
+
 - Rotated-aware augmentation: random affine, mosaic and mixup now carry rotated boxes instead of refusing them, warping each box through its four corners and re-fitting a long-edge box — exact under a similarity, an explicit fit under shear (WP-058).
+
 - ProbIoU rotated-box loss: both forms the source paper proposes, the bounded Hellinger distance and the unbounded Bhattacharyya distance, evaluated in a cancellation-free form that holds float32 accuracy from square boxes out to 1000:1 elongation and stays finite on degenerate input (WP-059).
+
 - Square-object angle loss: the auxiliary double-angle term that resolves what the rotated IoU loss cannot, weighted towards near-square targets by a log-Gaussian in the aspect ratio and zero at every quarter turn, so a square is never penalized for choosing either of its two indistinguishable orientations. The two representatives a square can arrive as score bit-identically, not merely to tolerance (WP-060).
+
 - Rotated candidate selection in the Task-Aligned Assigner and its STAL subclass: an oriented ground truth now decides candidacy by point-in-rotated-rect containment instead of by its axis-aligned envelope, through one optional argument that leaves the accepted axis-aligned path bit-identical when omitted. The end-to-end one-to-one assigner inherits it with no code of its own (WP-061).
+
 - Oriented detection head and NMS-free rotated decode: a third stem on each head branch predicts the angle directly, with the squashing nonlinearity of the previous versions removed, and the decode turns the ordinary box regression about its own centre and normalizes to the long-edge convention. An angle of zero reproduces the axis-aligned box exactly, and the two raw angles a half turn apart decode to the same box rather than two. Enabling the branch leaves the shipped detection head bit-identical, verified across 684 parameter and forward digests (WP-062).
+
 - Rotated mAP50-95 for oriented detection: exact polygon-intersection IoU against a shapely oracle, the COCO threshold grid and 101-point interpolation, and the DOTA convention where an instance flagged difficult is neither credited nor penalized. The detection cap follows what the model emits rather than COCO's smaller default, so no part of the output is discarded and then counted as missed (WP-063).
+
 - The license audit now reads the license documents a wheel bundles, not only the fields it declares. Its first run found two runtime libraries vendored under copyleft terms that no previous audit could see; a recognized license exception passes for any package, and the two remaining cases are allowlisted with the reasoning recorded (WP-063).
+
 - Oriented supervision wired into the training step: `task="obb"` now trains the angle stems it had only been constructing. The rotated ProbIoU replaces the Complete-IoU term in its slot, the L1 term is retargeted onto the rotated box's own centre and extents rather than the axis-aligned envelope it no longer matches, and R1's double-angle term is added — all gathered from the one assignment the box terms were scored against, never a second one. A `task="detect"` step stays bit-identical to a snapshot replayed from the pre-change tree (WP-088, A49-A51).
+
 - A `difficult` channel on the target container, so R18's per-instance flag survives the loader transport into the rotated metric instead of being filtered away at load, which would have scored every ignorable detection as a false positive (WP-088, A51).
+
 - `python scripts/build_dota_tiles.py` turns a DOTA root into the tiled COCO layout the oriented recipe trains on. The tiling geometry had existed since WP-057 with no caller, so the recipe pointed at a directory nothing could produce. Object-free crops are kept by default, since they are the negative evidence a one-to-one branch needs, and a flag selects the other reading; the per-instance difficult flag, the source paper's visible-area fraction, and each tile's source image and window travel in the annotation file so whole-image evaluation can be built later without re-tiling (WP-094, A52-A53).
+
 - The COCO reader forwards a `difficult` key onto the target container's flag channel on both the oriented and axis-aligned readings, defaulting to false when absent. Tiling *creates* difficult instances that appear in no label file, and without this every one of them reached the metric as an ordinary scored ground truth (WP-094, A53).
+
 - `python scripts/eval_obb.py` scores an oriented checkpoint against a split of the tiled layout through the rotated accumulator, with the EMA weights and the exact recall grid, the emitted detection cap and the difficult rule that instrument brings. The figure is explicitly per tile and says so: an object crossing a tile boundary is counted in both, and the merge rule that would fix it is a decision the release work package owns rather than something an instrument may pick quietly (WP-095).
+
 - A gate on the assumption register's own shape: a row written one column short is padded back by the formatter and reads as though a sourced assumption were unsourced, which two rows had already done (WP-061).
+
+- `docs/DATASETS.md` and `docs/TRAINING.md`: where each dataset comes from and what has to be on disk, and the launch command for each of the three tiers. DOTA provisioning is manual because its distribution offers interactive Drive folders rather than archive URLs, and that had never been written down; the training guide leads with the rule the report's historical command blocks do not state, that `default_root_dir` is where both loggers and the checkpoints write and therefore the whole of what survives a disconnected runtime (WP-003).
 
 ### Changed
 
@@ -32,6 +50,7 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Fixed
 
+- `lucid-data check --dataset dota` no longer fails on a correct download. It compared the summed `train` and `val` counts against the published 2,806 images and 188,282 instances by default, and those describe DOTA-v1.0 whole: the source paper takes half the images as training, a sixth as validation and a third as testing, and releases ground truth for the first two only, so an annotated root holds about two thirds of them and can never sum to them. The totals are now reported on a `NOTE` line and compared only where the caller states one, with `--expected_images`, `--expected_instances` and `--expected_classes` to assert them once a provisioning's counts are known; the layout, pairing and parse checks are unchanged, and an expectation aimed at another layout raises rather than being ignored (WP-097).
 - The angle term's weight is now measured rather than assumed: `0.25`, down from the `1.0` this project had picked for a gain R1 never states (A22). At `1.0` the term did not merely over-weight the objective, it destabilised angle regression on elongated targets — across five seeds the oriented overfit cleared its floor once, with a run-to-run spread of 0.667 and a worst run at 0.31; at `0.25` it clears four times with a spread of 0.096, and the mean angular error on elongated targets halves. The cause is visible in the term itself: `sin²(2Δθ)` is zero at both zero and a quarter turn, so for an elongated box a 90-degree error scores as a perfect answer and only the rotated IoU term objects (WP-093, A22).
 - A gate on the roadmap's own table shape: an unescaped pipe inside a code span opens a cell, so a row renders its tail into the wrong columns and drops the overflow. Two rows had already shipped that way, and neither existing gate could see it — one reads only the first column, the other matches the last (WP-093).
 - Exact recall sampling for the detection instrument: `evaluate_bbox` now supplies the 101-point recall grid as correctly rounded hundredths instead of accepting the metric's float32 default, which overshot `k/100` at 36 of the 101 indices. A class whose recall landed exactly on one of those boundaries forfeited that point and `1/101` of its average precision, always downward — an ordinary case rather than an exotic one, since a class with 5, 10, 20, 25, 50 or 100 ground truths lands on a grid point at every recall it can attain. Both mAP instruments now forfeit no boundary, and agree exactly where they used to differ (WP-092, A46).

@@ -20,7 +20,8 @@ added.
 
 Download behaviour:
     * ``val`` is the default split (5,000 images, ~1 GB); ``train`` is 18 GB and
-      must be opted into explicitly (``--splits train val``).
+      must be opted into explicitly (``--splits '[train,val]'`` through
+      ``lucid-data``; the deprecated alias spells the same list ``--splits train val``).
     * Transfers stream to ``<archive>.part`` and are renamed into place on
       completion (atomic), so a killed run never leaves a truncated ``.zip``.
     * A partial ``.part`` is resumed with an HTTP ``Range`` request when the
@@ -41,7 +42,7 @@ Examples:
 
     Or via the console script (both splits)::
 
-        lucid-data download --data_root /data/coco --splits train val
+        lucid-data download --data_root /data/coco --splits '[train,val]'
 """
 
 from __future__ import annotations

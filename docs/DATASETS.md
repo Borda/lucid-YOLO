@@ -10,7 +10,7 @@ Automated, because the archives are served from a stable public host (`images.co
 
 ```bash
 lucid-data download --data_root /data/coco                       # val + annotations, ~1 GB
-lucid-data download --data_root /data/coco --splits train val    # adds the 18 GB train archive
+lucid-data download --data_root /data/coco --splits '[train,val]'  # adds the 18 GB train archive
 lucid-data check    --data_root /data/coco
 ```
 
