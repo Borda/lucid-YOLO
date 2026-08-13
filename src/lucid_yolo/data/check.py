@@ -54,9 +54,10 @@ Examples:
         lucid-data check --data_root /data/coco
         lucid-data check --data_root /data/dota --dataset dota
 
-    Assert a DOTA root's totals once they are known for that provisioning::
+    Assert that a DOTA root holds both annotated splits whole::
 
-        lucid-data check --data_root /data/dota --dataset dota --expected_images <count>
+        lucid-data check --data_root /data/dota --dataset dota \
+            --expected_images 1869 --expected_instances 127843
 """
 
 from __future__ import annotations
@@ -70,9 +71,22 @@ from lucid_yolo.data.dota import DOTA_CLASSES, parse_dota_label_file
 #: Expected image counts for the two COCO 2017 splits (blueprint sec. 14.3).
 COCO_TRAIN_COUNT = 118287
 COCO_VAL_COUNT = 5000
-#: Published DOTA-v1.0 totals (AGENTS.md sec. 3; R18).
+#: Published DOTA-v1.0 totals (AGENTS.md sec. 3; R18). These cover all three splits,
+#: testing included, and R18 releases no testing ground truth — so they are what a
+#: caller asserting the *whole* dataset passes, never a default (see
+#: :func:`check_dota_root`).
 DOTA_IMAGE_COUNT = 2806
 DOTA_INSTANCE_COUNT = 188282
+#: Totals of the two annotated splits, **measured** on a complete DOTA-v1.0
+#: train-plus-val provisioning from the official distribution (2026-08-13): 1,411 plus
+#: 458 images, 98,990 plus 28,853 object lines with difficult instances included. Not a
+#: published figure — R18 states only the whole-dataset totals above, and 2,806 minus
+#: 1,869 is exactly the 937 images of the withheld testing third. Offered so a caller
+#: has something to pass to ``--expected_images``, which is how a truncated download or
+#: a half-unpacked archive gets caught; still not a default, because a root provisioned
+#: with one split is a legitimate thing to check.
+DOTA_ANNOTATED_IMAGE_COUNT = 1869
+DOTA_ANNOTATED_INSTANCE_COUNT = 127843
 DOTA_CLASS_COUNT = len(DOTA_CLASSES)
 #: DOTA split directories checked by default; each holds ``images/`` and ``labelTxt/``.
 DOTA_SPLITS = ("train", "val")

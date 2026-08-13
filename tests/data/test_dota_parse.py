@@ -343,6 +343,25 @@ def test_check_data_fails_on_a_total_it_was_given(dota_fixture: _DotaFixture) ->
     )
 
 
+def test_the_annotated_totals_are_the_published_ones_less_the_testing_third() -> None:
+    """The measured train-plus-val counts sit where R18's split ratios put them.
+
+    R18 sec. 4 takes half the images as training, a sixth as validation and a third as
+    testing, releasing ground truth for the first two: the annotated share is therefore
+    about two thirds of the published dataset. About, not exactly: the selection is
+    random, so the realised split lands near its ratios rather than on them -- the
+    measured images come to 0.666 of 2,806 where the arithmetic would give 1,871 -- and
+    instances are not distributed uniformly over images anyway. The band is sized for
+    what a transcription error would leave: a count copied from one split, or from
+    another dataset version, misses it by far more than the sampling does.
+    """
+    images = check_data.DOTA_ANNOTATED_IMAGE_COUNT / check_data.DOTA_IMAGE_COUNT
+    instances = check_data.DOTA_ANNOTATED_INSTANCE_COUNT / check_data.DOTA_INSTANCE_COUNT
+
+    assert 0.62 < images < 0.71
+    assert 0.62 < instances < 0.71
+
+
 def test_check_data_rejects_a_dota_expectation_aimed_at_coco() -> None:
     """A DOTA-only count passed with --dataset coco is rejected rather than ignored."""
     with pytest.raises(ValueError, match="apply to --dataset dota"):

@@ -57,7 +57,22 @@ Unpack so that each split directory holds an `images/` and a `labelTxt/` directo
 
 The archives do not necessarily unpack into this shape; moving directories after extraction is expected. `lucid-data check --data_root <dota_root> --dataset dota` is what decides whether the result is usable: it verifies both directories exist per split, that images and label files pair one-to-one in both directions, and that every object line parses, naming the file and line of the first that does not.
 
-**What it does not check, and why.** The totals across the checked splits are reported, not required. The published 2,806 images / 188,282 instances / 15 classes describe DOTA-v1.0 *whole*, and R18 splits it as "half of the original images as the training set, 1/6 as validation set, and 1/3 as the testing set" while releasing ground truth for the first two only — so an annotated root holds about two thirds of that and can never sum to it. Requiring those totals by default is what the check did until WP-097, which made it fail on every correct download. The line to read is now `NOTE totals across ...`; once the counts for a given provisioning are known they can be asserted with `--expected_images`, `--expected_instances` and `--expected_classes`, and are then enforced exactly as before.
+A complete train-plus-val provisioning from the official distribution reports:
+
+```text
+  PASS train — 1411 images, 98990 instances, 15 classes
+  PASS val — 458 images, 28853 instances, 15 classes
+  NOTE totals across ['train', 'val']: 1869 images, 127843 instances, 15 classes
+```
+
+Those are measured, not published — R18 gives whole-dataset totals only, and 2,806 minus 1,869 is exactly the 937 images of the withheld testing third. Compare against them, and pass them to make the comparison a gate:
+
+```bash
+lucid-data check --data_root <dota_root> --dataset dota \
+  --expected_images 1869 --expected_instances 127843
+```
+
+**What it does not check by default, and why.** The totals across the checked splits are reported, not required. The published 2,806 images / 188,282 instances / 15 classes describe DOTA-v1.0 *whole*, and R18 splits it as "half of the original images as the training set, 1/6 as validation set, and 1/3 as the testing set" while releasing ground truth for the first two only — so an annotated root holds about two thirds of that and can never sum to it. Requiring those totals by default is what the check did until WP-097, which made it fail on every correct download. The line to read is now `NOTE totals across ...`; once the counts for a given provisioning are known they can be asserted with `--expected_images`, `--expected_instances` and `--expected_classes`, and are then enforced exactly as before.
 
 ### Then build the tiles
 
