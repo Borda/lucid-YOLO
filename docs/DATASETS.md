@@ -79,7 +79,7 @@ lucid-data check --data_root <dota_root> --dataset dota \
 The tier trains on 1024 px tiles, never on the original tree — DOTA images run to several thousand pixels a side in PNG, which has no random-access region decode, so cropping per sample would decode a whole image to yield one window (WP-094):
 
 ```bash
-lucid-data build-tiles --root <dota_root> --out <tiles_root> --splits train,val --overlap 512
+lucid-data build-tiles --root <dota_root> --out <tiles_root> --splits train,val --overlap 512 --workers 8
 ```
 
 The tiles are a build artifact and are never committed. The output is a COCO container with quadrilateral rings, in the layout `obb_smoke.yaml` names, so training and evaluation read it through the same dataset class as COCO.

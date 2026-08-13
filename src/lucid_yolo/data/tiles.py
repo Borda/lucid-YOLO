@@ -65,11 +65,16 @@ Examples:
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Iterator
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import torch
 from torchvision.io import ImageReadMode, read_image, write_png
+from tqdm.auto import tqdm
 
 from lucid_yolo.data.dota import DOTA_CLASSES, load_dota_targets
 from lucid_yolo.data.rotated_geom import rboxes_to_polygons
@@ -81,6 +86,13 @@ IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 TILE_SEPARATOR = "__"
 #: Corner coordinates per quadrilateral, flattened into a COCO ``segmentation`` ring.
 _RING_VALUES = 8
+#: Id written by a worker, which cannot know how many tiles preceded it. The parent
+#: overwrites every one in source order, so this value never reaches the JSON — it is
+#: out of COCO's 1-based range so that a missed overwrite fails a reader rather than
+#: silently colliding with a real record.
+_UNNUMBERED = 0
+#: One written tile: its ``images`` record and its ``annotations`` records, unnumbered.
+_TileResult = tuple[dict[str, object], list[dict[str, object]]]
 
 
 @dataclass(frozen=True)
@@ -219,6 +231,113 @@ def source_images(split_dir: Path) -> list[Path]:
     return sorted(path for path in (split_dir / "images").iterdir() if path.suffix.lower() in IMAGE_SUFFIXES)
 
 
+def tile_source_image(
+    path: Path, *, labels_dir: Path, images_out: Path, patch: int, overlap: int, keep_empty: bool
+) -> tuple[list[_TileResult], int]:
+    """Tile one source image, writing its tiles and returning their unnumbered records.
+
+    This is the unit of parallelism, and it is the whole of the per-image work: reading
+    the label file, decoding the image, cropping, and writing every tile PNG. What comes
+    back is metadata only — a tile tensor returned to the parent would be shipped through
+    a pickle for no reason, and the tiles of one DOTA image outweigh the image.
+
+    Ids are **not** assigned here. A worker cannot know how many tiles the images before
+    it produced, and numbering by anything a worker does know (its own index, a shared
+    counter) would make the file depend on scheduling order. The parent numbers them in
+    source order, so the JSON is byte-identical however many workers ran.
+
+    Args:
+        path: The source image.
+        labels_dir: The split's ``labelTxt`` directory.
+        images_out: Directory the tile images are written into.
+        patch: Crop side in pixels.
+        overlap: Nominal crop overlap in pixels (A21).
+        keep_empty: Whether tiles with no annotation are written (A52).
+
+    Returns:
+        A ``(tiles, empty)`` pair: one ``(image record, annotation records)`` entry per
+        tile written, in window order, and how many windows carried no annotation.
+
+    Examples:
+        >>> tile_source_image(  # doctest: +IGNORE_EXCEPTION_DETAIL
+        ...     Path("/nonexistent.png"),
+        ...     labels_dir=Path("/nonexistent"),
+        ...     images_out=Path("/tmp"),
+        ...     patch=1024,
+        ...     overlap=512,
+        ...     keep_empty=True,
+        ... )
+        Traceback (most recent call last):
+        FileNotFoundError: ...
+    """
+    targets = load_dota_targets(labels_dir / f"{path.stem}.txt", keep_difficult=True)
+    image = read_image(str(path), ImageReadMode.RGB)
+    tiles: list[_TileResult] = []
+    empty = 0
+    for window, tile, tiled in tile_image_targets(
+        image, targets, difficult=targets.difficult, patch=patch, overlap=overlap
+    ):
+        records = annotation_records(_UNNUMBERED, _UNNUMBERED, tiled)
+        if not records:
+            empty += 1
+            if not keep_empty:
+                continue
+        file_name = tile_file_name(path.stem, window)
+        write_png(tile.contiguous(), str(images_out / file_name))
+        tiles.append((_image_record(_UNNUMBERED, file_name, tile, window, path.name), records))
+    return tiles, empty
+
+
+def _number(tiles: list[_TileResult], images: list[dict[str, object]], annotations: list[dict[str, object]]) -> None:
+    """Assign one source image's ids in place, continuing the split's running counts.
+
+    Args:
+        tiles: One worker's ``(image record, annotation records)`` entries, in window order.
+        images: The split's image records so far; extended here.
+        annotations: The split's annotation records so far; extended here.
+    """
+    for image_record, records in tiles:
+        image_id = len(images) + 1
+        image_record["id"] = image_id
+        for offset, record in enumerate(records):
+            record["id"] = len(annotations) + offset + 1
+            record["image_id"] = image_id
+        images.append(image_record)
+        annotations.extend(records)
+
+
+def _worker_setup() -> None:
+    """Pin each pool worker to one torch thread.
+
+    Tiling is one process per image already; letting every worker also fan out over the
+    machine's cores turns the pool into oversubscription, which on a many-core host is
+    slower than the serial build it replaced.
+    """
+    torch.set_num_threads(1)
+
+
+def _results(
+    paths: list[Path], job: partial[tuple[list[_TileResult], int]], workers: int, split: str, progress: bool
+) -> Iterator[tuple[list[_TileResult], int]]:
+    """Yield each source image's tiling result in source order, serially or through a pool.
+
+    Args:
+        paths: Source images, in the order their ids are assigned.
+        job: The per-image call, with everything but the path already bound.
+        workers: Pool processes; ``0`` and ``1`` run in this process instead.
+        split: Split name, shown on the progress bar.
+        progress: Whether to draw the progress bar.
+
+    Yields:
+        ``(tiles, empty)`` pairs, always in ``paths`` order.
+    """
+    if workers > 1:
+        with ProcessPoolExecutor(max_workers=workers, initializer=_worker_setup) as pool:
+            yield from tqdm(pool.map(job, paths), total=len(paths), desc=split, unit="img", disable=not progress)
+        return
+    yield from tqdm((job(path) for path in paths), total=len(paths), desc=split, unit="img", disable=not progress)
+
+
 def convert_split(
     split_dir: Path,
     out_dir: Path,
@@ -228,6 +347,8 @@ def convert_split(
     overlap: int = CROP_OVERLAP,
     keep_empty: bool = True,
     limit: int | None = None,
+    workers: int = 1,
+    progress: bool = True,
 ) -> SplitReport:
     """Tile one DOTA split into the COCO layout and write its instances JSON.
 
@@ -239,6 +360,8 @@ def convert_split(
         overlap: Nominal crop overlap in pixels (A21).
         keep_empty: Whether tiles with no annotation are written (A52).
         limit: Read at most this many source images; ``None`` reads all.
+        workers: Pool processes tiling source images; ``1`` stays in this process.
+        progress: Whether to draw a per-image progress bar.
 
     Returns:
         The split's :class:`SplitReport`.
@@ -252,25 +375,21 @@ def convert_split(
     images_out = out_dir / split
     images_out.mkdir(parents=True, exist_ok=True)
     (out_dir / "annotations").mkdir(parents=True, exist_ok=True)
+    job = partial(
+        tile_source_image,
+        labels_dir=split_dir / "labelTxt",
+        images_out=images_out,
+        patch=patch,
+        overlap=overlap,
+        keep_empty=keep_empty,
+    )
 
     images: list[dict[str, object]] = []
     annotations: list[dict[str, object]] = []
     empty = 0
-    for path in paths:
-        targets = load_dota_targets(split_dir / "labelTxt" / f"{path.stem}.txt", keep_difficult=True)
-        image = read_image(str(path), ImageReadMode.RGB)
-        for window, tile, tiled in tile_image_targets(
-            image, targets, difficult=targets.difficult, patch=patch, overlap=overlap
-        ):
-            records = annotation_records(len(images) + 1, len(annotations) + 1, tiled)
-            if not records:
-                empty += 1
-                if not keep_empty:
-                    continue
-            file_name = tile_file_name(path.stem, window)
-            write_png(tile.contiguous(), str(images_out / file_name))
-            images.append(_image_record(len(images) + 1, file_name, tile, window, path.name))
-            annotations.extend(records)
+    for tiles, empty_here in _results(paths, job, workers, split, progress):
+        _number(tiles, images, annotations)
+        empty += empty_here
 
     _write_instances(out_dir / "annotations" / f"instances_{split}.json", images, annotations, split)
     return SplitReport(
@@ -326,6 +445,8 @@ def build_tiles(
     overlap: int = CROP_OVERLAP,
     drop_empty_tiles: bool = False,
     limit: int | None = None,
+    workers: int | None = None,
+    progress: bool = True,
 ) -> int:
     """Tile an oriented dataset into the trainable COCO layout, split by split.
 
@@ -338,6 +459,13 @@ def build_tiles(
         overlap: Nominal crop overlap in pixels (A21; R18's own protocol is 512).
         drop_empty_tiles: Skip tiles that carry no annotation (A52).
         limit: Read at most this many source images per split.
+        workers: Processes tiling source images in parallel. ``None`` (default)
+            takes one per available CPU; ``1`` stays in this process. The output is
+            byte-identical either way — ids are assigned by the parent in source
+            order, never by a worker.
+        progress: Whether to draw a per-image progress bar. A full DOTA build is
+            thousands of multi-megapixel decodes, so silence for an hour is not a
+            reasonable thing to ask of an operator.
 
     Returns:
         ``0`` on success; ``1`` when a split directory is not a split of ``source``.
@@ -352,6 +480,7 @@ def build_tiles(
     """
     if source not in SOURCES:
         raise ValueError(f"unknown source {source!r}; known readers are {list(SOURCES)}")
+    resolved_workers = max(1, os.cpu_count() or 1) if workers is None else max(1, workers)
     for split in (name.strip() for name in splits.split(",") if name.strip()):
         try:
             report = convert_split(
@@ -362,6 +491,8 @@ def build_tiles(
                 overlap=overlap,
                 keep_empty=not drop_empty_tiles,
                 limit=limit,
+                workers=resolved_workers,
+                progress=progress,
             )
         except FileNotFoundError as error:
             print(f"FAIL: {error}")

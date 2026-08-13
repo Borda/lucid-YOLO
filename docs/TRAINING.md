@@ -61,7 +61,7 @@ DOTA is provisioned by hand and then tiled; both steps are docs/DATASETS.md. Tra
 
 ```bash
 lucid-data check       --data_root /content/dota --dataset dota
-lucid-data build-tiles --root /content/dota --out /content/dota_tiles --splits train,val --overlap 512
+lucid-data build-tiles --root /content/dota --out /content/dota_tiles --splits train,val --overlap 512 --workers 8
 
 lucid-yolo fit --config obb_smoke.yaml \
   --data.data_root /content/dota_tiles \

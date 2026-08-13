@@ -32,6 +32,9 @@ dependencies = [
   "faster-coco-eval>=1.7",
   "fvcore>=0.1.5",
   "pyyaml>=6.0",
+  # Declared directly for the same reason as jsonargparse: Lightning brings it for the
+  # training progress bar, and `lucid-data build-tiles` draws its own (WP-100).
+  "tqdm>=4.66",
   "numpy>=1.26",
 ]
 
@@ -49,6 +52,7 @@ dev = [
   "pre-commit>=3.7",
   "build>=1.2",
   "types-PyYAML",
+  "types-tqdm",
   "fuse-augmentations",
   "matplotlib>=3.8",
 ]

@@ -187,3 +187,73 @@ def test_the_report_counts_what_was_written(tmp_path: Path) -> None:
     assert (report.tiles, report.instances) == (len(payload["images"]), len(payload["annotations"]))
     assert report.difficult == sum(int(record["difficult"]) for record in payload["annotations"])
     assert report.source_images == 1
+
+
+def _multi_image_split(root: Path) -> Path:
+    """Write a four-image split, enough that a pool's completion order can differ from source order."""
+    return _write_split(
+        root / "dota",
+        "val",
+        {
+            "P0001": [_axis_aligned_line(2.0, 2.0, 6.0, 4.0, "plane", 0)],
+            "P0002": [_axis_aligned_line(6.0, 6.0, 10.0, 10.0, "harbor", 1)],
+            "P0003": [_axis_aligned_line(1.0, 1.0, 3.0, 9.0, "ship", 0)],
+            "P0004": [_axis_aligned_line(12.0, 12.0, 20.0, 16.0, "bridge", 0)],
+        },
+    )
+
+
+def test_a_pooled_build_writes_the_same_bytes_as_a_serial_one(tmp_path: Path) -> None:
+    """Workers change the schedule, never the file: ids are assigned by the parent in source order.
+
+    This is the whole risk of the pool. A worker cannot know how many tiles preceded it,
+    so numbering anything inside one would make the JSON depend on which process finished
+    first -- reproducible on the machine that built it and nowhere else.
+    """
+    split_dir = _multi_image_split(tmp_path)
+
+    build.convert_split(split_dir, tmp_path / "serial", "val", patch=PATCH, overlap=OVERLAP, progress=False)
+    build.convert_split(split_dir, tmp_path / "pooled", "val", patch=PATCH, overlap=OVERLAP, workers=4, progress=False)
+
+    serial = (tmp_path / "serial" / "annotations" / "instances_val.json").read_bytes()
+    assert serial == (tmp_path / "pooled" / "annotations" / "instances_val.json").read_bytes()
+
+
+def test_a_pooled_build_writes_every_tile_image(tmp_path: Path) -> None:
+    """The workers do the writing, so the images must be on disk and not only in the JSON."""
+    split_dir = _multi_image_split(tmp_path)
+
+    report = build.convert_split(
+        split_dir, tmp_path / "tiles", "val", patch=PATCH, overlap=OVERLAP, workers=2, progress=False
+    )
+
+    payload = _payload(tmp_path / "tiles")
+    assert report.tiles == len(payload["images"])
+    assert all((tmp_path / "tiles" / "val" / str(record["file_name"])).is_file() for record in payload["images"])
+
+
+def test_no_record_keeps_a_worker_placeholder_id(tmp_path: Path) -> None:
+    """Every id a worker left unnumbered is overwritten; the placeholder is out of COCO's range."""
+    split_dir = _multi_image_split(tmp_path)
+
+    build.convert_split(split_dir, tmp_path / "tiles", "val", patch=PATCH, overlap=OVERLAP, workers=2, progress=False)
+
+    payload = _payload(tmp_path / "tiles")
+    assert all(int(record["id"]) > 0 for record in payload["images"])
+    assert all(int(record["id"]) > 0 and int(record["image_id"]) > 0 for record in payload["annotations"])
+
+
+def test_the_worker_count_reaches_the_split_builder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--workers`` is forwarded rather than accepted and dropped, and defaults to one per CPU."""
+    seen: list[int] = []
+
+    def _record(*args: object, **kwargs: object) -> build.SplitReport:
+        seen.append(int(kwargs["workers"]))  # type: ignore[call-overload]
+        return build.SplitReport("val", 0, 0, 0, 0, 0)
+
+    monkeypatch.setattr(build, "convert_split", _record)
+    monkeypatch.setattr(build.os, "cpu_count", lambda: 7)
+
+    assert build.build_tiles(tmp_path, tmp_path / "out", splits="val", workers=3) == 0
+    assert build.build_tiles(tmp_path, tmp_path / "out", splits="val") == 0
+    assert seen == [3, 7]
