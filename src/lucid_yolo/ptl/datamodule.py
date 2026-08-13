@@ -133,12 +133,17 @@ _FLIP_PROB = 0.5
 _PREFETCH_FACTOR = 2
 
 
-#: Default validation-loader worker cap (WP-073). Val samples are letterbox-only
-#: (decode + one resize — a fraction of the train pipeline's work), so a handful
-#: of workers saturates it, while inheriting the train worker count doubles the
-#: resident worker-process population every epoch boundary (train workers are
-#: persistent) — the observed Colab host-OOM trigger on long runs.
+#: Validation-loader worker cap at :data:`_VAL_REFERENCE_SIDE` (WP-073), applied only
+#: when the train worker count was **auto-chosen** (WP-102). Val samples are
+#: letterbox-only, so few workers saturate them, while inheriting a large train count
+#: doubles the resident worker-process population every epoch boundary (train workers
+#: are persistent) — the observed Colab host-OOM trigger on long runs.
 _VAL_MAX_WORKERS = 4
+#: Letterbox side the cap above was reasoned about. Decode cost scales with the pixel
+#: count, so the cap scales with it too: the constant encodes "how many workers saturate
+#: a letterbox-only loader", and that number is not the same at 1024 px as at 640 px,
+#: where "a fraction of the train pipeline's work" stopped being true (WP-102).
+_VAL_REFERENCE_SIDE = 640
 
 
 #: Fraction of currently-free ``/dev/shm`` the worker queue may claim. Worker
@@ -180,6 +185,24 @@ def _shm_capped_workers(workers: int, batch_size: int, img_size: int, prefetch: 
     batch_bytes = 4 * 3 * batch_size * img_size * img_size
     budget = int(free_bytes * _SHM_BUDGET_FRACTION)
     return max(1, min(workers, budget // max(1, prefetch * batch_bytes)))
+
+
+def _val_worker_cap(img_size: int) -> int:
+    """Return the auto-chosen validation worker ceiling for a given letterbox side.
+
+    Args:
+        img_size: Square letterbox side of every emitted sample.
+
+    Returns:
+        :data:`_VAL_MAX_WORKERS` scaled by the pixel count relative to
+        :data:`_VAL_REFERENCE_SIDE`, at least 1.
+
+    Examples:
+        >>> _val_worker_cap(640), _val_worker_cap(1024)
+        (4, 10)
+    """
+    scale = (img_size / _VAL_REFERENCE_SIDE) ** 2
+    return max(1, round(_VAL_MAX_WORKERS * scale))
 
 
 def _init_worker(worker_id: int) -> None:
@@ -777,6 +800,7 @@ class DetectionDataModule(LightningDataModule):
         self._batch_size = int(batch_size)
         self._img_size = int(img_size)
         self._prefetch_factor = int(prefetch_factor)
+        workers_were_chosen_here = num_workers is None
         if num_workers is None:
             num_workers = _shm_capped_workers(
                 min(self._batch_size, os.cpu_count() or 1),
@@ -785,9 +809,7 @@ class DetectionDataModule(LightningDataModule):
                 self._prefetch_factor,
             )
         self._num_workers = int(num_workers)
-        self._val_num_workers = (
-            min(self._num_workers, _VAL_MAX_WORKERS) if val_num_workers is None else int(val_num_workers)
-        )
+        self._val_num_workers = self._resolve_val_workers(val_num_workers, workers_were_chosen_here)
         self._persistent_workers = bool(persistent_workers)
         self._seed = int(seed)
         self._pin_memory = torch.cuda.is_available() if pin_memory is None else bool(pin_memory)
@@ -800,6 +822,30 @@ class DetectionDataModule(LightningDataModule):
         self._val_ann_file = val_ann_file or default_val_ann
         self._train: _TrainPipeline | None = None
         self._val: CocoDetectionDataset | None = None
+
+    def _resolve_val_workers(self, requested: int | None, workers_were_chosen_here: bool) -> int:
+        """Decide the validation loader's worker count.
+
+        The cap applies to what this class chose, never to what a caller named. An
+        operator who writes ``--data.num_workers 16`` has stated how much of the machine
+        this run may use, and silently running validation on a quarter of it is the
+        library second-guessing a decision that was not its to make — the surprise costs
+        more than the OOM it was avoiding, because it shows up as an idle GPU with no
+        message. When the count was auto-chosen the cap still applies, because then the
+        library owns the consequences of its own guess.
+
+        Args:
+            requested: Explicit ``val_num_workers``, or ``None`` to derive one.
+            workers_were_chosen_here: Whether the train worker count was auto-chosen.
+
+        Returns:
+            The validation loader's worker count.
+        """
+        if requested is not None:
+            return int(requested)
+        if not workers_were_chosen_here:
+            return self._num_workers
+        return min(self._num_workers, _val_worker_cap(self._img_size))
 
     def prepare_data(self) -> None:
         """No-op: datasets are provisioned out of band, never downloaded (AGENTS.md sec. 3)."""

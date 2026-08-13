@@ -491,12 +491,47 @@ def test_dataloader_num_workers_auto_scales_with_batch(detseg_fixture_dir: Path)
     assert datamodule.train_dataloader().num_workers >= 1
 
 
-def test_val_loader_workers_capped_below_train(detseg_fixture_dir: Path) -> None:
-    """The val loader defaults to min(num_workers, 4) — never the full train worker pool (WP-073)."""
+def test_a_named_worker_count_reaches_the_val_loader(detseg_fixture_dir: Path) -> None:
+    """A worker count the caller stated is honoured by both loaders (WP-102).
+
+    The cap belongs to what this class chose, not to what an operator named: someone
+    writing ``--data.num_workers 8`` has said how much of the machine the run may use,
+    and quietly validating on half of it surfaces as an idle accelerator with no
+    message, which costs more than the host-OOM the cap was avoiding.
+    """
     datamodule = _datamodule(detseg_fixture_dir, num_workers=8)
     datamodule.setup("fit")
     assert datamodule.train_dataloader().num_workers == 8
-    assert datamodule.val_dataloader().num_workers == 4
+    assert datamodule.val_dataloader().num_workers == 8
+
+
+def test_an_auto_chosen_worker_count_is_still_capped_for_val(
+    detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the count was this class's own guess, the cap still applies (WP-073).
+
+    The library owns the consequences of a number it picked, and the resident worker
+    population doubling at every epoch boundary is one of them.
+    """
+    monkeypatch.setattr(dm.os, "cpu_count", lambda: 64)
+    monkeypatch.setattr(dm, "_shm_capped_workers", lambda workers, *args: workers)
+
+    datamodule = _datamodule(detseg_fixture_dir, num_workers=None)
+    datamodule.setup("fit")
+
+    assert datamodule.val_dataloader().num_workers == dm._val_worker_cap(_SMOKE_IMG_SIZE)
+    assert datamodule.val_dataloader().num_workers < datamodule.train_dataloader().num_workers
+
+
+def test_the_val_worker_cap_scales_with_the_letterbox_side() -> None:
+    """The cap encodes how many workers saturate a letterbox-only loader, which is pixel-bound.
+
+    Four was reasoned about 640 px samples, where val work was "a fraction of the train
+    pipeline's". At 1024 px the decode is the work, and a constant would starve it.
+    """
+    assert dm._val_worker_cap(640) == 4
+    assert dm._val_worker_cap(1024) > dm._val_worker_cap(640)
+    assert dm._val_worker_cap(64) >= 1
 
 
 def test_val_loader_workers_explicit_override(detseg_fixture_dir: Path) -> None:

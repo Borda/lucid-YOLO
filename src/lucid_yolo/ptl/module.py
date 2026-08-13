@@ -733,11 +733,12 @@ class DetectionLitModule(LightningModule):
         flag to ``model.task``, and a batch without them is scored on boxes only
         rather than rasterised a second time here.
 
-        An ``"obb"`` module accumulates the WP-063 rotated mAP the same way
-        (:meth:`_update_val_rotated`), for the same reason: ``val/mAP`` reads the
-        A44 composition's *pre-rotation* rectangle, so a run whose orientations
-        were random and one whose orientations were right would log the identical
-        curve, and the acceptance number would first appear hours after the run.
+        An ``"obb"`` module accumulates the WP-063 rotated mAP
+        (:meth:`_update_val_rotated`) **instead of** ``val/mAP``, not beside it
+        (WP-102): the axis-aligned figure reads the A44 composition's
+        *pre-rotation* rectangle, so a run whose orientations were random and one
+        whose orientations were right log the identical curve, and the acceptance
+        number would otherwise first appear hours after the run.
 
         Args:
             batch: The datamodule batch ``(images, list[Targets], masks)``; the
@@ -763,8 +764,9 @@ class DetectionLitModule(LightningModule):
                     "labels": kept[:, _LABEL_COLUMN].long(),
                 }
             )
-        ground_truth = [{"boxes": t.boxes.cpu(), "labels": t.labels.cpu()} for t in targets]
-        self._val_map.update(preds, ground_truth)
+        if self.task != "obb":
+            ground_truth = [{"boxes": t.boxes.cpu(), "labels": t.labels.cpu()} for t in targets]
+            self._val_map.update(preds, ground_truth)
         if self._val_segm is not None and seg_out is not None and masks is not None:
             image_size = (int(images.shape[-2]), int(images.shape[-1]))
             self._update_val_segm(seg_out, detections, anchor_indices, targets, masks, image_size)
@@ -893,11 +895,18 @@ class DetectionLitModule(LightningModule):
 
         A ``"segment"`` run additionally logs ``val/segm_mAP``, whenever any batch
         of the epoch carried ground-truth masks; an ``"obb"`` run logs the WP-063
-        ``val/rotated_mAP`` and ``val/rotated_mAP50`` over everything the epoch saw.
+        ``val/rotated_mAP`` and ``val/rotated_mAP50`` over everything the epoch saw
+        and logs **no** ``val/mAP`` at all (WP-102): that figure reads the A44
+        composition's pre-rotation rectangle, so it cannot separate a run whose
+        orientations were right from one whose orientations were random, and its
+        accumulator costs a CPU pass over every detection of every batch to say so.
+        The rotated metric is the one an oriented run is asking for; carrying a
+        second one that answers a different question is not a free comparison.
         """
-        computed = self._val_map.compute()
-        self.log("val/mAP", computed["map"].to(torch.float32), prog_bar=True)
-        self._val_map.reset()
+        if self.task != "obb":
+            computed = self._val_map.compute()
+            self.log("val/mAP", computed["map"].to(torch.float32), prog_bar=True)
+            self._val_map.reset()
         if self._val_segm is not None and self._val_segm_seen:
             self.log("val/segm_mAP", self._val_segm.compute()["map"].to(torch.float32), prog_bar=True)
             self._val_segm.reset()

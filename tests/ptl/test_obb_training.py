@@ -426,18 +426,21 @@ def _validated_module(batch: tuple[Tensor, list[Targets]]) -> tuple[DetectionLit
     return module, recorder
 
 
-def test_validation_logs_a_rotated_map_beside_the_box_map() -> None:
-    """An ``obb`` run reports the metric of the branch it exists for, per epoch.
+def test_validation_logs_the_rotated_map_and_not_the_box_map() -> None:
+    """An ``obb`` run reports the metric of the branch it exists for, and only that one.
 
-    Without it the only epoch metric is ``val/mAP``, which reads the A44 composition's
-    pre-rotation rectangle: a run whose orientations were random and one whose
-    orientations were right would log the identical curve.
+    ``val/mAP`` reads the A44 composition's pre-rotation rectangle: a run whose
+    orientations were random and one whose orientations were right log the identical
+    curve. Carrying it beside the rotated figure is not a free second opinion — its
+    accumulator walks every detection of every batch on the CPU to produce a number
+    that cannot answer the question the run is asking (WP-102).
     """
     _, recorder = _validated_module(_oriented_batch())
 
     assert "val/rotated_mAP50" in recorder.values
     assert "val/rotated_mAP" in recorder.values
     assert 0.0 <= recorder.values["val/rotated_mAP50"] <= 1.0
+    assert "val/mAP" not in recorder.values
 
 
 def test_detection_validation_logs_no_rotated_metric() -> None:
