@@ -302,14 +302,51 @@ def test_check_data_counts_difficult_instances_too(dota_fixture: _DotaFixture) -
     assert result.splits[0].instances == dota_fixture.instances
 
 
-def test_check_data_reports_the_published_totals_it_was_not_given(dota_fixture: _DotaFixture) -> None:
-    """Against the published 2,806 / 188,282 / 15 defaults a fixture root fails loudly."""
+def test_check_data_reports_totals_it_was_not_given_without_failing(dota_fixture: _DotaFixture) -> None:
+    """An unstated total is a note, not a problem: a well-formed root passes on its layout alone.
+
+    The published 2,806 / 188,282 / 15 were the defaults until WP-097, which made
+    ``lucid-data check --dataset dota`` fail on every correct download: R18 sec. 4
+    withholds the testing ground truth, so the annotated root holds about two thirds
+    of the published images and can never sum to them.
+    """
     result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,))
+
+    assert result.ok, result.problems
+    assert any(f"{dota_fixture.instances} instances" in note for note in result.notes)
+    assert str(check_data.DOTA_IMAGE_COUNT) not in check_data.format_report(result, dota_fixture.root)
+
+
+def test_check_data_fails_on_a_total_it_was_given(dota_fixture: _DotaFixture) -> None:
+    """A stated expectation is still enforced, and names both the wanted and the found count."""
+    result = check_data.check_dota_root(
+        dota_fixture.root,
+        splits=(_SPLIT,),
+        expected_images=check_data.DOTA_IMAGE_COUNT,
+    )
 
     assert not result.ok
     assert any(str(check_data.DOTA_IMAGE_COUNT) in problem for problem in result.problems)
-    assert any(str(check_data.DOTA_INSTANCE_COUNT) in problem for problem in result.problems)
-    assert data_cli.main(["check", "--data_root", str(dota_fixture.root), "--dataset", "dota"]) == 1
+    assert (
+        data_cli.main(
+            [
+                "check",
+                "--data_root",
+                str(dota_fixture.root),
+                "--dataset",
+                "dota",
+                "--expected_images",
+                str(check_data.DOTA_IMAGE_COUNT),
+            ]
+        )
+        == 1
+    )
+
+
+def test_check_data_rejects_a_dota_expectation_aimed_at_coco() -> None:
+    """A DOTA-only count passed with --dataset coco is rejected rather than ignored."""
+    with pytest.raises(ValueError, match="apply to --dataset dota"):
+        check_data.check_dataset(Path("/nonexistent"), dataset="coco", expected_images=1)
 
 
 def test_check_data_reports_an_image_without_a_label_file(dota_fixture: _DotaFixture) -> None:

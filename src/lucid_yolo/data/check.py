@@ -14,23 +14,27 @@ checks that
 
 For DOTA-v1.0 (``--dataset dota``) each split directory must hold ``images/`` and
 ``labelTxt/``, every image must have a label file of the same stem and vice
-versa, every object line must parse (:mod:`lucid_yolo.data.dota`), and the totals
-across the checked splits must match the published 2,806 images / 188,282
-instances / 15 classes of AGENTS.md sec. 3.
+versa, and every object line must parse (:mod:`lucid_yolo.data.dota`). The totals
+across the checked splits are **reported**, and required only when the caller
+states them (``--expected_images`` and its two siblings).
 
-    Those published totals describe the dataset **as published**. Whether a
-    partially provisioned root — one split, or the annotated splits only — can
-    meet them is settled at ``[DATA]`` time against real data, not here; the
-    counts are parameters so a partial provisioning states its own expectation.
-    Instances are counted from the label files directly, *every* object line
-    including the ones flagged ``difficult``, because the published total does
-    not break those out (A39 governs what a *loader* does with the flag, which is
-    a different question from what is on disk).
+    The published 2,806 images / 188,282 instances / 15 classes of AGENTS.md
+    sec. 3 describe the dataset **whole**, and are not the defaults: R18 sec. 4
+    splits DOTA into half training, one sixth validation and one third testing,
+    and releases ground truth for the first two only, so the annotated root this
+    check is pointed at holds about two thirds of that and can never sum to it.
+    Requiring them by default failed every correct download (WP-097). Instances
+    are counted from the label files directly, *every* object line including the
+    ones flagged ``difficult``, because the published total does not break those
+    out (A39 governs what a *loader* does with the flag, which is a different
+    question from what is on disk).
 
 The check core is importable (:func:`check_coco_root` and :func:`check_dota_root`
-return a :class:`DataCheck` whose ``ok`` flag drives the exit status); :func:`run` is a
-thin CLI over them. The expected counts are parameters (defaulting to the real dataset
-totals) so the logic is unit-testable against a tiny fake layout.
+return a :class:`DataCheck` whose ``ok`` flag drives the exit status);
+:func:`check_dataset` is a thin dispatch over them, and is what ``lucid-data check``
+calls. Every expected count is a parameter, so the logic is unit-testable against a
+tiny fake layout: COCO's per-split counts default to the published ones because a
+COCO split either is that split or is not, while DOTA's totals default to unstated.
 
 Relationship to :mod:`lucid_yolo.data.verify`:
     This module validates the layout by **counts** — fixed per-split totals plus
@@ -47,8 +51,12 @@ Relationship to :mod:`lucid_yolo.data.verify`:
 Examples:
     Validate a provisioned root (exit 1 on any mismatch)::
 
-        lucid-data check --data-root /data/coco
-        lucid-data check --data-root /data/dota --dataset dota
+        lucid-data check --data_root /data/coco
+        lucid-data check --data_root /data/dota --dataset dota
+
+    Assert a DOTA root's totals once they are known for that provisioning::
+
+        lucid-data check --data_root /data/dota --dataset dota --expected_images <count>
 """
 
 from __future__ import annotations
@@ -149,10 +157,16 @@ class DataCheck:
         splits: The per-split results.
         problems: Root-level problems that belong to no single split (the
             cross-split totals); empty when there are none.
+        notes: Root-level observations that are **not** problems — the summed
+            counts a caller may want to read off, printed but never failing the
+            check. A count nobody stated an expectation for is information, and
+            information reported as a problem trains an operator to skim past
+            the report, which is how the unreachable totals clause survived.
     """
 
     splits: list[SplitCheck] | list[DotaSplitCheck]
     problems: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -382,29 +396,42 @@ def check_dota_split(name: str, split_dir: Path) -> DotaSplitCheck:
 def check_dota_root(
     data_root: Path,
     splits: tuple[str, ...] = DOTA_SPLITS,
-    expected_images: int = DOTA_IMAGE_COUNT,
-    expected_instances: int = DOTA_INSTANCE_COUNT,
-    expected_classes: int = DOTA_CLASS_COUNT,
+    expected_images: int | None = None,
+    expected_instances: int | None = None,
+    expected_classes: int | None = None,
 ) -> DataCheck:
-    """Validate a DOTA-v1.0 root: per-split layout plus the published totals.
+    """Validate a DOTA-v1.0 root: per-split layout, and any totals the caller states.
 
-    Each split is checked by :func:`check_dota_split`; the totals across the
-    checked splits are then compared with the published counts of AGENTS.md
-    sec. 3 (2,806 images / 188,282 instances / 15 classes). Those describe the
-    dataset **as published** — a partially provisioned root states its own
-    expectation through the parameters rather than by weakening the default.
+    Each split is checked by :func:`check_dota_split`. The totals across the
+    checked splits are then **reported**, and compared only against an
+    expectation the caller actually supplied — an ``expected_*`` left at
+    ``None`` produces a note, never a problem.
+
+    The published counts (:data:`DOTA_IMAGE_COUNT`, :data:`DOTA_INSTANCE_COUNT`,
+    :data:`DOTA_CLASS_COUNT`) are not defaults here, because they are not
+    reachable by the roots this function is pointed at. They describe DOTA-v1.0
+    whole, and R18 sec. 4 splits it into half training, one sixth validation and
+    one third testing, releasing ground truth for the first two only: a
+    correctly provisioned ``train``/``val`` root therefore holds about two
+    thirds of 2,806 images and can never sum to it. Asserting them by default
+    made the one command an operator runs first fail on a correct download,
+    twice over, with the layout and pairing verdicts that *are* meaningful
+    printed just above the noise (WP-097). Pass them explicitly to assert them.
 
     Args:
         data_root: Directory holding the split directories.
         splits: Split directory names to check (defaults to the annotated
-            ``train``/``val`` pair).
-        expected_images: Expected image count summed over ``splits``.
-        expected_instances: Expected object-line count summed over ``splits``,
-            difficult instances included.
-        expected_classes: Expected number of distinct classes seen.
+            ``train``/``val`` pair; the testing split has no public labels).
+        expected_images: Image count to require summed over ``splits``, or
+            ``None`` to report the count without requiring one.
+        expected_instances: Object-line count to require summed over ``splits``,
+            difficult instances included, or ``None`` to only report it.
+        expected_classes: Number of distinct classes to require, or ``None`` to
+            only report it.
 
     Returns:
-        A :class:`DataCheck` aggregating the splits and the totals.
+        A :class:`DataCheck` aggregating the splits, the stated totals, and a
+        note carrying the observed ones.
 
     Examples:
         ```pycon
@@ -418,14 +445,18 @@ def check_dota_root(
     images = sum(max(check.found_images, 0) for check in checks)
     instances = sum(max(check.instances, 0) for check in checks)
     classes = frozenset[int]().union(*(check.classes for check in checks))
-    problems = []
-    if images != expected_images:
-        problems.append(f"expected {expected_images} images across {list(splits)}, found {images}")
-    if instances != expected_instances:
-        problems.append(f"expected {expected_instances} instances across {list(splits)}, found {instances}")
-    if len(classes) != expected_classes:
-        problems.append(f"expected {expected_classes} classes across {list(splits)}, found {len(classes)}")
-    return DataCheck(splits=checks, problems=problems)
+    stated = (
+        (expected_images, images, "images"),
+        (expected_instances, instances, "instances"),
+        (expected_classes, len(classes), "classes"),
+    )
+    problems = [
+        f"expected {expected} {noun} across {list(splits)}, found {found}"
+        for expected, found, noun in stated
+        if expected is not None and expected != found
+    ]
+    note = f"totals across {list(splits)}: {images} images, {instances} instances, {len(classes)} classes"
+    return DataCheck(splits=checks, problems=problems, notes=[note])
 
 
 def format_report(result: DataCheck, data_root: Path) -> str:
@@ -444,6 +475,7 @@ def format_report(result: DataCheck, data_root: Path) -> str:
             lines.append(f"  PASS {split.name} — {split.summary}")
         else:
             lines.extend(f"  FAIL {problem}" for problem in split.problems)
+    lines.extend(f"  NOTE {note}" for note in result.notes)
     lines.extend(f"  FAIL {problem}" for problem in result.problems)
     lines.append("PASS: dataset layout valid" if result.ok else "FAIL: dataset layout invalid")
     return "\n".join(lines)
@@ -453,18 +485,32 @@ def format_report(result: DataCheck, data_root: Path) -> str:
 DATASETS = ("coco", "dota")
 
 
-def check_dataset(data_root: Path, dataset: str = "coco") -> int:
+def check_dataset(
+    data_root: Path,
+    dataset: str = "coco",
+    expected_images: int | None = None,
+    expected_instances: int | None = None,
+    expected_classes: int | None = None,
+) -> int:
     """Validate a provisioned dataset root against its published layout.
 
     Args:
         data_root: Dataset root directory.
         dataset: Which layout to validate, ``coco`` or ``dota``.
+        expected_images: ``dota`` only — image count to require across the
+            checked splits; omitted, the count is reported and not required.
+        expected_instances: ``dota`` only — object-line count to require,
+            difficult instances included.
+        expected_classes: ``dota`` only — number of distinct classes to require.
 
     Returns:
         ``0`` when the layout is valid, ``1`` otherwise.
 
     Raises:
-        ValueError: If ``dataset`` is not a known layout.
+        ValueError: If ``dataset`` is not a known layout, or if a DOTA-only
+            expectation is supplied for another one. A count silently ignored is
+            worse than a rejected flag: the report then reads as though it had
+            been enforced.
 
     Examples:
         >>> code = check_dataset(Path("/nonexistent"))  # doctest: +ELLIPSIS
@@ -476,6 +522,18 @@ def check_dataset(data_root: Path, dataset: str = "coco") -> int:
     """
     if dataset not in DATASETS:
         raise ValueError(f"unknown dataset {dataset!r}; known layouts are {list(DATASETS)}")
-    result = check_coco_root(data_root) if dataset == "coco" else check_dota_root(data_root)
+    expectations = (expected_images, expected_instances, expected_classes)
+    if dataset != "dota" and any(expectation is not None for expectation in expectations):
+        raise ValueError(f"expected_images/instances/classes apply to --dataset dota, not {dataset!r}")
+    result = (
+        check_coco_root(data_root)
+        if dataset == "coco"
+        else check_dota_root(
+            data_root,
+            expected_images=expected_images,
+            expected_instances=expected_instances,
+            expected_classes=expected_classes,
+        )
+    )
     print(format_report(result, data_root))
     return 0 if result.ok else 1
