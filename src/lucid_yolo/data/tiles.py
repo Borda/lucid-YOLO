@@ -67,13 +67,13 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Iterator
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
 import torch
-from torchvision.io import ImageReadMode, read_image, write_png
+from torchvision.io import ImageReadMode, read_image, write_jpeg, write_png
 from tqdm.auto import tqdm
 
 from lucid_yolo.data.dota import DOTA_CLASSES, load_dota_targets
@@ -91,6 +91,14 @@ _RING_VALUES = 8
 #: out of COCO's 1-based range so that a missed overwrite fails a reader rather than
 #: silently colliding with a real record.
 _UNNUMBERED = 0
+#: Tile image formats that may be written. PNG is the default because it is lossless and
+#: the source is: a tile is an exact crop of a DOTA PNG, and a build should not decide on
+#: an operator's behalf to throw information away. JPEG is offered because the cost lands
+#: on every epoch rather than once — the loader decodes each tile every epoch, and PNG
+#: decode is the bottleneck a mosaic-fed 1024 px pipeline hits first.
+TILE_SUFFIXES = (".png", ".jpg", ".jpeg")
+#: Quality passed to the JPEG encoder when a lossy suffix is chosen; ignored for PNG.
+JPEG_QUALITY = 92
 #: One written tile: its ``images`` record and its ``annotations`` records, unnumbered.
 _TileResult = tuple[dict[str, object], list[dict[str, object]]]
 
@@ -231,8 +239,41 @@ def source_images(split_dir: Path) -> list[Path]:
     return sorted(path for path in (split_dir / "images").iterdir() if path.suffix.lower() in IMAGE_SUFFIXES)
 
 
+def write_tile(tile: torch.Tensor, path: Path, quality: int = JPEG_QUALITY) -> None:
+    """Write one tile in the format its own suffix names.
+
+    Args:
+        tile: The ``(3, H, W)`` uint8 crop.
+        path: Destination, whose suffix selects the encoder.
+        quality: JPEG quality; ignored when the suffix is PNG.
+
+    Raises:
+        ValueError: If the suffix is not one of :data:`TILE_SUFFIXES`.
+
+    Examples:
+        >>> write_tile(torch.zeros(3, 2, 2, dtype=torch.uint8), Path("/tmp/t.gif"))
+        Traceback (most recent call last):
+        ValueError: ...
+    """
+    suffix = path.suffix.lower()
+    if suffix not in TILE_SUFFIXES:
+        raise ValueError(f"unknown tile suffix {suffix!r}; known formats are {list(TILE_SUFFIXES)}")
+    if suffix == ".png":
+        write_png(tile, str(path))
+        return
+    write_jpeg(tile, str(path), quality=quality)
+
+
 def tile_source_image(
-    path: Path, *, labels_dir: Path, images_out: Path, patch: int, overlap: int, keep_empty: bool
+    path: Path,
+    *,
+    labels_dir: Path,
+    images_out: Path,
+    patch: int,
+    overlap: int,
+    keep_empty: bool,
+    suffix: str = ".png",
+    quality: int = JPEG_QUALITY,
 ) -> tuple[list[_TileResult], int]:
     """Tile one source image, writing its tiles and returning their unnumbered records.
 
@@ -253,6 +294,8 @@ def tile_source_image(
         patch: Crop side in pixels.
         overlap: Nominal crop overlap in pixels (A21).
         keep_empty: Whether tiles with no annotation are written (A52).
+        suffix: Tile image suffix, which selects the encoder.
+        quality: JPEG quality; ignored for PNG.
 
     Returns:
         A ``(tiles, empty)`` pair: one ``(image record, annotation records)`` entry per
@@ -282,8 +325,8 @@ def tile_source_image(
             empty += 1
             if not keep_empty:
                 continue
-        file_name = tile_file_name(path.stem, window)
-        write_png(tile.contiguous(), str(images_out / file_name))
+        file_name = tile_file_name(path.stem, window, suffix)
+        write_tile(tile.contiguous(), images_out / file_name, quality)
         tiles.append((_image_record(_UNNUMBERED, file_name, tile, window, path.name), records))
     return tiles, empty
 
@@ -330,10 +373,20 @@ def _results(
 
     Yields:
         ``(tiles, empty)`` pairs, always in ``paths`` order.
+
+    The bar counts **completions**, not positions: source images differ by an order of
+    magnitude in size, so consuming an ordered map would leave the bar still while one
+    multi-thousand-pixel image held up results already finished behind it. Order is a
+    requirement of the numbering, not of the counting, so the results are collected by
+    index and replayed in order once the pool drains.
     """
     if workers > 1:
         with ProcessPoolExecutor(max_workers=workers, initializer=_worker_setup) as pool:
-            yield from tqdm(pool.map(job, paths), total=len(paths), desc=split, unit="img", disable=not progress)
+            pending = {pool.submit(job, path): index for index, path in enumerate(paths)}
+            done: dict[int, tuple[list[_TileResult], int]] = {}
+            for future in tqdm(as_completed(pending), total=len(paths), desc=split, unit="img", disable=not progress):
+                done[pending[future]] = future.result()
+        yield from (done[index] for index in range(len(paths)))
         return
     yield from tqdm((job(path) for path in paths), total=len(paths), desc=split, unit="img", disable=not progress)
 
@@ -349,6 +402,8 @@ def convert_split(
     limit: int | None = None,
     workers: int = 1,
     progress: bool = True,
+    suffix: str = ".png",
+    quality: int = JPEG_QUALITY,
 ) -> SplitReport:
     """Tile one DOTA split into the COCO layout and write its instances JSON.
 
@@ -362,6 +417,8 @@ def convert_split(
         limit: Read at most this many source images; ``None`` reads all.
         workers: Pool processes tiling source images; ``1`` stays in this process.
         progress: Whether to draw a per-image progress bar.
+        suffix: Tile image suffix, which selects the encoder.
+        quality: JPEG quality; ignored for PNG.
 
     Returns:
         The split's :class:`SplitReport`.
@@ -382,6 +439,8 @@ def convert_split(
         patch=patch,
         overlap=overlap,
         keep_empty=keep_empty,
+        suffix=suffix,
+        quality=quality,
     )
 
     images: list[dict[str, object]] = []
@@ -447,6 +506,8 @@ def build_tiles(
     limit: int | None = None,
     workers: int | None = None,
     progress: bool = True,
+    suffix: str = ".png",
+    quality: int = JPEG_QUALITY,
 ) -> int:
     """Tile an oriented dataset into the trainable COCO layout, split by split.
 
@@ -466,12 +527,18 @@ def build_tiles(
         progress: Whether to draw a per-image progress bar. A full DOTA build is
             thousands of multi-megapixel decodes, so silence for an hour is not a
             reasonable thing to ask of an operator.
+        suffix: Tile image format, one of :data:`TILE_SUFFIXES`. PNG is lossless and
+            matches the source; ``.jpg`` trades that for a decode the loader pays
+            once per tile per epoch, which is where a mosaic-fed 1024 px pipeline
+            starves first.
+        quality: JPEG quality; ignored when ``suffix`` is PNG.
 
     Returns:
         ``0`` on success; ``1`` when a split directory is not a split of ``source``.
 
     Raises:
-        ValueError: If ``source`` is not a known reader.
+        ValueError: If ``source`` is not a known reader, or ``suffix`` not a known
+            tile format.
 
     Examples:
         >>> build_tiles(Path("/nonexistent"), Path("/tmp/tiles"), splits="val")  # doctest: +ELLIPSIS
@@ -480,6 +547,8 @@ def build_tiles(
     """
     if source not in SOURCES:
         raise ValueError(f"unknown source {source!r}; known readers are {list(SOURCES)}")
+    if suffix.lower() not in TILE_SUFFIXES:
+        raise ValueError(f"unknown tile suffix {suffix!r}; known formats are {list(TILE_SUFFIXES)}")
     resolved_workers = max(1, os.cpu_count() or 1) if workers is None else max(1, workers)
     for split in (name.strip() for name in splits.split(",") if name.strip()):
         try:
@@ -493,6 +562,8 @@ def build_tiles(
                 limit=limit,
                 workers=resolved_workers,
                 progress=progress,
+                suffix=suffix.lower(),
+                quality=quality,
             )
         except FileNotFoundError as error:
             print(f"FAIL: {error}")

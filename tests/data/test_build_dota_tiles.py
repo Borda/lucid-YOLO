@@ -257,3 +257,42 @@ def test_the_worker_count_reaches_the_split_builder(tmp_path: Path, monkeypatch:
     assert build.build_tiles(tmp_path, tmp_path / "out", splits="val", workers=3) == 0
     assert build.build_tiles(tmp_path, tmp_path / "out", splits="val") == 0
     assert seen == [3, 7]
+
+
+def test_jpeg_tiles_are_written_and_read_back(tmp_path: Path) -> None:
+    """``--suffix .jpg`` writes JPEG tiles that the reader loads through the same layout."""
+    split_dir = _multi_image_split(tmp_path)
+
+    build.convert_split(
+        split_dir, tmp_path / "tiles", "val", patch=PATCH, overlap=OVERLAP, progress=False, suffix=".jpg"
+    )
+
+    payload = _payload(tmp_path / "tiles")
+    names = [str(record["file_name"]) for record in payload["images"]]
+    assert names and all(name.endswith(".jpg") for name in names)
+    assert all((tmp_path / "tiles" / "val" / name).is_file() for name in names)
+    dataset = CocoDetectionDataset(
+        tmp_path / "tiles" / "val", tmp_path / "tiles" / "annotations" / "instances_val.json", oriented=True
+    )
+    assert len(dataset) == len(names)
+
+
+def test_the_geometry_survives_a_lossy_encoder(tmp_path: Path) -> None:
+    """JPEG changes pixels, never annotations: the records are identical to the PNG build's.
+
+    Worth pinning rather than assuming. The encoder sits between the crop and the disk,
+    and nothing about an annotation passes through it -- if a suffix ever reached the
+    geometry, that is a bug the pixel-level difference would hide.
+    """
+    split_dir = _multi_image_split(tmp_path)
+
+    build.convert_split(split_dir, tmp_path / "png", "val", patch=PATCH, overlap=OVERLAP, progress=False)
+    build.convert_split(split_dir, tmp_path / "jpg", "val", patch=PATCH, overlap=OVERLAP, progress=False, suffix=".jpg")
+
+    assert _payload(tmp_path / "png")["annotations"] == _payload(tmp_path / "jpg")["annotations"]
+
+
+def test_an_unknown_tile_suffix_is_rejected(tmp_path: Path) -> None:
+    """A format the encoder cannot write fails at the flag, not after the first image."""
+    with pytest.raises(ValueError, match="unknown tile suffix"):
+        build.build_tiles(tmp_path, tmp_path / "out", splits="val", suffix=".gif")
