@@ -53,7 +53,7 @@ from lucid_yolo.assign.grid import HEAD_STRIDES, make_anchor_points
 from lucid_yolo.cli import predict as predict_cli
 from lucid_yolo.cli.eval import DEFAULT_IMG_SIZE
 from lucid_yolo.models.heads.detect import DualHeadOutput
-from lucid_yolo.predict import DEFAULT_ORIENTED_IMG_SIZE, predict_oriented
+from lucid_yolo.predict import DEFAULT_ORIENTED_IMG_SIZE, DecodePath, predict_oriented
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
@@ -236,33 +236,43 @@ def test_a_non_oriented_checkpoint_fails_naming_its_task(image_file: Path, task:
         predict_oriented(module, image_file, img_size=IMG_SIZE)
 
 
-def test_the_suppression_path_is_refused_rather_than_quietly_replaced(image_file: Path) -> None:
-    """``--decoder nms`` on an oriented checkpoint raises instead of running the other path.
+def test_the_suppression_path_decodes_the_dense_branchs_rotated_boxes(image_file: Path) -> None:
+    """``--decoder nms`` runs the rotated suppression decoder and lands the same planted box.
 
-    There is no rotated suppression decoder: the dense branch has its angle stem, but
-    nothing suppresses overlapping *rotated* boxes, and running the axis-aligned
-    :class:`~lucid_yolo.decode.nms_path.NMSDecoder` over these extents would suppress by
-    upright overlap and keep or drop the wrong boxes with no sign that it had. Silently
-    substituting the ``e2e`` path would be worse still, because the report records the
-    decoder it was asked for and would then state something the run did not do.
+    WP-091 refused this path rather than substituting the other, because suppressing
+    rotated boxes by the overlap of their upright envelopes keeps or drops the wrong ones
+    with nothing in the output to show it had. WP-091b supplies the missing decoder, so
+    the refusal is gone; what has to stay true is that the flag now selects the *dense*
+    branch and its own angle stem. The planted module emits both branches identically, so
+    the geometry assertion is the same one the ``e2e`` case makes — the point here is that
+    the second path reaches it at all, through
+    :class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` and its class-wise rotated
+    suppression rather than through the top-k rank.
     """
     module = _PlantedOrientedModule(CANVAS_RBOX_CENTRE, CANVAS_RBOX_EXTENTS, raw_theta=0.3).eval()
 
-    with pytest.raises(ValueError, match="nms"):
-        predict_oriented(module, image_file, img_size=IMG_SIZE, decoder="nms")
+    detections = predict_oriented(module, image_file, img_size=IMG_SIZE, decoder="nms")
+
+    assert detections.shape == (1, 7)
+    assert detections[0, :4].tolist() == pytest.approx(EXPECTED_ORIGINAL_RBOX)
+    assert float(detections[0, 4]) == pytest.approx(0.3, abs=_THETA_TOLERANCE)
+    assert int(detections[0, 6]) == PLANTED_LABEL
 
 
-def test_an_oriented_head_without_angle_stems_is_refused(image_file: Path) -> None:
+@pytest.mark.parametrize("decoder", [pytest.param("e2e", id="e2e"), pytest.param("nms", id="nms")])
+def test_an_oriented_head_without_angle_stems_is_refused(image_file: Path, decoder: DecodePath) -> None:
     """A module claiming ``obb`` but emitting no angles raises rather than decoding boxes.
 
     The oriented twin of the missing-coefficients guard: the task says a heading exists,
     the head does not supply one, and the only silent answer available is an axis-aligned
-    box wearing an oriented tuple's shape.
+    box wearing an oriented tuple's shape. Both decode paths are checked because each
+    reads its **own** branch's angle stem, and a guard written against one of them would
+    let the other fall through to exactly that answer.
     """
     module = _AngleFreeOrientedModule().eval()
 
     with pytest.raises(ValueError, match="angles"):
-        predict_oriented(module, image_file, img_size=IMG_SIZE)
+        predict_oriented(module, image_file, img_size=IMG_SIZE, decoder=decoder)
 
 
 def test_nothing_above_the_threshold_returns_an_empty_oriented_tensor(image_file: Path) -> None:

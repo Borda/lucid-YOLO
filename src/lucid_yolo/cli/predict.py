@@ -239,8 +239,8 @@ def predict(
             ``nms`` for the confidence-threshold plus class-wise suppression path over
             the dense branch. Defaults to ``e2e`` — it is the path this architecture
             exists to demonstrate, and the one a deployment would ship; ``nms`` is the
-            comparison column, and an ``obb`` checkpoint refuses it, having no rotated
-            suppression to run.
+            comparison column, run on an ``obb`` checkpoint by the rotated suppression
+            decoder (WP-091b), which compares rotated overlaps rather than upright ones.
         conf_threshold: Detections at or below this score are dropped, with their masks.
         img_size: Letterbox side. Defaults per the checkpoint's task.
         device: ``auto``, ``cpu``, ``mps`` or ``cuda``.

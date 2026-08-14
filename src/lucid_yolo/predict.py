@@ -6,7 +6,10 @@ between is already written somewhere else and is called rather than restated: th
 preprocessing is :func:`~lucid_yolo.eval.annotations.read_letterboxed_image`, the same
 read-scale-letterbox chain the evaluator feeds val2017 through; the two decode paths are
 :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` and
-:class:`~lucid_yolo.decode.nms_path.NMSDecoder`; and the way back to original pixels is
+:class:`~lucid_yolo.decode.nms_path.NMSDecoder`, with
+:func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` and
+:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` as their oriented twins; and the
+way back to original pixels is
 :func:`~lucid_yolo.decode.common.to_letterboxed_original`, which recovers the ratio and
 the pads from :class:`~lucid_yolo.data.letterbox.Letterbox`'s own geometry.
 
@@ -57,7 +60,7 @@ Assumptions:
     docstring for why that seam is the decode rather than this module.
 
 Provenance: R1 sec. 3.2.1, R1 Eq. 7, R1 Eq. 13, R3 sec. 4. Assumptions: A9, A10, A23,
-A37, A45.
+A37, A45, A61.
 """
 
 from __future__ import annotations
@@ -77,6 +80,7 @@ from lucid_yolo.decode.common import (
     to_letterboxed_original,
 )
 from lucid_yolo.decode.nms_path import NMSDecoder
+from lucid_yolo.decode.rotated_nms import RotatedNMSDecoder
 from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.eval.annotations import read_letterboxed_image
 from lucid_yolo.eval.segment_decode import decode_instance_masks, masks_to_original
@@ -124,8 +128,12 @@ DEFAULT_CONF_THRESHOLD = 0.25
 #: or letting the pair drift.
 DEFAULT_ORIENTED_IMG_SIZE = 1024
 
-#: The only decode path an oriented checkpoint can be read through, and the reason
-#: :func:`predict_oriented` refuses the other by name — see its ``Raises``.
+#: The decode path :func:`predict_oriented` defaults to, and the one an oriented tier
+#: report quotes as its headline number: the suppression-free branch is what this
+#: architecture exists to demonstrate. Until WP-091b it was the *only* path an oriented
+#: checkpoint could be read through and the other was refused by name; the refusal is
+#: lifted now that :class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` suppresses by
+#: rotated overlap rather than by upright envelopes.
 ORIENTED_DECODE_PATH: DecodePath = "e2e"
 
 #: The task :func:`predict_image` serves.
@@ -391,9 +399,11 @@ def _canvas_masks(
     boxes, and there is no fixed output length here to preserve.
 
     An image with nothing above the threshold returns an empty stack without decoding.
-    That is not merely an optimisation: :func:`decode_instance_masks` upsamples with
-    ``F.interpolate``, which rejects a zero-length instance axis outright. The evaluator
-    never meets that because its decoders always hand it a full 300 rows.
+    That is an optimisation and no longer a guard: :func:`decode_instance_masks` used to
+    raise here, because ``F.interpolate`` rejects a zero-length instance axis outright and
+    the evaluator never met that — its decoders always hand over a full 300 rows. WP-090b
+    fixed it at the source, so both callers now get the empty stack; this one gets it
+    without building the gather first.
     """
     if not detections.shape[0]:
         return prototypes.new_zeros((0, *canvas), dtype=torch.bool)
@@ -449,9 +459,12 @@ def predict_oriented(
         img_size: Letterbox side the model sees. Defaults to
             :data:`DEFAULT_ORIENTED_IMG_SIZE`, the 1024 px the oriented tier trains at
             (R18 sec. 4), not the 640 the COCO tiers use.
-        decoder: Must be :data:`ORIENTED_DECODE_PATH`; the parameter exists so this
-            function's signature matches its two siblings and the command can pass its
-            flag through unread, not because there is a choice to make.
+        decoder: ``"e2e"`` for the suppression-free rotated top-k path over the one-to-one
+            branch, ``"nms"`` for the rotated-suppression path over the dense branch
+            (:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder`, WP-091b). Defaults
+            to :data:`ORIENTED_DECODE_PATH`. The second is the oriented comparison column
+            rather than a better answer: it suppresses by exact rotated overlap, so it
+            costs a Python-level greedy loop the first path does not run at all.
         conf_threshold: Detections at or below this score are dropped. Defaults to
             :data:`DEFAULT_CONF_THRESHOLD`.
         device: Device to run on. Defaults to CPU; the command resolves ``auto`` through
@@ -465,9 +478,9 @@ def predict_oriented(
         contiguous class index (see the module docstring).
 
     Raises:
-        ValueError: If the module's task is not ``obb``, naming the task it is; if
-            ``decoder`` is anything but :data:`ORIENTED_DECODE_PATH`; or if a module
-            claiming the task emits no angles to decode.
+        ValueError: If the module's task is not ``obb``, naming the task it is; or if a
+            module claiming the task emits no angles on the branch the selected decoder
+            reads.
 
     Examples:
         >>> callable(predict_oriented)  # a real call needs a checkpoint and an image file
@@ -480,20 +493,6 @@ def predict_oriented(
             f"predict_segmentation; both answer with axis-aligned corners, which is what a head "
             f"without an angle stem can say."
         )
-    if decoder != ORIENTED_DECODE_PATH:
-        # A raise, not a fallback to the one path that exists: the report records the
-        # decoder it was asked for, so quietly running the other one would put a claim in
-        # the file that the run did not honour. The dense branch is not the missing half —
-        # an `obb` head builds both angle stems — the missing half is a *rotated*
-        # suppression decoder. `dota_eval.rotated_iou` is the ingredient for one and no
-        # decode path uses it yet; running the axis-aligned `NMSDecoder` over these
-        # extents would suppress by upright overlap and silently keep or drop the wrong
-        # rotated boxes, which is exactly the plausible-wrong-answer this refuses.
-        raise ValueError(
-            f"predict_oriented decodes the {ORIENTED_DECODE_PATH!r} path only; got decoder={decoder!r}. "
-            f"The suppression path needs rotated NMS, which no decoder implements: suppressing "
-            f"rotated boxes by their axis-aligned overlap would answer plausibly and wrongly."
-        )
     run_on = torch.device("cpu") if device is None else device
     letterbox = Letterbox(img_size)
     canvas_image, orig_size = read_letterboxed_image(image, letterbox)
@@ -503,17 +502,54 @@ def predict_oriented(
     module.to(run_on).eval()
     with torch.no_grad():
         head_out = module(batch)
-    if head_out.o2o_angle is None:
-        raise ValueError(
-            f"this checkpoint's task is {_OBB_TASK!r} but its head emits no angles on the "
-            f"{ORIENTED_DECODE_PATH!r} branch, so R1 Eq. 13 has nothing to read. The checkpoint was "
-            f"built without the orientation stems and cannot produce a heading."
-        )
     anchor_points, strides = anchor_grid(canvas, run_on)
-    rboxes = decode_rboxes(head_out.o2o_box, head_out.o2o_angle, anchor_points, strides)
-    detections = o2o_rotated_topk(head_out.o2o_cls, rboxes)
+    detections = _decode_oriented(head_out, decoder, conf_threshold, anchor_points, strides)
     mapped = rboxes_to_letterboxed_original(
         detections.cpu(), orig_size=orig_size, letterboxed_size=canvas, allow_upscale=letterbox.allow_upscale
     )
     image_detections = mapped[0]
     return image_detections[image_detections[:, RBOX_COLUMNS] > conf_threshold]
+
+
+def _decode_oriented(
+    head_out: DualHeadOutput,
+    decoder: DecodePath,
+    conf_threshold: float,
+    anchor_points: Tensor,
+    strides: Tensor,
+) -> Tensor:
+    """Decode the selected oriented path into the fixed-size A45 batch it emits.
+
+    The oriented analogue of :func:`_decode_with_coefficients`, and it exists for the same
+    reason: the class logits, the ltrb distances and the **angles** have to come from one
+    branch, and choosing all three in one place is what makes a mismatched trio
+    unrepresentable rather than merely unlikely. Reading the one-to-one heading beside the
+    dense branch's boxes would answer with a correct-looking rectangle at a heading no
+    part of the model predicted for it.
+
+    The two paths are not two spellings of one thing. ``e2e`` ranks and suppresses
+    nothing, which is R1's claim for the one-to-one branch; ``nms`` is the dense branch's
+    comparison baseline and suppresses by exact rotated overlap
+    (:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder`, A61). Only the second is
+    given ``conf_threshold``, for the reason :func:`predict_image` states — it decides what
+    enters suppression, while the top-k path's own threshold would merely zero scores the
+    survivor filter drops regardless.
+    """
+    o2o = decoder == ORIENTED_DECODE_PATH
+    angles = head_out.o2o_angle if o2o else head_out.o2m_angle
+    if angles is None:
+        branch = ORIENTED_DECODE_PATH if o2o else "one-to-many"
+        raise ValueError(
+            f"this checkpoint's task is {_OBB_TASK!r} but its head emits no angles on the "
+            f"{branch!r} branch, so R1 Eq. 13 has nothing to read. The checkpoint was "
+            f"built without the orientation stems and cannot produce a heading."
+        )
+    if o2o:
+        rboxes = decode_rboxes(head_out.o2o_box, angles, anchor_points, strides)
+        return o2o_rotated_topk(head_out.o2o_cls, rboxes)
+    # Annotated rather than returned inline: `nn.Module.__call__` is typed `Any`, and
+    # returning it straight would silently widen this function's contract to `Any` too.
+    suppressed: Tensor = RotatedNMSDecoder(conf_threshold=conf_threshold)(
+        head_out.o2m_cls, head_out.o2m_box, angles, anchor_points, strides
+    )
+    return suppressed
