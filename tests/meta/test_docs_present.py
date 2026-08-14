@@ -201,6 +201,31 @@ def test_provenance_carries_allowlist_ids() -> None:
     assert ids >= set(range(1, 22)), f"provenance missing source ids: {sorted(set(range(1, 22)) - ids)}"
 
 
+#: Section headings `REPRODUCTION_REPORT.md` must carry, in the order D10 appends them: the
+#: three per-release tiers plus the WP-065 consolidation. Copied from the file itself, not
+#: retyped -- each uses an em dash, and a hyphen-typed copy would silently never match.
+_REPORT_SECTIONS = (
+    "## 0.1.0 — Detection",
+    "## 0.2.0 — Instance segmentation",
+    "## 0.3.0 — Oriented detection",
+    "## Consolidated note — detection, segmentation, oriented detection",
+)
+
+
+def test_report_sections() -> None:
+    """REPRODUCTION_REPORT.md carries every tier section plus the WP-065 consolidation.
+
+    The report is append-only (D10): a later release corrects an earlier claim by adding to
+    it, never by editing the record away, so no existing heading may ever be renamed out of
+    the file or dropped. This gate reads only the headings, not their content, which is what
+    keeps it compatible with that discipline -- a correction landing inside a section leaves
+    every heading exactly as it was, and this test unaffected.
+    """
+    text = (DOCS / "REPRODUCTION_REPORT.md").read_text(encoding="utf-8")
+    missing = [heading for heading in _REPORT_SECTIONS if heading not in text]
+    assert not missing, f"REPRODUCTION_REPORT.md missing section headings: {missing}"
+
+
 def test_decisions_carry_all_ids() -> None:
     """DECISIONS.md numbers its decisions contiguously from D1, never shrinks, and keeps the four ADRs.
 

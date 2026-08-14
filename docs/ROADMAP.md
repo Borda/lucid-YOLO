@@ -185,7 +185,7 @@ Deliberately after all three task phases rather than inside each. A predict path
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 | -- | -- | -- | -- | -- | -- |
-| 065 | `docs(report): consolidated multi-task reproduction note` | Merge det/seg/obb sections; assumption outcomes; deviations and hypotheses | `test_docs_present.py::test_report_sections` | 064 | ⬜ |
+| 065 | `docs(report): consolidated multi-task reproduction note` | A section reading the three tiers against each other, appended not merged (D10 is append-only): the shared trunk and what each head cost, a 23-row union of the per-tier assumption tables marking the 11 an accepted run carried without isolating, project-wide deviations split from per-tier ones, and four hypotheses with the test each needs · [log](RESEARCH_LOG.md#wp-065) | `tests/meta/test_docs_present.py::test_report_sections` — every tier heading plus the consolidation, so no section can be renamed out of an append-only file | 064 | ✅ |
 | 066 | `feat(export): ONNX export smoke test for E2E paths` | Verifies the paper's export claim; no NMS ops in the graph | `test_onnx_export.py::test_e2e_graph_ops` | 065 | ⬜ |
 | 067 | `release: v0.4.0 consolidated note and examples` [HUMAN] | `supervision` example notebook (boxes/masks/rboxes); tag; roadmap reopened for the next 0.MINOR | `release.yml` green on `v0.4.0` | 066 | ⬜ |
 
