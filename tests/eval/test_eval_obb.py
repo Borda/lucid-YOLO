@@ -16,6 +16,7 @@ the label space it expects. A wrong frame or a shifted label space fails that te
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -107,6 +108,34 @@ def test_the_limit_stops_early_without_changing_the_frame(tiled_root: Path) -> N
     _, tiles, _ = evaluate.score_split(module, _datamodule(tiled_root), torch.device("cpu"), img_size=IMG_SIZE, limit=2)
 
     assert tiles == 2
+
+
+def test_the_report_is_written_into_a_directory_that_does_not_exist_yet(tiled_root: Path, tmp_path: Path) -> None:
+    """``--output`` creates its parent rather than raising after the scoring pass (WP-105).
+
+    The failure this pins is expensive and silent in the worst way: the evaluation
+    completes, prints its numbers, and then dies writing them, so the only durable form of
+    minutes of GPU work is a traceback. Observed on the first oriented tier evaluation,
+    into a `.experiments/obb_smoke/` that no run had created yet.
+    """
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+    output = tmp_path / "reports" / "nested" / "obb.json"
+
+    code = evaluate.run(
+        module,
+        {"ema": False},
+        data_root=tiled_root,
+        split="val",
+        variant="n",
+        img_size=IMG_SIZE,
+        batch_size=2,
+        device_name="cpu",
+        limit=0,
+        output=output,
+    )
+
+    assert code == 0
+    assert json.loads(output.read_text())["metrics"]["map_50"] >= 0.0
 
 
 def test_perfect_predictions_score_one(tiled_root: Path) -> None:

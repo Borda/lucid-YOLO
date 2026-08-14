@@ -15,7 +15,7 @@ DOCS = REPO_ROOT / "docs"
 #: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted. Raise it when adding
 #: a work package; never lower it.
-_WP_FLOOR = 104
+_WP_FLOOR = 105
 
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
@@ -33,6 +33,7 @@ REQUIRED_FILES = (
     DOCS / "REPRODUCTION_REPORT.md",
     DOCS / "MODEL_CARD_DETECTION.md",
     DOCS / "MODEL_CARD_SEGMENTATION.md",
+    DOCS / "MODEL_CARD_OBB.md",
     REPO_ROOT / "AGENTS.md",
 )
 

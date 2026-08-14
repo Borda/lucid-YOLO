@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
+from tqdm.auto import tqdm
 
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.data.layout import resolve_split
@@ -149,8 +150,9 @@ def score_split(
     anchor_points, strides = _anchor_grid(img_size, device)
     predictions: list[dict[str, Tensor]] = []
     ground_truth: list[dict[str, Tensor]] = []
+    loader = datamodule.val_dataloader()
     with torch.no_grad():
-        for batch in datamodule.val_dataloader():
+        for batch in tqdm(loader, total=len(loader), desc="eval-obb", unit="batch"):
             images, targets, _ = datamodule.on_after_batch_transfer(batch, 0)
             head_out = module(images.to(device))
             rboxes = decode_rboxes(head_out.o2o_box, head_out.o2o_angle, anchor_points, strides)
@@ -238,6 +240,10 @@ def run(
             "seconds": round(elapsed, 1),
             "metrics": metrics,
         }
+        # The scoring pass is minutes of work and the report is its only durable form, so
+        # the directory is created rather than required: a run that computed the number
+        # and then raised on a missing parent has lost exactly what it was asked for.
+        output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(payload, indent=2) + "\n")
         print(f"report -> {output}")
     return 0

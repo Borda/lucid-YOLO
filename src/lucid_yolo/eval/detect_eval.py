@@ -43,10 +43,12 @@ Provenance: R1 Table 7, R1 sec. 4.4 (dual-path protocol), R1 Table S9
 from __future__ import annotations
 
 import json
+import math
 import time
 from typing import TYPE_CHECKING
 
 from torch import Tensor, nn
+from tqdm.auto import tqdm
 
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.decode.nms_path import NMSDecoder
@@ -154,7 +156,16 @@ def run(
         f"img_size={img_size}, masks={segmentation}"
     )
     start = time.perf_counter()
-    report = evaluator.evaluate(letterboxed_batches(images, images_dir, letterbox, batch_size), targets, device)
+    # The bar wraps the batch generator rather than living inside DualPathEvaluator: the
+    # evaluator is library code that tests drive in-process, and a progress bar is a
+    # property of being run from a command line, which is here.
+    batches = tqdm(
+        letterboxed_batches(images, images_dir, letterbox, batch_size),
+        total=math.ceil(len(images) / batch_size),
+        desc="eval",
+        unit="batch",
+    )
+    report = evaluator.evaluate(batches, targets, device)
     elapsed = time.perf_counter() - start
     print(f"done in {elapsed:.1f}s ({len(images) / elapsed:.1f} img/s)")
 
@@ -171,6 +182,9 @@ def run(
 
     if output:
         payload = {"info": info, "images": len(images), "seconds": round(elapsed, 1), "report": report}
+        # Created rather than required: the scoring pass is the expensive part and this
+        # file is its only durable form (see the note in `rotated_eval.run`).
+        output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(payload, indent=2) + "\n")
         print(f"report -> {output}")
     return 0
