@@ -93,6 +93,12 @@ Examples:
 
         lucid-data check --data_root /data/dota --dataset dota \
             --expected_images 1869 --expected_instances 127843
+
+    Check a root that ships only a training split — a third-party export whose validation
+    split was never cut is a correct export, and failing it on a missing ``val`` would be
+    the pre-flight refusing a dataset that trains::
+
+        lucid-data check --data_root /data/roboflow_export --splits '[train]'
 """
 
 from __future__ import annotations
@@ -550,9 +556,38 @@ def check_dota_root(
 
         ```
     """
+    _require_splits(splits)
     checks = [check_dota_split(name, data_root / name) for name in splits]
     problems, notes = _totals(checks, splits, expected_images, expected_instances, expected_classes)
     return DataCheck(splits=checks, problems=problems, notes=notes)
+
+
+def _require_splits(splits: tuple[str, ...]) -> None:
+    """Raise :class:`ValueError` unless ``splits`` names at least one split.
+
+    Every other bad argument in this module fails loudly; an empty ``splits`` fails
+    *quietly*, which is worse here than anywhere else in it. No split checked means no
+    problem found means ``PASS: dataset layout valid`` printed over a root nothing
+    looked at — a clean green from the one command whose whole purpose is to be believed.
+    Both root checkers guard rather than only :func:`check_dataset`, because they are
+    documented as the importable core and a library caller reaches them without passing
+    the entry point at all.
+
+    Args:
+        splits: The split names about to be checked.
+
+    Raises:
+        ValueError: If ``splits`` is empty.
+
+    Examples:
+        >>> _require_splits(("train",)) is None
+        True
+    """
+    if not splits:
+        raise ValueError(
+            "splits names no split, which would check nothing and report a pass; "
+            "omit it to check the layout's own splits"
+        )
 
 
 def _totals(
@@ -728,6 +763,7 @@ def check_yolo_root(
 
         ```
     """
+    _require_splits(splits)
     data_yaml = data_root / DATA_YAML_NAME
     try:
         config = YoloDataConfig.read(data_yaml)
@@ -794,6 +830,7 @@ def check_dataset(
     data_root: Path,
     dataset: str | None = None,
     oriented: bool = False,
+    splits: tuple[str, ...] | None = None,
     expected_images: int | None = None,
     expected_instances: int | None = None,
     expected_classes: int | None = None,
@@ -811,6 +848,16 @@ def check_dataset(
         oriented: ``yolo`` only — read the nine-field oriented label rows rather than
             five-field boxes. The variant is a property of the dataset and is declared,
             never sniffed (WP-099).
+        splits: ``dota`` and ``yolo`` — the split names to check. Left unstated (the
+            default) each layout keeps its own — :data:`DOTA_SPLITS`, :data:`YOLO_SPLITS` —
+            which is a property of the layout and not of this call, so the default is never
+            restated here. Naming a subset is how a root shipping only ``train`` passes: a
+            third-party export whose validation split was never cut is a correct export, and
+            failing it on a ``val`` nobody provisioned is WP-097's mistake in a new place.
+            COCO refuses the flag rather than defaulting it, because its two splits *are*
+            that layout — the names and the published per-split counts checked against them
+            are one fact (:func:`check_coco_root`), so a subset of them is not a question
+            the COCO branch can be asked.
         expected_images: ``dota`` and ``yolo`` — image count to require across the
             checked splits; omitted, the count is reported and not required.
         expected_instances: ``dota`` and ``yolo`` — object-line count to require,
@@ -823,9 +870,11 @@ def check_dataset(
         raised.
 
     Raises:
-        ValueError: If ``dataset`` is not a known layout, or a flag is supplied for a layout
-            it does not apply to. A flag silently ignored is worse than a rejected one: the
-            report then reads as though it had been enforced.
+        ValueError: If ``dataset`` is not a known layout, if ``splits`` names nothing at all,
+            or if a flag is supplied for a layout it does not apply to. A flag silently
+            ignored is worse than a rejected one: the report then reads as though it had been
+            enforced — and an empty ``splits`` is the sharpest case of that, since checking
+            no split at all yields a clean PASS about nothing.
 
     Examples:
         >>> code = check_dataset(Path("/nonexistent"))  # doctest: +ELLIPSIS
@@ -834,19 +883,32 @@ def check_dataset(
         FAIL: dataset layout invalid
         >>> code
         1
+
+        Naming a subset narrows what is checked, and the totals note says which splits it
+        summed:
+
+        >>> code = check_dataset(Path("/nonexistent"), dataset="dota", splits=("train",))
+        check-data: /nonexistent
+          FAIL images directory missing: /nonexistent/train/images
+          FAIL labelTxt directory missing: /nonexistent/train/labelTxt
+          NOTE totals across ['train']: 0 images, 0 instances, 0 classes
+        FAIL: dataset layout invalid
     """
     if dataset is not None and dataset not in DATASETS:
         raise ValueError(f"unknown dataset {dataset!r}; known layouts are {list(DATASETS)}")
+    if splits is not None:
+        _require_splits(splits)
     if dataset is None:
         dataset, probe_problems = _infer_dataset(data_root)
         if dataset is None:
             print(format_report(DataCheck(splits=[], problems=probe_problems), data_root))
             return 1
-    _check_flags_apply(dataset, oriented, (expected_images, expected_instances, expected_classes))
+    _check_flags_apply(dataset, oriented, splits, (expected_images, expected_instances, expected_classes))
     result = _check_root(
         data_root,
         dataset,
         oriented=oriented,
+        splits=splits,
         expected_images=expected_images,
         expected_instances=expected_instances,
         expected_classes=expected_classes,
@@ -885,21 +947,29 @@ def _infer_dataset(data_root: Path) -> tuple[str | None, list[str]]:
         ]
 
 
-def _check_flags_apply(dataset: str, oriented: bool, expectations: tuple[int | None, ...]) -> None:
+def _check_flags_apply(
+    dataset: str,
+    oriented: bool,
+    splits: tuple[str, ...] | None,
+    expectations: tuple[int | None, ...],
+) -> None:
     """Reject a flag belonging to a layout other than the one being checked.
 
     Args:
         dataset: The layout that will be checked, stated or inferred.
         oriented: The oriented-rows flag.
+        splits: The split names stated, or ``None`` for the layout's own.
         expectations: The three ``expected_*`` values.
 
     Raises:
         ValueError: If a flag applies to no layout in play. The counts are meaningless for
             COCO, whose per-split totals are published and are the check's own defaults; the
-            oriented reading is a property of the YOLO row grammar alone.
+            oriented reading is a property of the YOLO row grammar alone; and COCO's splits
+            are fixed by the same publication the counts come from, so
+            :func:`check_coco_root` has no ``splits`` to narrow.
 
     Examples:
-        >>> _check_flags_apply("yolo", True, (None, None, None)) is None
+        >>> _check_flags_apply("yolo", True, ("train",), (None, None, None)) is None
         True
     """
     if dataset == DatasetLayout.COCO.value and any(expectation is not None for expectation in expectations):
@@ -912,6 +982,11 @@ def _check_flags_apply(dataset: str, oriented: bool, expectations: tuple[int | N
             f"oriented applies to --dataset {DatasetLayout.YOLO.value}, whose label rows carry "
             f"either variant, not {dataset!r}"
         )
+    if splits is not None and dataset == DatasetLayout.COCO.value:
+        raise ValueError(
+            f"splits applies to --dataset {DOTA_DATASET} or --dataset {DatasetLayout.YOLO.value}, "
+            f"whose split names are the root's own, not {dataset!r}"
+        )
 
 
 def _check_root(
@@ -919,6 +994,7 @@ def _check_root(
     dataset: str,
     *,
     oriented: bool,
+    splits: tuple[str, ...] | None,
     expected_images: int | None,
     expected_instances: int | None,
     expected_classes: int | None,
@@ -929,6 +1005,9 @@ def _check_root(
         data_root: Dataset root directory.
         dataset: The layout to check, already validated and resolved.
         oriented: Whether YOLO rows are read as the oriented variant.
+        splits: Split names to check, or ``None`` to keep the layout's own — which each
+            branch names for itself here, since which splits a layout has by default is a
+            fact about that layout rather than about this dispatch.
         expected_images: Image count to require, or ``None``.
         expected_instances: Object-line count to require, or ``None``.
         expected_classes: Distinct class count to require, or ``None``.
@@ -941,6 +1020,7 @@ def _check_root(
         ...     Path("/nonexistent"),
         ...     "coco",
         ...     oriented=False,
+        ...     splits=None,
         ...     expected_images=None,
         ...     expected_instances=None,
         ...     expected_classes=None,
@@ -952,12 +1032,14 @@ def _check_root(
     if dataset == DOTA_DATASET:
         return check_dota_root(
             data_root,
+            splits=DOTA_SPLITS if splits is None else splits,
             expected_images=expected_images,
             expected_instances=expected_instances,
             expected_classes=expected_classes,
         )
     return check_yolo_root(
         data_root,
+        splits=YOLO_SPLITS if splits is None else splits,
         oriented=oriented,
         expected_images=expected_images,
         expected_instances=expected_instances,

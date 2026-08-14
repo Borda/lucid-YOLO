@@ -11,9 +11,10 @@ being cheap enough to run before a tier launch.
 Covered: a well-formed root passing on its layout alone; both directions of the image/label
 pairing; a malformed row and a row naming a class outside the declared ``names``, each
 reported with the file and the 1-based line; a ``data.yaml`` that is missing or contradicts
-itself; the oriented variant; and the dispatch — an unstated ``--dataset`` inferring the
+itself; the oriented variant; the dispatch — an unstated ``--dataset`` inferring the
 layout through the WP-099b probe, a root satisfying no convention reporting rather than
-raising, and every flag that belongs to another layout being refused.
+raising, and every flag that belongs to another layout being refused; and which splits that
+dispatch forwards (WP-099e), which is what lets a root shipping ``train`` alone pass.
 
 The COCO and DOTA branches keep their own gates in ``test_coco.py`` and ``test_dota_parse.py``.
 No RNG is used: every byte of every fixture is written out.
@@ -404,3 +405,124 @@ class TestCheckDatasetDispatch:
         )
 
         assert code == 0
+
+
+class TestCheckDatasetSplits:
+    """Which splits of a layout ``check_dataset`` checks, and which layout may narrow them."""
+
+    @pytest.fixture
+    def train_only_root(self, tmp_path: Path) -> Path:
+        """Build a YOLO root shipping ``train`` alone: no ``val`` entry and no ``val`` tree.
+
+        This is the shape of a third-party export whose validation split was never cut — the
+        ``data.yaml`` names one split because one split is what was published — and it is the
+        root the default pair fails on for a reason that is nobody's fault.
+        """
+        _write_data_yaml(tmp_path, "names:\n- car\n- truck\nnc: 2\ntrain: train/images\n")
+        _write_split(tmp_path, "train", _TRAIN_ROWS)
+        return tmp_path
+
+    @pytest.fixture
+    def dota_train_only_root(self, tmp_path: Path) -> Path:
+        """Build a DOTA-shaped root holding one well-formed ``train`` split and nothing else.
+
+        Deliberately the smallest layout the DOTA branch accepts, one image beside one
+        parseable object line: what is under test here is which splits the dispatch forwards,
+        not the DOTA verdict, whose own gate is ``test_dota_parse.py``.
+        """
+        images_dir, labels_dir = tmp_path / "train" / "images", tmp_path / "train" / "labelTxt"
+        images_dir.mkdir(parents=True)
+        labels_dir.mkdir(parents=True)
+        (images_dir / "P0001.png").touch()
+        (labels_dir / "P0001.txt").write_text("0 0 2 0 2 1 0 1 plane 0\n", encoding="utf-8")
+        return tmp_path
+
+    def test_a_train_only_root_passes_when_its_one_split_is_named(self, train_only_root: Path) -> None:
+        """Naming the split a root actually ships is what makes it pass the pre-flight.
+
+        An export with no validation split is a correct export, and this command is the first
+        one run against a fresh provisioning: refusing it over a ``val`` its operator never
+        intended to have is WP-097's failure in a new place.
+        """
+        code = check_data.check_dataset(train_only_root, splits=("train",))
+
+        assert code == 0
+
+    def test_the_same_root_fails_on_the_unstated_default_pair(self, train_only_root: Path, capsys) -> None:
+        """Left unstated the YOLO default still checks ``train`` and ``val``, so this root fails.
+
+        The default is deliberately unchanged: a root that means to hold both splits and is
+        missing one has to keep failing, which is the whole reason the flag is opt-in rather
+        than a relaxation of what "checked" means.
+        """
+        code = check_data.check_dataset(train_only_root)
+
+        out = capsys.readouterr().out
+        assert code == 1
+        assert "images directory missing" in out
+        assert "totals across ['train', 'val']" in out
+
+    def test_a_dota_subset_is_honoured_too(self, dota_train_only_root: Path) -> None:
+        """The DOTA branch takes the named subset through the same dispatch, and passes on it.
+
+        DOTA reaches the flag by the same route as YOLO — a root provisioned with one split is
+        a legitimate thing to check on either — so the threading is proven on both branches
+        rather than on the one that motivated it.
+        """
+        code = check_data.check_dataset(dota_train_only_root, dataset="dota", splits=("train",))
+
+        assert code == 0
+
+    def test_the_same_dota_root_fails_on_the_unstated_default_pair(self, dota_train_only_root: Path, capsys) -> None:
+        """Unstated, the DOTA default is still both annotated splits, so a train-only root fails.
+
+        Asserted as the contrast to the subset passing: without it, a passing subset would be
+        equally explained by the root having satisfied the default all along.
+        """
+        code = check_data.check_dataset(dota_train_only_root, dataset="dota")
+
+        out = capsys.readouterr().out
+        assert code == 1
+        assert "totals across ['train', 'val']" in out
+
+    def test_rejects_splits_aimed_at_coco(self) -> None:
+        """COCO's splits are fixed by the same publication its counts are, so narrowing is refused.
+
+        ``check_coco_root`` checks two named splits against two published per-split totals —
+        the names and the numbers are one fact — so a subset is not a question it can be asked,
+        and a flag silently dropped would make the report read as though it had been.
+        """
+        with pytest.raises(ValueError, match="splits applies to --dataset dota"):
+            check_data.check_dataset(Path("/nonexistent"), dataset="coco", splits=("train2017",))
+
+    def test_rejects_a_splits_that_names_nothing(self) -> None:
+        """An empty ``splits`` is refused rather than obeyed: it would check nothing and pass.
+
+        Every other bad argument here produces a loud failure, but this one produces a *clean*
+        one — no split checked means no problem found means ``PASS: dataset layout valid`` over
+        a root nothing looked at, which is the worst report this command could print.
+        """
+        with pytest.raises(ValueError, match="names no split"):
+            check_data.check_dataset(Path("/nonexistent"), dataset="yolo", splits=())
+
+    def test_the_root_checkers_refuse_it_too(self, train_only_root: Path) -> None:
+        """The empty guard holds for a library caller, who never passes the entry point.
+
+        Both root checkers are documented as the importable core, so guarding only in
+        ``check_dataset`` would leave the false green reachable by the shorter route — and a
+        caller reading ``ok`` off the result gets no report to notice the emptiness in.
+        """
+        with pytest.raises(ValueError, match="names no split"):
+            check_data.check_yolo_root(train_only_root, splits=())
+
+        with pytest.raises(ValueError, match="names no split"):
+            check_data.check_dota_root(train_only_root, splits=())
+
+    def test_the_cli_carries_the_flag_through(self, train_only_root: Path) -> None:
+        """``lucid-data check --splits '[train]'`` reaches the split selection and exits 0.
+
+        The flag is only useful in the spelling an operator types, and jsonargparse derives it
+        from the signature: nothing but an end-to-end parse proves that a tuple annotation
+        renders as a list literal on the command line and arrives as the splits that are checked.
+        """
+        assert data_cli.main(["check", "--data_root", str(train_only_root), "--splits", "[train]"]) == 0
