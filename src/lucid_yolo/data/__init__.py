@@ -50,6 +50,7 @@ from lucid_yolo.data.transforms import (
     boxes_from_polygons,
 )
 from lucid_yolo.data.verify import VerifyResult, verify_coco_root
+from lucid_yolo.data.yolo import YoloDataConfig, YoloDetectionDataset, load_yolo_targets
 
 __all__ = [
     "CROP_OVERLAP",
@@ -72,6 +73,8 @@ __all__ = [
     "Targets",
     "TiledTargets",
     "VerifyResult",
+    "YoloDataConfig",
+    "YoloDetectionDataset",
     "apply_affine_to_points",
     "boxes_from_polygons",
     "build_scale_policy",
@@ -84,6 +87,7 @@ __all__ = [
     "download_coco",
     "hsv_to_rgb",
     "load_dota_targets",
+    "load_yolo_targets",
     "mirror_rboxes",
     "parse_dota_label_file",
     "points_in_rboxes",

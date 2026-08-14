@@ -25,16 +25,25 @@ That keeps this a naming rule rather than an existence check, and leaves the "no
 file" to the reader that opens it, with the path it actually wanted in the message. An
 explicit override still wins over all of it.
 
-Adding a layout is one row here. What this does **not** do is read a different
-*annotation* format — a YOLO ``labels/*.txt`` tree is a reader, not a spelling, and is
-its own work package.
+Adding a layout is one row here. What this does **not** do is read a different *annotation*
+format: a YOLO ``labels/*.txt`` tree is a reader (:mod:`lucid_yolo.data.yolo`, WP-099), not a
+spelling. Its own naming convention lives beside this one as :data:`YOLO_CANDIDATES` /
+:func:`resolve_yolo_split`, deliberately a **second table rather than four more rows**. A YOLO
+split's annotations are a *directory*, so the "both halves exist" predicate that makes this
+table safe would have to become an existence check that accepts either kind of thing — and a
+root satisfying both conventions would then resolve to whichever row came first, handing a
+labels directory to the COCO reader or an ``instances_*.json`` to the YOLO one. Which
+convention applies is a property of the reader asking, so the reader asks its own table::
+
+    per-split export       <root>/train/images/   <root>/train/labels/
+    split-subdirectory     <root>/images/train/   <root>/labels/train/
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-__all__ = ["CANDIDATES", "resolve_split"]
+__all__ = ["CANDIDATES", "YOLO_CANDIDATES", "resolve_split", "resolve_yolo_split"]
 
 #: Layout conventions tried in order, as ``(images directory, annotation file)`` templates
 #: taking ``{split}``. Paths are relative to the dataset root.
@@ -43,6 +52,15 @@ CANDIDATES: tuple[tuple[str, str], ...] = (
     ("{split}", "annotations/instances_{split}.json"),
     ("images/{split}", "annotations/instances_{split}.json"),
     ("{split}", "{split}/_annotations.coco.json"),
+)
+
+#: YOLO-tree conventions tried in order, as ``(images directory, labels directory)`` templates
+#: taking ``{split}``. The per-split spelling comes first because it is the one a published
+#: export was read from (WP-099); both halves are directories, which is why this cannot be
+#: rows of :data:`CANDIDATES`.
+YOLO_CANDIDATES: tuple[tuple[str, str], ...] = (
+    ("{split}/images", "{split}/labels"),
+    ("images/{split}", "labels/{split}"),
 )
 
 
@@ -84,4 +102,51 @@ def resolve_split(data_root: Path, split: str) -> tuple[Path, Path]:
     for images_dir, annotation_file in candidates:
         if images_dir.is_dir() and annotation_file.is_file():
             return images_dir, annotation_file
+    return candidates[0]
+
+
+def resolve_yolo_split(data_root: Path, split: str) -> tuple[Path, Path]:
+    """Return the ``(images_dir, labels_dir)`` pair for ``split`` under a YOLO ``data_root``.
+
+    The sibling of :func:`resolve_split` for the tree :mod:`lucid_yolo.data.yolo` reads, and
+    the same kind of rule: a naming convention with a deterministic fallback, never an
+    existence check that raises. Both halves are directories here, so both are tested with
+    ``is_dir()``.
+
+    Args:
+        data_root: Dataset root holding the split's images and labels trees.
+        split: Split name, ``"train"`` or ``"val"`` (a YOLO ``data.yaml`` also spells its
+            validation split ``"valid"`` in the directory it points at, which is why the
+            dataset's own entry outranks this convention).
+
+    Returns:
+        The first pair in :data:`YOLO_CANDIDATES` whose two directories both exist; the
+        per-split pair when none of them does.
+
+    Examples:
+        A root matching no convention resolves to the per-split names, unchanged::
+
+            >>> images, labels = resolve_yolo_split(Path("/nonexistent"), "train")
+            >>> (images.parent.name, images.name), labels.name
+            (('train', 'images'), 'labels')
+
+        A root written in the split-subdirectory spelling resolves to its own::
+
+            >>> import tempfile
+            >>> with tempfile.TemporaryDirectory() as tmp:
+            ...     root = Path(tmp)
+            ...     (root / "images" / "val").mkdir(parents=True)
+            ...     (root / "labels" / "val").mkdir(parents=True)
+            ...     images, labels = resolve_yolo_split(root, "val")
+            ...     (images.parent.name, labels.parent.name)
+            ('images', 'labels')
+
+    """
+    candidates = [
+        (data_root / images.format(split=split), data_root / labels.format(split=split))
+        for images, labels in YOLO_CANDIDATES
+    ]
+    for images_dir, labels_dir in candidates:
+        if images_dir.is_dir() and labels_dir.is_dir():
+            return images_dir, labels_dir
     return candidates[0]
