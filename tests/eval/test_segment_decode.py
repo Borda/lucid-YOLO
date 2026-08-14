@@ -205,6 +205,30 @@ def test_output_is_bool_over_batch_and_instance_axes() -> None:
     assert masks.dtype == torch.bool
 
 
+def test_no_kept_detections_returns_the_empty_stack() -> None:
+    """An image with nothing to decode returns ``(B, 0, H, W)`` rather than raising.
+
+    ``F.interpolate`` treats the instance axis as channels and rejects a zero-length
+    one, so this raised ``RuntimeError`` for as long as the function has existed. No
+    test caught it because the only caller was the evaluator, whose decoders always
+    hand over a fixed 300 rows with their padding included — the axis was never empty.
+    The predict path decodes only the survivors of a confidence cut, and an image can
+    have none, which is how the case finally arrived.
+
+    The shape contract is the point of returning rather than raising: a caller
+    stacking per-image results needs an empty tensor of the right rank and dtype, and
+    an exception forces every such caller to special-case the count itself.
+    """
+    prototypes = torch.randn(2, 4, 8, 8)
+    coefficients = torch.zeros(2, 0, 4)
+    boxes = torch.zeros(2, 0, 4)
+
+    masks = decode_instance_masks(prototypes, coefficients, boxes, image_size=(32, 32))
+
+    assert masks.shape == (2, 0, 32, 32)
+    assert masks.dtype == torch.bool
+
+
 def test_boundary_lands_between_prototype_cells() -> None:
     """A sloped probability edge binarizes at a position no upsampled binary mask could reach.
 

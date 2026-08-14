@@ -85,7 +85,8 @@ def decode_instance_masks(
 
     Returns:
         Boolean instance masks of shape ``(B, N, height, width)``, zero outside
-        each detection's own box.
+        each detection's own box. ``N == 0`` returns the empty stack rather than
+        raising — see the note at the top of the body.
 
     Examples:
         >>> import torch
@@ -98,6 +99,15 @@ def decode_instance_masks(
         >>> masks[0, 0, 0]  # only the boxed columns survive the crop
         tensor([ True,  True, False, False])
     """
+    if not coefficients.shape[1]:
+        # `F.interpolate` treats the instance axis as channels and rejects a zero-length
+        # one outright, so an image with no kept detections used to raise here rather
+        # than return nothing. The evaluator never met that, because both decoders hand
+        # this function a fixed 300 rows with the padding included; the predict path
+        # decodes only survivors, and an image can have none. Returning the empty stack
+        # keeps the shape contract — `(B, 0, H, W)`, still boolean, still indexable —
+        # which a caller stacking per-image results needs and a raise does not give it.
+        return prototypes.new_zeros((prototypes.shape[0], 0, *image_size), dtype=torch.bool)
     probabilities = assemble_masks(prototypes, coefficients).sigmoid()  # (B, N, Hp, Wp)
     upsampled = F.interpolate(probabilities, size=image_size, mode="bilinear", align_corners=False)
     crop = _box_crop(boxes, image_size, prototypes)  # (B, N, H, W)
