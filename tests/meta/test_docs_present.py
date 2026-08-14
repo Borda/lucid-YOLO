@@ -173,7 +173,7 @@ def test_roadmap_statuses_valid() -> None:
     text = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")
     rows = re.findall(r"^\| (\d{3}[a-z]?) \|.*\| (\S+) \|$", text, flags=re.MULTILINE)
     assert len(rows) >= 91
-    bad = [(wp, status) for wp, status in rows if status not in {"⬜", "🔄", "✅", "⛔", "⊘"}]
+    bad = [(wp, status) for wp, status in rows if status not in {"⬜", "🔄", "✅", "⛔", "⏸", "⊘"}]
     assert not bad, f"invalid status values: {bad}"
 
 
