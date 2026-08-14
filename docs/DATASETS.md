@@ -188,6 +188,8 @@ A YOLO root's own `data.yaml` outranks this table for any split it names. `resol
 
 ### Resolving which format a bare root uses
 
+`lucid-data check` is the other caller. It named `--dataset coco` as its default until WP-099c, which is a pre-flight answering a different question than the run it precedes: a COCO-shaped verdict on a YOLO root reports a missing `train2017` for a tree that trains fine. With `--dataset` unstated it now probes, so the check dispatches exactly as `fit` does; `--dataset dota` still has to be named, because no run reads a DOTA root directly and no probe covers it. Both of the probe's undecidable states come back as report lines and exit 1 rather than a traceback (`_infer_dataset`, `lucid_yolo/data/check.py`).
+
 `detect_layout` is the one caller with no reader of its own to ask — `DetectionDataModule` is handed a bare `data_root` and has to decide which reader it calls for, which is the question neither table above answers on its own. It probes both layout tables in full — by directory and file existence only, per the *layout*/*format* distinction above — and raises if neither is satisfied, naming every path tried, or if **both** are, since across the two tables the loser is a different label space and a different image set, not another spelling of the same reader (A63; `detect_layout`, `lucid_yolo/data/layout.py`).
 
 ## Where a provisioned tree belongs on a hosted runtime

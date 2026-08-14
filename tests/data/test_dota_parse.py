@@ -406,7 +406,14 @@ def test_check_data_reports_missing_split_directories(tmp_path: Path) -> None:
     assert any("labelTxt directory missing" in problem for problem in result.splits[0].problems)
 
 
-def test_check_data_coco_path_is_the_default(tmp_path: Path) -> None:
-    """The CLI still validates a COCO root unless --dataset says otherwise."""
+def test_check_data_reaches_the_coco_branch_when_it_is_named(tmp_path: Path) -> None:
+    """--dataset coco still validates a COCO root; an unstated layout is probed, not assumed.
+
+    ``coco`` was the default until WP-099c made an unstated ``--dataset`` infer the layout
+    from the root (A63), which is the dispatch ``lucid-yolo fit`` itself makes. A root
+    satisfying no convention — this empty one, and every DOTA root, which no probe covers —
+    is reported and exits 1 either way, never a traceback.
+    """
     assert data_cli.main(["check", "--data_root", str(tmp_path)]) == 1
+    assert data_cli.main(["check", "--data_root", str(tmp_path), "--dataset", "coco"]) == 1
     assert not check_data.check_coco_root(tmp_path).ok

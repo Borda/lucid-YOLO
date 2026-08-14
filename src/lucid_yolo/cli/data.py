@@ -7,6 +7,10 @@ Three subcommands, in the order a tier run uses them::
     lucid-data check --data_root /data/coco
     lucid-data build-tiles --root /data/dota --out /data/dota_tiles --overlap 512
 
+``check`` names the dataset only where it has to: the COCO and YOLO layouts are inferred
+from the root itself, by the same probe ``lucid-yolo fit`` dispatches on (WP-099c), while
+``--dataset dota`` names a layout no run reads and no probe covers.
+
 They were three separate things before: a shipped ``lucid-download`` console script, an
 unshipped ``scripts/check_data.py`` reachable only through ``make``, and an unshipped
 ``scripts/build_dota_tiles.py``. A remote tier run installs a wheel, so two thirds of its
@@ -67,8 +71,10 @@ def build_parser() -> ArgumentParser:
     Examples:
         >>> parser = build_parser()
         >>> config = parser.parse_args(["check", "--data_root", "/data/coco"])
-        >>> config.check.dataset
-        'coco'
+        >>> config.check.dataset is None  # unstated: the root's layout is inferred (WP-099c)
+        True
+        >>> parser.parse_args(["check", "--data_root", "/data/dota", "--dataset", "dota"]).check.dataset
+        'dota'
     """
     parser = ArgumentParser(prog="lucid-data", description="Download, validate and tile datasets.")
     subcommands = parser.add_subcommands(dest="command", required=True)

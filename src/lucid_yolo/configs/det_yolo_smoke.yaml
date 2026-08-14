@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+# Det-smoke on a YOLO-format root: the det_smoke.yaml recipe with `data.layout` stated.
+# Nothing about the model or the schedule changes -- the YOLO reader emits the same
+# `Targets` the COCO one does (WP-099), so this file differs from det_smoke.yaml in the
+# data block alone. It is the worked example of `--data.layout`, which every other shipped
+# config leaves unset because every other shipped root is COCO-shaped.
+# Acceptance: this is a wiring recipe, not a tier -- point it at a real export and expect
+# the run to train; the published mAP claims live with the COCO tiers.
+# ADR-001 boundary: this file carries only run-level configuration (data paths, schedule,
+# optimizer/loss gains) -- topology is named by `variant` only and lives in
+# lucid_yolo/models/registry.py, never here.
+seed_everything: 0
+
+# Registry row, not a topology (ADR-001). Expands via scale_spec() onto the
+# module's depth/width/max_channels and the datamodule augmentation policy.
+variant: n
+
+trainer:
+  max_epochs: 50 # blueprint sec. 10 tier A: ~50 epochs, mirroring Det-smoke
+  # determinism: CLI default (default_determinism) — strict on CPU/CUDA, warn_only on MPS
+  gradient_clip_val: 10.0 # A31: bounds the violent opening steps of the from-scratch recipe
+  callbacks:
+    # Disable mosaic for the final epochs (blueprint sec. 5.9, R1 Table S3: close_mosaic 8-10).
+    - class_path: lucid_yolo.ptl.callbacks.CloseMosaicCallback
+      init_args:
+        close_mosaic: 10
+    # EMA weights, used for eval (blueprint D4).
+    - class_path: lucid_yolo.ptl.callbacks.EMACallback
+
+model:
+  # PLACEHOLDER -- must equal len(names) in the root's own data.yaml. The class index in a
+  # label row is 0-based into that list and is never remapped (WP-099), so a count that
+  # disagrees with the file is a run supervised against the wrong label space. Both numbers
+  # are printed by `lucid-data check --data_root /path/to/yolo_dataset`.
+  num_classes: 3
+  lr: 0.01 # blueprint sec. 5.8 (R1 Tables S2/S5): lr0
+  lrf: 0.01 # A8: linear decay to lr0*lrf over the run (WP-072)
+  warmup_epochs: 3 # A8/A31: opening linear LR warmup, generic from-scratch practice
+  momentum: 0.95 # blueprint sec. 5.8: momentum ~0.94-0.95
+  weight_decay: 0.0005 # blueprint sec. 5.8: weight_decay 5e-4
+  box_gain: 7.5 # blueprint sec. 5.7 (R1 Tables S2/S5): pretrain-style box gain
+  cls_gain: 0.5 # blueprint sec. 5.7: cls gain
+  l1_gain: 6.0 # blueprint sec. 5.7: L1 gain (the legacy dfl field scales L1)
+  alpha_init: 0.8 # blueprint sec. 5.7 (R1 Eq. 2-3): ProgLoss ramp start, weights (0.8, 0.2)
+  alpha_final: 0.1 # blueprint sec. 5.7: ProgLoss ramp end, weights (0.1, 0.9)
+
+data:
+  # PLACEHOLDER -- a YOLO root: a data.yaml naming the classes and the splits, beside
+  # `<split>/images` + `<split>/labels` (or `images/<split>` + `labels/<split>`) trees of
+  # one .txt per image (WP-099). Never downloaded (AGENTS.md sec. 3); validate the layout
+  # first with:
+  #   lucid-data check --data_root /path/to/yolo_dataset
+  data_root: /path/to/yolo_dataset
+  # Stated rather than inferred. `detect_layout` would resolve a root like this one on its
+  # own (WP-099b), and naming it here costs nothing and covers the two roots it cannot:
+  # one that also satisfies the COCO convention, which the probe refuses to break a tie on
+  # because the loser is a different label space (A63), and one whose data.yaml points its
+  # splits outside the convention table, which the reader resolves and no probe can see.
+  # Stating it also skips the probe, so any missing path is named by the reader that wanted
+  # it. Drop this line to have the root probed instead; `coco` is the other spelling.
+  layout: yolo
+  batch_size: 16 # PLACEHOLDER -- tune to accelerator memory
+  # num_workers: auto (min(batch_size, cpu count)); set 0 for byte-identical deterministic epochs
+  # Not available on this layout: model.task=segment. The format carries no polygon rings,
+  # so mask_targets is refused rather than silently supervising a segmentation head on
+  # empty masks (WP-099b).

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Validate a real COCO 2017 or DOTA-v1.0 dataset root before a ``[DATA]`` run (WP-014, WP-056).
+"""Validate a provisioned COCO, DOTA-v1.0 or YOLO dataset root before a run (WP-014, WP-056, WP-099c).
 
 Datasets are never committed and never auto-downloaded (AGENTS.md sec. 3); this is the
 ``lucid-data check`` gate that confirms a provisioned root actually matches the layout of
@@ -29,12 +29,45 @@ states them (``--expected_images`` and its two siblings).
     out (A39 governs what a *loader* does with the flag, which is a different
     question from what is on disk).
 
-The check core is importable (:func:`check_coco_root` and :func:`check_dota_root`
-return a :class:`DataCheck` whose ``ok`` flag drives the exit status);
-:func:`check_dataset` is a thin dispatch over them, and is what ``lucid-data check``
+For a YOLO root (WP-099c) the root's own ``data.yaml`` is read first — it carries the
+class list, so a labels tree without one is not a dataset this project can read — and
+each split's images and labels directories are resolved by
+:func:`~lucid_yolo.data.yolo.resolve_split_dirs`, the function
+:meth:`~lucid_yolo.data.yolo.YoloDetectionDataset.from_root` resolves them with. Images
+and label files must then pair by stem in **both** directions, and every row must parse
+(:func:`~lucid_yolo.data.yolo.scan_yolo_label_file`), each rejection naming the file and
+the 1-based line exactly as the reader's own does — a row's class index being inside the
+declared ``names`` is part of that grammar, which is how the class count and the rows are
+held to agree. Totals are reported and required only when stated, as for DOTA.
+
+Which layout, and who decides:
+    ``dataset`` left unstated means **infer**, through
+    :func:`~lucid_yolo.data.layout.detect_layout` — the WP-099b probe (A63). This command
+    is the pre-flight for ``lucid-yolo fit``, and a ``fit`` given no ``--data.layout``
+    dispatches on that same probe: a check that defaulted to COCO would validate a question
+    the run never asks, and the two would disagree about what the root is precisely when it
+    matters. There is therefore one statement of what a COCO root and a YOLO root are, and
+    this module holds neither of them.
+
+    DOTA is stated, never inferred, and sits outside the probe by design rather than by
+    omission: no training run reads a DOTA root at all. Its ``labelTxt`` tree is tiled into
+    a COCO container first (``lucid-data build-tiles``, WP-094), so what the OBB tier trains
+    on is a COCO layout. A root satisfying no convention says so *and* names
+    ``--dataset dota``, because that operator is the only one inference cannot serve.
+
+    The raise-versus-report line is the datamodule's (WP-099b): an argument the caller got
+    wrong raises — an unknown layout name, a flag belonging to another layout — while every
+    verdict about the disk, the probe's included, becomes a FAIL line in the report and exit
+    1. This is the first command an operator runs against a fresh provisioning, and WP-097
+    is the record of what a spurious failure costs there; a traceback would cost the same.
+
+The check core is importable (:func:`check_coco_root`, :func:`check_dota_root` and
+:func:`check_yolo_root` return a :class:`DataCheck` whose ``ok`` flag drives the exit
+status); :func:`check_dataset` is the dispatch over them, and is what ``lucid-data check``
 calls. Every expected count is a parameter, so the logic is unit-testable against a
 tiny fake layout: COCO's per-split counts default to the published ones because a
-COCO split either is that split or is not, while DOTA's totals default to unstated.
+COCO split either is that split or is not, while DOTA's and YOLO's totals default to
+unstated — neither publishes a total this project can hold every root to.
 
 Relationship to :mod:`lucid_yolo.data.verify`:
     This module validates the layout by **counts** — fixed per-split totals plus
@@ -49,9 +82,11 @@ Relationship to :mod:`lucid_yolo.data.verify`:
     coupling it to training would refuse a legitimate subset or smoke run at startup.
 
 Examples:
-    Validate a provisioned root (exit 1 on any mismatch)::
+    Validate a provisioned root (exit 1 on any mismatch); the layout is inferred unless
+    the root is a DOTA one, which no probe covers::
 
         lucid-data check --data_root /data/coco
+        lucid-data check --data_root /data/roboflow_export
         lucid-data check --data_root /data/dota --dataset dota
 
     Assert that a DOTA root holds both annotated splits whole::
@@ -65,8 +100,19 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from lucid_yolo.data.dota import DOTA_CLASSES, parse_dota_label_file
+from lucid_yolo.data.layout import DATA_YAML_NAME, DatasetLayout, detect_layout
+from lucid_yolo.data.yolo import IMAGE_SUFFIXES, YoloDataConfig, resolve_split_dirs, scan_yolo_label_file
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    #: One layout's label-directory scan: parse every label file under a directory and return
+    #: ``(instances, classes, problems)``, one problem per file that failed to parse. The seam
+    #: between :func:`_check_paired_split` and the two label grammars it is shared by.
+    _LabelScan = Callable[[Path], tuple[int, frozenset[int], list[str]]]
 
 #: Expected image counts for the two COCO 2017 splits (blueprint sec. 14.3).
 COCO_TRAIN_COUNT = 118287
@@ -90,12 +136,19 @@ DOTA_ANNOTATED_INSTANCE_COUNT = 127843
 DOTA_CLASS_COUNT = len(DOTA_CLASSES)
 #: DOTA split directories checked by default; each holds ``images/`` and ``labelTxt/``.
 DOTA_SPLITS = ("train", "val")
+#: YOLO splits checked by default: the two a training run builds, which is what a pre-run
+#: check is for. A ``data.yaml`` may also name a ``test:`` split, and requiring it would fail
+#: an export whose test images were never downloaded for a split no run of this project opens.
+YOLO_SPLITS = ("train", "val")
 #: Image file suffixes counted on disk (COCO 2017 ships ``.jpg``).
 _IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")
 #: Label file suffix of a DOTA ``labelTxt`` directory.
 _LABEL_SUFFIXES = (".txt",)
 #: Unmatched names listed in a pairing problem before the message is truncated.
 _MAX_LISTED_NAMES = 3
+#: Class names printed in a YOLO root's declared-classes note before it is truncated to a
+#: count. Enough for a small export to be read back at a glance, short of COCO's 80.
+_MAX_LISTED_CLASSES = 8
 
 
 @dataclass(frozen=True)
@@ -130,15 +183,20 @@ class SplitCheck:
 
 
 @dataclass(frozen=True)
-class DotaSplitCheck:
-    """Validation outcome for one DOTA-v1.0 split directory.
+class PairedSplitCheck:
+    """Validation outcome for one split of a layout whose labels are files beside its images.
+
+    Both such layouts — DOTA-v1.0's ``labelTxt`` tree and the YOLO ``labels`` one — are
+    checked the same way and report the same counts, so they share this container rather
+    than each naming its own. It is the *shape* of the annotation that decides: one text
+    file per image, paired by stem, versus COCO's single manifest (:class:`SplitCheck`).
 
     Attributes:
         name: Split name (e.g. ``"train"``).
-        found_images: Image files found under ``images/`` (``-1`` if it is
-            missing).
-        found_labels: Label files found under ``labelTxt/`` (``-1`` if it is
-            missing).
+        found_images: Image files found under the split's images directory (``-1``
+            if it is missing).
+        found_labels: Label files found under the split's labels directory (``-1``
+            if it is missing).
         instances: Object lines parsed across the split's label files (``-1``
             when the label directory is missing); difficult instances included.
         classes: Class ids seen in this split.
@@ -178,7 +236,7 @@ class DataCheck:
             the report, which is how the unreachable totals clause survived.
     """
 
-    splits: list[SplitCheck] | list[DotaSplitCheck]
+    splits: list[SplitCheck] | list[PairedSplitCheck]
     problems: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -366,7 +424,57 @@ def _scan_labels(labels_dir: Path) -> tuple[int, frozenset[int], list[str]]:
     return instances, frozenset(classes), problems
 
 
-def check_dota_split(name: str, split_dir: Path) -> DotaSplitCheck:
+def _check_paired_split(
+    name: str,
+    images_dir: Path,
+    labels_dir: Path,
+    image_suffixes: tuple[str, ...],
+    scan: _LabelScan,
+) -> PairedSplitCheck:
+    """Validate one split of a layout that pairs each image with a label file of the same stem.
+
+    The DOTA and YOLO layouts differ in where their two directories live and in the grammar
+    of a label line; everything between — the two directories existing, the pairing holding
+    in both directions, a malformed file being reported rather than raised — is one check,
+    stated here once so the two cannot drift into reporting the same fault differently.
+
+    Args:
+        name: Split name for messages.
+        images_dir: The split's images directory.
+        labels_dir: The split's labels directory; its own directory name is what the
+            missing-directory message says, so each layout's message names its own spelling.
+        image_suffixes: Suffixes counted as images — the reading reader's own set.
+        scan: The label-directory scan, returning ``(instances, classes, problems)``.
+
+    Returns:
+        A :class:`PairedSplitCheck` capturing the counts and any problems found.
+
+    Examples:
+        >>> _check_paired_split("train", Path("/no/images"), Path("/no/labels"), (".png",), _scan_labels).ok
+        False
+    """
+    image_stems = _stems(images_dir, image_suffixes)
+    label_stems = _stems(labels_dir, _LABEL_SUFFIXES)
+    problems: list[str] = []
+    if image_stems is None:
+        problems.append(f"images directory missing: {images_dir}")
+    if label_stems is None:
+        problems.append(f"{labels_dir.name} directory missing: {labels_dir}")
+    if image_stems is not None and label_stems is not None:
+        problems.extend(_pairing_problems(name, image_stems, label_stems))
+    instances, classes, parse_problems = scan(labels_dir) if label_stems is not None else (-1, frozenset(), [])
+    problems.extend(parse_problems)
+    return PairedSplitCheck(
+        name=name,
+        found_images=-1 if image_stems is None else len(image_stems),
+        found_labels=-1 if label_stems is None else len(label_stems),
+        instances=instances,
+        classes=classes,
+        problems=problems,
+    )
+
+
+def check_dota_split(name: str, split_dir: Path) -> PairedSplitCheck:
     """Validate one DOTA-v1.0 split directory's layout, pairing and label files.
 
     Args:
@@ -375,7 +483,7 @@ def check_dota_split(name: str, split_dir: Path) -> DotaSplitCheck:
             ``labelTxt/``.
 
     Returns:
-        A :class:`DotaSplitCheck` capturing the counts and any problems found.
+        A :class:`PairedSplitCheck` capturing the counts and any problems found.
 
     Examples:
         ```pycon
@@ -385,25 +493,12 @@ def check_dota_split(name: str, split_dir: Path) -> DotaSplitCheck:
 
         ```
     """
-    images_dir, labels_dir = split_dir / "images", split_dir / "labelTxt"
-    image_stems = _stems(images_dir, _IMAGE_SUFFIXES)
-    label_stems = _stems(labels_dir, _LABEL_SUFFIXES)
-    problems: list[str] = []
-    if image_stems is None:
-        problems.append(f"images directory missing: {images_dir}")
-    if label_stems is None:
-        problems.append(f"labelTxt directory missing: {labels_dir}")
-    if image_stems is not None and label_stems is not None:
-        problems.extend(_pairing_problems(name, image_stems, label_stems))
-    instances, classes, parse_problems = _scan_labels(labels_dir) if label_stems is not None else (-1, frozenset(), [])
-    problems.extend(parse_problems)
-    return DotaSplitCheck(
-        name=name,
-        found_images=-1 if image_stems is None else len(image_stems),
-        found_labels=-1 if label_stems is None else len(label_stems),
-        instances=instances,
-        classes=classes,
-        problems=problems,
+    return _check_paired_split(
+        name,
+        split_dir / "images",
+        split_dir / "labelTxt",
+        _IMAGE_SUFFIXES,
+        _scan_labels,
     )
 
 
@@ -456,6 +551,39 @@ def check_dota_root(
         ```
     """
     checks = [check_dota_split(name, data_root / name) for name in splits]
+    problems, notes = _totals(checks, splits, expected_images, expected_instances, expected_classes)
+    return DataCheck(splits=checks, problems=problems, notes=notes)
+
+
+def _totals(
+    checks: list[PairedSplitCheck],
+    splits: tuple[str, ...],
+    expected_images: int | None,
+    expected_instances: int | None,
+    expected_classes: int | None,
+) -> tuple[list[str], list[str]]:
+    """Sum a paired layout's per-split counts, and compare them with the totals stated.
+
+    Shared by the DOTA and the YOLO root check, which reach the same question from
+    different label grammars: neither layout publishes a per-root total this project can
+    hold every provisioning to, so an ``expected_*`` left at ``None`` is reported and never
+    required (WP-097).
+
+    Args:
+        checks: The per-split outcomes, in the order the splits were checked.
+        splits: The split names, named in both messages.
+        expected_images: Image count to require summed over ``splits``, or ``None``.
+        expected_instances: Object-line count to require, or ``None``.
+        expected_classes: Number of distinct classes to require, or ``None``.
+
+    Returns:
+        The problems raised by a stated total that was not met, and the one note carrying
+        the observed totals.
+
+    Examples:
+        >>> _totals([], ("train",), 1, None, None)
+        (["expected 1 images across ['train'], found 0"], ["totals across ['train']: 0 images, 0 instances, 0 classes"])
+    """
     images = sum(max(check.found_images, 0) for check in checks)
     instances = sum(max(check.instances, 0) for check in checks)
     classes = frozenset[int]().union(*(check.classes for check in checks))
@@ -470,7 +598,164 @@ def check_dota_root(
         if expected is not None and expected != found
     ]
     note = f"totals across {list(splits)}: {images} images, {instances} instances, {len(classes)} classes"
-    return DataCheck(splits=checks, problems=problems, notes=[note])
+    return problems, [note]
+
+
+def _scan_yolo_labels(labels_dir: Path, num_classes: int, oriented: bool) -> tuple[int, frozenset[int], list[str]]:
+    """Parse every label file of a YOLO split, counting rows and the classes they name.
+
+    Args:
+        labels_dir: The split's ``labels`` directory.
+        num_classes: Class count the root's ``data.yaml`` declares; a row naming anything
+            outside it is a row written against a different class list, and fails here.
+        oriented: Read the nine-field oriented rows rather than five-field boxes.
+
+    Returns:
+        An ``(instances, classes, problems)`` triple, with one problem per file that failed
+        to parse — the reader's own message, so the file and the 1-based line are named.
+
+    Examples:
+        >>> _scan_yolo_labels(Path("/nonexistent"), 1, False)
+        (0, frozenset(), [])
+    """
+    instances = 0
+    classes: set[int] = set()
+    problems: list[str] = []
+    for path in sorted(labels_dir.glob("*.txt")):
+        try:
+            count, seen = scan_yolo_label_file(path, num_classes=num_classes, oriented=oriented)
+        except (OSError, ValueError) as error:
+            problems.append(f"label file failed to parse: {error}")
+            continue
+        instances += count
+        classes.update(seen)
+    return instances, frozenset(classes), problems
+
+
+def check_yolo_split(name: str, data_root: Path, config: YoloDataConfig, oriented: bool = False) -> PairedSplitCheck:
+    """Validate one split of a YOLO root: its two directories, their pairing and every row.
+
+    The split's directories come from :func:`~lucid_yolo.data.yolo.resolve_split_dirs`, so a
+    split the ``data.yaml`` points somewhere its own way is checked where the reader will
+    look for it rather than where a convention says it should be (A58). A split entry that
+    resolves nowhere is that split's problem, not an exception: the report is the product
+    here, and one unbuilt split should not hide a second one's verdict.
+
+    Args:
+        name: Split name as keyed in the ``data.yaml``, e.g. ``"train"``.
+        data_root: The dataset root holding the ``data.yaml``.
+        config: The root's parsed ``data.yaml``, whose ``names`` bound every row's class.
+        oriented: Read nine-field oriented rows instead of five-field boxes. Declared by
+            the caller, never sniffed (WP-099): a nine-field file read as detection is a
+            file that fails on every row, which is the report a mis-stated flag should give.
+
+    Returns:
+        A :class:`PairedSplitCheck` capturing the counts and any problems found.
+
+    Examples:
+        ```pycon
+        >>> from pathlib import Path
+        >>> config = YoloDataConfig(root=Path("/nonexistent"), names=("car",), splits={})
+        >>> check_yolo_split("train", Path("/nonexistent"), config).ok
+        False
+
+        ```
+    """
+    try:
+        images_dir, labels_dir = resolve_split_dirs(data_root, name, config)
+    except (FileNotFoundError, ValueError) as error:
+        return PairedSplitCheck(
+            name=name,
+            found_images=-1,
+            found_labels=-1,
+            instances=-1,
+            classes=frozenset(),
+            problems=[str(error)],
+        )
+    return _check_paired_split(
+        name,
+        images_dir,
+        labels_dir,
+        IMAGE_SUFFIXES,
+        lambda directory: _scan_yolo_labels(directory, len(config.names), oriented),
+    )
+
+
+def check_yolo_root(
+    data_root: Path,
+    splits: tuple[str, ...] = YOLO_SPLITS,
+    oriented: bool = False,
+    expected_images: int | None = None,
+    expected_instances: int | None = None,
+    expected_classes: int | None = None,
+) -> DataCheck:
+    """Validate a YOLO root: its ``data.yaml``, each split's pairing, and every label row.
+
+    The ``data.yaml`` is read first and is the whole of the class space, so a root without
+    one — or with one that contradicts itself, an ``nc`` disagreeing with its ``names``
+    (A57) — has no split worth checking and is reported as that one problem. Otherwise each
+    split in ``splits`` is checked by :func:`check_yolo_split`, and the totals are reported
+    and required only where stated, as for DOTA.
+
+    What this deliberately does **not** check: that an image decodes, that a box is
+    plausible, or that a class the ``data.yaml`` declares is used by any row. The first two
+    are the reader's job at the moment it reads (and would cost an epoch's decoding here);
+    the third is not a fault at all — an export whose validation split happens to use six of
+    its eight classes is a correct export, and failing it would be WP-097's mistake again.
+
+    Args:
+        data_root: Directory holding ``data.yaml`` and the split trees.
+        splits: Split names to check; the two a training run builds by default, since this
+            validates what ``fit`` will read. A ``test:`` entry is checked only when asked
+            for by name, because no run of this project opens it.
+        oriented: Read the nine-field oriented rows on every split (see
+            :func:`check_yolo_split`).
+        expected_images: Image count to require summed over ``splits``, or ``None`` to
+            report the count without requiring one.
+        expected_instances: Object-row count to require, or ``None`` to only report it.
+        expected_classes: Number of distinct classes the rows must *use*, or ``None`` to
+            only report it. The count the file declares is a note either way.
+
+    Returns:
+        A :class:`DataCheck` aggregating the splits, the stated totals, and notes carrying
+        the observed totals and the declared class list.
+
+    Examples:
+        ```pycon
+        >>> from pathlib import Path
+        >>> check_yolo_root(Path("/nonexistent")).ok
+        False
+
+        ```
+    """
+    data_yaml = data_root / DATA_YAML_NAME
+    try:
+        config = YoloDataConfig.read(data_yaml)
+    except (OSError, ValueError) as error:
+        return DataCheck(splits=[], problems=[f"{DATA_YAML_NAME} unusable: {error}"])
+    checks = [check_yolo_split(name, data_root, config, oriented=oriented) for name in splits]
+    problems, notes = _totals(checks, splits, expected_images, expected_instances, expected_classes)
+    return DataCheck(splits=checks, problems=problems, notes=[_declared_classes_note(config), *notes])
+
+
+def _declared_classes_note(config: YoloDataConfig) -> str:
+    """Render the class list a root's ``data.yaml`` declares, as a report note.
+
+    Args:
+        config: The root's parsed ``data.yaml``.
+
+    Returns:
+        The declared class count, with the names themselves when there are few enough to
+        read at a glance — the check an operator actually performs by eye is "is this the
+        label space I meant", and an 80-name COCO-sized list buries the rest of the report.
+
+    Examples:
+        >>> _declared_classes_note(YoloDataConfig(root=Path("."), names=("car", "truck"), splits={}))
+        'data.yaml declares 2 classes: car, truck'
+    """
+    names = config.names
+    listed = ", ".join(names) if len(names) <= _MAX_LISTED_CLASSES else f"{', '.join(names[:_MAX_LISTED_CLASSES])}, ..."
+    return f"{DATA_YAML_NAME} declares {len(names)} classes: {listed}"
 
 
 def format_report(result: DataCheck, data_root: Path) -> str:
@@ -495,36 +780,52 @@ def format_report(result: DataCheck, data_root: Path) -> str:
     return "\n".join(lines)
 
 
-#: Dataset layouts :func:`check_dataset` knows how to validate.
-DATASETS = ("coco", "dota")
+#: The DOTA-v1.0 layout, which is named and never inferred: no training run reads a DOTA
+#: root — its ``labelTxt`` tree is tiled into a COCO container first (WP-094) — so it is
+#: outside :func:`~lucid_yolo.data.layout.detect_layout`'s two tables by design.
+DOTA_DATASET = "dota"
+#: Dataset layouts :func:`check_dataset` knows how to validate: the two a run can be pointed
+#: at, taken from the probe's own enum so this module cannot come to disagree with it about
+#: what a root is, plus DOTA.
+DATASETS = (DatasetLayout.COCO.value, DOTA_DATASET, DatasetLayout.YOLO.value)
 
 
 def check_dataset(
     data_root: Path,
-    dataset: str = "coco",
+    dataset: str | None = None,
+    oriented: bool = False,
     expected_images: int | None = None,
     expected_instances: int | None = None,
     expected_classes: int | None = None,
 ) -> int:
-    """Validate a provisioned dataset root against its published layout.
+    """Validate a provisioned dataset root against the layout it is written in.
 
     Args:
         data_root: Dataset root directory.
-        dataset: Which layout to validate, ``coco`` or ``dota``.
-        expected_images: ``dota`` only — image count to require across the
+        dataset: Which layout to validate — ``coco``, ``dota`` or ``yolo``. Left unstated
+            (the default) the root is **probed** by
+            :func:`~lucid_yolo.data.layout.detect_layout`, which is the same dispatch a
+            ``fit`` without ``--data.layout`` makes: this command is that run's pre-flight,
+            so inferring differently would validate a question the run never asks. A DOTA
+            root is outside the probe and must be named.
+        oriented: ``yolo`` only — read the nine-field oriented label rows rather than
+            five-field boxes. The variant is a property of the dataset and is declared,
+            never sniffed (WP-099).
+        expected_images: ``dota`` and ``yolo`` — image count to require across the
             checked splits; omitted, the count is reported and not required.
-        expected_instances: ``dota`` only — object-line count to require,
+        expected_instances: ``dota`` and ``yolo`` — object-line count to require,
             difficult instances included.
-        expected_classes: ``dota`` only — number of distinct classes to require.
+        expected_classes: ``dota`` and ``yolo`` — number of distinct classes to require.
 
     Returns:
-        ``0`` when the layout is valid, ``1`` otherwise.
+        ``0`` when the layout is valid, ``1`` otherwise — including when the root satisfies
+        no convention, which is a verdict about the disk and so is reported rather than
+        raised.
 
     Raises:
-        ValueError: If ``dataset`` is not a known layout, or if a DOTA-only
-            expectation is supplied for another one. A count silently ignored is
-            worse than a rejected flag: the report then reads as though it had
-            been enforced.
+        ValueError: If ``dataset`` is not a known layout, or a flag is supplied for a layout
+            it does not apply to. A flag silently ignored is worse than a rejected one: the
+            report then reads as though it had been enforced.
 
     Examples:
         >>> code = check_dataset(Path("/nonexistent"))  # doctest: +ELLIPSIS
@@ -534,20 +835,131 @@ def check_dataset(
         >>> code
         1
     """
-    if dataset not in DATASETS:
+    if dataset is not None and dataset not in DATASETS:
         raise ValueError(f"unknown dataset {dataset!r}; known layouts are {list(DATASETS)}")
-    expectations = (expected_images, expected_instances, expected_classes)
-    if dataset != "dota" and any(expectation is not None for expectation in expectations):
-        raise ValueError(f"expected_images/instances/classes apply to --dataset dota, not {dataset!r}")
-    result = (
-        check_coco_root(data_root)
-        if dataset == "coco"
-        else check_dota_root(
+    if dataset is None:
+        dataset, probe_problems = _infer_dataset(data_root)
+        if dataset is None:
+            print(format_report(DataCheck(splits=[], problems=probe_problems), data_root))
+            return 1
+    _check_flags_apply(dataset, oriented, (expected_images, expected_instances, expected_classes))
+    result = _check_root(
+        data_root,
+        dataset,
+        oriented=oriented,
+        expected_images=expected_images,
+        expected_instances=expected_instances,
+        expected_classes=expected_classes,
+    )
+    print(format_report(result, data_root))
+    return 0 if result.ok else 1
+
+
+def _infer_dataset(data_root: Path) -> tuple[str | None, list[str]]:
+    """Ask the layout probe which convention ``data_root`` is written in.
+
+    The probe raises on both of its undecidable states — a root satisfying neither
+    convention, and one satisfying both (A63) — and both are verdicts about the disk, so
+    they come back as report problems here. ``lucid-data check`` is the first command run
+    against a fresh provisioning; a traceback where a report belongs is what WP-097 already
+    paid for once.
+
+    Args:
+        data_root: Dataset root to probe.
+
+    Returns:
+        The layout's name and no problems, or ``None`` and the probe's own message, extended
+        with the layout the probe cannot see.
+
+    Examples:
+        >>> layout, problems = _infer_dataset(Path("/nonexistent"))
+        >>> layout is None, len(problems)
+        (True, 1)
+    """
+    try:
+        return detect_layout(data_root).value, []
+    except (FileNotFoundError, ValueError) as error:
+        return None, [
+            f"{error}. Inference covers the two layouts a run reads; a DOTA-v1.0 root "
+            f"(images beside labelTxt) is stated with --dataset {DOTA_DATASET}"
+        ]
+
+
+def _check_flags_apply(dataset: str, oriented: bool, expectations: tuple[int | None, ...]) -> None:
+    """Reject a flag belonging to a layout other than the one being checked.
+
+    Args:
+        dataset: The layout that will be checked, stated or inferred.
+        oriented: The oriented-rows flag.
+        expectations: The three ``expected_*`` values.
+
+    Raises:
+        ValueError: If a flag applies to no layout in play. The counts are meaningless for
+            COCO, whose per-split totals are published and are the check's own defaults; the
+            oriented reading is a property of the YOLO row grammar alone.
+
+    Examples:
+        >>> _check_flags_apply("yolo", True, (None, None, None)) is None
+        True
+    """
+    if dataset == DatasetLayout.COCO.value and any(expectation is not None for expectation in expectations):
+        raise ValueError(
+            f"expected_images/instances/classes apply to --dataset {DOTA_DATASET} or "
+            f"--dataset {DatasetLayout.YOLO.value}, not {dataset!r}"
+        )
+    if oriented and dataset != DatasetLayout.YOLO.value:
+        raise ValueError(
+            f"oriented applies to --dataset {DatasetLayout.YOLO.value}, whose label rows carry "
+            f"either variant, not {dataset!r}"
+        )
+
+
+def _check_root(
+    data_root: Path,
+    dataset: str,
+    *,
+    oriented: bool,
+    expected_images: int | None,
+    expected_instances: int | None,
+    expected_classes: int | None,
+) -> DataCheck:
+    """Run the check belonging to one layout.
+
+    Args:
+        data_root: Dataset root directory.
+        dataset: The layout to check, already validated and resolved.
+        oriented: Whether YOLO rows are read as the oriented variant.
+        expected_images: Image count to require, or ``None``.
+        expected_instances: Object-line count to require, or ``None``.
+        expected_classes: Distinct class count to require, or ``None``.
+
+    Returns:
+        That layout's :class:`DataCheck`.
+
+    Examples:
+        >>> _check_root(
+        ...     Path("/nonexistent"),
+        ...     "coco",
+        ...     oriented=False,
+        ...     expected_images=None,
+        ...     expected_instances=None,
+        ...     expected_classes=None,
+        ... ).ok
+        False
+    """
+    if dataset == DatasetLayout.COCO.value:
+        return check_coco_root(data_root)
+    if dataset == DOTA_DATASET:
+        return check_dota_root(
             data_root,
             expected_images=expected_images,
             expected_instances=expected_instances,
             expected_classes=expected_classes,
         )
+    return check_yolo_root(
+        data_root,
+        oriented=oriented,
+        expected_images=expected_images,
+        expected_instances=expected_instances,
+        expected_classes=expected_classes,
     )
-    print(format_report(result, data_root))
-    return 0 if result.ok else 1

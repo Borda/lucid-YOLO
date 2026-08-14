@@ -100,7 +100,15 @@ from lucid_yolo.data.transforms import GeometricTransform, boxes_from_polygons
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-__all__ = ["DATA_YAML_NAME", "IMAGE_SUFFIXES", "YoloDataConfig", "YoloDetectionDataset", "load_yolo_targets"]
+__all__ = [
+    "DATA_YAML_NAME",
+    "IMAGE_SUFFIXES",
+    "YoloDataConfig",
+    "YoloDetectionDataset",
+    "load_yolo_targets",
+    "resolve_split_dirs",
+    "scan_yolo_label_file",
+]
 
 #: Image extensions the reader enumerates, lower-cased. ``.jpg`` is what the published export
 #: writes; ``.png`` is what this project's synthetic fixtures do (A26).
@@ -318,11 +326,9 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         """Build a split's dataset from a dataset root alone.
 
         The root's ``data.yaml`` is authoritative: it supplies the class names, and its own
-        split entry supplies the image directory when it resolves. Otherwise the images
-        directory falls back to :func:`~lucid_yolo.data.layout.resolve_yolo_split`, the naming
-        convention shared with every other layout. The labels directory is the sibling of the
-        images one, ``images`` swapped for ``labels`` in the final path component — which is
-        what both published spellings, ``<split>/images`` and ``images/<split>``, agree on.
+        split entry supplies the image directory when it resolves. Where the two directories
+        come from is :func:`resolve_split_dirs`, shared with the pre-run check so a validated
+        root is the tree this reader then opens.
 
         Args:
             data_root: Directory holding ``data.yaml`` and the split trees.
@@ -347,12 +353,7 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             ```
         """
         config = YoloDataConfig.read(data_root / DATA_YAML_NAME)
-        default_images, default_labels = resolve_yolo_split(data_root, split)
-        if split in config.splits:
-            images_dir = config.images_dir(split)
-            labels_dir = _labels_dir_for(images_dir)
-        else:
-            images_dir, labels_dir = default_images, default_labels
+        images_dir, labels_dir = resolve_split_dirs(data_root, split, config)
         return cls(
             images_dir,
             labels_dir,
@@ -486,6 +487,96 @@ def load_yolo_targets(label_file: Path, *, height: int, width: int, num_classes:
     if oriented:
         return _oriented_targets(rows, labels, height=height, width=width)
     return Targets(boxes=_detection_boxes(rows, height=height, width=width), labels=labels)
+
+
+def resolve_split_dirs(data_root: Path, split: str, config: YoloDataConfig) -> tuple[Path, Path]:
+    """Return the ``(images_dir, labels_dir)`` a split is actually read from.
+
+    The dataset's own ``data.yaml`` entry outranks the naming convention: the published
+    export writes ``val: ../valid/images`` for a directory no
+    :data:`~lucid_yolo.data.layout.YOLO_CANDIDATES` row names (A58). A split the file does
+    not mention falls back to that table
+    (:func:`~lucid_yolo.data.layout.resolve_yolo_split`), which is a naming rule with a
+    deterministic fallback and cannot fail.
+
+    It is a function rather than three lines inside
+    :meth:`YoloDetectionDataset.from_root` because ``lucid-data check`` validates a root
+    *before* a run reads it (WP-099c), and a pre-run check resolving splits its own way
+    would validate a different tree than the one that gets trained on.
+
+    Args:
+        data_root: Directory holding ``data.yaml`` and the split trees.
+        split: Split name as keyed in the file, e.g. ``"train"`` or ``"val"``.
+        config: The root's parsed ``data.yaml``.
+
+    Returns:
+        The split's images directory and the labels directory beside it.
+
+    Raises:
+        FileNotFoundError: If the file names the split but its entry resolves to no
+            directory; the message lists every path tried.
+        ValueError: If the resolved images directory has no ``images`` component, leaving
+            no labels directory to derive from it.
+
+    Examples:
+        ```pycon
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     (root / "valid" / "images").mkdir(parents=True)
+        ...     config = YoloDataConfig(root=root, names=("car",), splits={"val": "../valid/images"})
+        ...     images, labels = resolve_split_dirs(root, "val", config)
+        ...     (images.parent.name, images.name, labels.name)
+        ('valid', 'images', 'labels')
+
+        ```
+    """
+    if split not in config.splits:
+        return resolve_yolo_split(data_root, split)
+    images_dir = config.images_dir(split)
+    return images_dir, _labels_dir_for(images_dir)
+
+
+def scan_yolo_label_file(label_file: Path, *, num_classes: int, oriented: bool) -> tuple[int, frozenset[int]]:
+    """Parse one label file for its object count and class ids, without its image.
+
+    The same grammar :func:`load_yolo_targets` reads, stopping before the denormalization:
+    a validator (``lucid-data check``, WP-099c) wants to know that every row parses and what
+    classes the file names, and decoding the image to obtain a pixel scale it then discards
+    would make checking a split as expensive as an epoch of it. Every rejection is therefore
+    the reader's own, named by file and 1-based line.
+
+    Args:
+        label_file: Path to an image's ``.txt`` label file.
+        num_classes: Number of classes the dataset declares; a row's class index must be
+            below it, which is what makes a file written against another class list fail
+            here rather than train.
+        oriented: Read the nine-field oriented rows instead of five-field boxes. Declared,
+            never sniffed, exactly as on the reader (see the module docstring).
+
+    Returns:
+        The number of object rows (blank lines excluded) and the distinct class ids they name.
+
+    Raises:
+        ValueError: If any row is malformed, naming the file and the 1-based line.
+        OSError: If the file cannot be read.
+
+    Examples:
+        ```pycon
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = Path(tmp) / "frame.txt"
+        ...     _ = path.write_text("1 0.5 0.5 0.5 0.25\\n\\n0 0.2 0.2 0.1 0.1\\n", encoding="utf-8")
+        ...     scan_yolo_label_file(path, num_classes=3, oriented=False)
+        (2, frozenset({0, 1}))
+
+        ```
+    """
+    lines = label_file.read_text(encoding="utf-8").splitlines()
+    rows = _parse_rows(lines, str(label_file), num_classes=num_classes, oriented=oriented)
+    return len(rows), frozenset(row.label for row in rows)
 
 
 def _parse_names(raw: object, source: str) -> tuple[str, ...]:

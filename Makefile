@@ -7,7 +7,7 @@ UV        := uv
 MINOR     ?=
 TASK      ?= det
 DATA_ROOT ?=
-DATASET   ?= coco
+DATASET   ?=
 
 .PHONY: setup lint test test-gpu precommit gate gate-gpu golden golden-gpu freeze-goldens overfit shapes check-data build clean
 
@@ -77,12 +77,15 @@ overfit:
 shapes:
 	$(PY) scripts/shapes_regression.py --task $(TASK) $(if $(FREEZE),--freeze,)
 
-# Real-dataset layout validation (WP-014/056; synthetic stand-in per docs/ASSUMPTIONS.md A26).
-# DATASET selects the layout: coco (default) or dota. A convenience wrapper only — the
-# check ships as `lucid-data check`, so a remote tier run needs no checkout (WP-096).
+# Real-dataset layout validation (WP-014/056/099c; synthetic stand-in per docs/ASSUMPTIONS.md A26).
+# DATASET names the layout and is optional: unset, the root is probed (coco or yolo), which
+# is what `lucid-yolo fit` itself does — passing a default here would make the pre-flight
+# check a different question than the run. `DATASET=dota` names the one layout no probe
+# covers. A convenience wrapper only — the check ships as `lucid-data check`, so a remote
+# tier run needs no checkout (WP-096).
 check-data:
-	@test -n "$(DATA_ROOT)" || { echo "usage: make check-data DATA_ROOT=/path/to/data [DATASET=coco|dota]"; exit 1; }
-	$(PY) -m lucid_yolo.cli.data check --data_root $(DATA_ROOT) --dataset $(DATASET)
+	@test -n "$(DATA_ROOT)" || { echo "usage: make check-data DATA_ROOT=/path/to/data [DATASET=coco|dota|yolo]"; exit 1; }
+	$(PY) -m lucid_yolo.cli.data check --data_root $(DATA_ROOT) $(if $(DATASET),--dataset $(DATASET),)
 
 # Standard PEP 517 build (setuptools backend): sdist + wheel into dist/.
 build:
