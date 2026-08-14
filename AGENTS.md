@@ -11,7 +11,7 @@ First file an agent (or engineer) executing the roadmap reads. Mirrors blueprint
 3. Implement **only that WP's scope**. Scope creep is a defect: unrelated fixes become their own WP.
 4. Run `make gate`. Must be green, every previously frozen golden included.
 5. Commit once (sec. 5 format) on `main` (D12a — one WP = one commit; each independently revertable, leaving `main` releasable).
-6. Flip WP row to `done` in `docs/ROADMAP.md`, same commit.
+6. Flip WP row to `done` in `docs/ROADMAP.md`, same commit. Keep the Scope cell near the table's median (~285 chars) — guidance, not a limit, and the reasoning behind the scope belongs in the linked RESEARCH_LOG.md section, per that file's header.
 7. **Stop and report.** No chaining into the next WP without operator authorization for the session.
 
 **Staged set must equal gate-tested set.** Step 4 certifies a tree, not an intention: any edit between gate run and `git commit` invalidates the green — including a docs edit, which is the form this actually takes. Docs-only *commit* is exempt; a docs edit riding inside a code commit is not, nor is a step-6 roadmap flip made after step 4 ran. Re-run the gate, or at minimum the meta tests, before staging. Failure surfaces one commit later as a red `main` with no obvious owner: `fcf3040` shipped that way, and the next agent spent a full run reporting a blocker it was forbidden to fix.
