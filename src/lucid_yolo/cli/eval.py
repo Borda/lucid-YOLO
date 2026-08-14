@@ -9,7 +9,8 @@ One command, no task flag::
 Which protocol runs is read from the checkpoint's ``task``: ``detect`` and ``segment``
 take :mod:`lucid_yolo.eval.detect_eval` (dual-path COCO, with the twelve ``segm_``
 statistics when the checkpoint has a mask branch), ``obb`` takes
-:mod:`lucid_yolo.eval.rotated_eval` (per-tile rotated mAP). That is the rule the
+:mod:`lucid_yolo.eval.rotated_eval` (rotated mAP, reported per tile **and** per whole
+source image once the tiles are merged, WP-107). That is the rule the
 detection evaluator already applied to masks — "driven by the checkpoint's own task, not
 by a flag the caller has to remember" — one level up: a caller who names the wrong task
 gets a wrong report, and a caller who names none cannot.

@@ -92,22 +92,20 @@ def test_the_split_is_scored_tile_by_tile(tiled_root: Path) -> None:
     """Every tile of the split is scored, and the report counts the instances it saw."""
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
 
-    metrics, tiles, instances = evaluate.score_split(
-        module, _datamodule(tiled_root), torch.device("cpu"), img_size=IMG_SIZE
-    )
+    scoring = evaluate.score_split(module, _datamodule(tiled_root), torch.device("cpu"), img_size=IMG_SIZE)
 
-    assert tiles == 4
-    assert instances >= 1
-    assert 0.0 <= metrics["map_50"] <= 1.0
+    assert scoring.tiles == 4
+    assert scoring.instances >= 1
+    assert 0.0 <= scoring.per_tile["map_50"] <= 1.0
 
 
 def test_the_limit_stops_early_without_changing_the_frame(tiled_root: Path) -> None:
     """``--limit`` scores a prefix of the split rather than a resampled subset."""
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
 
-    _, tiles, _ = evaluate.score_split(module, _datamodule(tiled_root), torch.device("cpu"), img_size=IMG_SIZE, limit=2)
+    scoring = evaluate.score_split(module, _datamodule(tiled_root), torch.device("cpu"), img_size=IMG_SIZE, limit=2)
 
-    assert tiles == 2
+    assert scoring.tiles == 2
 
 
 def test_the_report_is_written_into_a_directory_that_does_not_exist_yet(tiled_root: Path, tmp_path: Path) -> None:
@@ -136,6 +134,74 @@ def test_the_report_is_written_into_a_directory_that_does_not_exist_yet(tiled_ro
 
     assert code == 0
     assert json.loads(output.read_text())["metrics"]["map_50"] >= 0.0
+
+
+def _run_report(module: DetectionLitModule, root: Path, output: Path) -> dict[str, object]:
+    """Score a layout end to end and return the written report.
+
+    Args:
+        module: The oriented module to score with.
+        root: Root of the tiled layout.
+        output: Where the report is written.
+
+    Returns:
+        The parsed report payload.
+    """
+    assert (
+        evaluate.run(
+            module,
+            {"ema": False},
+            data_root=root,
+            split="val",
+            variant="n",
+            img_size=IMG_SIZE,
+            batch_size=2,
+            device_name="cpu",
+            limit=0,
+            output=output,
+        )
+        == 0
+    )
+    return json.loads(output.read_text())
+
+
+def test_the_report_names_both_figures_rather_than_quoting_one(tiled_root: Path, tmp_path: Path) -> None:
+    """WP-107: the per-tile and whole-image numbers are separate, labelled report entries.
+
+    The confusion this package exists to end is a report that quotes an oriented mAP
+    without saying which of the two it is — that is how 0.3.0's per-tile figures came to
+    be read as comparable to published ones. The four tiles of this layout merge back to
+    one source image, and the merged block names the rule and the cap it was scored at.
+    """
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+
+    payload = _run_report(module, tiled_root, tmp_path / "obb.json")
+
+    assert payload["info"]["per_tile"] is True  # type: ignore[call-overload,index]
+    assert payload["tiles"] == 4
+    assert payload["whole_image"]["source_images"] == 1  # type: ignore[call-overload,index]
+    assert payload["whole_image"]["max_detections"] is None  # type: ignore[call-overload,index]
+    assert 0.0 <= payload["whole_image"]["metrics"]["map_50"] <= 1.0  # type: ignore[call-overload,index]
+
+
+def test_a_layout_without_window_provenance_reports_no_whole_image_figure(tiled_root: Path, tmp_path: Path) -> None:
+    """A53's keys are non-schema, so a plain COCO layout has nothing to merge on.
+
+    The alternative — inventing an offset from the tile file names — would make the naming
+    a load-bearing interface, which A53 exists to avoid. Saying the figure is unavailable
+    is the honest answer, and it must be said rather than left as a missing key.
+    """
+    annotations = tiled_root / "annotations" / "instances_val.json"
+    payload = json.loads(annotations.read_text())
+    for record in payload["images"]:
+        del record["source_image"], record["window"]
+    annotations.write_text(json.dumps(payload))
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+
+    report = _run_report(module, tiled_root, tmp_path / "obb.json")
+
+    assert report["whole_image"] is None
+    assert report["metrics"]["map_50"] >= 0.0  # type: ignore[call-overload,index]
 
 
 def test_perfect_predictions_score_one(tiled_root: Path) -> None:

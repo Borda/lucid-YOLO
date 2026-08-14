@@ -16,18 +16,19 @@ Three pieces compose the protocol, mirroring the axis-aligned
 - :func:`rotated_detections_to_predictions` and :func:`tiled_targets_to_ground_truth` —
   the adapters from the A45 oriented detection tuple and from WP-057's tiled targets.
 
-Scope — what this module is **not** (WP-064):
+Scope — what this module is **not** (WP-107):
     It scores predictions against ground truth **as supplied**, one evaluation unit at a
     time. It does **not** merge detections from the overlapping 1024 px tiles of
     :func:`~lucid_yolo.data.tiling.tile_windows` back onto whole DOTA images. That step is
     genuinely underspecified on an NMS-free path — two overlapping tiles both detect the
     same object at full confidence and there is no suppression stage to remove the
     duplicate — so it needs a policy decided rather than inherited. WP-063 deferred it to
-    WP-088, whose scope never took it up; it belongs to WP-064, the tier that first quotes
-    a whole-image number. Until that lands the honest reading of a number this module
-    produces is **per-tile** mAP, not whole-image mAP, and the two are not interchangeable:
-    a tile-level score never pays the duplicate-detection cost that whole-image evaluation
-    charges.
+    WP-088, whose scope never took it up, and 0.3.0 shipped without it; it now lives in
+    :mod:`lucid_yolo.eval.tile_merge` (WP-107), which states the rule and argues it. What
+    this module scores is whatever evaluation unit it is handed: hand it tiles and the
+    honest reading is **per-tile** mAP, hand it merged source images and it is whole-image
+    mAP, and the two are not interchangeable — a tile-level score never pays the
+    duplicate-detection cost that whole-image evaluation charges.
 
 Protocol constants, fixed here as decisions:
     R1 states the evaluation target ("rotated mAP50-95 on DOTA-v1.0 val", Tables 10-11)
@@ -369,6 +370,8 @@ def tiled_targets_to_ground_truth(tiled: TiledTargets) -> dict[str, Tensor]:
 def evaluate_rotated_map(
     preds: Sequence[Mapping[str, Tensor]],
     targets: Sequence[Mapping[str, Tensor]],
+    *,
+    max_detections: int | None = MAX_DETECTIONS,
 ) -> dict[str, float]:
     """Score oriented predictions against oriented ground truth with rotated mAP50-95.
 
@@ -388,11 +391,18 @@ def evaluate_rotated_map(
         preds: Per-image prediction dicts with ``rboxes`` (``(M, 5)``), ``scores``
             (``(M,)``) and ``labels`` (``(M,)``), as produced by
             :func:`rotated_detections_to_predictions`. Images carrying more than
-            :data:`MAX_DETECTIONS` rows are capped here, by score, across all classes.
+            ``max_detections`` rows are capped here, by score, across all classes.
         targets: Per-image ground-truth dicts with ``rboxes`` (``(N, 5)``), ``labels``
             (``(N,)``) and ``difficult`` (``(N,)`` bool), aligned by position with
             ``preds`` and in the same coordinate and label space. ``difficult`` may be
             omitted, which is read as no instance being difficult.
+        max_detections: Detections scored per evaluation unit (decision 3). Defaults to
+            :data:`MAX_DETECTIONS`, the per-tile cap A47 fixes. ``None`` scores every
+            detection supplied, which is what :mod:`lucid_yolo.eval.tile_merge`'s
+            whole-image unit needs: a merged source image is many forward passes, each
+            already capped at emission, so re-capping the merged image at 300 would
+            measure a truncation rather than the model. ``mar_300`` keeps A47's name
+            wherever the cap goes, so a report quoting a non-default cap must name it.
 
     Returns:
         ``{"map": ..., "map_50": ..., "map_75": ..., "mar_300": ...}``. ``map`` is the
@@ -419,7 +429,7 @@ def evaluate_rotated_map(
     labels = _scorable_labels(targets)
     if not labels:
         return dict.fromkeys(_METRIC_KEYS, 0.0)
-    capped = [_cap_detections(prediction) for prediction in preds]
+    capped = [_cap_detections(prediction, max_detections) for prediction in preds]
     curves = [
         _class_curves([_split_class(p, t, label) for p, t in zip(capped, targets, strict=True)]) for label in labels
     ]
@@ -657,11 +667,12 @@ def _image_to_prediction(detections: Tensor, score_floor: float) -> dict[str, Te
     }
 
 
-def _cap_detections(prediction: Mapping[str, Tensor]) -> Mapping[str, Tensor]:
-    """Keep at most :data:`MAX_DETECTIONS` rows of one image, the highest-scoring ones.
+def _cap_detections(prediction: Mapping[str, Tensor], cap: int | None) -> Mapping[str, Tensor]:
+    """Keep at most ``cap`` rows of one image, the highest-scoring ones.
 
     The cap is applied across all classes at once, as COCO's ``maxDets`` is: it models
-    what the detector may emit for the image, not what it may emit per class.
+    what the detector may emit for the image, not what it may emit per class. ``None``
+    disables it for an evaluation unit whose detections were already capped at emission.
 
     Examples:
         >>> import torch
@@ -670,13 +681,15 @@ def _cap_detections(prediction: Mapping[str, Tensor]) -> Mapping[str, Tensor]:
         ...     "scores": torch.arange(400, dtype=torch.float32),
         ...     "labels": torch.zeros(400, dtype=torch.long),
         ... }
-        >>> tuple(_cap_detections(many)["scores"].shape)
+        >>> tuple(_cap_detections(many, MAX_DETECTIONS)["scores"].shape)
         (300,)
+        >>> tuple(_cap_detections(many, None)["scores"].shape)
+        (400,)
     """
     scores = prediction["scores"]
-    if scores.shape[0] <= MAX_DETECTIONS:
+    if cap is None or scores.shape[0] <= cap:
         return prediction
-    keep = torch.topk(scores, MAX_DETECTIONS).indices
+    keep = torch.topk(scores, cap).indices
     return {key: value[keep] for key, value in prediction.items()}
 
 
