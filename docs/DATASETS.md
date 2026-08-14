@@ -2,7 +2,7 @@
 
 Datasets are never committed to this repository and never downloaded by test code (AGENTS.md sec. 3). Every unit gate runs offline against synthetic fixtures (A26/D12b); only the WPs marked `[DATA]` need a real tree, and a tier acceptance run needs one that passes `lucid-data check`.
 
-This file says where each dataset comes from and what has to be on disk before a run starts. It does not restate the layout that `lucid_yolo.data.check` validates — that module is the specification, and this file follows it.
+This file says where each dataset comes from, what has to be on disk before a run starts, and — since WP-099d — how the two dataset formats lay out on disk and what their annotations actually contain. None of it is restated from memory: the provisioning sections follow what `lucid_yolo.data.check` validates, and the **Dataset formats** reference below follows `lucid_yolo.data.layout`, `.coco`, `.yolo` and `.dota` — those modules are the specification, and every claim below cites the one it came from.
 
 ## COCO 2017 (R12)
 
@@ -87,6 +87,65 @@ Tiles are PNG by default, matching the lossless source. `--suffix .jpg --quality
 The tiles are a build artifact and are never committed. The output is a COCO container with quadrilateral rings, in the layout `obb_smoke.yaml` names, so training and evaluation read it through the same dataset class as COCO.
 
 Overlap is a real choice, not a default to accept unread. Pixels are amplified by `(patch / (patch - overlap))²`: 512 px of overlap is R18's own crop stride and costs 4.0x, while the 200 px of A21 costs about 1.55x. Larger overlap means fewer objects severed by a tile edge and a longer epoch.
+
+## Dataset formats: the layouts they publish, and what one annotation contains
+
+This is a reader's map, not a restatement: every claim below cites the module that enforces it, and none of it substitutes for reading that module when something is unclear. It answers two questions the provisioning sections above do not — how a reader finds its images and annotations under a dataset root, and what one annotation actually contains, per task and per container.
+
+### Directory conventions
+
+`lucid_yolo.data.layout` names the directory conventions a root may satisfy, as two separate tables — `CANDIDATES` for a COCO-format root (an images directory beside an `instances_*.json`) and `YOLO_CANDIDATES` for a YOLO-format one (a `data.yaml` beside per-split `images`/`labels` directories). They stay two tables rather than becoming rows of one because a YOLO split's annotations are a *directory*, not a file: the "both halves exist" predicate that lets `CANDIDATES` fall back safely would have to become an existence check that accepts either kind of thing, and a root satisfying both conventions would then resolve to whichever table came first — handing a labels directory to the COCO reader or an `instances_*.json` to the YOLO one (`lucid_yolo/data/layout.py:28-40`).
+
+`CANDIDATES`, tried in this order for a split (`val` below), the first row whose directory *and* file both exist winning (`lucid_yolo/data/layout.py:78-83`, `resolve_split`, `:156-163`):
+
+| Convention | Images directory | Annotation file |
+| -- | -- | -- |
+| COCO 2017 | `val2017/` | `annotations/instances_val2017.json` |
+| plain COCO / tiled | `val/` | `annotations/instances_val.json` |
+| images-subdirectory | `images/val/` | `annotations/instances_val.json` |
+| per-split export | `val/` | `val/_annotations.coco.json` |
+
+`YOLO_CANDIDATES`, the same rule over two rows, both halves directories so both are tested with `is_dir()` (`lucid_yolo/data/layout.py:89-92`, `resolve_yolo_split`, `:203-210`):
+
+| Convention | Images directory | Labels directory |
+| -- | -- | -- |
+| per-split export | `val/images/` | `val/labels/` |
+| split-subdirectory | `images/val/` | `labels/val/` |
+
+Neither table raises on a miss: when nothing matches, `resolve_split`/`resolve_yolo_split` return the first row unchanged, leaving the "no such file" to the reader that actually opens the path (`lucid_yolo/data/layout.py:20-26`). `detect_layout` — the one caller with no reader of its own to ask, `DetectionDataModule` deciding which reader a bare `data_root` calls for — is stricter: it probes both tables in full and raises if neither is satisfied (naming every path tried) or if **both** are, since across the two tables the loser is a different label space and a different image set, not another spelling of the same reader (A63; `lucid_yolo/data/layout.py:213-282`).
+
+DOTA-v1.0's own `images/` + `labelTxt/` layout, documented above under **DOTA-v1.0 (R18)**, is neither of these tables — it is read directly by `lucid_yolo.data.dota`, not through `lucid_yolo.data.layout`, and only becomes a COCO-format root (one of the rows above) after `lucid-data build-tiles` writes it out.
+
+A YOLO root's own `data.yaml` outranks `YOLO_CANDIDATES` for any split it names: `YoloDataConfig.images_dir` resolves the file's own entry — the literal reading against the file's directory first, then the same entry with leading `..` components dropped, since the published export writes `../train/images` for a directory that actually sits beside the yaml — and the convention table above applies only to a split the file leaves unnamed (`lucid_yolo/data/yolo.py:211-253`, `from_root`, `:308-363`).
+
+### What one annotation contains
+
+| Task | COCO container | YOLO container |
+| -- | -- | -- |
+| detect | `bbox`: pixel `[x, y, w, h]`, converted to `xyxy` on read | five normalized fields: `cls cx cy w h` |
+| segment | first ring of `segmentation`: pixel `(P, 2)` polygon, `P >= 3` | not expressible — the format carries no rings |
+| obb | four-point `segmentation` ring, plus four non-schema keys (A53) | nine normalized fields: `cls x1 y1 x2 y2 x3 y3 x4 y4` |
+
+**COCO detect.** An annotation's `bbox` is `[x, y, w, h]` in pixels, top-left corner plus width and height; the reader converts it to this project's `xyxy` convention and clamps it to the image bounds (`lucid_yolo/data/coco.py:9-12`, `_xywh_to_xyxy`, `:436-452`). On a 100x50px image, `"bbox": [10, 5, 20, 10]` reads as `xyxy = [10, 5, 30, 15]` (`x2 = x + w = 30`, `y2 = y + h = 15`).
+
+**COCO segment.** `segmentation` is a list of flat polygon rings; only the *first* ring of an ordinary (list-typed) annotation is kept, reshaped to `(P, 2)`, and only when it has at least three points — a run-length dict, an empty list, or a shorter ring makes the reader skip the annotation entirely, along with any `iscrowd=1` one (`lucid_yolo/data/coco.py:14-22`, `_parse_ring`, `:412-433`). The same object as above, `"segmentation": [[10, 5, 30, 5, 30, 15, 10, 15]]`, parses to the ring `[[10, 5], [30, 5], [30, 15], [10, 15]]` — the envelope of that ring is the same box `bbox` gives above, though the (non-oriented) reader does not derive one from the other here; it does on the oriented path below.
+
+**COCO obb.** Under `oriented=True` the `segmentation` ring is read as a rotated box's quadrilateral rather than a free polygon: it must be exactly four points, fitted to a canonical long-edge box `(cx, cy, w, h, theta)` (`lucid_yolo/data/rotated_geom.py:4`), and `boxes` is recomputed as the **envelope of that same ring** rather than read from `bbox` — so `boxes[i]` and `rboxes[i]` describe one object by construction (`lucid_yolo/data/coco.py:24-40`, `_oriented_targets`, `:312-352`). The module's own worked example: the ring `[[3, 2], [7, 2], [7, 4], [3, 4]]` yields `boxes = [[3.0, 2.0, 7.0, 4.0]]` and `rboxes[0] = [5.0, 3.0, 4.0, 2.0, 0.0]` (`lucid_yolo/data/coco.py:334-338`).
+
+A53 adds four keys the COCO schema has none for, written by `lucid-data build-tiles` and read back by name — never by a standard COCO reader, which sees an ordinary detection set and ignores all four:
+
+| Key | Scope | Written at | Read by this project's reader |
+| -- | -- | -- | -- |
+| `difficult` | per annotation | `annotation_records` (`lucid_yolo/data/tiles.py:212`) | yes — forwarded onto `Targets.difficult`; absent reads as `False` (`lucid_yolo/data/coco.py:308`) |
+| `visible_fraction` | per annotation | `annotation_records` (`lucid_yolo/data/tiles.py:213`) | no — not read by `CocoDetectionDataset` |
+| `source_image` | per image | `_image_record` (`lucid_yolo/data/tiles.py:473`) | no |
+| `window` | per image | `_image_record` (`lucid_yolo/data/tiles.py:474`), a `(x0, y0, x1, y1)` pixel box (`lucid_yolo/data/tiles.py:150`) | no |
+
+**YOLO detect.** Each non-blank label line is five whitespace-separated fields, class index first, the rest `cx cy w h` normalized by the image's own width/height (`lucid_yolo/data/yolo.py:12-18`). At `width=100, height=40`, the row `1 0.5 0.5 0.5 0.25` denormalizes to `xyxy = [25.0, 15.0, 75.0, 25.0]` — `cx=50, w=50 -> x1=25, x2=75`; `cy=20, h=10 -> y1=15, y2=25` (the module's own doctest, `lucid_yolo/data/yolo.py:470-478`).
+
+**YOLO obb.** The oriented row is exactly nine fields — class index, then four normalized `(x, y)` corners — and a ten-field row (R18's own label lines append a trailing `difficult` flag the normalized variant has no published spelling for) is rejected naming the file and line, never assumed away (A56; `lucid_yolo/data/yolo.py:73-76`, `_parse_row`, `:655-679`). At `width=10, height=10`, the row `0 0.1 0.1 0.5 0.1 0.5 0.3 0.1 0.3` denormalizes to the quadrilateral `[[1, 1], [5, 1], [5, 3], [1, 3]]`, giving `boxes = [[1.0, 1.0, 5.0, 3.0]]` and `rboxes[0] = [3.0, 2.0, 4.0, 2.0, 0.0]` (the module's own doctest, `lucid_yolo/data/yolo.py:887-892`).
+
+**YOLO segment.** Not expressible. A label line carries five or nine normalized numbers and never a polygon ring — the format has no rings to rasterize a mask from (`lucid_yolo/data/yolo.py:12-18`). `DetectionDataModule` refuses `mask_targets=True` on a YOLO root rather than rasterizing empty masks and reporting a plausible detection number off a segmentation head trained on nothing: "`mask_targets=True is unavailable on a YOLO root: the format carries no per-instance polygon rings, so there is nothing to rasterise masks from`" (`lucid_yolo/ptl/datamodule.py:931-950`).
 
 ## Where a provisioned tree belongs on a hosted runtime
 
