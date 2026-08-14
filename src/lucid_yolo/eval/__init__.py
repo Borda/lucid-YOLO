@@ -21,13 +21,16 @@ ground-truth masks come from
 polygon and RLE encodings alike.
 
 The oriented half is :mod:`lucid_yolo.eval.dota_eval` (WP-063, A24): exact
-polygon-intersection rotated IoU (:func:`~lucid_yolo.eval.dota_eval.rotated_iou`)
+polygon-intersection rotated IoU (:func:`~lucid_yolo.data.rotated_geom.rotated_iou`,
+defined in the geometry module since WP-091c and re-exported by both)
 and the COCO-style accumulator that runs on it
 (:func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map`), reached through the
 adapters :func:`~lucid_yolo.eval.dota_eval.rotated_detections_to_predictions` and
 :func:`~lucid_yolo.eval.dota_eval.tiled_targets_to_ground_truth`. That module
 scores one evaluation unit at a time; merging detections across overlapping tiles
-back onto whole DOTA images is WP-064's, and its docstring says so.
+back onto whole DOTA images is :mod:`lucid_yolo.eval.tile_merge` (WP-107), whose
+core-ownership rule (A59) decides which tile owns a detection before anything is
+scored.
 
 :mod:`lucid_yolo.eval.checkpoint` is the step every acceptance script starts with
 (:func:`~lucid_yolo.eval.checkpoint.load_eval_module`,

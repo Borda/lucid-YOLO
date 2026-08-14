@@ -31,6 +31,7 @@ from lucid_yolo.data.rotated_geom import (
     points_in_rboxes,
     polygons_to_rboxes,
     rboxes_to_polygons,
+    rotated_iou,
 )
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.data.tiling import (
@@ -97,6 +98,7 @@ __all__ = [
     "rbox_envelopes",
     "rboxes_to_polygons",
     "rgb_to_hsv",
+    "rotated_iou",
     "shift_rboxes",
     "tile_image_targets",
     "tile_windows",

@@ -15,7 +15,7 @@ interchangeably (blueprint sec. 5.5):
 
 :class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` (WP-091b) is the oriented
 third: the same non-E2E path over the dense branch's *rotated* outputs, suppressing by
-the exact rotated overlap of :func:`~lucid_yolo.eval.dota_eval.rotated_iou` rather than
+the exact rotated overlap of :func:`~lucid_yolo.data.rotated_geom.rotated_iou` rather than
 by the boxes' upright envelopes, and emitting the A45 tuple
 :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` emits so the oriented tier's two
 columns compare. It serves the one-to-many branch and exists as that comparison

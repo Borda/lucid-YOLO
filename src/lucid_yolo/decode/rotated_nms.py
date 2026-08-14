@@ -20,10 +20,11 @@ output to show it had. The two measures are genuinely different quantities: two 
 crossing at right angles through one centre have **identical** envelopes, so their
 envelope IoU is exactly ``1.0`` while their rotated IoU is ``0.053``. Under any threshold
 below 1 an envelope-based decoder deletes one of two objects that barely touch. The
-overlap here is :func:`~lucid_yolo.eval.dota_eval.rotated_iou`, the exact
-polygon-intersection measure the oriented evaluator already scores with (A24), so the
-decoder and the instrument that grades it agree on what "overlap" means by construction
-rather than by coincidence.
+overlap here is :func:`~lucid_yolo.data.rotated_geom.rotated_iou`, the exact
+polygon-intersection measure the oriented evaluator also scores with (A24), so the decoder
+and the instrument that grades it agree on what "overlap" means by construction rather
+than by coincidence — they call one function in the geometry module, not two
+implementations that happen to match (WP-091c).
 
 The pipeline over the dense oriented outputs mirrors the axis-aligned path step for step:
 
@@ -73,8 +74,8 @@ from __future__ import annotations
 import torch
 from torch import Tensor, nn
 
+from lucid_yolo.data.rotated_geom import rotated_iou
 from lucid_yolo.decode.common import pad_detections
-from lucid_yolo.eval.dota_eval import rotated_iou
 from lucid_yolo.models.heads.obb import decode_rboxes
 
 __all__ = ["ROTATED_NMS_IOU_THRESHOLD", "RotatedNMSDecoder"]

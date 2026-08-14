@@ -5,13 +5,25 @@ The oriented acceptance instrument of the blueprint: rotated mAP50-95 on the DOT
 **validation** split, scored with **exact polygon-intersection IoU** rather than a
 Gaussian surrogate. :mod:`lucid_yolo.losses.probiou` approximates a rotated box by its
 uniform-density Gaussian because a loss needs a smooth gradient; a metric needs the area
-itself, so this module computes it — Sutherland-Hodgman convex clipping of one
+itself, so the area is computed exactly — Sutherland-Hodgman convex clipping of one
 quadrilateral against the other, then the shoelace formula.
+
+That kernel is :func:`~lucid_yolo.data.rotated_geom.rotated_iou`, and it lives in the
+geometry module rather than here (WP-091c): it is pure geometry with no evaluation
+content, and :class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` suppresses with the
+same function, so putting it beside :func:`~lucid_yolo.data.rotated_geom.canonicalize`
+keeps an evaluation module off the decode path's import graph. It is imported **and
+re-exported** here deliberately, not as a leftover alias awaiting removal: the protocol
+this module defines is stated in terms of that overlap measure, so a caller reproducing
+the protocol reaches for the two through one import, exactly as
+:func:`~lucid_yolo.data.rotated_geom.canonicalize` is reachable from both
+:mod:`lucid_yolo.data` and its own module.
 
 Three pieces compose the protocol, mirroring the axis-aligned
 :mod:`lucid_yolo.eval.coco_eval`:
 
-- :func:`rotated_iou` — the exact pairwise overlap kernel.
+- :func:`rotated_iou` — the exact pairwise overlap kernel, defined in
+  :mod:`lucid_yolo.data.rotated_geom` and re-exported here.
 - :func:`evaluate_rotated_map` — the COCO-style accumulator running on that kernel.
 - :func:`rotated_detections_to_predictions` and :func:`tiled_targets_to_ground_truth` —
   the adapters from the A45 oriented detection tuple and from WP-057's tiled targets.
@@ -96,36 +108,12 @@ The difficult flag, and what the caller must do about it:
     costing a true positive. Difficult instances are never consumed, so several detections
     may be discarded against the same one, which is the devkit's behaviour.
 
-Precision, and why there is no float64 here:
-    :mod:`lucid_yolo.data.tiling` clips in float64 because DOTA coordinates reach 10^4 px
-    and a float32 shoelace difference loses the precision its 0.7 threshold is compared
-    at. That escape is not available on this path: evaluation runs on MPS, which has no
-    float64 — the same constraint :mod:`lucid_yolo.losses.probiou` restructured its algebra
-    for. The working dtype here follows the input instead, and the conditioning is fixed
-    structurally: intersection over union is **translation invariant**, so every pair is
-    re-centred on its own midpoint and only then expanded to corners. A pair of 50 px
-    boxes at ``x = 12000`` is clipped at coordinates near zero rather than near 12000,
-    which is where a float32 shoelace has its precision, and the remaining operations are
-    all like-signed sums over small numbers.
-
-    The order of those two steps is the whole of it, and it is not a detail. Worst
-    absolute IoU error over 300 overlapping 20-80 px pairs per row, measured against a
-    float64 shapely evaluation, as the pair's common offset from the origin grows::
-
-        common offset   no shift at all   shift after   shift before (shipped)
-        0               1.5e-07           2.2e-07       1.4e-07
-        1e3             5.1e-05           1.8e-06       1.7e-07
-        1e4             6.3e-03           2.7e-05       1.6e-07
-        1e5             1.7e+00           1.4e-04       1.4e-07
-        1e6             1.5e+00           1.4e-03       1.4e-07
-
-    Shifting *after* the corners are expanded still leaves them rounded at absolute scale
-    — a cliff that merely starts later. Shifting *before* makes the kernel scale-free, at
-    the cost of canonicalizing ``M * N`` boxes rather than ``M + N``. That price is worth
-    paying now rather than later: tiles are 1024 px local, so nothing in this work package
-    exercises the cliff, but WP-064 evaluates on whole DOTA images whose coordinates reach
-    10^4, and a metric that quietly loses three digits at that scale would be found by
-    nobody.
+Precision, and why there is no float64 anywhere on this path:
+    Evaluation runs on MPS, which has no float64, so the overlap kernel cannot buy its
+    conditioning the way :mod:`lucid_yolo.data.tiling` does. It buys it structurally
+    instead, by re-centring each pair on its own midpoint before expanding corners. The
+    argument and the error measurements that fix the order of those two steps travel with
+    the kernel — see :mod:`lucid_yolo.data.rotated_geom`.
 
 Provenance: R1 Tables 10-11, R12 (the 101-point and zero-GT conventions), R13, R18 sec. 4
 and its devkit. Assumptions: A21, A23, A24, A39, A45.
@@ -139,7 +127,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch import Tensor
 
-from lucid_yolo.data.rotated_geom import rboxes_to_polygons
+from lucid_yolo.data.rotated_geom import rotated_iou
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -190,91 +178,6 @@ _SCORE_COLUMN = 5
 _LABEL_COLUMN = 6
 #: Width of the A45 oriented detection tuple ``[cx, cy, w, h, theta, score, class]``.
 _DETECTION_WIDTH = 7
-
-#: Corner count of the quadrilateral form of a rotated box.
-_QUAD_CORNERS = 4
-#: Vertex bound on the intersection of two convex quadrilaterals. Clipping a 4-gon by
-#: ``j`` half-planes yields at most ``4 + j`` vertices, so 8 bounds every intermediate
-#: stage of the four-edge pass as well as its result.
-_MAX_INTERSECTION_CORNERS = 8
-#: Minimum vertex count for a polygon to enclose any area.
-_MIN_AREA_CORNERS = 3
-
-
-def rotated_iou(boxes_a: Tensor, boxes_b: Tensor) -> Tensor:
-    """Compute exact pairwise intersection-over-union between rotated boxes.
-
-    Each box is expanded to its four corners by
-    :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons` — which canonicalizes first,
-    so ``theta`` and ``theta + pi`` give identical overlaps — and every pair's
-    intersection is obtained by clipping one quadrilateral against the other's four edges
-    (Sutherland-Hodgman, valid because both are convex) and taking the shoelace area of
-    what survives. No sampling, no Gaussian surrogate, no float64: see the module
-    docstring on the per-pair midpoint shift that makes float32 sufficient.
-
-    Conventions and degenerate cases:
-
-    - Clipping is **edge-inclusive** (a vertex exactly on a clip edge counts as inside),
-      matching :func:`~lucid_yolo.data.rotated_geom.points_in_rboxes` and WP-055's
-      containment choice. Boxes sharing only an edge or a corner therefore intersect in a
-      zero-area polygon and score exactly ``0.0`` either way — inclusivity changes which
-      vertices are kept, never the area.
-    - A box with zero or negative extent encloses no area. Its polygon has zero or
-      reversed winding, both of which clamp to zero area, so every IoU involving it is
-      ``0.0``. The union is guarded against division by zero, so a degenerate pair yields
-      ``0.0`` rather than ``NaN`` — the same refusal :mod:`lucid_yolo.losses.probiou`
-      makes.
-
-    Args:
-        boxes_a: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``, canonical or not.
-        boxes_b: ``(N, 5)`` rotated boxes in the same form.
-
-    Returns:
-        ``(M, N)`` IoU in ``[0, 1]``, in the dtype
-        :func:`torch.result_type` gives the two inputs.
-
-    Raises:
-        ValueError: If either argument is not a 2-D ``(K, 5)`` tensor.
-
-    Examples:
-        >>> import torch
-        >>> box = torch.tensor([[0.0, 0.0, 4.0, 2.0, 0.0]])
-        >>> float(rotated_iou(box, box))  # a box against itself
-        1.0
-        >>> shifted = torch.tensor([[2.0, 0.0, 4.0, 2.0, 0.0]])  # half its width along +x
-        >>> round(float(rotated_iou(box, shifted)), 4)
-        0.3333
-        >>> touching = torch.tensor([[4.0, 0.0, 4.0, 2.0, 0.0]])  # shares one edge only
-        >>> float(rotated_iou(box, touching))
-        0.0
-        >>> square = torch.tensor([[0.0, 0.0, 3.0, 3.0, 0.2]])
-        >>> turned = torch.tensor([[0.0, 0.0, 3.0, 3.0, 0.2 + torch.pi / 2]])
-        >>> round(float(rotated_iou(square, turned)), 5)  # the same square, folded
-        1.0
-    """
-    _check_rboxes(boxes_a, "boxes_a")
-    _check_rboxes(boxes_b, "boxes_b")
-    dtype = torch.result_type(boxes_a, boxes_b)
-    left, right = boxes_a.to(dtype), boxes_b.to(dtype)
-    if left.shape[0] == 0 or right.shape[0] == 0:
-        return torch.zeros((left.shape[0], right.shape[0]), dtype=dtype, device=left.device)
-
-    # Translation invariance is what buys float32 the headroom float64 would otherwise be
-    # needed for: each pair is re-centred on its own midpoint *before* its corners are
-    # expanded, so no coordinate in the clipping arithmetic ever carries the absolute
-    # offset. Re-centring after the expansion would leave the corners themselves rounded
-    # at absolute scale, which is a cliff rather than a constant (see the module docstring).
-    shape = (left.shape[0], right.shape[0], _RBOX_COLUMNS)
-    midpoint = (left[:, None, :2] + right[None, :, :2]) / 2
-    subject = _local_polygons(left[:, None].expand(shape), midpoint)
-    clip = _local_polygons(right[None, :].expand(shape), midpoint)
-
-    area_a = _shoelace(subject).clamp_min(0)
-    area_b = _shoelace(clip).clamp_min(0)
-    intersection = _intersection_area(subject, clip)
-    union = area_a + area_b - intersection
-    tiny = torch.finfo(union.dtype).tiny
-    return torch.where(union > tiny, intersection / union.clamp_min(tiny), torch.zeros_like(union)).clamp(0.0, 1.0)
 
 
 def rotated_detections_to_predictions(detections: Tensor, score_floor: float = 0.0) -> list[dict[str, Tensor]]:
@@ -457,197 +360,6 @@ class _ImageSplit:
     scores: Tensor
     iou: Tensor
     difficult: Tensor
-
-
-def _local_polygons(pairs: Tensor, midpoint: Tensor) -> Tensor:
-    """Expand per-pair rotated boxes to corners in the frame centred on ``midpoint``.
-
-    The subtraction happens on the **centre**, before
-    :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons` adds the half-extents, so
-    the corner coordinates are born small instead of being made small afterwards. That is
-    the whole precision story of this module: a corner expanded at absolute DOTA scale is
-    already rounded to that scale's float32 spacing, and no later shift recovers it.
-
-    Args:
-        pairs: ``(M, N, 5)`` rotated boxes, broadcast to the pair grid.
-        midpoint: ``(M, N, 2)`` centre each pair is re-expressed about.
-
-    Returns:
-        ``(M, N, 4, 2)`` corner coordinates in the per-pair local frame.
-
-    Examples:
-        >>> import torch
-        >>> box = torch.tensor([[[10.0, 10.0, 4.0, 2.0, 0.0]]])
-        >>> _local_polygons(box, torch.tensor([[[10.0, 10.0]]]))[0, 0].tolist()
-        [[-2.0, -1.0], [2.0, -1.0], [2.0, 1.0], [-2.0, 1.0]]
-    """
-    shifted = torch.cat([pairs[..., :2] - midpoint, pairs[..., 2:]], dim=-1)
-    corners = rboxes_to_polygons(shifted.reshape(-1, _RBOX_COLUMNS))
-    return corners.reshape(*pairs.shape[:2], _QUAD_CORNERS, corners.shape[-1])
-
-
-def _intersection_area(subject: Tensor, clip: Tensor) -> Tensor:
-    """Clip ``subject`` against every edge of ``clip`` and return the surviving area.
-
-    One Sutherland-Hodgman pass per clip edge, each followed by a compaction back to
-    :data:`_MAX_INTERSECTION_CORNERS` slots — which loses nothing, since an intermediate
-    result cannot exceed that bound (see the constant's note).
-
-    Args:
-        subject: ``(M, N, 4, 2)`` corners of the clipped quadrilateral, per pair.
-        clip: ``(M, N, 4, 2)`` corners of the clipping quadrilateral, per pair.
-
-    Returns:
-        ``(M, N)`` intersection area, never negative.
-
-    Examples:
-        >>> import torch
-        >>> unit = torch.tensor([[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]])
-        >>> pair = unit[None, None]
-        >>> float(_intersection_area(pair, pair))
-        4.0
-    """
-    polygon = subject
-    valid = torch.ones(subject.shape[:-1], dtype=torch.bool, device=subject.device)
-    for corner in range(_QUAD_CORNERS):
-        start = clip[..., corner, :]
-        end = clip[..., (corner + 1) % _QUAD_CORNERS, :]
-        polygon, valid = _clip_by_edge(polygon, valid, start, end)
-        polygon, valid = _compact(polygon, valid)
-    enclosed = valid.sum(dim=-1) >= _MIN_AREA_CORNERS
-    return torch.where(enclosed, _shoelace(polygon), torch.zeros_like(enclosed, dtype=polygon.dtype)).clamp_min(0)
-
-
-def _clip_by_edge(polygon: Tensor, valid: Tensor, start: Tensor, end: Tensor) -> tuple[Tensor, Tensor]:
-    """Run one Sutherland-Hodgman step against the directed edge ``start -> end``.
-
-    Emits two slots per input vertex — the vertex itself when it is inside, and the
-    crossing point when the edge to its successor changes side — so the output shape is a
-    pure function of the input shape and no data-dependent resize is needed. The interior
-    test is ``cross >= 0``, which is **edge-inclusive** and matches the positive winding
-    :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons` guarantees.
-
-    Args:
-        polygon: ``(M, N, K, 2)`` vertices, valid ones compacted to the front.
-        valid: ``(M, N, K)`` prefix mask of live vertices.
-        start: ``(M, N, 2)`` first endpoint of the clip edge.
-        end: ``(M, N, 2)`` second endpoint of the clip edge.
-
-    Returns:
-        ``(M, N, 2K, 2)`` vertices and their ``(M, N, 2K)`` validity mask.
-
-    Examples:
-        >>> import torch
-        >>> square = torch.tensor([[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]])[None, None]
-        >>> live = torch.ones(square.shape[:-1], dtype=torch.bool)
-        >>> _, mask = _clip_by_edge(square, live, torch.zeros(1, 1, 2), torch.tensor([[[1.0, 0.0]]]))
-        >>> int(mask.sum())  # the whole square lies on the inside of the x axis
-        4
-    """
-    edge = (end - start)[..., None, :]
-    offset = polygon - start[..., None, :]
-    distance = edge[..., 0] * offset[..., 1] - edge[..., 1] * offset[..., 0]
-    successor = _successor(polygon, valid)
-    next_distance = _successor(distance[..., None], valid)[..., 0]
-
-    inside = distance >= 0
-    crossing = inside != (next_distance >= 0)
-    denominator = distance - next_distance
-    step = distance / torch.where(denominator == 0, torch.ones_like(denominator), denominator)
-    crossed = polygon + step[..., None] * (successor - polygon)
-
-    vertices = torch.stack([polygon, crossed], dim=-2).flatten(-3, -2)
-    kept = torch.stack([valid & inside, valid & crossing], dim=-1).flatten(-2, -1)
-    return vertices, kept
-
-
-def _successor(values: Tensor, valid: Tensor) -> Tensor:
-    """Return each slot's cyclic successor among the live vertices.
-
-    ``valid`` is a prefix mask, so the successor of slot ``i`` is slot ``i + 1`` when that
-    slot is live and slot ``0`` otherwise — the ring closes at the first vertex rather
-    than wandering into the padding.
-
-    Args:
-        values: ``(M, N, K, C)`` per-vertex values.
-        valid: ``(M, N, K)`` prefix mask of live vertices.
-
-    Returns:
-        ``(M, N, K, C)`` values of each slot's successor.
-
-    Examples:
-        >>> import torch
-        >>> values = torch.tensor([[[[1.0], [2.0], [3.0]]]])
-        >>> mask = torch.tensor([[[True, True, False]]])
-        >>> _successor(values, mask).flatten().tolist()  # slot 1 wraps to slot 0
-        [2.0, 1.0, 1.0]
-    """
-    rolled = values.roll(-1, dims=-2)
-    rolled_valid = valid.roll(-1, dims=-1)
-    return torch.where(rolled_valid[..., None], rolled, values[..., :1, :])
-
-
-def _compact(polygon: Tensor, valid: Tensor) -> tuple[Tensor, Tensor]:
-    """Move live vertices to the front, truncate to the vertex bound, and pad with vertex 0.
-
-    Restores the prefix-mask invariant :func:`_successor` relies on, and replaces every
-    dead slot with the first live vertex so :func:`_shoelace` may run mask-free: the
-    padding edges are zero-length and contribute nothing to the area.
-
-    Args:
-        polygon: ``(M, N, K, 2)`` vertices in emission order.
-        valid: ``(M, N, K)`` mask of live vertices, in any arrangement.
-
-    Returns:
-        ``(M, N, 8, 2)`` compacted vertices and their ``(M, N, 8)`` prefix mask.
-
-    Examples:
-        >>> import torch
-        >>> pts = torch.tensor([[[[9.0, 9.0], [1.0, 1.0], [2.0, 2.0]]]])
-        >>> mask = torch.tensor([[[False, True, True]]])
-        >>> kept, live = _compact(pts, mask)
-        >>> kept[0, 0, :3].tolist(), live[0, 0, :3].tolist()
-        ([[1.0, 1.0], [2.0, 2.0], [1.0, 1.0]], [True, True, False])
-    """
-    order = torch.argsort(valid.logical_not().to(torch.uint8), dim=-1, stable=True)[..., :_MAX_INTERSECTION_CORNERS]
-    gathered = polygon.gather(-2, order[..., None].expand(*order.shape, polygon.shape[-1]))
-    kept = valid.gather(-1, order)
-    return torch.where(kept[..., None], gathered, gathered[..., :1, :]), kept
-
-
-def _shoelace(polygon: Tensor) -> Tensor:
-    """Return the signed area of each polygon by the shoelace formula.
-
-    Positive for the winding :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons`
-    emits. Repeated vertices contribute zero, which is what lets padded rings be measured
-    without a mask.
-
-    Args:
-        polygon: ``(..., K, 2)`` vertices in ring order.
-
-    Returns:
-        ``(...)`` signed area.
-
-    Examples:
-        >>> import torch
-        >>> square = torch.tensor([[0.0, 0.0], [3.0, 0.0], [3.0, 2.0], [0.0, 2.0]])
-        >>> float(_shoelace(square))
-        6.0
-    """
-    successor = polygon.roll(-1, dims=-2)
-    cross = polygon[..., 0] * successor[..., 1] - successor[..., 0] * polygon[..., 1]
-    return 0.5 * cross.sum(dim=-1)
-
-
-def _check_rboxes(rboxes: Tensor, name: str) -> None:
-    """Raise :class:`ValueError` unless ``rboxes`` is a 2-D ``(K, 5)`` tensor.
-
-    Examples:
-        >>> import torch
-        >>> _check_rboxes(torch.zeros((0, 5)), "boxes_a")
-    """
-    if rboxes.ndim != 2 or rboxes.shape[1] != _RBOX_COLUMNS:
-        raise ValueError(f"{name} must be (K, {_RBOX_COLUMNS}); got shape {tuple(rboxes.shape)}")
 
 
 def _image_to_prediction(detections: Tensor, score_floor: float) -> dict[str, Tensor]:
