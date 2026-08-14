@@ -10,7 +10,9 @@ A research reproduction for knowledge sharing: independent verification of the p
 
 Perpetual 0.x release train — each 0.MINOR is a gated capability milestone (0.1 detection, 0.2 instance segmentation, 0.3 oriented detection, 0.4+ rolling). No 1.0 is planned: the project tracks a living specification (the paper plus this project's assumption register), and each release freezes its golden metrics; later releases must never regress them. This is a deliberate policy, not an abandonment signal — see docs/DECISIONS.md.
 
-Current release: **0.2.0** — detection and instance segmentation, at the smoke tier and the smallest scale. No `v0.1.0` was ever tagged; the detector's history ships inside the 0.2.0 changelog section, and `goldens/frozen/0.2/` is the first frozen set. Releases publish no trained weights (D14).
+Current release: **0.3.0** — detection, instance segmentation and oriented detection, at the smoke tier and the smallest scale. No `v0.1.0` was ever tagged; the detector's history ships inside the 0.2.0 changelog section, and `goldens/frozen/0.2/` is the first frozen set. Releases publish no trained weights (D14), which for the oriented model is a licence matter as well as a policy one: DOTA permits academic use only, so weights trained on it could not ship under this repository's Apache-2.0 terms (O4).
+
+The oriented tier's reported accuracy is **per tile**. Overlapping 1024 px tiles are not merged back onto whole images, so it is not comparable to published DOTA figures — see the reproduction report, and roadmap 107 for the merge policy that would make it so.
 
 ## Development
 

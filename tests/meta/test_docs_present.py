@@ -11,11 +11,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS = REPO_ROOT / "docs"
+MODEL_CARDS = DOCS / "model_cards"
 
 #: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted. Raise it when adding
 #: a work package; never lower it.
-_WP_FLOOR = 105
+_WP_FLOOR = 107
 
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
@@ -31,11 +32,24 @@ REQUIRED_FILES = (
     DOCS / "DATASETS.md",
     DOCS / "TRAINING.md",
     DOCS / "REPRODUCTION_REPORT.md",
-    DOCS / "MODEL_CARD_DETECTION.md",
-    DOCS / "MODEL_CARD_SEGMENTATION.md",
-    DOCS / "MODEL_CARD_OBB.md",
+    MODEL_CARDS / "detection.md",
+    MODEL_CARDS / "segmentation.md",
+    MODEL_CARDS / "obb.md",
     REPO_ROOT / "AGENTS.md",
 )
+
+
+def test_every_model_card_is_a_required_file() -> None:
+    """No card sits in ``docs/model_cards/`` unlisted above (WP-106).
+
+    The directory is the natural place to drop a fourth card, and a card nothing gates is
+    a card that can be deleted or renamed silently. The listing is what makes each one
+    required, so the two are checked against each other rather than kept in step by hand.
+    """
+    on_disk = {path.name for path in MODEL_CARDS.glob("*.md")}
+    required = {path.name for path in REQUIRED_FILES if path.parent == MODEL_CARDS}
+
+    assert on_disk == required, f"model cards not in REQUIRED_FILES: {sorted(on_disk - required)}"
 
 
 def test_policy_docs_exist() -> None:

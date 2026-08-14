@@ -81,6 +81,18 @@ _SEG_SERIES = (
     ("train/semantic", "semantic (train only)", "#2ca02c"),
 )
 
+#: Panel 4 series for an oriented run: the pre-gain terms that replace and extend the box
+#: pair (A49, A50, WP-088). Validation only, matching panel 3 — both splits would put six
+#: curves on one axis to say what three already say.
+_OBB_SERIES = (("rbox", "rotated ProbIoU"), ("rl1", "L1 (stride units)"), ("angle", "angle"))
+
+#: Panel 1 series when a run logs no ``val/mAP``: the oriented metric that replaces it
+#: (WP-102). mAP50 leads because the oriented DoD is stated at IoU 0.50.
+_ROTATED_SERIES = (
+    ("val/rotated_mAP50", "mAP50", "#1f77b4"),
+    ("val/rotated_mAP", "mAP50-95", "#7f7f7f"),
+)
+
 #: Figure geometry in inches: each panel gets this width, and the figure this height.
 _PANEL_WIDTH, _FIGURE_HEIGHT = 4.5, 3.9
 
@@ -138,25 +150,76 @@ def load_series(path: Path, column: str) -> tuple[list[int], list[float]]:
     return epochs, values
 
 
+def _mark_close_mosaic(axis: Axes, close_mosaic: int | None) -> None:
+    """Mark the epoch mosaic augmentation was disabled, on whichever metric panel was drawn."""
+    if close_mosaic is None:
+        return
+    axis.axvline(close_mosaic, color="#d62728", linestyle="--", linewidth=1.0)
+    axis.annotate(
+        "close-mosaic",
+        xy=(close_mosaic, axis.get_ylim()[1] * 0.12),
+        xytext=(4, 0),
+        textcoords="offset points",
+        fontsize=8,
+        color="#d62728",
+    )
+
+
+def _panel_rotated_map(axis: Axes, path: Path, close_mosaic: int | None) -> bool:
+    """Draw the oriented metric panel: rotated mAP50 and mAP50-95 (WP-063).
+
+    Both are drawn because they answer different questions about the same run. mAP50
+    leads and is annotated — the oriented DoD is stated at IoU 0.50, and localization
+    at 0.50 is what an orientation either gets right or does not. The stricter mean
+    over 0.50-0.95 sits beneath it and is where a systematically slightly-wrong
+    heading shows up as a gap rather than as a failure.
+
+    Neither is a whole-image number: both score tiles as supplied, and the merge
+    policy for overlapping tiles belongs to WP-064 (`eval/dota_eval.py`).
+    """
+    drawn = False
+    for column, label, color in _ROTATED_SERIES:
+        epochs, values = load_series(path, column)
+        if not epochs:
+            continue
+        axis.plot(epochs, values, label=label, color=color, linewidth=1.8 if not drawn else 1.4)
+        if not drawn:
+            axis.annotate(
+                f"{values[-1]:.3f}",
+                xy=(epochs[-1], values[-1]),
+                xytext=(-34, -12),
+                textcoords="offset points",
+                fontsize=9,
+                color=color,
+            )
+        drawn = True
+    if not drawn:
+        return False
+    axis.set_title("validation rotated mAP (per tile)")
+    axis.set_ylabel("rotated mAP")
+    axis.set_ylim(bottom=0.0)
+    axis.legend(frameon=False, fontsize=9)
+    _mark_close_mosaic(axis, close_mosaic)
+    return True
+
+
 def _panel_map(axis: Axes, path: Path, close_mosaic: int | None) -> bool:
-    """Draw the val/mAP panel; return whether the run logged the metric at all."""
+    """Draw the headline metric panel; return whether the run logged one at all.
+
+    An oriented run logs no ``val/mAP`` — that figure reads the A44 composition's
+    pre-rotation rectangle and was dropped rather than carried beside a metric that
+    answers the question (WP-102) — so the panel falls back to the rotated pair. The
+    annotated value is the leading series either way, which for an oriented run is
+    mAP50, where its acceptance criterion is stated.
+    """
     epochs, values = load_series(path, "val/mAP")
     if not epochs:
-        return False
+        return _panel_rotated_map(axis, path, close_mosaic)
     axis.plot(epochs, values, color="#1f77b4", linewidth=1.8)
     axis.set_title("validation mAP50-95 (E2E proxy)")
     axis.set_ylabel("mAP50-95")
     axis.set_ylim(bottom=0.0)
-    if close_mosaic is not None:
-        axis.axvline(close_mosaic, color="#d62728", linestyle="--", linewidth=1.0)
-        axis.annotate(
-            "close-mosaic",
-            xy=(close_mosaic, axis.get_ylim()[1] * 0.12),
-            xytext=(4, 0),
-            textcoords="offset points",
-            fontsize=8,
-            color="#d62728",
-        )
+    _mark_close_mosaic(axis, close_mosaic)
     axis.annotate(
         f"{values[-1]:.3f}",
         xy=(epochs[-1], values[-1]),
@@ -250,6 +313,34 @@ def _panel_segmentation(axis: Axes, path: Path) -> None:
     axis.legend(frameon=False, fontsize=9)
 
 
+def _has_oriented(path: Path) -> bool:
+    """Report whether the run logged the oriented loss terms."""
+    return any(load_series(path, f"val/{column}")[0] for column, _ in _OBB_SERIES)
+
+
+def _panel_oriented(axis: Axes, path: Path) -> None:
+    """Draw the pre-gain oriented terms an ``obb`` run adds to the shared objective.
+
+    Two of the three replace terms panel 3 also carries: ``rbox`` is the rotated
+    ProbIoU that stands in for CIoU (A49) and ``rl1`` the L1 retargeted onto the
+    rotated box's own extents (A50), so panel 3's ``o2o_box`` and ``o2o_l1`` are the
+    zeros the dual loss is constructed with rather than live terms. ``angle`` is the
+    one term with no axis-aligned counterpart at all.
+
+    The axis is log, as panel 3 is: the three terms sit decades apart, and the angle
+    term in particular is small enough that a linear axis would draw it flat against
+    the bottom whether it was learning or dead.
+    """
+    for column, label in _OBB_SERIES:
+        epochs, values = load_series(path, f"val/{column}")
+        if epochs:
+            axis.plot(epochs, values, label=label, linewidth=1.4)
+    axis.set_title("validation oriented terms (pre-gain)")
+    axis.set_ylabel("term value")
+    axis.set_yscale("log")
+    axis.legend(frameon=False, fontsize=9)
+
+
 def plot_run(metrics: Path, output: Path, title: str, close_mosaic: int | None = None) -> Path:
     """Render one run's figure and write it as SVG.
 
@@ -277,7 +368,8 @@ def plot_run(metrics: Path, output: Path, title: str, close_mosaic: int | None =
         ```
     """
     segmented = _has_segmentation(metrics)
-    panels = 4 if segmented else 3
+    oriented = _has_oriented(metrics)
+    panels = 4 if segmented or oriented else 3
     figure, axes = plt.subplots(1, panels, figsize=_figure_size(panels))
     has_map = _panel_map(axes[0], metrics, close_mosaic)
     if not has_map:
@@ -287,6 +379,8 @@ def plot_run(metrics: Path, output: Path, title: str, close_mosaic: int | None =
     _panel_components(axes[2], metrics)
     if segmented:
         _panel_segmentation(axes[3], metrics)
+    elif oriented:
+        _panel_oriented(axes[3], metrics)
     for axis in axes:
         if axis.axison:
             axis.set_xlabel("epoch")

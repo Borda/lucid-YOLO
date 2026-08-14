@@ -69,4 +69,4 @@ Architecture- and policy-level decisions. D1–D11 are transcribed from the gove
 | O1 | GPU budget → tier commitment per task | before Phase 6 | All three A+B tiers, B on rented spot instances, sequenced Det → Seg → OBB; each 0.MINOR ships at A-tier if B still queued |
 | O2 | Project name | resolved 2026-08-02 (D12f) | `lucid-yolo`; YOLO26 implementation exposed under feature name `e2e` |
 | O3 | Employer nexus + counsel review of README/NOTICE naming | before the repository or any tag is public (before v0.1.0) | blocked-on-human |
-| O4 | OBB weight release policy given DOTA academic-use terms | before v0.3.0 | Code + report Apache-2.0; DOTA-trained weights withheld, documented reproduction recipe |
+| O4 | OBB weight release policy given DOTA academic-use terms | resolved 2026-08-14 (v0.3.0) | Code + report Apache-2.0; DOTA-trained weights withheld, documented reproduction recipe |

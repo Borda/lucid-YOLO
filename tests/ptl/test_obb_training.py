@@ -14,8 +14,9 @@ therefore aim at the **wiring** rather than at the components again:
 * the rotated and angle terms gather their targets by the *assignment*, not by
   positional order, so an anchor's orientation cannot be scored against another
   instance's box;
-* ``task="detect"`` is bit-identical to a snapshot captured **before** this work
-  package touched the shared modules — not merely "the detection tests pass";
+* ``task="detect"`` reproduces a snapshot captured **before** this work package
+  touched the shared modules — not merely "the detection tests pass" — to the
+  tolerance an architecture's choice of summation order forces on it;
 * the oriented module's state-dict keys are the detection module's plus the angle
   stems, so the stages stayed flat and the accepted checkpoints keep loading;
 * rotated ground truth survives the loader transport into
@@ -68,10 +69,26 @@ _SNAPSHOT_FILE = Path(__file__).parent / "prechange_detect_step.json"
 #: bounds that cancellation rather than the correctness of the arithmetic.
 _LEVERAGE_RTOL = 0.05
 
-#: Relative tolerance on the snapshot's gradient norm. The loss itself is asserted
-#: **exactly**; the norm is a float64 reduction over 700+ tensors whose summation order
-#: torch does not promise across builds, so it is compared at 1e-9 rather than bit-wise.
-_GRAD_NORM_RTOL = 1e-9
+#: Relative tolerance on the snapshot's scalars. Set from two measured cross-architecture
+#: datapoints: the snapshot was captured on arm64, and x86-64 CI reproduces its total as
+#: ``22.80112076`` against the recorded ``22.80110550`` — 1.5e-5 apart — while the same
+#: run reproduces the ``o2o_l1`` component as ``0.024623577`` against ``0.024620384``,
+#: 1.3e-4 apart. Both come from a reduction order the two builds choose differently; the
+#: component drifts relatively further because it is a small term summed out of much
+#: larger ones, so the same absolute wobble lands on a smaller magnitude. 1e-3 leaves
+#: eight times the worse of the two and still fails any change to the objective, which
+#: moves these numbers by percent rather than by ulps.
+_SNAPSHOT_RTOL = 1e-3
+#: Absolute floor beneath the relative tolerance. Two components are ``o2m`` terms of a
+#: batch that assigns almost nothing, of order 1e-9 and 1e-8; a relative bound on those
+#: would compare float32 noise against float32 noise and mean nothing.
+_SNAPSHOT_ATOL = 1e-6
+
+#: Relative tolerance on the snapshot's gradient norm — looser than the scalars above,
+#: and by argument rather than by measurement: no cross-architecture value for it has
+#: been observed, and it is a float64 reduction over 700+ tensors that each carry the
+#: same class of drift. A real change to the objective moves it by percent.
+_GRAD_NORM_RTOL = 1e-4
 
 
 @pytest.fixture(autouse=True)
@@ -234,22 +251,33 @@ def test_obb_state_dict_is_the_detection_state_dict_plus_the_angle_stems() -> No
     assert any(".angle_stems." in key for key in oriented.state_dict())
 
 
-def test_detect_step_is_bit_identical_to_the_pre_change_snapshot(single_threaded: None) -> None:
+def test_detect_step_reproduces_the_pre_change_snapshot(single_threaded: None) -> None:
     """A ``task="detect"`` step reproduces the total and every component captured before this WP.
 
     WP-088 edited modules that also sit on the detection path — the dual loss, the
     target container, four geometric transforms, the COCO reader and the decode
     helpers. "The detection tests still pass" would not distinguish an objective that
-    moved by a rounding step from one that did not; the frozen numbers do. The snapshot
-    was produced by running this exact step against the ``fcf3040`` source tree,
-    exported with ``git archive`` rather than remembered.
+    moved from one that did not; the frozen numbers do. The snapshot was produced by
+    running this exact step against the ``fcf3040`` source tree, exported with
+    ``git archive`` rather than remembered.
 
-    The ``single_threaded`` fixture is load-bearing. Intra-op thread count decides how
-    torch splits its reductions, and therefore the summation order of the dense
-    classification term: the same unmodified tree yields ``22.80111694`` on twelve
-    threads and ``22.80110550`` on one. Without the pin this test would pass alone and
-    fail after any test that has touched ``torch.set_num_threads`` (the WP-079 loader
-    worker init does), reporting a numerical regression that is really a core count.
+    **The comparison is to a tolerance, and it did not start that way.** Three values
+    of the same total have now been observed from source trees that compute the same
+    arithmetic: ``22.80110550`` on arm64 with one intra-op thread, ``22.80111694`` on
+    arm64 with twelve, and ``22.80112076`` on x86-64 CI. Summation order is a property
+    of the build and the core count, not of the objective, so bit-identity holds within
+    an architecture and cannot hold across one. This test was written asserting equality
+    and passed for the whole of Phase 8 — because until the 0.3.0 push it had only ever
+    run on the machine its snapshot came from. What it can still catch is any change to
+    the objective, which moves these numbers by percent; what it can no longer catch is
+    a change of a single rounding step, and no amount of tolerance choosing recovers
+    that across architectures.
+
+    The ``single_threaded`` fixture therefore no longer decides pass from fail — the
+    thread-count spread is well inside ``_SNAPSHOT_RTOL``. It is kept because it removes
+    the one source of drift that *is* under this suite's control, leaving the tolerance
+    to absorb only the architecture; without it the margin would be spent on whichever
+    test last touched ``torch.set_num_threads`` (the WP-079 loader worker init does).
     """
     snapshot = json.loads(_SNAPSHOT_FILE.read_text())
     torch.manual_seed(snapshot["model_seed"])
@@ -272,8 +300,8 @@ def test_detect_step_is_bit_identical_to_the_pre_change_snapshot(single_threaded
     total = module.training_step((images, targets), 0)
     total.backward()
 
-    assert float(total.detach()) == snapshot["total"]
-    assert recorder.values == snapshot["components"]
+    assert float(total.detach()) == pytest.approx(snapshot["total"], rel=_SNAPSHOT_RTOL, abs=_SNAPSHOT_ATOL)
+    assert recorder.values == pytest.approx(snapshot["components"], rel=_SNAPSHOT_RTOL, abs=_SNAPSHOT_ATOL)
     assert len(module.state_dict()) == snapshot["state_dict_keys"]
     assert _gradient_norm(module) == pytest.approx(snapshot["grad_l2"], rel=_GRAD_NORM_RTOL)
 
