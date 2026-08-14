@@ -61,6 +61,7 @@ dev = [
 lucid-yolo = "lucid_yolo.cli.train:main"
 lucid-data = "lucid_yolo.cli.data:main"
 lucid-eval = "lucid_yolo.cli.eval:main"
+lucid-predict = "lucid_yolo.cli.predict:main"
 # Deprecated in 0.3.0, removed in 0.4.0 (WP-096): `lucid-data download` replaces it. Kept
 # because published reproduction instructions name it, and a command that disappears
 # between two 0.x versions makes those instructions unreproducible rather than outdated.

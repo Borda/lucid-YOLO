@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Every command this package installs, in one place (WP-096).
 
-Three entry points, one parser stack:
+Four entry points, one parser stack:
 
 ``lucid-yolo``
     Training and validation (:mod:`lucid_yolo.cli.train`) — a
@@ -13,6 +13,11 @@ Three entry points, one parser stack:
 ``lucid-eval``
     Acceptance scoring (:mod:`lucid_yolo.cli.eval`), on the protocol the checkpoint's own
     task names.
+``lucid-predict``
+    Detections for a single image (:mod:`lucid_yolo.cli.predict`) — the other reading of
+    a checkpoint. Where ``lucid-eval`` answers "how good is this model", this answers
+    "what is in this picture", and reads its task from the same place: a checkpoint whose
+    task is not ``detect`` is refused by name rather than run as a detector (WP-089).
 
 Why one package:
     The wiring used to be spread across ``lucid_yolo/ptl/cli.py``, a console script in
@@ -39,6 +44,7 @@ Why jsonargparse:
 
 from lucid_yolo.cli.data import main as data_main
 from lucid_yolo.cli.eval import main as eval_main
+from lucid_yolo.cli.predict import main as predict_main
 from lucid_yolo.cli.train import main as train_main
 
-__all__ = ["data_main", "eval_main", "train_main"]
+__all__ = ["data_main", "eval_main", "predict_main", "train_main"]

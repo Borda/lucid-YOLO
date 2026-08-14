@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit gate on the installed command surface (WP-096).
 
-Three console scripts are declared in ``pyproject.toml`` and none of them is exercised by
+Four console scripts are declared in ``pyproject.toml`` and none of them is exercised by
 importing the library: a rename or a move breaks the *installed* command while every
 other test keeps passing, which is how ``scripts/`` tooling drifted out of reach of a
 wheel in the first place. These tests resolve each declared target the way a console
@@ -36,6 +36,7 @@ EXPECTED_SCRIPTS = {
     "lucid-yolo": "lucid_yolo.cli.train:main",
     "lucid-data": "lucid_yolo.cli.data:main",
     "lucid-eval": "lucid_yolo.cli.eval:main",
+    "lucid-predict": "lucid_yolo.cli.predict:main",
     "lucid-download": "lucid_yolo.data.download:main",
 }
 

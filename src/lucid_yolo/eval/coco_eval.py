@@ -70,8 +70,8 @@ from typing import TYPE_CHECKING, Protocol, cast
 import torch
 from torchmetrics.detection import MeanAveragePrecision
 
-from lucid_yolo.assign.grid import make_anchor_points
-from lucid_yolo.decode.common import BOX_CORNERS, SCORE_COLUMN, to_letterboxed_original
+from lucid_yolo.assign.grid import HEAD_STRIDES, anchor_grid
+from lucid_yolo.decode.common import BOX_CORNERS, LABEL_COLUMN, SCORE_COLUMN, to_letterboxed_original
 from lucid_yolo.eval.segment_decode import decode_instance_masks, masks_to_original
 from lucid_yolo.models.build import SegmentOutput
 
@@ -144,12 +144,6 @@ _RECALL_POINTS = 101
 #: agreement at the boundaries, and the 36-index defect itself, so a torchmetrics that
 #: fixes its own grid is noticed rather than silently worked around forever.
 _RECALL_GRID: tuple[float, ...] = tuple(index / (_RECALL_POINTS - 1) for index in range(_RECALL_POINTS))
-
-#: Feature-level input-pixel strides of the P3/P4/P5 detection head (8, 16, 32).
-_STRIDES: tuple[int, int, int] = (8, 16, 32)
-
-#: Column index of the integral class label within the A9 detection tuple.
-_LABEL_COLUMN = 5
 
 
 def detections_to_predictions(
@@ -231,7 +225,7 @@ def _image_to_prediction(
     keep = detections[:, SCORE_COLUMN] > score_floor
     kept = detections[keep]
     labels = torch.tensor(
-        [label_to_category[int(label)] for label in kept[:, _LABEL_COLUMN]],
+        [label_to_category[int(label)] for label in kept[:, LABEL_COLUMN]],
         dtype=torch.long,
     )
     prediction = {
@@ -632,7 +626,8 @@ class DualPathEvaluator:
             share the target dicts' category-id space.
         letterbox: The validation :class:`~lucid_yolo.data.letterbox.Letterbox`
             whose geometry (its ``allow_upscale`` setting) inverts the resize.
-        strides: The head's per-level input strides. Defaults to ``(8, 16, 32)``.
+        strides: The head's per-level input strides. Defaults to
+            :data:`~lucid_yolo.assign.grid.HEAD_STRIDES`.
 
     Examples:
         >>> evaluator = DualPathEvaluator(  # doctest: +SKIP
@@ -650,7 +645,7 @@ class DualPathEvaluator:
         nms_decoder: nn.Module,
         label_to_category: Mapping[int, int],
         letterbox: Letterbox,
-        strides: tuple[int, int, int] = _STRIDES,
+        strides: tuple[int, int, int] = HEAD_STRIDES,
     ) -> None:
         self._model = model
         self._e2e_decoder = e2e_decoder
@@ -708,7 +703,7 @@ class DualPathEvaluator:
     ) -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
         """Forward once, then build both paths' prediction dicts from the shared outputs."""
         head_out, prototypes = _segment_parts(self._model(images))
-        anchor_points, strides = self._anchor_grid(images.shape[-2:], device)
+        anchor_points, strides = anchor_grid((int(images.shape[-2]), int(images.shape[-1])), device, self._strides)
         geometry = _BatchGeometry(
             anchor_points=anchor_points,
             strides=strides,
@@ -775,13 +770,6 @@ class DualPathEvaluator:
             original = (int(orig_size[0]), int(orig_size[1]))
             masks.append(masks_to_original(canvas_masks[0].cpu(), self._letterbox, original))
         return masks
-
-    def _anchor_grid(self, size: torch.Size, device: torch.device) -> tuple[Tensor, Tensor]:
-        """Build the ``(anchor_points, stride_per_anchor)`` grid for a canvas size."""
-        height, width = int(size[0]), int(size[1])
-        feature_sizes = [(height // stride, width // stride) for stride in self._strides]
-        points, strides = make_anchor_points(feature_sizes, list(self._strides))
-        return points.to(device), strides.to(device)
 
     def _to_original(
         self,

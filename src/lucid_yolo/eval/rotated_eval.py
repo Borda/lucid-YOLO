@@ -55,7 +55,7 @@ from typing import TYPE_CHECKING
 import torch
 from tqdm.auto import tqdm
 
-from lucid_yolo.assign import make_anchor_points
+from lucid_yolo.assign import anchor_grid
 from lucid_yolo.data.layout import resolve_split
 from lucid_yolo.eval.checkpoint import pick_device
 from lucid_yolo.eval.dota_eval import MAX_DETECTIONS, evaluate_rotated_map, rotated_detections_to_predictions
@@ -66,9 +66,6 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     from lucid_yolo.ptl.module import DetectionLitModule
-
-#: Feature-map strides of the three detection levels (blueprint sec. 5.4).
-STRIDES = (8, 16, 32)
 
 
 def build_datamodule(
@@ -147,7 +144,7 @@ def score_split(
     if module.task != "obb":
         raise ValueError(f"eval_obb needs an oriented checkpoint; this one has task={module.task!r}")
     module = module.to(device)
-    anchor_points, strides = _anchor_grid(img_size, device)
+    anchor_points, strides = anchor_grid((img_size, img_size), device)
     predictions: list[dict[str, Tensor]] = []
     ground_truth: list[dict[str, Tensor]] = []
     loader = datamodule.val_dataloader()
@@ -172,13 +169,6 @@ def score_split(
         predictions, ground_truth = predictions[:limit], ground_truth[:limit]
     instances = sum(int(target["labels"].numel()) for target in ground_truth)
     return evaluate_rotated_map(predictions, ground_truth), len(ground_truth), instances
-
-
-def _anchor_grid(img_size: int, device: torch.device) -> tuple[Tensor, Tensor]:
-    """Return the ``(anchor_points, strides)`` grid for a square input on ``device``."""
-    feature_sizes = [(img_size // stride, img_size // stride) for stride in STRIDES]
-    points, strides = make_anchor_points(feature_sizes, list(STRIDES))
-    return points.to(device), strides.to(device)
 
 
 def run(

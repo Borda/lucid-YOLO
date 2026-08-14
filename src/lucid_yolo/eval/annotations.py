@@ -344,6 +344,37 @@ def load_eval_annotations(
     return images, targets, label_to_category
 
 
+def read_letterboxed_image(path: Path, letterbox: Letterbox) -> tuple[Tensor, tuple[int, int]]:
+    """Read one image file and letterbox it exactly as the evaluation path does.
+
+    The whole of what happens to an image between the disk and the model: read as RGB,
+    scaled to the unit float range the model was trained on, letterboxed with the
+    validation geometry. :func:`letterboxed_batches` is this function in a loop, and
+    single-image inference (:func:`lucid_yolo.predict.predict_image`) is one call of it
+    — which is why it is a function rather than three lines inside the batcher. A second
+    copy would be free to read ``ImageReadMode.UNCHANGED``, or to scale by ``256``, and
+    the model would answer plausibly either way.
+
+    Args:
+        path: Image file to read.
+        letterbox: The validation letterbox applied to it.
+
+    Returns:
+        The letterboxed ``(3, out_h, out_w)`` float image, and the **original**
+        ``(height, width)`` the file decoded to — the frame an inverse letterbox maps
+        predictions back onto (A10).
+
+    Examples:
+        >>> image, orig_size = read_letterboxed_image(path, letterbox)  # doctest: +SKIP
+        >>> image.shape[0]  # doctest: +SKIP
+        3
+    """
+    raw = read_image(str(path), ImageReadMode.RGB)
+    orig_size = (int(raw.shape[-2]), int(raw.shape[-1]))
+    letterboxed, _ = letterbox(raw.to(torch.float32) / _UINT8_MAX, Targets.empty())
+    return letterboxed, orig_size
+
+
 def letterboxed_batches(
     images: Sequence[EvalImage],
     images_dir: Path,
@@ -373,11 +404,7 @@ def letterboxed_batches(
     """
     for start in range(0, len(images), batch_size):
         chunk = images[start : start + batch_size]
-        tensors = []
-        for image in chunk:
-            raw = read_image(str(images_dir / image.file_name), ImageReadMode.RGB)
-            letterboxed, _ = letterbox(raw.to(torch.float32) / _UINT8_MAX, Targets.empty())
-            tensors.append(letterboxed)
+        tensors = [read_letterboxed_image(images_dir / image.file_name, letterbox)[0] for image in chunk]
         yield (
             torch.stack(tensors),
             [image.image_id for image in chunk],

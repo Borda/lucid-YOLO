@@ -30,6 +30,7 @@ from lucid_yolo.data.letterbox import Letterbox
 __all__ = [
     "BOX_CORNERS",
     "DET_WIDTH",
+    "LABEL_COLUMN",
     "PAD_ANCHOR_INDEX",
     "RBOX_COLUMNS",
     "SCORE_COLUMN",
@@ -50,6 +51,11 @@ RBOX_COLUMNS = 5
 
 #: Column index of the confidence score within the A9 detection tuple.
 SCORE_COLUMN = 4
+
+#: Column index of the integral class label within the A9 detection tuple. Stored as a
+#: float like every other column — the tuple is one tensor — and narrowed to ``int`` by
+#: whichever boundary reads it (a category-id lookup, a written report).
+LABEL_COLUMN = 5
 
 #: Anchor index reported for a padding detection row, which has no source anchor.
 #: Negative so it can never be mistaken for a real row and cannot silently index
