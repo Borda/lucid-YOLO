@@ -37,13 +37,41 @@ convention applies is a property of the reader asking, so the reader asks its ow
 
     per-split export       <root>/train/images/   <root>/train/labels/
     split-subdirectory     <root>/images/train/   <root>/labels/train/
+
+One caller has no reader to ask with (WP-099b): :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule`
+is handed a ``data_root`` and has to *decide* which reader the root calls for, which is the
+question the two tables above deliberately do not answer. :func:`detect_layout` answers it, and
+it is a third thing rather than a merged table — it consults both tables and demands an
+**unambiguous** answer:
+
+* Neither convention satisfied raises, naming both and every path tried. The tables fall back
+  instead of raising because a reader follows them and reports the file it could not open; a
+  dispatcher has no such reader, so a fallback here would just pick one at random and let the
+  wrong reader report a missing file it was never pointed at.
+* **Both** satisfied raises too — the one place this module refuses precedence. Inside a table
+  the rows are the same reader, so first-match is merely a tie-break between spellings; across
+  the two tables the loser is a different *label space* and a different image set, and picking
+  one silently trains on annotations nobody named. The caller states which it meant.
 """
 
 from __future__ import annotations
 
+from enum import StrEnum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-__all__ = ["CANDIDATES", "YOLO_CANDIDATES", "resolve_split", "resolve_yolo_split"]
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+__all__ = [
+    "CANDIDATES",
+    "DATA_YAML_NAME",
+    "YOLO_CANDIDATES",
+    "DatasetLayout",
+    "detect_layout",
+    "resolve_split",
+    "resolve_yolo_split",
+]
 
 #: Layout conventions tried in order, as ``(images directory, annotation file)`` templates
 #: taking ``{split}``. Paths are relative to the dataset root.
@@ -62,6 +90,36 @@ YOLO_CANDIDATES: tuple[tuple[str, str], ...] = (
     ("{split}/images", "{split}/labels"),
     ("images/{split}", "labels/{split}"),
 )
+
+#: File a YOLO root publishes its class list and split entries under. It lives here rather than
+#: in :mod:`lucid_yolo.data.yolo` (which re-exports it) because it is the same kind of fact as
+#: the tables above — a name a dataset root is recognised by — and :func:`detect_layout` needs it
+#: without importing the reader.
+DATA_YAML_NAME = "data.yaml"
+
+#: Splits :func:`detect_layout` probes when a caller names none: the two a training run builds.
+_PROBE_SPLITS: tuple[str, ...] = ("train", "val")
+
+
+class DatasetLayout(StrEnum):
+    """Which reader a dataset root's own directory names call for (WP-099b).
+
+    A :class:`~enum.StrEnum` so a configuration file, a CLI flag and a comparison against the
+    plain spelling all keep working: ``DatasetLayout.YOLO == "yolo"`` is true.
+
+    Attributes:
+        COCO: An images directory beside a COCO ``instances_*.json``
+            (:data:`CANDIDATES`, read by :class:`~lucid_yolo.data.coco.CocoDetectionDataset`).
+        YOLO: A ``data.yaml`` beside per-split ``images``/``labels`` directories
+            (:data:`YOLO_CANDIDATES`, read by :class:`~lucid_yolo.data.yolo.YoloDetectionDataset`).
+
+    Examples:
+        >>> DatasetLayout("yolo") is DatasetLayout.YOLO
+        True
+    """
+
+    COCO = "coco"
+    YOLO = "yolo"
 
 
 def resolve_split(data_root: Path, split: str) -> tuple[Path, Path]:
@@ -150,3 +208,149 @@ def resolve_yolo_split(data_root: Path, split: str) -> tuple[Path, Path]:
         if images_dir.is_dir() and labels_dir.is_dir():
             return images_dir, labels_dir
     return candidates[0]
+
+
+def detect_layout(data_root: Path, splits: Sequence[str] = _PROBE_SPLITS) -> DatasetLayout:
+    """Return which of the two conventions ``data_root`` actually satisfies (WP-099b).
+
+    The question :func:`resolve_split` and :func:`resolve_yolo_split` deliberately do not answer
+    — see the module docstring. A root satisfies COCO when any probed split has both halves of a
+    :data:`CANDIDATES` row on disk, and YOLO when it holds a :data:`DATA_YAML_NAME` *and* any
+    probed split has both directories of a :data:`YOLO_CANDIDATES` row. Satisfying one is the
+    answer; satisfying neither or both raises rather than guessing.
+
+    A YOLO root whose ``data.yaml`` points its splits somewhere neither row names is legible to
+    :meth:`~lucid_yolo.data.yolo.YoloDetectionDataset.from_root` and invisible here, which is one
+    of the two reasons the caller can state the layout outright instead of asking.
+
+    Args:
+        data_root: Dataset root to probe.
+        splits: Split names to probe, defaulting to the two a training run builds. A root is
+            matched by *any* of them, so a dataset shipping only ``train`` still resolves.
+
+    Returns:
+        The layout the root satisfies.
+
+    Raises:
+        FileNotFoundError: If neither convention is satisfied. The message names both and every
+            path tried, because a root that resolves to nothing is nearly always a root spelled
+            in a third way, and the paths are what say which.
+        ValueError: If both are — an ambiguity this module refuses to break by precedence, since
+            the two readings are different label spaces rather than two spellings of one.
+
+    Examples:
+        A root written in a COCO spelling resolves to the COCO reader::
+
+            >>> import tempfile
+            >>> with tempfile.TemporaryDirectory() as tmp:
+            ...     root = Path(tmp)
+            ...     (root / "train2017").mkdir()
+            ...     (root / "annotations").mkdir()
+            ...     _ = (root / "annotations" / "instances_train2017.json").write_text("{}")
+            ...     detect_layout(root)
+            <DatasetLayout.COCO: 'coco'>
+
+        A ``data.yaml`` beside an images/labels pair resolves to the YOLO one::
+
+            >>> with tempfile.TemporaryDirectory() as tmp:
+            ...     root = Path(tmp)
+            ...     (root / "train" / "images").mkdir(parents=True)
+            ...     (root / "train" / "labels").mkdir(parents=True)
+            ...     _ = (root / DATA_YAML_NAME).write_text("names: [car]\\n")
+            ...     detect_layout(root)
+            <DatasetLayout.YOLO: 'yolo'>
+
+    """
+    coco_matched, coco_tried = _probe_coco(data_root, splits)
+    yolo_matched, yolo_tried = _probe_yolo(data_root, splits)
+    if coco_matched and not yolo_matched:
+        return DatasetLayout.COCO
+    if yolo_matched and not coco_matched:
+        return DatasetLayout.YOLO
+    named = ", ".join(splits)
+    if coco_matched and yolo_matched:
+        raise ValueError(
+            f"{data_root}: satisfies both dataset conventions for splits {named}, which are two "
+            f"different label spaces rather than two spellings of one; state which was meant "
+            f"(layout={DatasetLayout.COCO.value!r} or layout={DatasetLayout.YOLO.value!r}). "
+            f"COCO matched among {_listed(coco_tried)}; YOLO matched among {_listed(yolo_tried)}"
+        )
+    raise FileNotFoundError(
+        f"{data_root}: satisfies no dataset convention for splits {named}. "
+        f"COCO (an images directory beside its annotations JSON) tried {_listed(coco_tried)}; "
+        f"YOLO (a {DATA_YAML_NAME} beside an images and a labels directory) tried {_listed(yolo_tried)}"
+    )
+
+
+def _probe_coco(data_root: Path, splits: Sequence[str]) -> tuple[bool, list[str]]:
+    """Test ``data_root`` against :data:`CANDIDATES` and report what was tried.
+
+    Args:
+        data_root: Dataset root to probe.
+        splits: Split names to probe.
+
+    Returns:
+        Whether any split matched a row outright, and every ``images + annotations`` pair tried.
+
+    Examples:
+        >>> matched, tried = _probe_coco(Path("/nonexistent"), ["val"])
+        >>> matched, len(tried) == len(CANDIDATES)
+        (False, True)
+    """
+    matched = False
+    tried: list[str] = []
+    for split in splits:
+        for images, annotation in CANDIDATES:
+            images_dir = data_root / images.format(split=split)
+            annotation_file = data_root / annotation.format(split=split)
+            tried.append(f"{images_dir} + {annotation_file}")
+            matched = matched or (images_dir.is_dir() and annotation_file.is_file())
+    return matched, tried
+
+
+def _probe_yolo(data_root: Path, splits: Sequence[str]) -> tuple[bool, list[str]]:
+    """Test ``data_root`` against :data:`YOLO_CANDIDATES` and report what was tried.
+
+    The ``data.yaml`` is part of the predicate, not a detail: it carries the class names, so a
+    labels tree without one is not a YOLO dataset this project can read, and dispatching to the
+    reader on the directories alone would replace a layout error with a missing-file one.
+
+    Args:
+        data_root: Dataset root to probe.
+        splits: Split names to probe.
+
+    Returns:
+        Whether the root holds a ``data.yaml`` *and* any split matched a row, and every path
+        tried — the ``data.yaml`` first, then each ``images + labels`` pair.
+
+    Examples:
+        >>> matched, tried = _probe_yolo(Path("/nonexistent"), ["val"])
+        >>> matched, tried[0]
+        (False, '/nonexistent/data.yaml')
+    """
+    data_yaml = data_root / DATA_YAML_NAME
+    matched = False
+    tried: list[str] = [str(data_yaml)]
+    for split in splits:
+        for images, labels in YOLO_CANDIDATES:
+            images_dir = data_root / images.format(split=split)
+            labels_dir = data_root / labels.format(split=split)
+            tried.append(f"{images_dir} + {labels_dir}")
+            matched = matched or (images_dir.is_dir() and labels_dir.is_dir())
+    return matched and data_yaml.is_file(), tried
+
+
+def _listed(tried: Sequence[str]) -> str:
+    """Join probed paths into one message fragment.
+
+    Args:
+        tried: The paths a probe tried, in probe order.
+
+    Returns:
+        The paths separated by ``; ``.
+
+    Examples:
+        >>> _listed(["a", "b"])
+        'a; b'
+    """
+    return "; ".join(tried)

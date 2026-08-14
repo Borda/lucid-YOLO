@@ -92,7 +92,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from torchvision.io import ImageReadMode, read_image
 
-from lucid_yolo.data.layout import resolve_yolo_split
+from lucid_yolo.data.layout import DATA_YAML_NAME, resolve_yolo_split
 from lucid_yolo.data.rotated_geom import polygons_to_rboxes
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.data.transforms import GeometricTransform, boxes_from_polygons
@@ -102,8 +102,6 @@ if TYPE_CHECKING:
 
 __all__ = ["DATA_YAML_NAME", "IMAGE_SUFFIXES", "YoloDataConfig", "YoloDetectionDataset", "load_yolo_targets"]
 
-#: File name a YOLO root's class list and split paths are published under.
-DATA_YAML_NAME = "data.yaml"
 #: Image extensions the reader enumerates, lower-cased. ``.jpg`` is what the published export
 #: writes; ``.png`` is what this project's synthetic fixtures do (A26).
 IMAGE_SUFFIXES: tuple[str, ...] = (".jpg", ".jpeg", ".png")

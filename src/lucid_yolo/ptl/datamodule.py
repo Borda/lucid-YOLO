@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""COCO detection :class:`~pytorch_lightning.LightningDataModule` (WP-014).
+"""Detection :class:`~pytorch_lightning.LightningDataModule` over either dataset layout (WP-014).
 
 :class:`DetectionDataModule` wires the WP-014 :class:`~lucid_yolo.data.coco.CocoDetectionDataset`
 into the Phase 1 augmentation pipeline and exposes train/val
@@ -8,6 +8,30 @@ layout of blueprint sec. 14.3 (``train2017/`` + ``annotations/instances_train201
 and the matching ``val2017``) and, per the dataset contract (AGENTS.md sec. 3),
 contains **no download logic**: a missing or mis-shaped root is validated by
 ``lucid-data check`` before any ``[DATA]`` run, never fetched here.
+
+Layout dispatch (WP-099b):
+    ``data_root`` may also be a YOLO root — a ``data.yaml`` beside per-split ``images``/
+    ``labels`` trees — in which case both splits are built by
+    :class:`~lucid_yolo.data.yolo.YoloDetectionDataset` instead, and everything downstream is
+    unchanged because both readers emit the same
+    :class:`~lucid_yolo.data.targets.Targets`. WP-099 delivered that reader and left the
+    choice unmade, which meant a YOLO root was reachable from a library call and not from
+    ``lucid-yolo fit``. Which reader a root gets is decided in three steps:
+
+    1. an explicit ``layout`` wins outright — it is the only way to name a layout the
+       filesystem cannot be asked about (see :attr:`DetectionDataModule.layout`);
+    2. otherwise, naming any of the four ``*_images_dir``/``*_ann_file`` overrides *is* a
+       statement of the COCO layout, since an annotation file is a concept only that
+       convention has;
+    3. otherwise the root is probed by :func:`~lucid_yolo.data.layout.detect_layout`, which
+       raises rather than guess when the root satisfies neither convention or both.
+
+    The probe runs at :meth:`DetectionDataModule.setup`, not at construction: constructing
+    this class is a pure configuration act — ``LightningCLI(run=False)`` instantiates every
+    shipped config, whose ``data_root`` is a placeholder path on the machine that parses it —
+    so a filesystem verdict there would fail runs that have not yet been pointed at data.
+    Steps 1 and 2 need no filesystem and are settled in ``__init__``, which is why a layout
+    the YOLO path cannot serve is rejected there.
 
 Multi-image augmentation composition:
     Mosaic, mixup and copy-paste each consume *several* images, so they cannot be
@@ -79,11 +103,12 @@ from torch.utils.data import DataLoader, Dataset, get_worker_info
 from lucid_yolo.data.affine import FusedAffineLetterbox
 from lucid_yolo.data.augment import HorizontalFlip, HSVJitter
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
-from lucid_yolo.data.layout import resolve_split
+from lucid_yolo.data.layout import DatasetLayout, detect_layout, resolve_split
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.mixup import CopyPaste, Mixup
 from lucid_yolo.data.mosaic import MosaicAssembly
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.data.yolo import YoloDetectionDataset
 from lucid_yolo.ptl.seg_targets import instance_mask_targets
 
 __all__ = [
@@ -98,6 +123,10 @@ __all__ = [
 
 #: Column count of a polygon point ``(x, y)`` — the width of a packed ring row.
 _POINT_DIM = 2
+
+#: Either layout's reader. Both yield ``(image, Targets)`` samples and size the same way, which
+#: is what lets the augmentation pipeline, the collate and every consumer stay layout-blind.
+_DetectionSource = CocoDetectionDataset | YoloDetectionDataset
 
 #: uint8 quantization scale for image transport. :func:`collate_detection` quantizes
 #: the post-augmentation float pixels (``[0, 1]``) to ``round(x * 255)`` uint8 codes so
@@ -604,7 +633,7 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
             change takes effect on the next sample assembled.
 
     Args:
-        base: The raw (untransformed) :class:`~lucid_yolo.data.coco.CocoDetectionDataset`.
+        base: The raw (untransformed) reader — either layout's.
         img_size: Target square side for the letterboxed output.
         policy: The size-aware strengths from
             :func:`~lucid_yolo.data.coco.build_scale_policy` (``scale``, ``mixup``,
@@ -615,15 +644,22 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
             (WP-056); every other stage is unchanged, and in particular the draw
             sequence is not — the copy-paste probability is *consulted* as always,
             it simply never fires.
+        polygon_free: The same suppression for the same reason, reached the other way:
+            a base whose *format* carries no rings rather than whose modality does not.
+            The YOLO reading is one (WP-099: ``polygons`` is always empty there), and
+            unlike the oriented case copy-paste would not raise on it — it would find no
+            paste candidates and quietly do nothing, having already decoded a whole extra
+            source sample to discover that. Suppressing it says so and stops paying for it.
     """
 
     def __init__(
         self,
-        base: CocoDetectionDataset,
+        base: _DetectionSource,
         img_size: int,
         policy: dict[str, float],
         seed: int,
         oriented: bool = False,
+        polygon_free: bool = False,
     ) -> None:
         self._base = base
         self._img_size = int(img_size)
@@ -634,8 +670,10 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
         # targets without polygons on purpose, so a rotated instance has nothing to
         # paste. `CopyPaste` says exactly that by raising, which means the composition —
         # not the transform — is what has to know. Mosaic and mixup are unaffected: both
-        # carry `rboxes` through (WP-058).
-        self._copy_paste_prob = 0.0 if oriented else policy["copy_paste"]
+        # carry `rboxes` through (WP-058). `polygon_free` is the same absence arrived at from
+        # the format instead of the modality (WP-099b); there the transform stays silent
+        # rather than raising, so the composition is the *only* thing that can know.
+        self._copy_paste_prob = 0.0 if (oriented or polygon_free) else policy["copy_paste"]
         self._generator = torch.Generator().manual_seed(seed)
         self._mosaic = MosaicAssembly(self._img_size, generator=self._generator)
         self._fused = FusedAffineLetterbox(
@@ -703,18 +741,22 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
 
 
 class DetectionDataModule(LightningDataModule):
-    """COCO detection datamodule assembling the Phase 1 augmentation pipeline (WP-014).
+    """Detection datamodule assembling the Phase 1 augmentation pipeline (WP-014).
 
     Train and val splits are built from the COCO 2017 layout under ``data_root``
     (``train2017/`` + ``annotations/instances_train2017.json`` and the ``val2017``
     equivalents); each split path may be overridden explicitly (used by the offline
-    fixture tests, which have a single Roboflow-style split). Training samples pass
+    fixture tests, which have a single Roboflow-style split). A ``data_root`` written in
+    the YOLO convention instead is read by
+    :class:`~lucid_yolo.data.yolo.YoloDetectionDataset` — see the module docstring for the
+    three-step dispatch (WP-099b). Training samples pass
     through :class:`_TrainPipeline` (mosaic/mixup/copy-paste/affine/hsv/flip +
     letterbox); validation is letterbox-only. No split is ever downloaded.
 
     Args:
-        data_root: COCO 2017 root directory (holds ``train2017``, ``val2017``,
-            ``annotations``).
+        data_root: Dataset root: a COCO 2017 root (holding ``train2017``, ``val2017``,
+            ``annotations``), any other layout :data:`~lucid_yolo.data.layout.CANDIDATES`
+            names, or a YOLO root (a ``data.yaml`` beside ``images``/``labels`` trees).
         batch_size: Samples per batch for both loaders.
         num_workers: DataLoader worker processes. ``None`` (default) resolves
             to ``min(batch_size, cpu count)``, further capped so the in-flight
@@ -768,7 +810,18 @@ class DetectionDataModule(LightningDataModule):
             box; the CLI turns it on for ``model.task="segment"``. Adds the mask
             stack to the batch transport — roughly 27 MB per batch of 32 at COCO
             instance density — so a container with a small ``/dev/shm`` may need
-            fewer workers or a lower ``prefetch_factor``.
+            fewer workers or a lower ``prefetch_factor``. **Unavailable on a YOLO root**:
+            that format carries no per-instance rings at all, so the request is refused
+            as soon as the layout is known rather than left to produce a segmentation run
+            supervised by nothing.
+        layout: Which reader ``data_root`` calls for — ``"coco"``, ``"yolo"``, or ``None``
+            (the default) to infer it. Two things are unsayable without it, which is the
+            whole of its justification: a root holding *both* conventions, which
+            :func:`~lucid_yolo.data.layout.detect_layout` refuses to break a tie on because
+            the two readings are different label spaces; and a YOLO root whose ``data.yaml``
+            points its splits outside the convention table, which the reader resolves and
+            the probe cannot see. Stating ``"coco"`` or ``"yolo"`` skips the probe entirely,
+            so the reader — not this dispatch — names any path it then fails to open.
 
     Examples:
         ```pycon
@@ -798,6 +851,7 @@ class DetectionDataModule(LightningDataModule):
         persistent_workers: bool = False,
         mask_targets: bool = False,
         rotated_targets: bool = False,
+        layout: str | None = None,
     ) -> None:
         super().__init__()
         self._mask_targets = bool(mask_targets)
@@ -820,14 +874,107 @@ class DetectionDataModule(LightningDataModule):
         self._seed = int(seed)
         self._pin_memory = torch.cuda.is_available() if pin_memory is None else bool(pin_memory)
         self._policy = build_scale_policy(variant)
+        self._data_root = data_root
+        # The COCO reading of the root is resolved here whether or not it is the one that ends
+        # up used: it is a naming rule with a fallback, never an existence check, so it costs a
+        # few stat calls and cannot fail. Which reading is *taken* is `_layout`'s decision.
         default_train_images, default_train_ann = resolve_split(data_root, "train")
         default_val_images, default_val_ann = resolve_split(data_root, "val")
         self._train_images_dir = train_images_dir or default_train_images
         self._train_ann_file = train_ann_file or default_train_ann
         self._val_images_dir = val_images_dir or default_val_images
         self._val_ann_file = val_ann_file or default_val_ann
+        self._named_paths = any(
+            path is not None for path in (train_images_dir, train_ann_file, val_images_dir, val_ann_file)
+        )
+        self._layout = self._layout_without_probing(layout)
         self._train: _TrainPipeline | None = None
-        self._val: CocoDetectionDataset | None = None
+        self._val: _DetectionSource | None = None
+
+    def _layout_without_probing(self, requested: str | None) -> DatasetLayout | None:
+        """Settle the layout as far as the arguments alone can, before any filesystem is read.
+
+        Steps 1 and 2 of the module docstring's dispatch. Both are decidable from the call
+        itself, so a run misconfigured in either way fails at the point the configuration is
+        written rather than at the epoch that needed the data. ``None`` means step 3 — the probe
+        — still has to run, which :meth:`setup` does once the root is supposed to exist.
+
+        Args:
+            requested: The ``layout`` argument as given.
+
+        Returns:
+            The stated layout, :attr:`~lucid_yolo.data.layout.DatasetLayout.COCO` when the
+            COCO-shaped path overrides state it, or ``None`` when the root must be probed.
+
+        Raises:
+            ValueError: If ``layout`` names neither convention, or if it names the YOLO one
+                alongside a path override only the COCO one has a meaning for.
+        """
+        if requested is None:
+            return DatasetLayout.COCO if self._named_paths else None
+        try:
+            layout = DatasetLayout(requested)
+        except ValueError:
+            known = ", ".join(repr(member.value) for member in DatasetLayout)
+            raise ValueError(f"unknown layout {requested!r}; expected one of {known}") from None
+        if layout is DatasetLayout.YOLO and self._named_paths:
+            raise ValueError(
+                f"layout={DatasetLayout.YOLO.value!r} cannot be combined with the train_images_dir/"
+                "train_ann_file/val_images_dir/val_ann_file overrides: those name a COCO "
+                "annotation file and the images directory beside it, while a YOLO root resolves "
+                "its splits from its own data.yaml. Drop the overrides, or point data_root at "
+                "the root holding that data.yaml"
+            )
+        self._check_layout_support(layout)
+        return layout
+
+    def _check_layout_support(self, layout: DatasetLayout) -> None:
+        """Reject a request the resolved layout's reader cannot serve.
+
+        The one such request today is segmentation supervision on a YOLO root. It is refused
+        rather than downgraded because the failure it replaces is silent in the worst way: the
+        rings the mask targets rasterise are simply never there (WP-099), so the run would
+        train a segmentation head on empty masks and report a plausible detection number.
+
+        Args:
+            layout: The layout that will be read.
+
+        Raises:
+            ValueError: If ``mask_targets`` was asked for on a YOLO root.
+        """
+        if layout is DatasetLayout.YOLO and self._mask_targets:
+            raise ValueError(
+                "mask_targets=True is unavailable on a YOLO root: the format carries no "
+                "per-instance polygon rings, so there is nothing to rasterise masks from. "
+                "Train segmentation from a COCO-format root, or drop mask_targets"
+            )
+
+    @property
+    def layout(self) -> DatasetLayout:
+        """Return the layout this datamodule reads, probing the root once if need be.
+
+        Returns:
+            The resolved :class:`~lucid_yolo.data.layout.DatasetLayout`, cached after the
+            first call so the probe's verdict cannot change mid-run.
+
+        Raises:
+            FileNotFoundError: If the root satisfies neither convention; the message names
+                both and every path tried (:func:`~lucid_yolo.data.layout.detect_layout`).
+            ValueError: If it satisfies both, or asks for something that layout cannot serve.
+
+        Examples:
+            ```pycon
+            >>> DetectionDataModule.layout  # doctest: +SKIP
+            >>> # DetectionDataModule(yolo_root, batch_size=2, num_workers=0, variant="n").layout
+            >>> # <DatasetLayout.YOLO: 'yolo'>
+
+            ```
+        """
+        if self._layout is None:
+            layout = detect_layout(self._data_root)
+            self._check_layout_support(layout)
+            self._layout = layout
+        return self._layout
 
     def _resolve_val_workers(self, requested: int | None, workers_were_chosen_here: bool) -> int:
         """Decide the validation loader's *intended* worker count.
@@ -900,17 +1047,68 @@ class DetectionDataModule(LightningDataModule):
     def setup(self, stage: str | None = None) -> None:
         """Build the train pipeline and the letterbox-only val dataset.
 
+        The layout is resolved here (:attr:`layout`) rather than at construction, because this
+        is the first moment the root is required to exist: a root that satisfies neither
+        convention raises before a single image is decoded, naming both conventions and every
+        path tried.
+
         Args:
             stage: The Lightning stage (``"fit"``/``"validate"``/…); unused, both
                 splits are always built so repeated calls are idempotent.
+
+        Raises:
+            FileNotFoundError: If the root satisfies neither dataset convention.
+            ValueError: If it satisfies both, or the resolved layout cannot serve a
+                requested modality.
         """
-        base = CocoDetectionDataset(self._train_images_dir, self._train_ann_file, oriented=self._rotated_targets)
-        self._train = _TrainPipeline(base, self._img_size, self._policy, self._seed, oriented=self._rotated_targets)
-        self._val = CocoDetectionDataset(
-            self._val_images_dir,
-            self._val_ann_file,
-            transforms=Letterbox(self._img_size),
+        yolo = self.layout is DatasetLayout.YOLO
+        base, self._val = self._build_yolo_splits() if yolo else self._build_coco_splits()
+        self._train = _TrainPipeline(
+            base,
+            self._img_size,
+            self._policy,
+            self._seed,
             oriented=self._rotated_targets,
+            polygon_free=yolo,
+        )
+
+    def _build_coco_splits(self) -> tuple[_DetectionSource, _DetectionSource]:
+        """Build both splits from the resolved (or overridden) COCO paths.
+
+        Returns:
+            The raw train reader and the letterbox-only val reader.
+        """
+        return (
+            CocoDetectionDataset(self._train_images_dir, self._train_ann_file, oriented=self._rotated_targets),
+            CocoDetectionDataset(
+                self._val_images_dir,
+                self._val_ann_file,
+                transforms=Letterbox(self._img_size),
+                oriented=self._rotated_targets,
+            ),
+        )
+
+    def _build_yolo_splits(self) -> tuple[_DetectionSource, _DetectionSource]:
+        """Build both splits from the root's own ``data.yaml`` and label trees.
+
+        Each split is resolved by the reader
+        (:meth:`~lucid_yolo.data.yolo.YoloDetectionDataset.from_root`), so the dataset's own
+        split entries outrank the naming convention — the published spelling writes
+        ``val: ../valid/images``, which no convention table would find. ``rotated_targets``
+        selects the nine-field oriented reading on *both* splits, since the variant is a
+        property of the dataset and is declared, never sniffed (WP-099).
+
+        Returns:
+            The raw train reader and the letterbox-only val reader.
+        """
+        return (
+            YoloDetectionDataset.from_root(self._data_root, "train", oriented=self._rotated_targets),
+            YoloDetectionDataset.from_root(
+                self._data_root,
+                "val",
+                Letterbox(self._img_size),
+                oriented=self._rotated_targets,
+            ),
         )
 
     def on_after_batch_transfer(
