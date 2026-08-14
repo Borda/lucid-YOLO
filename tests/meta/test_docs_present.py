@@ -32,6 +32,7 @@ REQUIRED_FILES = (
     DOCS / "DATASETS.md",
     DOCS / "TRAINING.md",
     DOCS / "REPRODUCTION_REPORT.md",
+    DOCS / "RESEARCH_LOG.md",
     MODEL_CARDS / "detection.md",
     MODEL_CARDS / "segmentation.md",
     MODEL_CARDS / "obb.md",
@@ -50,6 +51,25 @@ def test_every_model_card_is_a_required_file() -> None:
     required = {path.name for path in REQUIRED_FILES if path.parent == MODEL_CARDS}
 
     assert on_disk == required, f"model cards not in REQUIRED_FILES: {sorted(on_disk - required)}"
+
+
+def test_every_research_log_link_resolves() -> None:
+    """Each ``RESEARCH_LOG.md#anchor`` the roadmap cites is an anchor that file defines.
+
+    The roadmap's Scope column carries what a package does and hands the measurements,
+    rejections and negative results to the research log. That split is only safe while the
+    pointers hold: a renamed section leaves a row citing evidence a reader cannot reach,
+    and nothing about the roadmap itself would look wrong. Anchors are explicit ``<a id=>``
+    tags rather than heading slugs, so they are greppable and survive a retitle.
+    """
+    roadmap = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")
+    log = (DOCS / "RESEARCH_LOG.md").read_text(encoding="utf-8")
+
+    cited = set(re.findall(r"RESEARCH_LOG\.md#([\w-]+)", roadmap))
+    defined = set(re.findall(r'<a id="([\w-]+)">', log))
+
+    assert cited, "no roadmap row links the research log"
+    assert cited <= defined, f"roadmap cites undefined research-log anchors: {sorted(cited - defined)}"
 
 
 def test_policy_docs_exist() -> None:
