@@ -206,12 +206,14 @@ def test_nothing_above_the_threshold_returns_an_empty_row_aligned_pair(image_fil
 
 
 def test_an_oriented_checkpoint_is_still_refused_by_name(image_file: Path) -> None:
-    """An ``obb`` checkpoint is refused by both entry points, naming its task and WP-091.
+    """An ``obb`` checkpoint is refused by both of these entry points, naming its task.
 
     The oriented head's plain forward returns the same detection output a detector's
     does, so falling through either way would produce boxes with the angle branch
-    silently unread. WP-090 closed the segmentation half of that seam and deliberately
-    left this half open, so the refusal has to survive the change that closed the other.
+    silently unread. WP-091 gave that checkpoint its own entry point
+    (:func:`~lucid_yolo.predict.predict_oriented`) and this refusal is what keeps it the
+    only way there: a third destination must not turn either of the first two into a path
+    an oriented checkpoint can also take.
     """
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=NUM_CLASSES, task="obb").eval()
 

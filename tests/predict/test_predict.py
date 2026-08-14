@@ -116,9 +116,10 @@ def test_a_non_detect_checkpoint_fails_naming_its_task(image_file: Path, task: s
 
     Both build a head whose plain forward returns the same detection output a detector's
     does, so falling through would produce boxes with the mask or angle branch silently
-    unread — a plausible answer to a question nobody asked. A segmentation checkpoint has
-    a destination now (:func:`~lucid_yolo.predict.predict_segmentation`, WP-090) and the
-    message names it; an oriented one is still the open half of the seam, WP-091.
+    unread — a plausible answer to a question nobody asked. Each has a destination of its
+    own now (:func:`~lucid_yolo.predict.predict_segmentation`, WP-090;
+    :func:`~lucid_yolo.predict.predict_oriented`, WP-091), and the refusal names it rather
+    than merely declining, so the message is a redirection instead of a dead end.
     """
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=NUM_CLASSES, task=task).eval()
 

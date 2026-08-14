@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Shared geometry for the single-image inference suites (WP-089, WP-090).
+"""Shared geometry for the single-image inference suites (WP-089, WP-090, WP-091).
 
 The detection suite and the segmentation one assert against the **same** planted box, and
 that is why this module exists rather than a copy in each file: ``test_mask_matches_box``
@@ -7,6 +7,11 @@ means "the mask lands inside the box" only if the box it compares against is the
 :mod:`tests.predict.test_predict` proved the letterbox inverse puts there. Two files each
 carrying their own copy of the arithmetic would stay internally consistent while drifting
 apart, and the second one's containment assertion would quietly stop saying anything.
+
+The oriented suite lands on the same image and the same letterbox, with a rotated box of
+its own: an ``xyxy`` box and a ``(cx, cy, w, h, theta)`` one are not the same statement,
+and the second travels home through a different function
+(:func:`~lucid_yolo.decode.common.rboxes_to_letterboxed_original`).
 
 The image is 64x128, deliberately not square: at a 64 px canvas that is ratio 0.5 with a
 16 px top pad and no left pad, so a wrong inverse cannot pass by symmetry. An inverse that
@@ -44,6 +49,19 @@ IMG_SIZE = 64
 #: ``x/0.5`` on the horizontal, ``(y - 16)/0.5`` on the vertical.
 CANVAS_BOX = (8.0, 24.0, 40.0, 48.0)
 EXPECTED_ORIGINAL_BOX = (16.0, 16.0, 80.0, 64.0)
+
+#: The planted **rotated** box, in the two forms a head can emit it in, and where the
+#: letterbox inverse must put either. Both describe the same rectangle centred at canvas
+#: ``(24, 32)``: ``(32, 16)`` states the long edge first, ``(16, 32)`` the short edge
+#: first — so the second is the first rotated a quarter turn, and canonicalization has to
+#: turn it into the first with ``theta`` shifted by ``pi/2`` (A23). Their axis-aligned
+#: envelopes, ``[8, 24, 40, 40]`` and ``[16, 16, 32, 48]``, both lie inside the 64 px
+#: canvas's content band (``y`` in ``[16, 48]``), so neither planting reaches into a pad.
+#: At ratio 0.5 with a 16 px top pad: ``cx/0.5``, ``(cy - 16)/0.5``, extents ``/0.5``.
+CANVAS_RBOX_CENTRE = (24.0, 32.0)
+CANVAS_RBOX_EXTENTS = (32.0, 16.0)
+CANVAS_RBOX_EXTENTS_SWAPPED = (16.0, 32.0)
+EXPECTED_ORIGINAL_RBOX = (48.0, 32.0, 64.0, 32.0)
 
 #: Class index the planted detection carries, of the two the stub modules are built for.
 PLANTED_LABEL = 1

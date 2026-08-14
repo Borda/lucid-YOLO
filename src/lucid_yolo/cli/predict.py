@@ -1,19 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``lucid-predict`` — detections for one image, from one checkpoint (WP-089, WP-090).
+"""``lucid-predict`` — detections for one image, from one checkpoint (WP-089, WP-090, WP-091).
 
 One command, no task flag::
 
     lucid-predict --checkpoint runs/det.ckpt --image street.jpg
     lucid-predict --checkpoint runs/det.ckpt --image street.jpg --decoder nms --output dets.json
     lucid-predict --checkpoint runs/seg.ckpt --image street.jpg --output masks.json
+    lucid-predict --checkpoint runs/obb.ckpt --image aerial.png --output rboxes.json
 
 The task is read from the checkpoint, exactly as ``lucid-eval`` reads it: a caller who
 names the wrong task gets a wrong answer, and a caller who names none cannot. A
-``detect`` checkpoint answers with boxes and a ``segment`` one additionally with each
-detection's instance mask, through the two entry points of :mod:`lucid_yolo.predict`; an
-``obb`` checkpoint is refused by name rather than run as a detector, because
-:meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward` would happily return boxes for
-it. Oriented inference is WP-091.
+``detect`` checkpoint answers with boxes, a ``segment`` one additionally with each
+detection's instance mask, and an ``obb`` one with rotated boxes, through the three entry
+points of :mod:`lucid_yolo.predict`. Which of the three runs is decided here, once, from
+the checkpoint's own task; each entry point additionally refuses the other two by name,
+because :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward` would happily return
+axis-aligned boxes for any of them.
 
 ``--ema``, ``--device`` and ``--output`` keep ``lucid-eval``'s spellings and semantics,
 so the two commands cannot disagree about what a flag means. ``--img_size`` defaults from
@@ -47,12 +49,30 @@ Assumptions:
     running a segmentation checkpoint asked. RLE keeps one file, adds no dependency, and
     round-trips exactly.
 
-Provenance: R1 sec. 3.2.1, R1 Eq. 7, R3 sec. 4, R1 sec. 4.4. Assumptions: A9, A10, A37.
+    An oriented report replaces ``box`` with **two** derived geometries of the same
+    object: ``rbox``, the A45 five-tuple exactly as
+    :func:`~lucid_yolo.predict.predict_oriented` returned it, and ``polygon``, its four
+    corners as ``[x1, y1, ..., x4, y4]``. Neither is a second arithmetic — the corners
+    come from :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons`, the same function
+    :func:`~lucid_yolo.data.tiles.annotation_records` writes rotated ground truth with,
+    and that record likewise carries one object as two derived geometries. Both are
+    written because each answers a question the other cannot: the tuple is what
+    reproduces the library's own answer and carries the canonical angle A23 guarantees,
+    while the ring is what DOTA's protocol states an oriented object in and what a reader
+    can draw without knowing this project's angle convention. The report's top-level
+    ``boxes`` key names that convention (``"obb-longedge-rad"``) for the same reason
+    ``masks`` names the mask encoding: the file should say what it holds. It appears on
+    oriented reports only — the ``box`` of the other two is plain ``xyxy`` and was
+    already shipped without it.
+
+Provenance: R1 sec. 3.2.1, R1 Eq. 7, R1 Eq. 13, R3 sec. 4, R1 sec. 4.4, R18 sec. 4.
+Assumptions: A9, A10, A23, A37, A45.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
@@ -62,20 +82,34 @@ from faster_coco_eval import mask as mask_api
 from jsonargparse import auto_cli
 
 from lucid_yolo.cli.eval import DEFAULT_IMG_SIZE
-from lucid_yolo.decode.common import BOX_CORNERS, LABEL_COLUMN, SCORE_COLUMN
+from lucid_yolo.data.rotated_geom import rboxes_to_polygons
+from lucid_yolo.decode.common import BOX_CORNERS, LABEL_COLUMN, RBOX_COLUMNS, SCORE_COLUMN
 from lucid_yolo.eval.checkpoint import load_eval_module, pick_device
 
 # ``DecodePath`` is imported at runtime, not under TYPE_CHECKING: jsonargparse resolves
 # the signature's annotations through ``get_type_hints`` to build the parser, and a name
 # only the type checker can see is not in the module globals it resolves against.
-from lucid_yolo.predict import DEFAULT_CONF_THRESHOLD, DecodePath, predict_image, predict_segmentation
+from lucid_yolo.predict import (
+    DEFAULT_CONF_THRESHOLD,
+    DecodePath,
+    predict_image,
+    predict_oriented,
+    predict_segmentation,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from torch import Tensor
 
-__all__ = ["DetectionRecord", "RleMask", "SegmentedDetectionRecord", "main", "predict"]
+__all__ = [
+    "DetectionRecord",
+    "OrientedDetectionRecord",
+    "RleMask",
+    "SegmentedDetectionRecord",
+    "main",
+    "predict",
+]
 
 #: Value of the report's ``masks`` key when the checkpoint has a mask branch: the name of
 #: the encoding the ``segmentation`` records carry, so the file says what it holds.
@@ -85,6 +119,20 @@ _MASK_FORMAT = "coco-rle"
 
 #: The task whose checkpoints additionally produce masks (WP-090).
 _SEGMENT_TASK = "segment"
+
+#: The task whose checkpoints produce rotated boxes instead of corners (WP-091).
+_OBB_TASK = "obb"
+
+#: Coordinate count of a rotated box's corner ring, ``[x1, y1, ..., x4, y4]``. Named so
+#: the flattening reads as "one ring per row" rather than as an inferred dimension, which
+#: an image with nothing above the threshold would leave ambiguous.
+_RING_VALUES = 8
+
+#: Value of an oriented report's ``boxes`` key: the convention its ``rbox`` records are
+#: written in — the long-edge form of :mod:`lucid_yolo.data.rotated_geom` with ``theta``
+#: in **radians**. Named in the file because angle conventions are the thing oriented
+#: formats silently disagree about (degrees, and a ``(0, 90]`` range, are both common).
+_OBB_BOX_FORMAT = "obb-longedge-rad"
 
 
 class DetectionRecord(TypedDict):
@@ -122,6 +170,34 @@ class RleMask(TypedDict):
     counts: str
 
 
+class OrientedDetectionRecord(TypedDict):
+    """One oriented detection as the report and the stdout summary carry it.
+
+    Deliberately **not** a subclass of :class:`DetectionRecord`: it has no ``box``,
+    because its geometry is not corners, and inheriting one to leave it out is not
+    something a ``TypedDict`` can express. A reader therefore learns which report it is
+    holding from the key it finds, before it has parsed a number.
+
+    Attributes:
+        rbox: The A45 box columns ``[cx, cy, w, h, theta]`` in original-image pixels,
+            canonical per A23 — ``w >= h`` and ``theta`` in radians on
+            ``[-pi/4, 3*pi/4)``, measured from ``+x`` towards ``+y`` on the y-down grid.
+        polygon: The same rectangle's four corners, ``[x1, y1, ..., x4, y4]``, in the
+            clockwise-as-displayed winding
+            :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons` defines. Redundant
+            with ``rbox`` by construction and useful for exactly that reason: it is
+            drawable and comparable without this project's angle convention.
+        score: Confidence in ``[0, 1]``.
+        label: Contiguous class index (not a dataset category id — see the module
+            docstring).
+    """
+
+    rbox: list[float]
+    polygon: list[float]
+    score: float
+    label: int
+
+
 class SegmentedDetectionRecord(DetectionRecord):
     """A detection record that also carries its instance mask.
 
@@ -146,15 +222,16 @@ def predict(
     device: str = "auto",
     output: Path | None = None,
 ) -> int:
-    """Detect objects in one image, and segment them when the checkpoint can.
+    """Detect objects in one image, and segment or orient them when the checkpoint can.
 
-    Which of the two happens is the checkpoint's ``task``, not a flag: a ``segment``
-    checkpoint run as a detector would answer plausibly with its mask branch unread, and
-    that is precisely the mistake a flag lets a caller make.
+    Which of the three happens is the checkpoint's ``task``, not a flag: a ``segment``
+    checkpoint run as a detector would answer plausibly with its mask branch unread, an
+    ``obb`` one with its angle branch unread, and that is precisely the mistake a flag
+    lets a caller make.
 
     Args:
-        checkpoint: Lightning ``.ckpt`` to predict with; its task must be ``detect`` or
-            ``segment``.
+        checkpoint: Lightning ``.ckpt`` to predict with; its task must be ``detect``,
+            ``segment`` or ``obb``.
         image: Image file to run on.
         ema: Predict with the EMA shadow stored in the checkpoint rather than raw
             weights.
@@ -162,7 +239,8 @@ def predict(
             ``nms`` for the confidence-threshold plus class-wise suppression path over
             the dense branch. Defaults to ``e2e`` — it is the path this architecture
             exists to demonstrate, and the one a deployment would ship; ``nms`` is the
-            comparison column.
+            comparison column, and an ``obb`` checkpoint refuses it, having no rotated
+            suppression to run.
         conf_threshold: Detections at or below this score are dropped, with their masks.
         img_size: Letterbox side. Defaults per the checkpoint's task.
         device: ``auto``, ``cpu``, ``mps`` or ``cuda``.
@@ -182,8 +260,22 @@ def predict(
     info["decoder"] = decoder
     resolved_img_size = DEFAULT_IMG_SIZE.get(task, 640) if img_size is None else img_size
     run_on = pick_device(device)
-    records: list[DetectionRecord]
-    if task == _SEGMENT_TASK:
+    records: list[DetectionRecord] | list[OrientedDetectionRecord]
+    box_format: str | None = None
+    if task == _OBB_TASK:
+        rotated = predict_oriented(
+            module,
+            image,
+            img_size=resolved_img_size,
+            decoder=decoder,
+            conf_threshold=conf_threshold,
+            device=run_on,
+        )
+        records = _to_oriented_records(rotated)
+        lines = _oriented_lines(records)
+        mask_format: str | None = None
+        box_format = _OBB_BOX_FORMAT
+    elif task == _SEGMENT_TASK:
         prediction = predict_segmentation(
             module,
             image,
@@ -193,11 +285,12 @@ def predict(
             device=run_on,
         )
         records = _to_segmented_records(prediction.detections, prediction.masks)
-        mask_format: str | None = _MASK_FORMAT
+        lines = _detection_lines(records)
+        mask_format = _MASK_FORMAT
     else:
-        # Not an `elif task == "detect"`: an `obb` checkpoint must be refused, and the
-        # refusal belongs to the library (see `lucid_yolo.predict`), which is where it
-        # names the task and points at WP-091. Restating the test here would give this
+        # Not an `elif task == "detect"`: an unknown task must be refused, and the refusal
+        # belongs to the library (see `lucid_yolo.predict`), which is where it names the
+        # task the checkpoint actually carries. Restating the test here would give this
         # command a second opinion about which checkpoints it accepts.
         detections = predict_image(
             module,
@@ -208,18 +301,18 @@ def predict(
             device=run_on,
         )
         records = _to_records(detections)
+        lines = _detection_lines(records)
         mask_format = None
 
     print(
         f"predict: {image} -> {len(records)} detections, path={decoder}, "
         f"img_size={resolved_img_size}, masks={mask_format or 'none'}"
     )
-    for record in records:
-        corners = " ".join(f"{value:.1f}" for value in record["box"])
-        print(f"  class={record['label']} score={record['score']:.3f} box=[{corners}]")
+    for line in lines:
+        print(line)
 
     if output:
-        payload = {
+        payload: dict[str, object] = {
             "info": info,
             "image": str(image),
             "decoder": decoder,
@@ -227,6 +320,11 @@ def predict(
             "masks": mask_format,
             "detections": records,
         }
+        # Added rather than always present, so the two shipped report shapes are untouched:
+        # `box` has meant `xyxy` since WP-089 and needs no announcement, while `rbox` is
+        # new and its angle convention is the thing oriented formats disagree about.
+        if box_format is not None:
+            payload["boxes"] = box_format
         # Created rather than required, for the reason `detect_eval.run` states: the
         # forward pass is the expensive part and this file is its only durable form.
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -254,6 +352,55 @@ def _to_records(detections: Tensor) -> list[DetectionRecord]:
             label=int(row[LABEL_COLUMN]),
         )
         for row in detections
+    ]
+
+
+def _to_oriented_records(detections: Tensor) -> list[OrientedDetectionRecord]:
+    """Turn an A45 oriented detection tensor into JSON-serialisable per-detection records.
+
+    Args:
+        detections: Oriented detections of shape ``(N, 7)`` in original-image coordinates,
+            as :func:`~lucid_yolo.predict.predict_oriented` returns them.
+
+    Returns:
+        One :class:`OrientedDetectionRecord` per row. The corners come from
+        :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons` applied to the whole
+        stack at once, so the ``polygon`` of row ``n`` is that row's own ``rbox`` and the
+        two cannot describe different rectangles.
+    """
+    rings = rboxes_to_polygons(detections[:, :RBOX_COLUMNS]).reshape(-1, _RING_VALUES)
+    return [
+        OrientedDetectionRecord(
+            rbox=[float(value) for value in row[:RBOX_COLUMNS]],
+            polygon=[float(value) for value in ring],
+            score=float(row[RBOX_COLUMNS]),
+            label=int(row[RBOX_COLUMNS + 1]),
+        )
+        for row, ring in zip(detections, rings, strict=True)
+    ]
+
+
+def _detection_lines(records: Sequence[DetectionRecord]) -> list[str]:
+    """Render one stdout line per axis-aligned detection."""
+    return [
+        f"  class={record['label']} score={record['score']:.3f} "
+        f"box=[{' '.join(f'{value:.1f}' for value in record['box'])}]"
+        for record in records
+    ]
+
+
+def _oriented_lines(records: Sequence[OrientedDetectionRecord]) -> list[str]:
+    """Render one stdout line per oriented detection.
+
+    The angle is printed in degrees beside the tuple it is stored in radians in: a
+    heading is what a reader of this line is checking by eye, and ``2.6`` radians is not
+    a number anyone recognises as pointing anywhere.
+    """
+    return [
+        f"  class={record['label']} score={record['score']:.3f} "
+        f"rbox=[{' '.join(f'{value:.1f}' for value in record['rbox'][:-1])} "
+        f"{math.degrees(record['rbox'][-1]):.1f}deg]"
+        for record in records
     ]
 
 
