@@ -340,7 +340,9 @@ def rotated_iou(boxes_a: Tensor, boxes_b: Tensor) -> Tensor:
         :func:`torch.result_type` gives the two inputs.
 
     Raises:
-        ValueError: If either argument is not a 2-D ``(K, 5)`` tensor.
+        ValueError: If either argument is not a 2-D five-column tensor. The message
+            names the offending argument and spells the row count ``N``, the letter
+            :func:`_check_2d` uses for every shape it rejects.
 
     Examples:
         ```pycon
@@ -361,8 +363,8 @@ def rotated_iou(boxes_a: Tensor, boxes_b: Tensor) -> Tensor:
 
         ```
     """
-    _check_rboxes(boxes_a, "boxes_a")
-    _check_rboxes(boxes_b, "boxes_b")
+    _check_2d(boxes_a, _RBOX_DIM, "boxes_a")
+    _check_2d(boxes_b, _RBOX_DIM, "boxes_b")
     dtype = torch.result_type(boxes_a, boxes_b)
     left, right = boxes_a.to(dtype), boxes_b.to(dtype)
     if left.shape[0] == 0 or right.shape[0] == 0:
@@ -435,9 +437,15 @@ def _greatest_below_high(like: Tensor) -> Tensor:
 def _check_2d(tensor: Tensor, columns: int, name: str) -> None:
     """Raise :class:`ValueError` unless ``tensor`` is 2-D with ``columns`` columns.
 
+    The row count is spelled ``N`` in every message this raises, :func:`rotated_iou`'s
+    two operands included. Their signature distinguishes ``M`` from ``N`` because the
+    output is ``(M, N)`` — but the *predicate* each input has to satisfy is one and the
+    same, so a second letter in the rejection named a difference the check never tested.
+
     Examples:
         >>> import torch
         >>> _check_2d(torch.zeros((0, 5)), 5, "rboxes")
+        >>> _check_2d(torch.zeros((0, 5)), 5, "boxes_a")
     """
     if tensor.ndim != 2 or tensor.shape[1] != columns:
         raise ValueError(f"{name} must be (N, {columns}); got shape {tuple(tensor.shape)}")
@@ -452,22 +460,6 @@ def _check_polygons(polygons: Tensor) -> None:
     """
     if polygons.ndim != 3 or tuple(polygons.shape[1:]) != (_QUAD_CORNERS, _POINT_DIM):
         raise ValueError(f"polygons must be (M, 4, 2); got shape {tuple(polygons.shape)}")
-
-
-def _check_rboxes(rboxes: Tensor, name: str) -> None:
-    """Raise :class:`ValueError` unless ``rboxes`` is a 2-D ``(K, 5)`` tensor.
-
-    :func:`rotated_iou`'s own guard, kept separate from :func:`_check_2d` rather than
-    folded into it: the two differ only in the letter they name the row count with, and
-    both spellings are pinned by their callers' tests, so merging them would change a
-    message rather than remove a duplicate.
-
-    Examples:
-        >>> import torch
-        >>> _check_rboxes(torch.zeros((0, 5)), "boxes_a")
-    """
-    if rboxes.ndim != 2 or rboxes.shape[1] != _RBOX_DIM:
-        raise ValueError(f"{name} must be (K, {_RBOX_DIM}); got shape {tuple(rboxes.shape)}")
 
 
 def _local_polygons(pairs: Tensor, midpoint: Tensor) -> Tensor:

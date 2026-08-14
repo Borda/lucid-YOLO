@@ -261,8 +261,8 @@ class TestRotatedIou:
         ],
     )
     def test_rejects_malformed_boxes(self, shape: tuple[int, ...]) -> None:
-        """A tensor that is not ``(K, 5)`` is rejected rather than silently reinterpreted."""
-        with pytest.raises(ValueError, match=r"must be \(K, 5\)"):
+        """A tensor that is not ``(N, 5)`` is rejected rather than silently reinterpreted."""
+        with pytest.raises(ValueError, match=r"boxes_a must be \(N, 5\)"):
             rotated_iou(torch.zeros(shape), torch.zeros(1, 5))
 
 
