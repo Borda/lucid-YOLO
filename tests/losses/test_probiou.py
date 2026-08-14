@@ -26,6 +26,7 @@ import pytest
 import torch
 from torch import Tensor
 
+from lucid_yolo.data.rotated_geom import canonicalize
 from lucid_yolo.losses import probabilistic_iou, probiou_bhattacharyya_loss, probiou_hellinger_loss
 
 #: Pairs spanning square/elongated, aligned/rotated, overlapping/disjoint.
@@ -454,11 +455,27 @@ def test_batched_broadcast_and_empty_shapes() -> None:
     ],
 )
 def test_wrong_trailing_dimension_raises(shape: tuple[int, ...]) -> None:
-    """A tensor whose last dimension is not 5 is rejected by name."""
+    """A tensor whose last dimension is not 5 is rejected by name, and by the shape it wanted."""
     good = torch.zeros(3, 5)
 
-    with pytest.raises(ValueError, match="target must be"):
+    with pytest.raises(ValueError, match=r"target must be \(\.\.\., 5\)"):
         probiou_bhattacharyya_loss(good, torch.zeros(shape))
+
+
+def test_extra_leading_dimensions_are_accepted() -> None:
+    """The loss takes any leading shape — the guard asserts the trailing five and nothing else.
+
+    Pins the divergence from :func:`lucid_yolo.data.rotated_geom` deliberately (WP-091e):
+    that module's checks require exactly 2-D and reject this input, and the two are not
+    copies of one check despite sharing a name.
+    """
+    boxes = torch.rand(2, 3, 4, 5) + torch.tensor([0.0, 0.0, 1.0, 1.0, 0.0])
+
+    assert probiou_bhattacharyya_loss(boxes, boxes.clone()).shape == (2, 3, 4)
+    assert probiou_hellinger_loss(boxes, boxes.clone()).shape == (2, 3, 4)
+
+    with pytest.raises(ValueError, match=r"rboxes must be \(N, 5\)"):
+        canonicalize(boxes)
 
 
 def test_scores_stay_in_range_over_a_random_sweep() -> None:

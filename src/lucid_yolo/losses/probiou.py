@@ -306,9 +306,19 @@ def _unpack(rboxes: Tensor, min_side: float) -> tuple[Tensor, Tensor, Tensor, Te
 def _check_rboxes(rboxes: Tensor, name: str) -> None:
     """Raise :class:`ValueError` unless ``rboxes`` has a trailing rotated-box dimension.
 
+    Deliberately looser than :func:`lucid_yolo.data.rotated_geom._check_2d`, which
+    requires exactly 2-D: everything here is elementwise in the leading shape, so a
+    ``(4, 1, 5)`` prediction against a ``(1, 3, 5)`` target is a well-defined pairwise
+    matrix and refusing it would be the guard inventing a restriction the arithmetic
+    does not have. The two are not a duplicate pair, whatever the shared name suggests
+    (WP-091e). Only the trailing five is structural — it is what :func:`_unpack`
+    unbinds — so that is all this asserts, and the message says ``(..., 5)`` rather
+    than naming rows the function never counts.
+
     Examples:
         >>> import torch
         >>> _check_rboxes(torch.zeros((0, 5)), "pred")
+        >>> _check_rboxes(torch.zeros((2, 3, 5)), "pred")
     """
     if rboxes.ndim == 0 or rboxes.shape[-1] != _RBOX_DIM:
         raise ValueError(f"{name} must be (..., {_RBOX_DIM}); got shape {tuple(rboxes.shape)}")
