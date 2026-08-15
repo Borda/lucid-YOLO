@@ -48,7 +48,9 @@ repos:
         pass_filenames: false
       # Scans the installed environment, not the diff, so it must run on every
       # commit: a copyleft dependency can arrive through a transitive bump that
-      # touches no tracked file. Costs ~0.1 s over 93 distributions.
+      # touches no tracked file. Costs ~0.24 s over 87 distributions and the 340
+      # native libraries they ship; WP-109's binary scan, which walks every wheel's
+      # RECORD, is ~0.15 s of that — measured against 0.09 s for the two checks alone.
       - id: license-audit
         name: dependency license audit
         entry: .venv/bin/python scripts/audit_licenses.py
