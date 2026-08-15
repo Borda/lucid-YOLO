@@ -20,8 +20,7 @@ added.
 
 Download behaviour:
     * ``val`` is the default split (5,000 images, ~1 GB); ``train`` is 18 GB and
-      must be opted into explicitly (``--splits '[train,val]'`` through
-      ``lucid-data``; the deprecated alias spells the same list ``--splits train val``).
+      must be opted into explicitly (``lucid-data download --splits '[train,val]'``).
     * Transfers stream to ``<archive>.part`` and are renamed into place on
       completion (atomic), so a killed run never leaves a truncated ``.zip``.
     * A partial ``.part`` is resumed with an HTTP ``Range`` request when the
@@ -33,21 +32,23 @@ Checksum policy:
     The official COCO archives publish no authoritative SHA-256 digests, so none
     are hard-coded here. The computed digest of every downloaded archive is
     printed, and an expected digest may be supplied per archive
-    (``--sha256 val2017.zip=<hex>``) to enforce a mismatch failure.
+    (``--sha256 '[val2017.zip=<hex>]'``) to enforce a mismatch failure.
 
 Examples:
     Fetch the validation split plus annotations::
 
-        python -m lucid_yolo.data.download --data-root /data/coco
+        lucid-data download --data_root /data/coco
 
-    Or via the console script (both splits)::
+    Or both splits, confirming every annotated image landed::
 
-        lucid-data download --data_root /data/coco --splits '[train,val]'
+        lucid-data download --data_root /data/coco --splits '[train,val]' --verify true
+
+    Without the console scripts on ``PATH``, the same command is
+    ``python -m lucid_yolo.cli.data download ...``.
 """
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import sys
 import urllib.request
@@ -59,7 +60,7 @@ from typing import Any
 
 from lucid_yolo.data.verify import VerifyResult, format_report, verify_coco_root
 
-__all__ = ["add_arguments", "download_coco", "download_dataset", "main"]
+__all__ = ["download_coco", "download_dataset"]
 
 #: Official public COCO 2017 image host (blueprint sec. 14.3); no mirrors. The
 #: S3 path-style form is used because the ``images.cocodataset.org`` CNAME is an
@@ -385,51 +386,6 @@ def _parse_checksums(items: Iterable[str]) -> dict[str, str]:
     return checksums
 
 
-def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Register the ``lucid-data download`` flags on ``parser``.
-
-    Args:
-        parser: The subcommand parser to populate.
-
-    Examples:
-        >>> parser = argparse.ArgumentParser()
-        >>> add_arguments(parser)
-        >>> parser.parse_args(["--data-root", "/data/coco"]).splits
-        ['val']
-    """
-    parser.add_argument("--data-root", type=Path, required=True, help="target root directory")
-    parser.add_argument(
-        "--splits",
-        nargs="+",
-        choices=sorted(SPLIT_ARCHIVES),
-        default=["val"],
-        help="image splits to fetch (default: val)",
-    )
-    parser.add_argument(
-        "--no-annotations", dest="annotations", action="store_false", help="skip the annotations archive"
-    )
-    parser.add_argument(
-        "--sha256",
-        action="append",
-        default=[],
-        metavar="NAME=HEX",
-        help="expected SHA-256 for an archive, e.g. val2017.zip=<hex> (repeatable)",
-    )
-    parser.add_argument("--force", action="store_true", help="re-download even if already extracted")
-    parser.add_argument("--keep-archives", action="store_true", help="keep the downloaded .zip files after extraction")
-    parser.add_argument(
-        "--verify",
-        action="store_true",
-        help="after downloading, verify every annotated image was provisioned (fails on mismatch)",
-    )
-    parser.add_argument(
-        "--verify-only",
-        action="store_true",
-        help="skip downloading; verify an existing --data-root and exit 0 (complete) or 1 (missing files)",
-    )
-    parser.add_argument("--quiet", action="store_true", help="suppress progress output")
-
-
 def _skipped_splits(data_root: Path, splits: Sequence[str], *, force: bool) -> set[str]:
     """Return the requested splits the idempotent check will skip.
 
@@ -450,6 +406,10 @@ def _skipped_splits(data_root: Path, splits: Sequence[str], *, force: bool) -> s
 def _emit_repair_hints(data_root: Path, result: VerifyResult, skipped: set[str]) -> None:
     """Print a ``--force`` re-run hint for each incomplete but skipped split.
 
+    The hint is the shipped ``lucid-data download`` spelling, quoted as a shell would need
+    it: a repair hint naming a command the caller cannot run is worse than none, which is
+    what the removed ``lucid-download`` alias would have left behind here (WP-110).
+
     Args:
         data_root: The verified data root, named in the printed command.
         result: The verification outcome.
@@ -458,7 +418,7 @@ def _emit_repair_hints(data_root: Path, result: VerifyResult, skipped: set[str])
     for split in sorted(skipped):
         outcome = next((item for item in result.splits if item.name == f"{split}2017"), None)
         if outcome is not None and not outcome.ok:
-            command = f"lucid-download --data-root {data_root} --splits {split} --force"
+            command = f"lucid-data download --data_root {data_root} --splits '[{split}]' --force true"
             sys.stderr.write(f"hint: {split}2017 is incomplete and was skipped; re-fetch it with:\n  {command}\n")
 
 
@@ -539,48 +499,3 @@ def download_dataset(
     if verify:
         return _run_verification(data_root, splits, skipped)
     return 0
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the deprecated ``lucid-download`` entry point.
-
-    ``lucid-download`` became ``lucid-data download`` in 0.3.0 (WP-096). The old console
-    script keeps working for one minor and prints where it went, because it is named in
-    published reproduction instructions and a command that vanishes between two 0.x
-    versions makes those instructions unreproducible rather than merely outdated.
-
-    Args:
-        argv: Command-line arguments (defaults to ``sys.argv[1:]``).
-
-    Returns:
-        Whatever :func:`run` returns.
-
-    Examples:
-        ```pycon
-        >>> main(["--data-root", "/data/coco", "--splits", "val"])  # doctest: +SKIP
-        0
-
-        ```
-    """
-    print(
-        "lucid-download is deprecated and will be removed in 0.4.0; use: lucid-data download ...",
-        file=sys.stderr,
-    )
-    parser = argparse.ArgumentParser(prog="lucid-download", description="Download COCO 2017 (use lucid-data download).")
-    add_arguments(parser)
-    args = parser.parse_args(argv)
-    return download_dataset(
-        args.data_root,
-        args.splits,
-        annotations=args.annotations,
-        sha256=args.sha256,
-        force=args.force,
-        keep_archives=args.keep_archives,
-        verify=args.verify,
-        verify_only=args.verify_only,
-        quiet=args.quiet,
-    )
-
-
-if __name__ == "__main__":
-    sys.exit(main())

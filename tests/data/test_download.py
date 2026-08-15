@@ -6,24 +6,33 @@ monkeypatching ``urllib.request.urlopen`` with an in-memory zip server, and the
 idempotency path monkeypatches it to raise if it is ever called. The tests cover
 the URL constants, the split/annotation-to-archive plan (and its check-data
 layout compatibility), the zip-slip guard, resume/atomic/skip behaviour, the
-SHA-256 verification hook, and the CLI argument parsing.
+SHA-256 verification hook, and the command that drives them.
+
+That command is ``lucid-data download``. WP-110 removed the ``lucid-download``
+alias these tests used to parse through, so the spellings asserted here are the
+shipped underscored ones (``--data_root``, ``--splits '[val]'``, ``--force
+true``) and the parser is the one a wheel installs, not a frozen local copy.
 """
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import io
 import json
+import shlex
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from lucid_yolo.cli import data as data_cli
 from lucid_yolo.data import check as check_data
 from lucid_yolo.data import download as dl
+
+if TYPE_CHECKING:
+    from jsonargparse import Namespace
 
 
 class _FakeResponse:
@@ -296,68 +305,111 @@ def test_parse_checksums_invalid_raises(item: str) -> None:
         dl._parse_checksums([item])
 
 
-def _deprecated_parser() -> argparse.ArgumentParser:
-    """Build the frozen ``lucid-download`` parser (dashed flags, deprecated in 0.3.0)."""
-    parser = argparse.ArgumentParser()
-    dl.add_arguments(parser)
-    return parser
+def _parse_download(argv: list[str]) -> Namespace:
+    """Parse ``lucid-data download`` arguments, returning that subcommand's namespace."""
+    return data_cli.build_parser().parse_args(["download", *argv]).download
 
 
 def test_cli_requires_data_root() -> None:
-    parser = _deprecated_parser()
+    """``--data_root`` has no default, so omitting it fails the parse rather than the run."""
     with pytest.raises(SystemExit):
-        parser.parse_args([])
+        _parse_download([])
 
 
 def test_cli_defaults_to_val_with_annotations() -> None:
-    args = _deprecated_parser().parse_args(["--data-root", "/data/coco"])
-    assert args.splits == ["val"]
+    """Bare ``--data_root`` fetches val plus annotations, the ~1 GB default."""
+    args = _parse_download(["--data_root", "/data/coco"])
+    assert list(args.splits) == ["val"]
     assert args.annotations is True
     assert args.force is False
 
 
 def test_cli_parses_splits_and_no_annotations() -> None:
-    args = _deprecated_parser().parse_args(
-        ["--data-root", "/data/coco", "--splits", "train", "val", "--no-annotations", "--keep-archives", "--quiet"]
+    """The underscored, list-valued spellings reach the operation function's parameters.
+
+    This is the surface a copy-pasted command depends on, and the one that changed when
+    the dashed alias went (WP-110): a list is ``'[train,val]'``, and a flag that used to
+    be a bare switch now takes an explicit ``true``/``false``.
+    """
+    args = _parse_download(
+        [
+            "--data_root",
+            "/data/coco",
+            "--splits",
+            "[train,val]",
+            "--annotations",
+            "false",
+            "--keep_archives",
+            "true",
+            "--quiet",
+            "true",
+        ]
     )
-    assert args.splits == ["train", "val"]
+    assert list(args.splits) == ["train", "val"]
     assert args.annotations is False
     assert args.keep_archives is True
     assert args.quiet is True
 
 
-def test_cli_rejects_unknown_split() -> None:
-    with pytest.raises(SystemExit):
-        _deprecated_parser().parse_args(["--data-root", "/data/coco", "--splits", "test"])
+def test_cli_rejects_unknown_split(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unknown split name fails the run, without reaching the network.
+
+    The dashed alias rejected it in the parser (``choices=``); the shipped command derives
+    its flags from :func:`download_dataset`'s signature, which has no such constraint, so
+    :func:`_plan_archives` is the guard that matters and the exit code is what a caller
+    sees. The difference is worth pinning: the check moved, it did not disappear.
+    """
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
+
+    code = data_cli.main(["download", "--data_root", str(tmp_path), "--splits", "[test]", "--quiet", "true"])
+
+    assert code == 1
 
 
 def test_main_returns_zero_on_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
     monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
-    code = dl.main(["--data-root", str(tmp_path / "coco"), "--splits", "val", "--no-annotations", "--quiet"])
+    code = data_cli.main(
+        [
+            "download",
+            "--data_root",
+            str(tmp_path / "coco"),
+            "--splits",
+            "[val]",
+            "--annotations",
+            "false",
+            "--quiet",
+            "true",
+        ]
+    )
     assert code == 0
 
 
 def test_main_returns_one_on_checksum_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes()}
     monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
-    code = dl.main(
+    code = data_cli.main(
         [
-            "--data-root",
+            "download",
+            "--data_root",
             str(tmp_path / "coco"),
             "--splits",
-            "val",
-            "--no-annotations",
+            "[val]",
+            "--annotations",
+            "false",
             "--sha256",
-            "val2017.zip=bad",
+            "[val2017.zip=bad]",
             "--quiet",
+            "true",
         ]
     )
     assert code == 1
 
 
 def test_main_returns_one_on_bad_checksum_arg(tmp_path: Path) -> None:
-    code = dl.main(["--data-root", str(tmp_path / "coco"), "--sha256", "malformed", "--quiet"])
+    code = data_cli.main(
+        ["download", "--data_root", str(tmp_path / "coco"), "--sha256", "[malformed]", "--quiet", "true"]
+    )
     assert code == 1
 
 
@@ -380,35 +432,42 @@ def _seed_val_root(root: Path, annotated: int, present: int) -> None:
         (root / "val2017" / f"{i:012d}.jpg").write_bytes(b"jpegbytes")
 
 
+def _verify_only(root: Path) -> int:
+    """Run ``lucid-data download --verify_only`` over ``root``'s val split."""
+    return data_cli.main(
+        ["download", "--data_root", str(root), "--splits", "[val]", "--verify_only", "true", "--quiet", "true"]
+    )
+
+
 def test_cli_verify_only_passes_on_complete_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`--verify-only` exits 0 on a complete root without touching the network."""
+    """`--verify_only` exits 0 on a complete root without touching the network."""
     root = tmp_path / "coco"
     _seed_val_root(root, annotated=2, present=2)
     monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
 
-    code = dl.main(["--data-root", str(root), "--splits", "val", "--verify-only", "--quiet"])
+    code = _verify_only(root)
 
     assert code == 0
 
 
 def test_cli_verify_only_fails_on_missing_images(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`--verify-only` exits 1 and reports the shortfall on an incomplete root."""
+    """`--verify_only` exits 1 and reports the shortfall on an incomplete root."""
     root = tmp_path / "coco"
     _seed_val_root(root, annotated=4, present=1)
     monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
 
-    code = dl.main(["--data-root", str(root), "--splits", "val", "--verify-only", "--quiet"])
+    code = _verify_only(root)
 
     assert code == 1
 
 
 def test_cli_verify_only_fails_on_missing_annotation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`--verify-only` exits 1 when the split's annotation JSON is absent."""
+    """`--verify_only` exits 1 when the split's annotation JSON is absent."""
     root = tmp_path / "coco"
     (root / "val2017").mkdir(parents=True)
     monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
 
-    code = dl.main(["--data-root", str(root), "--splits", "val", "--verify-only", "--quiet"])
+    code = _verify_only(root)
 
     assert code == 1
 
@@ -418,24 +477,70 @@ def test_cli_verify_after_download_passes(tmp_path: Path, monkeypatch: pytest.Mo
     mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": _val_archive_bytes(num_images=2)}
     monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
 
-    code = dl.main(
-        ["--data-root", str(tmp_path / "coco"), "--splits", "val", "--no-annotations", "--verify", "--quiet"]
+    code = data_cli.main(
+        [
+            "download",
+            "--data_root",
+            str(tmp_path / "coco"),
+            "--splits",
+            "[val]",
+            "--annotations",
+            "false",
+            "--verify",
+            "true",
+            "--quiet",
+            "true",
+        ]
     )
 
     assert code == 0
 
 
-def test_cli_verify_after_skipped_incomplete_split_hints_force(
+def _hint_for_incomplete_split(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """`--verify` on a skipped, incomplete split exits 1 and prints a --force hint."""
+) -> tuple[int, str, str]:
+    """Drive ``--verify`` over a skipped, incomplete val split; return code and streams."""
     root = tmp_path / "coco"
     _seed_val_root(root, annotated=2, present=1)
     monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
 
-    code = dl.main(["--data-root", str(root), "--splits", "val", "--verify", "--quiet"])
+    code = data_cli.main(
+        ["download", "--data_root", str(root), "--splits", "[val]", "--verify", "true", "--quiet", "true"]
+    )
     captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def test_cli_verify_after_skipped_incomplete_split_hints_force(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--verify` on a skipped, incomplete split exits 1 and prints a `--force` re-run hint."""
+    code, out, err = _hint_for_incomplete_split(tmp_path, monkeypatch, capsys)
 
     assert code == 1
-    assert "val2017" in captured.out  # the verification report
-    assert f"lucid-download --data-root {root} --splits val --force" in captured.err  # repair hint
+    assert "val2017" in out  # the verification report
+    expected = f"lucid-data download --data_root {tmp_path / 'coco'} --splits '[val]' --force true"
+    assert expected in err  # repair hint
+
+
+def test_the_repair_hint_names_a_command_that_still_parses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The printed repair hint is a command a caller can paste back into a shell.
+
+    Asserting the hint's *text* only proves a string was printed; the alias removal
+    (WP-110) is exactly the change that can leave a well-formed hint naming a command
+    nothing installs. So the hint is split as a shell would split it and fed back through
+    the shipped parser, which is what makes the assertion mean "runnable" rather than
+    "spelled the way this test expects".
+    """
+    _, _, err = _hint_for_incomplete_split(tmp_path, monkeypatch, capsys)
+    hint = next(line.strip() for line in err.splitlines() if line.strip().startswith("lucid-data"))
+
+    command, *arguments = shlex.split(hint)
+    config = data_cli.build_parser().parse_args(arguments).download
+
+    assert command == "lucid-data"
+    assert list(config.splits) == ["val"]
+    assert config.force is True
+    assert config.data_root == tmp_path / "coco"

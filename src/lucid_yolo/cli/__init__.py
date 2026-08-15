@@ -37,9 +37,10 @@ Why jsonargparse:
     consequence to know: jsonargparse spells flags with underscores (``--data_root``),
     exactly as ``--data.batch_size`` already does on the training CLI.
 
-    The deprecated ``lucid-download`` alias keeps its original argparse parser and its
-    dashed flags, frozen: it exists so published reproduction instructions keep running,
-    and re-spelling its flags would defeat that.
+    That consequence had one exemption and no longer does: the ``lucid-download`` alias
+    kept its argparse parser and its dashed flags through 0.3.0 so published reproduction
+    instructions kept running. It was removed in 0.4.0 as 0.3.0 said it would be, so
+    ``--data_root`` is now the only spelling any shipped command answers to (WP-110).
 """
 
 from lucid_yolo.cli.data import main as data_main

@@ -107,7 +107,7 @@ lucid-yolo fit --config det_smoke.yaml \
 python scripts/eval_det.py <checkpoint> --data-root <root>
 ```
 
-These are the commands **as run**, at the version named, and are left unedited for that reason. On 0.3.0 and later the same three steps are `lucid-data download --data_root <root> --splits '[train,val]' --verify true`, the unchanged `lucid-yolo fit`, and `lucid-eval --checkpoint <checkpoint> --data_root <root>` (WP-096). `lucid-download` still works and still takes the dashed flags above; it is removed in 0.4.0.
+These are the commands **as run**, at the version named, and are left unedited for that reason. On 0.3.0 and later the same three steps are `lucid-data download --data_root <root> --splits '[train,val]' --verify true`, the unchanged `lucid-yolo fit`, and `lucid-eval --checkpoint <checkpoint> --data_root <root>` (WP-096). `lucid-download` kept accepting the dashed flags above through 0.3.0; it was removed in 0.4.0 as that release said it would be (WP-110), so on 0.4.0 and later the block above must be read through those replacements rather than run as written.
 
 Seed 0 throughout. Cross-platform bitwise reproduction is not claimed (A26: libm last-bit rounding differs across OS and architecture); the run config, seeds, and metric reports are archived under `.experiments/det_smoke/`.
 

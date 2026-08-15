@@ -24,6 +24,7 @@ import torch
 
 from lucid_yolo.cli import data as data_cli
 from lucid_yolo.cli import eval as eval_cli
+from lucid_yolo.data import download
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
@@ -37,7 +38,6 @@ EXPECTED_SCRIPTS = {
     "lucid-data": "lucid_yolo.cli.data:main",
     "lucid-eval": "lucid_yolo.cli.eval:main",
     "lucid-predict": "lucid_yolo.cli.predict:main",
-    "lucid-download": "lucid_yolo.data.download:main",
 }
 
 
@@ -156,16 +156,15 @@ def test_an_explicit_size_beats_the_task_default(tmp_path: Path, monkeypatch: py
     assert seen["img_size"] == 512
 
 
-def test_the_deprecated_download_alias_says_where_it_went(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """``lucid-download`` still runs, keeps its dashed flags, and points at its replacement.
+def test_the_deprecated_download_alias_is_gone() -> None:
+    """``lucid-download`` is no longer declared, and the entry point it named is gone too.
 
-    It is named in published reproduction instructions, so it keeps working for one minor
-    rather than vanishing between two 0.x versions — and it keeps the flag spellings those
-    instructions use, which is the whole point of keeping it.
+    0.3.0 deprecated the alias in favour of ``lucid-data download`` and put the removal in
+    writing for 0.4.0 (WP-096), which WP-110 carried out. This asserts the absence rather
+    than merely dropping the old test: a removal nothing asserts is one a later copy-paste
+    can silently undo, and the entry point is the half that would come back unnoticed —
+    a stale ``[project.scripts]`` line at least fails to resolve.
     """
-    from lucid_yolo.data import download  # noqa: PLC0415 - the deprecated surface, imported where it is tested
-
-    code = download.main(["--data-root", str(tmp_path), "--splits", "val", "--verify-only", "--quiet"])
-
-    assert code == 1
-    assert "lucid-data download" in capsys.readouterr().err
+    assert "lucid-download" not in _declared_scripts()
+    assert not hasattr(download, "main")
+    assert "main" not in download.__all__
