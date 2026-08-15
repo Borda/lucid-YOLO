@@ -25,6 +25,28 @@ Datasets are never committed and never fetched by the test suite — docs/DATASE
 
 The execution contract for contributors and agents lives in AGENTS.md; every design decision cites its public source (docs/PROVENANCE.md), and every point where the papers underdetermine the implementation is a recorded assumption (docs/ASSUMPTIONS.md).
 
+## Examples
+
+Releases publish no trained weights (D14), so every command below takes a checkpoint you trained yourself — docs/TRAINING.md carries the launch command for each tier.
+
+One image to a prediction, as printed detections and as a JSON report:
+
+```bash
+lucid-predict --checkpoint runs/det.ckpt --image street.jpg
+lucid-predict --checkpoint runs/seg.ckpt --image street.jpg --output masks.json
+lucid-predict --checkpoint runs/obb.ckpt --image aerial.png --output rboxes.json
+```
+
+The same three predictions drawn over the picture they were made on:
+
+```bash
+python scripts/draw_predictions.py runs/det.ckpt street.jpg --output street_det.png
+python scripts/draw_predictions.py runs/seg.ckpt street.jpg --output street_seg.png --conf-threshold 0.4
+python scripts/draw_predictions.py runs/obb.ckpt aerial.png --output aerial_obb.png --img-size 1024
+```
+
+A detection checkpoint draws boxes, a segmentation one adds each instance's own mask overlay, and an oriented one draws rotated quadrilaterals — never their upright envelopes, which is a different rectangle from the one the model reported. The task is read from the checkpoint; `--task` can name it, and a checkpoint that contradicts the name is refused rather than drawn through the wrong path. Colour is a function of the class index alone, so two figures of the same scene are comparable by eye. `matplotlib` is a `dev` dependency and stays one: the drawing lives in `scripts/`, and a wheel a consumer installs pulls no plotting stack.
+
 ## License
 
 Apache-2.0 (see LICENSE and NOTICE).
