@@ -55,6 +55,12 @@ dev = [
   "types-tqdm",
   "fuse-augmentations",
   "matplotlib>=3.8",
+  # WP-066's export gate only. The export itself is `torch.onnx.export`, already a
+  # runtime dep, so nothing a consumer installs changes: `onnx` reads the emitted
+  # graph back to assert what is in it, and `onnxruntime` executes it to assert the
+  # exported model still answers what the checkpoint answers. Both Apache-2.0/MIT.
+  "onnx>=1.17",
+  "onnxruntime>=1.19",
 ]
 
 [project.scripts]
