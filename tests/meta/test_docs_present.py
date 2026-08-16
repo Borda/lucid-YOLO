@@ -21,7 +21,7 @@ _WP_FLOOR = 115
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
 #: stays contiguous. Raise it when adding a decision; never lower it.
-_DECISION_FLOOR = 16
+_DECISION_FLOOR = 17
 
 REQUIRED_FILES = (
     DOCS / "PROVENANCE.md",

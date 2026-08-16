@@ -53,6 +53,14 @@ dev = [
   "build>=1.2",
   "types-PyYAML",
   "types-tqdm",
+  # `scripts/audit_licenses.py` imports it directly for marker and extras evaluation:
+  # attributing a distribution to a dependency tier means walking the requirement graph
+  # the way an installer would, and a hand-rolled marker evaluator would be a second,
+  # worse implementation of a solved problem. Arrived transitively before WP-115 (pytest
+  # and mkdocs both require it, which is why the docs CI job has it without this line);
+  # declared here because a direct import is not a transitive dependency. Apache-2.0 OR
+  # BSD-2-Clause, read from the installed distribution's own `License-Expression`.
+  "packaging>=24.0",
   "fuse-augmentations",
   "matplotlib>=3.8",
   # WP-066's export gate only. The export itself is `torch.onnx.export`, already a

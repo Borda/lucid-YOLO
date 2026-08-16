@@ -60,44 +60,31 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 - `mkdocs` is capped at `<2`, a licence bound rather than a compatibility one: the Material team's own build-time notice describes MkDocs 2.0 as "Currently unlicensed", and unlicensed is stricter than the AGPL this project bans, since the default is no grant at all. The licence audit cannot report it — it matches a GPL-family pattern against a declared licence, so a distribution declaring nothing passes in the same run that calls the environment clean (WP-114b).
 
+- A fourth surface for the licence audit: the absence of a licence. A distribution none of the three copyleft checks can read is now a finding, graded by dependency tier — fatal in the `[project.dependencies]` closure the wheel republishes, reported but not fatal for a package only the `dev` or `docs` groups reach, and fatal in either when the document it ships is copyleft prose. When no metadata field declares anything, the shipped `License-File` is identified from a distinctive phrase in its own header, which is what clears `faster-coco-eval` — PEP 639 metadata with no licence field, shipping the Apache-2.0 text. Tier attribution resolves the requirement graph from `pyproject.toml` with markers and extras evaluated: 56 base, 29 dev, 19 docs, and the project itself the only distribution no list mentions (WP-115).
+
+- That check fired on its first run in a CUDA environment, correctly: `cuda-toolkit`'s wheel `dist-info` holds METADATA, WHEEL and RECORD and nothing else — no licence field, no classifier, no licence document, verified from the wheel. It is allowlisted through a fourth allowlist keyed by distribution, kept separate from the three beside it because silence is a different exposure from a copyleft declaration or a vendored copyleft binary. CUDA is admitted as the accelerator environment rather than as a licence: the EULA is proprietary, the project declares no CUDA package and redistributes none of the toolkit, and D17 states that rather than leaving it a silence. The report also stopped spelling an unattributed package as a base one — both fail, for opposite reasons. In the same pass the licence-audit suite stopped reading the installed environment: seven tests and nine doctests asserted over `metadata.distributions()`, which is a property of a contributor's machine rather than of the audit, and would have failed on that CUDA box whatever the allowlist said. The live claim belongs to the commit-time hook, which is the actual gate; the tests answer whether the audit decides correctly, from synthetic distributions (WP-115b).
+
 ## [0.3.0] - 2026-08-14
 
 ### Added
 
 - Long-edge rotated-box primitives: canonicalization to `w >= h` with the angle on `[-45, 135)` degrees, quadrilateral conversion in both directions, and a vectorized point-in-rotated-rect test. Three conventions the paper leaves open are fixed here and inherited by the whole oriented path — the angle turns `+x` towards `+y`, containment is edge-inclusive, and an exact square folds towards zero (WP-055).
-
 - DOTA-v1.0 label parsing: the 15 categories in the published order, metadata headers skipped, category names normalized across their hyphenated and underscored spellings, and each annotated quadrilateral converted to a canonical long-edge box. Rotated boxes are kept on the same instance axis as the axis-aligned envelopes and labels, so one mask filters every modality (WP-056).
-
 - `make check-data DATASET=dota` — DOTA root layout, image/label pairing and published-count validation beside the existing COCO path (WP-056).
-
 - Overlapping 1024 px crop tiling for aerial imagery, with the source paper's partial-object rule: an instance clipped to under 70% of its area is flagged difficult rather than dropped, and re-fitted to a long-edge box. Crop overlap is a parameter; the visible fraction is carried alongside each instance (WP-057).
-
 - Rotated-aware augmentation: random affine, mosaic and mixup now carry rotated boxes instead of refusing them, warping each box through its four corners and re-fitting a long-edge box — exact under a similarity, an explicit fit under shear (WP-058).
-
 - ProbIoU rotated-box loss: both forms the source paper proposes, the bounded Hellinger distance and the unbounded Bhattacharyya distance, evaluated in a cancellation-free form that holds float32 accuracy from square boxes out to 1000:1 elongation and stays finite on degenerate input (WP-059).
-
 - Square-object angle loss: the auxiliary double-angle term that resolves what the rotated IoU loss cannot, weighted towards near-square targets by a log-Gaussian in the aspect ratio and zero at every quarter turn, so a square is never penalized for choosing either of its two indistinguishable orientations. The two representatives a square can arrive as score bit-identically, not merely to tolerance (WP-060).
-
 - Rotated candidate selection in the Task-Aligned Assigner and its STAL subclass: an oriented ground truth now decides candidacy by point-in-rotated-rect containment instead of by its axis-aligned envelope, through one optional argument that leaves the accepted axis-aligned path bit-identical when omitted. The end-to-end one-to-one assigner inherits it with no code of its own (WP-061).
-
 - Oriented detection head and NMS-free rotated decode: a third stem on each head branch predicts the angle directly, with the squashing nonlinearity of the previous versions removed, and the decode turns the ordinary box regression about its own centre and normalizes to the long-edge convention. An angle of zero reproduces the axis-aligned box exactly, and the two raw angles a half turn apart decode to the same box rather than two. Enabling the branch leaves the shipped detection head bit-identical, verified across 684 parameter and forward digests (WP-062).
-
 - Rotated mAP50-95 for oriented detection: exact polygon-intersection IoU against a shapely oracle, the COCO threshold grid and 101-point interpolation, and the DOTA convention where an instance flagged difficult is neither credited nor penalized. The detection cap follows what the model emits rather than COCO's smaller default, so no part of the output is discarded and then counted as missed (WP-063).
-
 - The license audit now reads the license documents a wheel bundles, not only the fields it declares. Its first run found two runtime libraries vendored under copyleft terms that no previous audit could see; a recognized license exception passes for any package, and the two remaining cases are allowlisted with the reasoning recorded (WP-063).
-
 - Oriented supervision wired into the training step: `task="obb"` now trains the angle stems it had only been constructing. The rotated ProbIoU replaces the Complete-IoU term in its slot, the L1 term is retargeted onto the rotated box's own centre and extents rather than the axis-aligned envelope it no longer matches, and R1's double-angle term is added — all gathered from the one assignment the box terms were scored against, never a second one. A `task="detect"` step stays bit-identical to a snapshot replayed from the pre-change tree (WP-088, A49-A51).
-
 - A `difficult` channel on the target container, so R18's per-instance flag survives the loader transport into the rotated metric instead of being filtered away at load, which would have scored every ignorable detection as a false positive (WP-088, A51).
-
 - `python scripts/build_dota_tiles.py` turns a DOTA root into the tiled COCO layout the oriented recipe trains on. The tiling geometry had existed since WP-057 with no caller, so the recipe pointed at a directory nothing could produce. Object-free crops are kept by default, since they are the negative evidence a one-to-one branch needs, and a flag selects the other reading; the per-instance difficult flag, the source paper's visible-area fraction, and each tile's source image and window travel in the annotation file so whole-image evaluation can be built later without re-tiling (WP-094, A52-A53).
-
 - The COCO reader forwards a `difficult` key onto the target container's flag channel on both the oriented and axis-aligned readings, defaulting to false when absent. Tiling *creates* difficult instances that appear in no label file, and without this every one of them reached the metric as an ordinary scored ground truth (WP-094, A53).
-
 - `python scripts/eval_obb.py` scores an oriented checkpoint against a split of the tiled layout through the rotated accumulator, with the EMA weights and the exact recall grid, the emitted detection cap and the difficult rule that instrument brings. The figure is explicitly per tile and says so: an object crossing a tile boundary is counted in both, and the merge rule that would fix it is a decision the release work package owns rather than something an instrument may pick quietly (WP-095).
-
 - A gate on the assumption register's own shape: a row written one column short is padded back by the formatter and reads as though a sourced assumption were unsourced, which two rows had already done (WP-061).
-
 - `docs/DATASETS.md` and `docs/TRAINING.md`: where each dataset comes from and what has to be on disk, and the launch command for each of the three tiers. DOTA provisioning is manual because its distribution offers interactive Drive folders rather than archive URLs, and that had never been written down; the training guide leads with the rule the report's historical command blocks do not state, that `default_root_dir` is where both loggers and the checkpoints write and therefore the whole of what survives a disconnected runtime (WP-003).
 
 ### Changed
