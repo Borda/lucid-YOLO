@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Rewrite the README's repository-relative links to absolute ones, for a PyPI build (WP-114).
+"""Rewrite the README's repository-relative links to absolute ones, for a PyPI build (WP-113b).
 
 ``pyproject.toml`` hands ``README.md`` to setuptools as the long description, and PyPI
 renders that description with no notion of the repository it came from: every relative

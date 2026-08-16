@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Docs
+
+# Builds the MkDocs Material site on every pull request and deploys it to GitHub
+# Pages on every push to the default branch. `mkdocs build --strict` is the check
+# worth running on a PR: it fails on a link to a page that does not exist and on a
+# page the nav never lists, which are the two ways this site rots silently.
+#
+# Enabling Pages is a one-time operator step (Settings -> Pages -> Source: GitHub
+# Actions) and is deliberately not automated here — `configure-pages` is called
+# without `enablement`, so it reports a misconfigured repository rather than
+# changing one. Until that switch is thrown the first push-to-main run fails at
+# `configure-pages`; pull-request runs are unaffected, because none of the three
+# Pages actions is on their path.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.workflow }}-${{ github.ref }}
+  # Not cancel-in-progress, following release.yml: this workflow deploys, and a
+  # half-finished deployment interrupted by the next push is worse than a queue.
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Replaces the top-level block rather than extending it. `pages: read` is what
+    # `configure-pages` needs to read the repository's Pages configuration; its
+    # `enablement` input defaults to false and, per its own action.yml, enabling
+    # would require a token other than `GITHUB_TOKEN` anyway — so read is the
+    # ceiling this job can use, not a permission it is being denied.
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: Create venv and install the docs dependency group
+        run: |
+          uv venv --python 3.11 .venv
+          uv pip install --python .venv/bin/python --group docs
+      # The docs group is in no other workflow's environment, so this is the only
+      # place CI ever sees the tree mkdocs-material pulls. The audit scans the
+      # installed environment rather than the diff (D15/D16), which means an
+      # unaudited environment is an unaudited dependency — run it where the
+      # exposure enters.
+      - name: Dependency license audit over the docs environment
+        run: .venv/bin/python scripts/audit_licenses.py
+      - name: Build the site (strict)
+        run: .venv/bin/python -m mkdocs build --strict
+      # Skipped on pull requests: it reads the repository's Pages configuration and
+      # fails when Pages is not enabled, which would turn every PR red for a reason
+      # no PR can fix. On push it is the early, legible failure for that same state.
+      - name: Configure Pages
+        if: github.event_name == 'push'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Upload the built site as a Pages artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    # Job-level permissions replace the top-level block rather than extend it, so
+    # the two the deployment needs are both named here.
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

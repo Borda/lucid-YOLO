@@ -13,13 +13,30 @@ repos:
       - id: trailing-whitespace
         exclude: ^docs/figures/.*\.svg$
       - id: check-yaml
+        # mkdocs.yml is excluded here and re-checked below: MkDocs loads it with
+        # yaml.Loader, and this hook uses safe_load, which cannot construct the
+        # `!!python/name:` tag Material's mermaid fence needs.
+        exclude: ^mkdocs\.yml$
+      - id: check-yaml
+        name: check yaml (mkdocs, unsafe tags)
+        # --unsafe checks the syntax without constructing objects, so the file is
+        # still parsed rather than skipped — which is the half that catches an
+        # indentation slip in a 120-line nav.
+        args: ["--unsafe"]
+        files: ^mkdocs\.yml$
       - id: check-toml
       - id: check-added-large-files
         args: ["--maxkb=512"]
   - repo: https://github.com/hukkin/mdformat
     rev: 1.0.0
     hooks:
+      # Two instances of the same hook, because `docs/` is now published twice: as plain
+      # files on GitHub and as a MkDocs Material site, and the second one understands a
+      # dialect the first does not. Running the mkdocs plugin over the whole tree would
+      # apply that dialect to files no site renders — the README, AGENTS.md, CHANGELOG.md
+      # — so each instance is scoped to the surface it actually formats for.
       - id: mdformat
+        name: mdformat (outside docs/)
         # Core mdformat is CommonMark-only: it parses a GFM table as a paragraph,
         # and --wrap=no would then collapse every row onto one line. The plugin
         # (MIT, like mdformat itself) is what keeps the governance tables intact.
@@ -28,10 +45,20 @@ repos:
         # its widest cell, and ASSUMPTIONS/ROADMAP rows run past 2500 characters:
         # padding them out grew docs/ from 162 kB to 375 kB of trailing spaces.
         args: ["--number", "--wrap=no", "--compact-tables"]
-        # pre-commit itself never sees these — they are gitignored working trees — but a
-        # save-time hook that formats whatever file was just edited does, and reformatting
-        # a 681-line design document to fix one number in it is not a trade anyone chose.
-        exclude: ^\.(plans|temp|reports|notes|experiments|cache)/
+        # pre-commit itself never sees the dot-dirs — they are gitignored working trees —
+        # but a save-time hook that formats whatever file was just edited does, and
+        # reformatting a 681-line design document to fix one number in it is not a trade
+        # anyone chose. `docs/` is excluded here because the instance below owns it.
+        exclude: ^(\.(plans|temp|reports|notes|experiments|cache)/|docs/)
+      - id: mdformat
+        name: mdformat (docs/, mkdocs dialect)
+        # mdformat-mkdocs (MIT) formats what the site renders and core mdformat would
+        # mangle or flatten: MkDocs-style admonitions, content tabs, and the nested-list
+        # indentation Material is sensitive to. It requires mdformat>=1.0.0 and
+        # mdformat-gfm>=1.0.0, both of which the pin above already satisfies.
+        additional_dependencies: ["mdformat-gfm==1.0.0", "mdformat-mkdocs==5.3.0"]
+        args: ["--number", "--wrap=no", "--compact-tables"]
+        files: ^docs/
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.1
     hooks:

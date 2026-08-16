@@ -62,6 +62,22 @@ dev = [
   "onnx>=1.17",
   "onnxruntime>=1.19",
 ]
+# Deliberately not folded into `dev`, and deliberately not part of `make setup`: the
+# site is a publishing toolchain, `mkdocs build` is not a merge gate, and nothing in
+# `make gate` imports either package. A contributor who never builds the site never
+# installs the tree. Install with `uv pip install --python .venv/bin/python --group docs`;
+# doing so also brings the tree under the pre-commit licence audit, which scans the
+# environment rather than the diff. Both packages are permissive (mkdocs BSD-2-Clause,
+# mkdocs-material MIT) and the tree they pull clears that audit — measured, not assumed.
+# One transitive is not permissive and is named rather than buried: `certifi` is
+# MPL-2.0, weak file-level copyleft, reached through mkdocs-material -> requests. It is
+# not what the audit bans (AGPL/GPL/LGPL) and MPL-2.0 is already in this environment
+# via `pathspec`, which arrives with mypy; it is recorded here because a licence claim
+# nobody can check is the failure D15 and D16 exist to prevent.
+docs = [
+  "mkdocs>=1.6",
+  "mkdocs-material>=9.5",
+]
 
 [project.scripts]
 lucid-yolo = "lucid_yolo.cli.train:main"

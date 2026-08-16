@@ -1,0 +1,124 @@
+# MkDocs Material site over the existing docs/ tree (WP-114).
+#
+# The site publishes what is already in the repository; it owns no prose of its own
+# beyond docs/index.md. Every register stays a plain markdown file a reader can open
+# on GitHub without this toolchain, which is why nothing here rewrites content and
+# why no plugin generates pages from source.
+#
+# Identity fields are read off pyproject.toml rather than restated: site_name is the
+# distribution name, site_description its description verbatim, repo_url its Homepage.
+# site_url is the one derived value — GitHub Pages serves a project site at
+# <owner>.github.io/<repo>/ and nothing in the repository states it.
+#
+# Loaded with yaml.Loader by MkDocs (mkdocs/utils/yaml.py), which is what makes the
+# !!python/name: tag below resolvable. pre-commit's check-yaml reads the same file
+# with safe_load and cannot construct that tag, so .pre-commit-config.yaml excludes
+# this file from the default instance and re-checks it with --unsafe: syntax still
+# validated, objects not constructed.
+
+site_name: lucid-yolo
+site_description: Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, and oriented-detection methods described in the YOLO26 paper (arXiv:2606.03748)
+site_url: https://borda.github.io/lucid-YOLO/
+site_author: Jirka Borovec
+copyright: Copyright 2026 Jirka Borovec — Apache-2.0 (see LICENSE and NOTICE)
+
+repo_url: https://github.com/Borda/lucid-YOLO
+repo_name: Borda/lucid-YOLO
+# Explicit because the default is edit/master/docs/, and this repository's default
+# branch is main: every edit link would 404 on a value nothing else here would catch.
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+
+plugins:
+  # Naming any plugin replaces the default list, so search is restated rather than
+  # inherited — omitting it silently ships a site whose search box finds nothing.
+  - search
+
+markdown_extensions:
+  # tables is a default that a user-supplied markdown_extensions list does not
+  # inherit, and this repository is wall-to-wall GFM tables: the assumption
+  # register, the roadmap and every acceptance table render as pipe-soup without
+  # it, on a build that reports success. Listed here, and asserted in
+  # tests/meta/test_docs_site.py rather than trusted to stay listed.
+  - tables
+  - attr_list
+  - def_list
+  - md_in_html
+  - admonition
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      # Material renders a fence tagged mermaid as a diagram only when superfences
+      # hands it through as a div of that class; the format callable is what does
+      # the handing. No ```mermaid fence exists in docs/ today — this makes the
+      # first one that lands render instead of printing as literal source.
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+validation:
+  nav:
+    # Both raised from their defaults so --strict fails on them. A page missing from
+    # the nav is reachable only by search or by guessing its URL, which for a register
+    # nobody knows exists is indistinguishable from not publishing it.
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn
+    anchors: warn
+
+nav:
+  - Home: index.md
+  - Running the models:
+      - Launching a training run: TRAINING.md
+      - Provisioning the datasets: DATASETS.md
+  - Results:
+      - Reproduction report: REPRODUCTION_REPORT.md
+      - Model card — detection: model_cards/detection.md
+      - Model card — instance segmentation: model_cards/segmentation.md
+      - Model card — oriented detection: model_cards/obb.md
+  - Clean-room record:
+      - Provenance log: PROVENANCE.md
+      - Assumption register: ASSUMPTIONS.md
+      - Decision record: DECISIONS.md
+  - Execution:
+      - Work-package roadmap: ROADMAP.md
+      - Research log: RESEARCH_LOG.md
+      - Escalation log: ESCALATION.md

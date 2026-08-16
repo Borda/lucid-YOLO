@@ -11,7 +11,7 @@ DATASET   ?=
 
 TAG       ?=
 
-.PHONY: setup lint test test-gpu precommit gate gate-gpu golden golden-gpu freeze-goldens overfit shapes check-data build dist-pypi clean
+.PHONY: setup lint test test-gpu precommit gate gate-gpu golden golden-gpu freeze-goldens overfit shapes check-data build dist-pypi docs docs-serve clean
 
 setup:
 	$(UV) venv --python 3.11 $(VENV)
@@ -105,6 +105,20 @@ dist-pypi:
 	status=0; $(PY) -m build || status=$$?; \
 	$(PY) scripts/absolutize_readme.py --revert || exit 1; \
 	exit $$status
+# MkDocs Material site over docs/ into site/. The docs group is deliberately outside
+# `make setup`: it is a publishing toolchain, no gate imports it, and a contributor who
+# never builds the site never installs the tree. Install it on demand with
+# `uv pip install --python $(PY) --group docs`, which also brings that tree under the
+# pre-commit licence audit — the audit scans the environment, not the diff.
+# --strict is the whole value of building locally: it fails on a link to a page that
+# does not exist and on a page the nav never lists, and a register nobody can navigate
+# to is one nobody reads.
+docs:
+	$(PY) -m mkdocs build --strict
+
+# Live-reload preview on http://127.0.0.1:8000 for editing prose; not a gate.
+docs-serve:
+	$(PY) -m mkdocs serve
 
 clean:
-	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache .coverage build dist src/*.egg-info
+	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache .coverage build dist site src/*.egg-info

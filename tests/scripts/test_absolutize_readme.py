@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the packaging-time README link rewrite (WP-114).
+"""Tests for the packaging-time README link rewrite (WP-113b).
 
 What is actually at stake is a file that renders correctly in two places at once and
 cannot: relative targets are right in the git tree and dead on PyPI. So the tests below
