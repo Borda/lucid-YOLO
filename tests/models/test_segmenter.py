@@ -151,7 +151,7 @@ def test_deployed_output_shapes_are_mutually_consistent() -> None:
 
 
 def test_deployed_outputs_assemble_into_instance_masks() -> None:
-    """Deployed coefficients and prototypes contract through Eq. 7 without adaptation.
+    """Deployed coefficients and prototypes contract through Equation 7 without adaptation.
 
     The end-to-end proof that both sides really share one K: a coefficient width
     that drifted from the prototype count would raise inside the einsum rather

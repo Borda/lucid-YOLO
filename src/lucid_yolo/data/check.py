@@ -325,7 +325,7 @@ def check_coco_root(
     expected_train: int = COCO_TRAIN_COUNT,
     expected_val: int = COCO_VAL_COUNT,
 ) -> DataCheck:
-    """Validate a COCO 2017 root against the blueprint sec. 14.3 layout.
+    """Validate a COCO 2017 root against the blueprint section 14.3 layout.
 
     Args:
         data_root: Directory holding ``train2017``, ``val2017`` and

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit gate for the WP-013 photometric HSV jitter and horizontal flip (blueprint sec. 5.9).
+"""Unit gate for the WP-013 photometric HSV jitter and horizontal flip (blueprint section 5.9).
 
 Covers the HSV converter round-trip fidelity and the jitter's identity/clamp/wrap
 behaviour with targets left untouched, plus the flip's per-modality mirroring

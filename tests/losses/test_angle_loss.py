@@ -148,7 +148,7 @@ def test_wrap_ties_take_the_low_end(dtype: torch.dtype) -> None:
 
 
 def test_wrap_is_invariant_to_whole_half_turns() -> None:
-    """Adding ``pi`` to a residual does not change where it wraps to (Eq. 14's premise)."""
+    """Adding ``pi`` to a residual does not change where it wraps to (Equation 14's premise)."""
     base = torch.tensor([0.0, 0.3, -0.3, 1.4, -1.4, 1.5])
 
     wrapped = wrap_angle_delta(base)
@@ -306,7 +306,7 @@ def test_square_representative_invariance_holds_across_a_random_sweep() -> None:
 
 
 def test_loss_is_invariant_to_half_turns_of_either_angle() -> None:
-    """``theta`` and ``theta + pi`` are one rectangle, so they are one loss (Eq. 14).
+    """``theta`` and ``theta + pi`` are one rectangle, so they are one loss (Equation 14).
 
     The premise the whole term is built on, checked on the loss rather than on the wrap:
     an implementation that measured the residual on the real line would fail here.

@@ -45,7 +45,7 @@ def progressive_alpha(
     alpha_init: float = _DEFAULT_ALPHA_INIT,
     alpha_final: float = _DEFAULT_ALPHA_FINAL,
 ) -> float:
-    """Linear once-per-epoch ramp of the one-to-many branch weight (R1 Eq. 2-3).
+    """Linear once-per-epoch ramp of the one-to-many branch weight (R1 Equation 2-3).
 
     Implements ``alpha(t) = max(1 - t / max(E - 1, 1), 0) * (alpha_init -
     alpha_final) + alpha_final`` verbatim, with ``t = epoch`` (0-based) and

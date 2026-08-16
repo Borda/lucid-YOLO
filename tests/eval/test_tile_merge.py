@@ -344,10 +344,11 @@ class TestSingleTileEquality:
         return _layout(tmp_path, [window], annotations), detections
 
     def test_the_whole_image_figure_reproduces_the_per_tile_one(self, tmp_path: Path) -> None:
-        """Exact equality, every key. A tolerance here would hide the defect it guards.
+        """Exact equality on every key, with no tolerance anywhere.
 
-        The per-tile side is what the existing path reports: the detections as the head
-        emits them, against the tile's own ground truth. The whole-image side is the new
+        A tolerance here would hide the defect it guards. The per-tile side is what the
+        existing path reports: the detections as the head emits them, against the tile's
+        own ground truth. The whole-image side is the new
         path over the same detections. With one tile the letterbox is the identity, the
         window origin is zero and the single core is infinite, so every step of the merge
         is a no-op and any difference is the merge changing the score for a reason

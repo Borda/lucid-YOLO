@@ -16,7 +16,7 @@ MODEL_CARDS = DOCS / "model_cards"
 #: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted. Raise it when adding
 #: a work package; never lower it.
-_WP_FLOOR = 115
+_WP_FLOOR = 116
 
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains

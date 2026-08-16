@@ -158,7 +158,7 @@ def test_small_input_forward() -> None:
 
 
 def test_cls_bias_prior_init() -> None:
-    """Class outputs start at the RetinaNet prior pi=0.01 (A30, R24 sec. 5.1)."""
+    """Class outputs start at the RetinaNet prior pi=0.01 (A30, R24 section 5.1)."""
     head = DualDetectionHead(in_channels=(16, 32, 64), num_classes=4).eval()
     features = _make_features(128, (16, 32, 64), batch=1)
 

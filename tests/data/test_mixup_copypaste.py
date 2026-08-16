@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit gate for the WP-012 mixup blend and copy-paste assembly (blueprint sec. 5.9).
+"""Unit gate for the WP-012 mixup blend and copy-paste assembly (blueprint section 5.9).
 
 Covers mixup — that ``p=1`` blends pixels by the sampled ``lam`` (recovered from a
 known pixel), that both label sets concatenate with counts preserved, ``p=0``

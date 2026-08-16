@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit gate for the WP-010 random-affine transform (blueprint sec. 5.9).
+"""Unit gate for the WP-010 random-affine transform (blueprint section 5.9).
 
 Covers the box/mask consistency contract (the DoD), the identity transform,
 recovery of a seeded translation on both the image and the box centres, canvas

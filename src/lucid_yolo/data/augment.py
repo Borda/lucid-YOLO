@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Photometric HSV jitter and horizontal flip augmentations (WP-013, blueprint sec. 5.9).
+"""Photometric HSV jitter and horizontal flip augmentations (WP-013, blueprint section 5.9).
 
 Two more :class:`~lucid_yolo.data.transforms.GeometricTransform` implementations from
 the YOLO-lineage recipe ([R1] Table S3: ``fliplr=0.5`` plus per-channel HSV gains):

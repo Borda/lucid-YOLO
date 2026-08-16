@@ -26,7 +26,7 @@ def test_license_is_apache2() -> None:
 
 
 def test_notice_attribution() -> None:
-    """NOTICE attributes the YOLO family to Redmon et al. and states independence."""
+    """NOTICE attributes the YOLO family to Redmon and coauthors, and states independence."""
     notice = (REPO_ROOT / "NOTICE").read_text(encoding="utf-8")
     assert "Redmon" in notice
     assert "arXiv:1506.02640" in notice

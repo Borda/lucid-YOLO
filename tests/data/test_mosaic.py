@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit gate for the WP-011 four-image mosaic assembly (blueprint sec. 5.9).
+"""Unit gate for the WP-011 four-image mosaic assembly (blueprint section 5.9).
 
 Covers the canvas geometry (``2S x 2S``), that every output box lies within the
 canvas, that instances are lost only to clipping (kept count bounded by the input

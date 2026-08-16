@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Random affine augmentation for boxes and instance masks (WP-010, blueprint sec. 5.9).
+"""Random affine augmentation for boxes and instance masks (WP-010, blueprint section 5.9).
 
 Random affine is the geometric workhorse of the YOLO-lineage recipe: it samples a
 rotation, an anisotropic shear, a uniform scale and a translation, composes them

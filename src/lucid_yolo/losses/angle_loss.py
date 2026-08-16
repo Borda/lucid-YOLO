@@ -124,7 +124,7 @@ _QUARTER_PI = math.pi / 4
 
 
 def wrap_angle_delta(delta: Tensor) -> Tensor:
-    """Reduce an angular residual modulo ``pi`` into ``[-pi/2, pi/2)`` (R1 Eq. 14).
+    """Reduce an angular residual modulo ``pi`` into ``[-pi/2, pi/2)`` (R1 Equation 14).
 
     The residual of two orientations, measured on the circle a rectangle actually lives on
     rather than on the real line: ``delta`` and ``delta + pi`` describe the same relative
@@ -155,7 +155,7 @@ def wrap_angle_delta(delta: Tensor) -> Tensor:
 
 
 def aspect_ratio_weight(width: Tensor, height: Tensor, lam: float = _LAMBDA, min_side: float = _MIN_SIDE) -> Tensor:
-    """Per-target ``omega``, R1 Eq. 15's aspect-ratio-aware factor.
+    """Per-target ``omega``, R1 Equation 15's aspect-ratio-aware factor.
 
     A log-Gaussian in the target's aspect ratio: ``1`` for an exact square and decaying as
     the box elongates, so the double-angle penalty is spent on the boxes whose orientation
@@ -197,7 +197,7 @@ def square_angle_loss(
     lam: float = _LAMBDA,
     min_side: float = _MIN_SIDE,
 ) -> Tensor:
-    """Assignment-weighted square-object angle loss (R1 Eq. 15).
+    """Assignment-weighted square-object angle loss (R1 Equation 15).
 
     The **pre-gain** term: A22 puts its weight in the total objective at ``1.0`` but R1
     does not state one, so the gain stays with the caller that assembles the oriented

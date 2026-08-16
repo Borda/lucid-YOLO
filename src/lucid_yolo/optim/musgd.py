@@ -191,7 +191,7 @@ class MuSGD(Optimizer):
 
     @staticmethod
     def _muon_branch(nesterov_grad: Tensor, ns_steps: int) -> Tensor:
-        """Orthogonalize and rescale the matrix view of ``nesterov_grad`` (R7 Eq. 4).
+        """Orthogonalize and rescale the matrix view of ``nesterov_grad`` (R7 Equation 4).
 
         Flattens trailing dimensions to the 2D view ``(A, B)``, orthogonalizes
         it with the Newton-Schulz iteration, rescales by

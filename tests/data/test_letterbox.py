@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit gate for the WP-009 letterbox transform (blueprint sec. 5.9, A10).
+"""Unit gate for the WP-009 letterbox transform (blueprint section 5.9, A10).
 
 Covers the sub-pixel forward/inverse round trip across boxes and polygons,
 aspect preservation and symmetric padding of the resized canvas, box/polygon

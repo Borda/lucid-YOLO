@@ -33,7 +33,7 @@ def _features(
 
 
 def test_fusion_eq8() -> None:
-    """Eq. 8 adds each projected coarse-level bias to the unprojected P3 tensor."""
+    """Equation 8 adds each projected coarse-level bias to the unprojected P3 tensor."""
     torch.manual_seed(0)
     fusion = ProtoFusion(_CHANNELS).eval()
     x1, x2, x3 = _features(((12, 20), (6, 10), (3, 5)))
@@ -188,7 +188,7 @@ def test_proto_grid_is_refined_after_upsampling() -> None:
 
 
 def test_fusion_and_protonet_run_from_neck_feature_triple() -> None:
-    """The Eq. 8 output feeds Eq. 9 directly at the expected proto resolution."""
+    """The Equation 8 output feeds Equation 9 directly at the expected proto resolution."""
     channels = (4, 8, 16)
     fusion = ProtoFusion(channels).eval()
     prototypes = ProtoNet(fusion.out_channels).eval()

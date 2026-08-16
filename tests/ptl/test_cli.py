@@ -96,7 +96,6 @@ def test_logger_false_disables_default_loggers(tmp_path: Path) -> None:
 
 def test_default_determinism_matches_accelerator() -> None:
     """Strict determinism everywhere except MPS, which only supports warn_only."""
-
     expected = "warn_only" if torch.backends.mps.is_available() else True
     assert default_determinism() == expected
 

@@ -178,3 +178,54 @@ branch = true
 
 [tool.coverage.report]
 show_missing = true
+
+[tool.docformatter]
+# PEP 257 normalization only: quote placement, the blank line before a closing triple
+# quote, the period a one-line summary ends with, trailing whitespace inside the body.
+# Deliberately not a re-flow of the prose.
+#
+# `wrap-descriptions = 0` disables description wrapping, and that is the load-bearing
+# setting here rather than a timid one. This project's docstrings carry argued paragraphs,
+# `**bold**` lead-ins, and Google-style `Args:`/`Returns:` blocks whose indentation is what
+# Napoleon parses; re-flowing them to a column would run those blocks together and rewrite
+# hand-chosen line breaks across the whole tree in a commit nobody could review. Summaries
+# are wrapped, at the same 120 columns ruff-format uses, because a summary is one sentence
+# by construction and has no structure to lose.
+wrap-summaries = 0
+wrap-descriptions = 0
+# Words that open a summary as an identifier rather than as English. PEP 257 wants a
+# capitalized sentence, and every entry here is a name whose spelling is not this file's
+# to change: the distribution, a subpackage, a third-party library. `Lucid-yolo` names
+# nothing that exists.
+non-cap = [
+  # The distribution and its subpackages, named as modules rather than as English.
+  "lucid-yolo:",
+  "assign",
+  "data",
+  "decode",
+  "eval",
+  "heads",
+  "losses",
+  "models",
+  "optim",
+  "ptl",
+  # Third-party names and API surface a summary opens with. `Empty()` and `Backward()`
+  # name no method that exists, and `MAP` is a different thing from `mAP`.
+  "torchmetrics",
+  "empty()",
+  "backward()",
+  "mAP",
+  # Symbols and abbreviations from the papers and the code they describe.
+  "rboxes[i]",
+  "rkeep",
+  "rgb",
+  "o2o",
+  "p=0",
+  "total",
+  "lrf",
+]
+# The blank line before a closing `"""` on a multi-line docstring is PEP 257's own
+# convention and is what this repository already writes; stated so the hook does not have
+# to infer it from the first file it sees.
+pre-summary-newline = false
+close-quotes-on-newline = true

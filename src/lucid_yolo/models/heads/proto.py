@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Prototype-feature fusion, generation, and assembly from Eq. 7-9 (WP-048-051).
+"""Prototype-feature fusion, generation, and assembly from Equation 7-9 (WP-048-051).
 
 The fusion preserves the highest-resolution P3 feature ``X_1`` directly, then
 adds each coarser P4/P5 feature after a learned 1x1 projection into P3's channel
@@ -27,7 +27,7 @@ __all__ = ["ProtoFusion", "ProtoNet", "assemble_masks"]
 
 
 class ProtoFusion(nn.Module):
-    """Fuse stride-8/16/32 features into the Eq. 8 prototype input ``F_proto``.
+    """Fuse stride-8/16/32 features into the Equation 8 prototype input ``F_proto``.
 
     The finest feature ``X_1`` (P3) is deliberately not projected: its identity
     path is the first term of Eq. 8. P4 and P5 each receive their own bare 1x1
@@ -56,7 +56,7 @@ class ProtoFusion(nn.Module):
     """
 
     def __init__(self, in_channels: tuple[int, int, int]) -> None:
-        """Initialize the two coarse-level projections required by Eq. 8.
+        """Initialize the two coarse-level projections required by Equation 8.
 
         Args:
             in_channels: Per-level neck channel counts ``(N3, N4, N5)`` in
@@ -90,7 +90,7 @@ class ProtoFusion(nn.Module):
 
 
 class ProtoNet(nn.Module):
-    """Generate raw Eq. 9 prototype maps from the fused P3-resolution feature.
+    """Generate raw Equation 9 prototype maps from the fused P3-resolution feature.
 
     Four 3x3 :class:`ConvBNAct` units refine the fused feature around a 2x
     nearest-neighbour upsample, then a 1x1 convolution produces one map per
@@ -155,7 +155,7 @@ class ProtoNet(nn.Module):
 
 
 def assemble_masks(prototypes: Tensor, coefficients: Tensor) -> Tensor:
-    """Combine prototypes into per-instance mask logits, ``M_i = sum_k c_ik * P_k`` (Eq. 7).
+    """Combine prototypes into per-instance mask logits, ``M_i = sum_k c_ik * P_k`` (Equation 7).
 
     The contraction is the whole of Eq. 7: a linear combination and nothing
     else. No activation is applied — the coefficients already carry tanh (A16)

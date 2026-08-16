@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Four-image mosaic assembly for boxes and instance masks (WP-011, blueprint sec. 5.9).
+"""Four-image mosaic assembly for boxes and instance masks (WP-011, blueprint section 5.9).
 
 Mosaic (R9, YOLOv4, arXiv:2004.10934) stitches four training images into one
 ``2S x 2S`` canvas so a single training sample carries four scenes' worth of

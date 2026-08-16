@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Two-image mixup blend and polygon copy-paste assembly (WP-012, blueprint sec. 5.9).
+"""Two-image mixup blend and polygon copy-paste assembly (WP-012, blueprint section 5.9).
 
 Both operations here are **assemblies**, not
 :class:`~lucid_yolo.data.transforms.GeometricTransform` implementations: like

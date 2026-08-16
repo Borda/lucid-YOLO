@@ -82,7 +82,7 @@ Co-authored-by: Claude <209825114+claude[bot]@users.noreply.github.com>
 
 
 def test_valid_message_passes() -> None:
-    """The canonical AGENTS.md sec. 5 message reports no violation."""
+    """The canonical AGENTS.md section 5 message reports no violation."""
     assert validator.validate_message(VALID_MESSAGE, VALID_IDS) == []
 
 

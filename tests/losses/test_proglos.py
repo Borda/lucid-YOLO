@@ -57,7 +57,7 @@ def reset_random_seeds() -> None:
     ],
 )
 def test_alpha_at_t0_mid_end(epoch: int, total_epochs: int, expected: float) -> None:
-    """progressive_alpha reproduces R1 Eq. 3 exactly at t=0, the odd-E midpoint, and t=E-1."""
+    """progressive_alpha reproduces R1 Equation 3 exactly at t=0, the odd-E midpoint, and t=E-1."""
     assert progressive_alpha(epoch, total_epochs) == pytest.approx(expected)
 
 

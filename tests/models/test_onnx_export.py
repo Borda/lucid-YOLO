@@ -169,7 +169,7 @@ class _DetectGraph(_E2EGraph):
 
 
 class _SegmentGraph(_E2EGraph):
-    """Segmentation E2E graph: the A9 tuple beside its Eq. 7 instance masks."""
+    """Segmentation E2E graph: the A9 tuple beside its Equation 7 instance masks."""
 
     def forward(self, image: Tensor) -> tuple[Tensor, Tensor]:
         """Decode an image batch into ``(B, 300, 6)`` detections and their masks."""

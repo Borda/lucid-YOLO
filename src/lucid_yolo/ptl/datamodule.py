@@ -1042,7 +1042,7 @@ class DetectionDataModule(LightningDataModule):
         return capped
 
     def prepare_data(self) -> None:
-        """No-op: datasets are provisioned out of band, never downloaded (AGENTS.md sec. 3)."""
+        """No-op: datasets are provisioned out of band, never downloaded (AGENTS.md section 3)."""
 
     def setup(self, stage: str | None = None) -> None:
         """Build the train pipeline and the letterbox-only val dataset.

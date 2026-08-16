@@ -59,6 +59,18 @@ repos:
         additional_dependencies: ["mdformat-gfm==1.0.0", "mdformat-mkdocs==5.3.0"]
         args: ["--number", "--wrap=no", "--compact-tables"]
         files: ^docs/
+  - repo: https://github.com/PyCQA/docformatter
+    rev: v1.7.8
+    hooks:
+      # Runs before ruff-format, not after: docformatter rewrites the docstring body and
+      # ruff-format then normalizes the quotes and indentation around it, so this order
+      # converges in one pass where the reverse leaves ruff's output for the next commit.
+      - id: docformatter
+        name: docformatter (PEP 257 docstrings)
+        # Config lives in [tool.docformatter]; passed explicitly because the hook runs
+        # from an isolated environment and `--in-place` is the half that makes it a
+        # formatter rather than a checker.
+        args: ["--in-place", "--config", "pyproject.toml"]
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.1
     hooks:

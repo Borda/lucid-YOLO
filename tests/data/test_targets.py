@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit gate for the WP-008 target container and transform helpers (blueprint sec. 5.9).
+"""Unit gate for the WP-008 target container and transform helpers (blueprint section 5.9).
 
 Covers construction-time validation, deep-copy independence, aligned filtering
 across every modality, concatenation semantics, the empty identity, and the two

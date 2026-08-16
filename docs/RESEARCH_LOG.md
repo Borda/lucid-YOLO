@@ -1026,3 +1026,27 @@ WP-115 shipped a check for the absence of a licence and it fired within a day, o
 **And the suite stopped reading the installed environment.** Seven tests and nine doctests asserted over `metadata.distributions()` -- the whole venv is clean, `shapely` really does ship GEOS, `torch` attributes to base -- and none of those is an assertion about this code. A contributor who installs anything can fail them without touching a line of the audit, which is exactly what `cuda-toolkit` did. Had the allowlist landed on its own, `test_the_live_environment_has_no_unreadable_license` would have gone green and the next package installed on that box would have turned it red again. The live claim belongs to the pre-commit hook, which runs the audit against the real environment on every commit and is the actual gate; a test's job is that the audit *decides* correctly, and synthetic distributions answer that without depending on what anyone happens to have installed. The shapes those fixtures are written to were read off real wheels once and recorded in their docstrings -- the `cuda_toolkit` dist-info listing above is one of them.
 
 Two things that went with it are worth naming. The GEOS true-positive test is gone; what stands in for it is the synthetic manylinux spelling (`libgeos_c-abcdd5fa.so.1.19.2` through `library_stem`) plus the parametrized normalizer cases, so the regression it guarded -- the stem normalizer going blind on Linux, where CI actually runs -- is still caught. And `audit = _load_audit()` at module level became a session-scoped fixture: loading a non-package script by path is fine, doing it as an import side effect at collection time is not.
+
+### WP-116 — a formatter that reads `Eq.` as the end of a sentence
+
+<a id="wp-116"></a>
+
+docformatter joins the three formatters already on the commit hook, configured in `[tool.docformatter]` and ordered ahead of ruff-format so the docstring body is rewritten first and the quotes and indentation around it normalized second -- the reverse order converges too, but only on the commit after.
+
+**Wrapping is off in both axes, and that is the load-bearing setting rather than a timid one.** `wrap-descriptions = 0` because this project's docstrings carry argued paragraphs, `**bold**` lead-ins, and Google `Args:`/`Returns:` blocks whose indentation is what Napoleon parses; re-flowing them to a column would run those blocks together and rewrite hand-chosen line breaks across the whole tree in a single commit nobody could review. `wrap-summaries = 0` for a smaller reason: a summary is one sentence by construction and has nothing to gain from being re-flowed.
+
+**What it cost once was 32 summary lines.** docformatter decides where the summary ends by finding the first period it reads as a sentence end, and it reads every abbreviation that way. This repository writes the papers' own notation -- `R1 Eq. 15`, `blueprint sec. 5.9`, `Redmon et al.` -- in summary lines, so those summaries were cut mid-citation and everything after them re-indented as continuation text, which is what turns an `Args:` block into prose Napoleon cannot parse:
+
+```
+"""Initialize the two coarse-level projections required by Eq.
+
+8.
+        Args:
+            in_channels: Per-level neck channel counts ``(N3, N4, N5)`` in
+```
+
+No option prevents it. `--wrap-summaries 0` disables wrapping, not the split; `--non-strict` governs reST list detection; `--docstring-length` would only choose which docstrings get mangled. So the source is what changed: `Eq.` and `sec.` are spelled out and `et al.` rephrased, **in summary lines only** -- the bodies keep the papers' abbreviations, since nothing reads them for sentence boundaries. One summary genuinely held two sentences and was split into a summary and a body paragraph, which is what PEP 257 asked for anyway.
+
+**`non-cap` names 17 identifiers.** The formatter capitalizes a summary's first word, which is right for English and wrong for a name: `lucid-yolo:` became `Lucid-yolo:`, `mAP` became `MAP`, and `empty()`, `backward()`, `rboxes[i]`, `o2o` and the nine subpackage names were all renamed to something that does not exist. Each is listed rather than the check being disabled, so a future summary opening with an ordinary English word is still capitalized.
+
+**The hook now reformats nothing, and that is the honest result.** Every line in this commit's diff is the one-time rephrase; docformatter's own second pass is empty, because these docstrings were already PEP 257-clean. Its value is prospective -- it is a gate on what gets written next, not a repair of what is there.

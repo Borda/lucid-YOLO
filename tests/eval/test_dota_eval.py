@@ -279,7 +279,6 @@ class TestProtocolConstants:
 
     def test_detection_cap_is_300_not_cocos_100(self) -> None:
         """Decision 3: the cap matches what the oriented head actually emits."""
-
         detections = o2o_rotated_topk(torch.zeros(1, 1000, 3), torch.zeros(1, 1000, 5))
         assert MAX_DETECTIONS == detections.shape[1] == 300
 
