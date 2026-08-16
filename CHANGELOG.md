@@ -58,6 +58,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 - A MkDocs Material site over the existing `docs/` tree, published to GitHub Pages on every push to the default branch and built with `--strict` on every pull request. It owns no prose beyond `docs/index.md`, a front page that routes a reader to the register answering their question; every register stays a plain markdown file readable on GitHub without the toolchain. The docs dependency group sits outside `dev` and outside `make setup` — no gate imports it — so the workflow that installs it is the only place CI sees that tree, and runs the licence audit there. `mdformat` and `check-yaml` each became two hook instances: one for the tree, one for the dialect `docs/` and `mkdocs.yml` are now read in (WP-114).
 
+- `mkdocs` is capped at `<2`, a licence bound rather than a compatibility one: the Material team's own build-time notice describes MkDocs 2.0 as "Currently unlicensed", and unlicensed is stricter than the AGPL this project bans, since the default is no grant at all. The licence audit cannot report it — it matches a GPL-family pattern against a declared licence, so a distribution declaring nothing passes in the same run that calls the environment clean (WP-114b).
+
 ## [0.3.0] - 2026-08-14
 
 ### Added

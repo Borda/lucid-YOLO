@@ -118,6 +118,24 @@ def test_the_site_description_is_the_distribution_description() -> None:
     assert _config()["site_description"] == described.group(1)
 
 
+def test_mkdocs_is_capped_below_the_unlicensed_major() -> None:
+    """The ``docs`` group pins ``mkdocs<2``, and the cap is a licence bound.
+
+    MkDocs 2.0 is described by the Material team's own build-time notice as "Currently
+    unlicensed", and unlicensed is stricter than the AGPL this project bans — the default
+    is no grant at all. Asserted here because the licence audit cannot see it: it matches
+    a GPL-family pattern against a declared licence, so a distribution declaring nothing
+    matches nothing and passes. Lifting the cap is a decision, not a dependency bump.
+    """
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    # The operator class is what keeps this off `mkdocs-material`, which shares the prefix
+    # and sits two lines away; without it the assertion would silently move to that pin.
+    pin = re.search(r'^\s*"mkdocs([<>=!~][^"]*)"', pyproject, flags=re.MULTILINE)
+
+    assert pin, "the docs group declares no mkdocs pin"
+    assert "<2" in pin.group(1), f"mkdocs is not capped below 2.0: {pin.group(0)}"
+
+
 def test_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed() -> None:
     """``docs.yml`` runs the licence audit, and runs it before the build.
 

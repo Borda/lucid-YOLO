@@ -74,8 +74,18 @@ dev = [
 # not what the audit bans (AGPL/GPL/LGPL) and MPL-2.0 is already in this environment
 # via `pathspec`, which arrives with mypy; it is recorded here because a licence claim
 # nobody can check is the failure D15 and D16 exist to prevent.
+#
+# `mkdocs<2` is a licence bound, not a compatibility one. Building the site prints a
+# notice from the Material team about the MkDocs 2.0 release, one line of which is
+# "Currently unlicensed - unsuitable for production use". This project admits permissive
+# licences only, and an unlicensed dependency is not one: the default is no grant at all,
+# which is stricter than the AGPL the audit bans. And the audit would not catch it:
+# `scripts/audit_licenses.py` matches a GPL-family pattern against what a distribution
+# declares, so a distribution declaring nothing matches nothing and passes silently. The
+# cap is what keeps that resolution from happening in the first place. Lift it when
+# 2.x ships a permissive LICENSE, verified from the repository rather than from the notice.
 docs = [
-  "mkdocs>=1.6",
+  "mkdocs>=1.6,<2",
   "mkdocs-material>=9.5",
 ]
 
