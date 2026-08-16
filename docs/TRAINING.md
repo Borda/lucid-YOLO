@@ -1,4 +1,4 @@
-# Launching a training run
+# 🏋️ Launching a training run
 
 Three tiers, one command. `lucid-yolo fit --config <name>.yaml` resolves the name against the configs packaged inside the wheel, so a run needs no checkout — `det_smoke.yaml`, `seg_smoke.yaml` and `obb_smoke.yaml` are all installed with the package.
 
@@ -8,7 +8,7 @@ What the configs carry is run-level configuration only: schedule, optimizer and 
 
 Provisioning the datasets these recipes read: docs/DATASETS.md. What the accepted runs actually measured, with the exact commands as they were run at the time: docs/REPRODUCTION_REPORT.md.
 
-## Always: point `default_root_dir` at storage that outlives the runtime
+## 💾 Always: point `default_root_dir` at storage that outlives the runtime
 
 `--trainer.default_root_dir` is the `save_dir` of both default loggers (TensorBoard and CSV, pinned to a single `lightning_logs/version_N` directory) and the directory checkpoints land in. On a hosted runtime it is the whole of what survives a disconnect.
 
@@ -22,7 +22,7 @@ drive.mount("/content/drive")
 
 Then `--trainer.default_root_dir /content/drive/MyDrive/lucid_runs` on every command below. The **dataset** goes the other way: it stays on the runtime's local disk, because every epoch reads every image and Drive is a network filesystem mounted through FUSE.
 
-## Detection — COCO 2017
+## 🎯 Detection — COCO 2017
 
 ```bash
 lucid-data download --data_root /content/coco2017 --splits '[train,val]' --verify true
@@ -39,7 +39,7 @@ lucid-eval --checkpoint <checkpoint> --data_root /content/coco2017 --output det_
 
 `lr 0.02` against the file's 0.01 is the linear scaling for batch 128: the config carries the batch-64 recipe value, and the unscaled one has no clean measurement of its own on this codebase.
 
-## Instance segmentation — COCO 2017
+## 🖌️ Instance segmentation — COCO 2017
 
 The detection recipe with `task: segment`; the same data root serves both, so a tree already provisioned above needs nothing further.
 
@@ -55,7 +55,7 @@ lucid-eval --checkpoint <checkpoint> --data_root /content/coco2017 --output seg_
 
 `lucid-eval` reads the task off the checkpoint and scores masks when the checkpoint has them, so the same command serves both COCO tiers. `--masks false` scores boxes only from a segmentation checkpoint.
 
-## Oriented detection — DOTA-v1.0 tiles
+## 🔄 Oriented detection — DOTA-v1.0 tiles
 
 DOTA is provisioned by hand and then tiled; both steps are docs/DATASETS.md. Training reads the tiles, never the original tree.
 
@@ -79,7 +79,7 @@ Two differences from the COCO tiers, forced by the data rather than chosen:
 
 `lucid-eval` picks the rotated protocol from the checkpoint's own task, and with it the 1024 px letterbox and batch 8; an explicit `--img_size` or `--batch_size` still wins.
 
-## Before any of them: the wiring gate
+## 🔌 Before any of them: the wiring gate
 
 Each tier has a minutes-long overfit gate that must pass before a launch that costs hours. It is development tooling and ships in `scripts/`, not in the wheel, so it runs from a checkout:
 

@@ -1,8 +1,8 @@
-# Model card — lucid-yolo detector (n scale)
+# 🎯 Model card — lucid-yolo detector (n scale)
 
 Covers the detection model accepted at the Det-smoke tier for release `0.1.0`. One card per task family; segmentation and oriented detection get their own at `0.2.0` and `0.3.0`.
 
-## Model details
+## 📇 Model details
 
 |  |  |
 | -- | -- |
@@ -17,19 +17,19 @@ Covers the detection model accepted at the Det-smoke tier for release `0.1.0`. O
 
 The architecture is typed Python, not a config DSL (ADR-001): five scale rows (`n/s/m/l/x`) multiply depth, width and max-channels over one topology. Only the `n` scale has been trained.
 
-## Intended use
+## 🧭 Intended use
 
 **Intended.** Reproduction research: verifying the paper's architectural and training claims, ablating its mechanisms, and serving as a readable from-scratch implementation of NMS-free detection. The `e2e` path is the interesting artifact — it exports without suppression ops.
 
 **Not intended.** Production detection, safety-critical or rights-affecting decisions, surveillance, biometric identification, or any deployment where 25 mAP on 80 common object categories would be mistaken for a reliable perception system. This is a smoke-tier reproduction at the smallest scale, roughly half the accuracy of a well-trained detector of this family, and it has been evaluated on exactly one benchmark.
 
-## Training data
+## 🗂️ Training data
 
 COCO 2017 `train2017` — 118,287 images, 80 categories, annotations under CC-BY-4.0 with images under their original Flickr terms. No other data; no pretraining (D2: no Objects365 initialization).
 
 COCO's documented composition limits apply to this model directly: category frequencies are long-tailed, scenes are web photography skewed toward particular geographies and contexts, and the `person` category carries all the demographic imbalance of that source. Nothing here corrects for it, and no fairness evaluation across subgroups has been run.
 
-## Training procedure
+## 🏋️ Training procedure
 
 |  |  |
 | -- | -- |
@@ -41,7 +41,7 @@ COCO's documented composition limits apply to this model directly: category freq
 | Hardware | one RTX PRO 6000, ~8m45s/epoch, ~7.3 hours total |
 | EMA | decay 0.9999, tau 2000 |
 
-## Evaluation
+## 📊 Evaluation
 
 COCO val2017, all 5000 images, `torchmetrics` `MeanAveragePrecision` on the `faster_coco_eval` backend. Both decode paths from one forward per batch.
 
@@ -56,7 +56,7 @@ Recall at 100 detections (E2E, EMA): 46.07. The NMS-free path costs 1.11 AP agai
 
 No latency figures are published. Throughput is hardware-dependent and the project treats parameter/FLOP fidelity as the substitute claim (all five scales within ±2% params, ±5% FLOPs of [R1 Table 7]).
 
-## Limitations
+## ⚠️ Limitations
 
 - **Accuracy.** 25.3 mAP is a smoke-tier result at the smallest scale, ~50 epochs against the paper's 500–600. Expect frequent misses and confusions on anything but large, unambiguous, well-lit instances.
 - **Small objects are weakest** — 11.9 mAP_S against 33.9 mAP_L. STAL is implemented but its benefit is a Det-ablations trend claim, unmeasured here.
@@ -66,19 +66,19 @@ No latency figures are published. Throughput is hardware-dependent and the proje
 - **No robustness evaluation** — weather, blur, occlusion, adversarial or distribution-shift behavior is entirely uncharacterized.
 - **Not bitwise reproducible across platforms** (A26): libm last-bit rounding differs across OS and architecture; the goldens assert structural metrics with tolerance, not byte hashes.
 
-## Ethical considerations
+## 🤝 Ethical considerations
 
 A detector trained on COCO inherits COCO's `person` category, and any deployment that detects people carries surveillance and privacy implications this project has not assessed. The intended-use section is a boundary, not a disclaimer: the model has no evaluation supporting use on people, and none is planned.
 
 Failure modes are unbounded in the sense that matters — no calibration study exists, so the confidence scores should not be read as probabilities, and the model gives no signal when it is operating outside its training distribution.
 
-## Licensing and provenance
+## 📜 Licensing and provenance
 
 Code and this report: Apache-2.0. Weights derive from COCO 2017; publication follows the dataset's terms and the release policy in D10.
 
 **Clean-room statement.** No file, configuration, weight, or code fragment from any Ultralytics repository, package, documentation site, or released checkpoint was opened, downloaded, imported, or consulted at any point in this project's history. Every design input traces to a paper, its cited primary literature, a registered assumption, or — for diagnosis only, never copying — a permissively licensed independent implementation registered under D13/ADR-004. The audit trail is `PROVENANCE.md`; the standing prohibitions are `AGENTS.md` sec. 7.
 
-## Citation
+## 🔖 Citation
 
 This reproduction has no publication. Cite the paper it reproduces:
 

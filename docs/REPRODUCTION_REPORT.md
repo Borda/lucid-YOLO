@@ -1,4 +1,4 @@
-# Reproduction report
+# 📈 Reproduction report
 
 A living document (D10): one section lands with each `0.MINOR`, recording what was reproduced, what was assumed, and what diverged. Sections are append-only — a later release corrects an earlier claim by adding to it, never by editing the record away.
 
@@ -6,7 +6,7 @@ Independent, from-scratch implementation of the methods described in the Ultraly
 
 ______________________________________________________________________
 
-## 0.1.0 — Detection
+## 🎯 0.1.0 — Detection
 
 ### What was reproduced
 
@@ -113,7 +113,7 @@ Seed 0 throughout. Cross-platform bitwise reproduction is not claimed (A26: libm
 
 ______________________________________________________________________
 
-## 0.2.0 — Instance segmentation
+## 🖌️ 0.2.0 — Instance segmentation
 
 The Seg-smoke tier has run and was **accepted 2026-08-10** at roadmap 054's `[HUMAN]` gate, together with the numeric criterion below, which `seg_smoke.yaml` had stated only qualitatively. This section records what the run measured and what it was measured against.
 
@@ -225,7 +225,7 @@ Seed 0 throughout. The package version installed for run v9 is not recorded in a
 
 ______________________________________________________________________
 
-## 0.3.0 — Oriented detection
+## 🔄 0.3.0 — Oriented detection
 
 The OBB-smoke tier has run and was **accepted 2026-08-14** at roadmap 064's `[HUMAN]` gate. This section records what the run measured, what it can and cannot be compared against, and where the criterion `obb_smoke.yaml` stated no longer fits the instruments — the acceptance was given on the first two, and explicitly not on the third.
 
@@ -343,7 +343,7 @@ Seed 0 throughout. Cross-platform bitwise reproduction is not claimed (A26), tho
 
 ______________________________________________________________________
 
-## Consolidated note — detection, segmentation, oriented detection
+## 🧾 Consolidated note — detection, segmentation, oriented detection
 
 This is not a fourth tier. No run stands behind it; it reads the three sections above against each other and states what only becomes visible once they sit side by side. Nothing here revises a claim those sections make — a correction to any of them belongs in a future section, named as one (D10) — and every number below already appears in `## 0.1.0`, `## 0.2.0` or `## 0.3.0`.
 

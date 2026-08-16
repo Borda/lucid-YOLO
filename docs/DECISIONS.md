@@ -1,8 +1,8 @@
-# Decision Record
+# ⚖️ Decision Record
 
 Architecture- and policy-level decisions. D1–D11 are transcribed from the governing blueprint (v1.5, 2026-07-10); D12 records execution-session amendments (2026-07-31). ADRs expand the three decisions with lasting architectural consequences.
 
-## Decisions
+## 📌 Decisions
 
 | ID | Decision | Resolution |
 | -- | -- | -- |
@@ -23,7 +23,7 @@ Architecture- and policy-level decisions. D1–D11 are transcribed from the gove
 | D15 | Bundled native libraries are audited; recognized license exceptions pass, and two vendored libraries are allowlisted (2026-08-11) | **The license audit reads bundled `License-File` entries, not only the metadata license fields.** Three rules follow. (a) A GPL-family declaration carrying a *recognized exception* is permissive by construction and is not a finding for any package — currently the GCC Runtime Library Exception, matched by expression rather than by package name, so a future dependency built by gcc needs no allowlist entry. (b) `shapely` is allowlisted for the LGPLv2.1 GEOS binaries its wheel carries. (c) `numpy` is allowlisted for `libquadmath` (LGPL-2.1-or-later) alone; its sibling `libgfortran`/`libgcc` pass under rule (a), and the exception is tested *before* the allowlist so that a package listed for one vendored library is not silently excused for every other one it ships. The numpy exposure was found by the very check this decision adds, on its first run — it is a runtime dependency whose declared license is BSD-3-Clause, and the GCC runtime it vendors was invisible to every audit the project had run until then. Found during WP-063: shapely declares `License: BSD 3-Clause` and its wheel bundles GEOS shared libraries under LGPLv2.1, so the audit — which read only `License`, `License-Expression` and `License ::` classifiers — passed while an LGPL binary sat in the environment. The blind spot is general, not shapely's: any wheel may vendor a native library under a license its own metadata never mentions, and the audit is the gate that is supposed to see it. The allowance is narrow and rests on four facts, each of which would have to stay true: shapely is a `dev` dependency-group package, `src/` never imports it, GEOS is dynamically linked at test time only, and neither is vendored into this repository or present in any published artifact. LGPL is also not what the policy bans outright — AGPL and commercial licenses are — and a test-only dynamically-linked dependency is the weakest form of contact with weak copyleft. The oracle it provides is the point: A24's validation is an *independent* polygon implementation, and replacing it with our own float64 code would leave the kernel checked against something sharing its assumptions. Recorded rather than waved through, because the allowlist in `scripts/audit_licenses.py` requires a decision entry before any entry is added. |
 | D16 | Shipped binaries are audited by filename against a named table (2026-08-15) | **The license audit reads a third surface: the files a wheel says it installs, not only what it declares and what its license documents say.** `supervision`, sourced as the drawing library for WP-067's example, hard-requires `av>=14.2`; the `av` wheel declares `BSD-3-Clause`, ships a `licenses/LICENSE.txt` with no GPL mention anywhere in it, and ships `av/.dylibs/libx264.165.dylib` — x264 is GPL-2.0, offered commercially as the alternative. Both existing checks pass it clean, so the gate would have admitted a GPL binary in silence. `supervision` is refused on that basis and WP-067's example is drawn with `matplotlib` (R29), already a dependency. Three parts follow. (a) The scan matches shipped filenames against `COPYLEFT_BINARIES`, a table naming x264, x265, mp3lame, GEOS and the eight FFmpeg libraries, each entry carrying its license and where that license was read. (b) **It narrows the hole rather than closing it**, and the module docstring says so in those terms: a copyleft library the table has never heard of passes exactly as `av` did. The alternative — failing on every unrecognized binary — is not available, since `torch` alone ships hundreds and a gate that fires on every commit is a gate that gets disabled; a green run is evidence that no *listed* library is present and nothing more. (c) Its allowlist is keyed on `(distribution, library)` where the bundled-document allowlist beside it is keyed on the package alone, because D15's own rule is that a package excused for one vendored library is not excused for the next one it ships — the two entries it carries are D15's shapely/GEOS allowance reached by the file list instead of by the license document, not a widening of it. Additions require an entry here, as for both other allowlists. |
 
-## ADR-001 — Architecture in code; YAML for experiments only (D9)
+## 🏗️ ADR-001 — Architecture in code; YAML for experiments only (D9)
 
 **Status**: accepted (blueprint v1.2).
 
@@ -33,7 +33,7 @@ Architecture- and policy-level decisions. D1–D11 are transcribed from the gove
 
 **Consequences**: (i) clean-room — a layer-list YAML DSL would structurally converge on the reference implementation's model-YAML format; (ii) the paper defines exactly one topology with five multiplier rows — a configurable graph engine is over-engineering; (iii) the Phase 2/7/8 param/FLOP gates test Python constructors directly, and mypy covers what a DSL cannot. No model-topology config format may ever be created (standing prohibition, AGENTS.md).
 
-## ADR-002 — Perpetual 0.x release train (D10)
+## 🚂 ADR-002 — Perpetual 0.x release train (D10)
 
 **Status**: accepted (blueprint v1.3).
 
@@ -43,7 +43,7 @@ Architecture- and policy-level decisions. D1–D11 are transcribed from the gove
 
 **Consequences**: each 0.MINOR freezes its golden metrics; later releases must never regress any frozen golden — frozen goldens are immutable, a genuine correction ships as the next 0.MINOR with an explicit changelog note. Every release ships with resolved run configs + seeds, its report section, a changelog, and weights where dataset licenses permit. No 1.0 is ever planned, promised, or tagged.
 
-## ADR-003 — Autonomous execution under human gates (D11)
+## 🚦 ADR-003 — Autonomous execution under human gates (D11)
 
 **Status**: accepted (blueprint v1.5); amended by D12(a) for local git flow.
 
@@ -53,7 +53,7 @@ Architecture- and policy-level decisions. D1–D11 are transcribed from the gove
 
 **Consequences**: agents never widen the source allowlist, never create model-topology configs, and stop rather than guess (escalation protocol in AGENTS.md and docs/ESCALATION.md). The assumption register plus the escalation log is itself research output a from-code port could not produce.
 
-## ADR-004 — Reference implementations readable, never copyable (D13)
+## 🔒 ADR-004 — Reference implementations readable, never copyable (D13)
 
 **Context.** The blueprint's v1.4 tightening (D5) restricted implementation sources to the three papers, their cited primary literature, and neutral tooling documentation. Three Det-smoke attempts then stalled at 4-6 val mAP50-95 against a
 
@@ -63,7 +63,7 @@ Architecture- and policy-level decisions. D1–D11 are transcribed from the gove
 
 **Consequences.** The clean-room position now rests on two claims instead of one: nothing from Ultralytics was consulted (unchanged, auditable via the fetch log), and nothing from any external repository was copied (enforced by the standing prohibition and the provenance trail). Reading a permissively licensed implementation to learn a convention is the ordinary practice the two-team clean-room pattern already contemplates for the specification side; what it must never become is transcription.
 
-## Open items
+## 🕗 Open items
 
 | ID | Question | Deadline | Default |
 | -- | -- | -- | -- |

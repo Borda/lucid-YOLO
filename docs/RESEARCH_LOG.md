@@ -1,4 +1,4 @@
-# Research Log
+# 🔬 Research Log
 
 What executing the work packages taught, kept out of the roadmap so that file can stay what it says it is: a queue. ROADMAP.md answers *what a package does*; this file answers *what it cost to find out* — the measurements behind a perf claim, the approaches that were tried and abandoned, and the results that do not flatter the project.
 
@@ -12,7 +12,7 @@ Dates are the day the finding was recorded.
 
 ______________________________________________________________________
 
-## Cross-cutting
+## 🧵 Cross-cutting
 
 Findings that belong to no single package because they are properties of the environment every package runs in.
 
@@ -62,7 +62,7 @@ Both recurred often enough to be written into AGENTS.md rather than left in note
 
 ______________________________________________________________________
 
-## Phase 0 — Foundation
+## 🧱 Phase 0 — Foundation
 
 ### WP-001 — one place to write the version
 
@@ -119,7 +119,7 @@ The split that has held ever since: **integers exact, aggregates to tolerance**.
 
 ______________________________________________________________________
 
-## Phase 1 — Data pipeline
+## 🚰 Phase 1 — Data pipeline
 
 ### WP-014 — the DataLoader transport saga
 
@@ -142,7 +142,7 @@ The through-line: three distinct resources exhaust in this pipeline — shm **by
 
 ______________________________________________________________________
 
-## Phase 2 — Architecture
+## 🏗️ Phase 2 — Architecture
 
 ### WP-023 — the param/FLOP fidelity gate
 
@@ -154,7 +154,7 @@ The third change was explicitly **not** an iteration: A29's counting convention 
 
 ______________________________________________________________________
 
-## Phase 3 — Assignment and losses
+## ⚖️ Phase 3 — Assignment and losses
 
 ### WP-022 — the dead predictor
 
@@ -176,7 +176,7 @@ Constructing the learnable tensors so the target is exactly representable is wha
 
 ______________________________________________________________________
 
-## Phase 4 — MuSGD
+## 📉 Phase 4 — MuSGD
 
 ### WP-033 — toy convergence golden
 
@@ -188,7 +188,7 @@ The tolerance is the interesting part: step counts are pinned at **±15**, final
 
 ______________________________________________________________________
 
-## Phase 5 — Lightning training loop
+## ⚡ Phase 5 — Lightning training loop
 
 ### WP-038 — four defaults that only fail off the developer's machine
 
@@ -222,7 +222,7 @@ The structural decision that outlived it: `goldens/gpu/` is excluded from defaul
 
 ______________________________________________________________________
 
-## Phase 6 — Evaluation, release 0.1.0
+## 🎯 Phase 6 — Evaluation, release 0.1.0
 
 ### WP-071 — packed uint8 batch transport
 
@@ -298,7 +298,7 @@ Wiring it up took the offline suite from **558 to 699 cases** and coverage from 
 
 ______________________________________________________________________
 
-## Phase 7 — Instance segmentation, release 0.2.0
+## 🖌️ Phase 7 — Instance segmentation, release 0.2.0
 
 ### WP-052 — Segmenter wiring
 
@@ -408,7 +408,7 @@ The 0.2.0 release row owed "the 0.1 goldens still green", and that clause could 
 
 Worth keeping because the shape recurs in a roadmap transcribed ahead of the work: a definition of done can name an artifact that the intervening packages decided not to produce, and the honest outcome is to record that the clause lost its referent — not to satisfy a nearby clause and tick the row.
 
-## Phase 8 — Oriented detection, release 0.3.0
+## 🔄 Phase 8 — Oriented detection, release 0.3.0
 
 ### WP-055 — rotated geometry primitives
 
@@ -596,7 +596,7 @@ Recorded because the failure was in the gate rather than in the data, and a gate
 
 The row also owned the whole-image tile merge and did not deliver it. It moved to [WP-107](#wp-107) rather than being marked done — a package that reports itself complete while a clause of its scope is unbuilt is how a roadmap stops describing the code, and this is the third time the merge had slipped, after WP-063 deferred it and WP-088's scope never took it up.
 
-## Phase 9 — Inference and generalization
+## 🔮 Phase 9 — Inference and generalization
 
 ### WP-093 — stable angle regression for elongated boxes
 
@@ -845,7 +845,7 @@ The empty tuple is the sharper case, because it inverts the failure mode the res
 
 The annotation is `tuple[str, ...] | None`, and the CLI surface it produces was verified rather than assumed: jsonargparse renders it as a list literal, `--splits '[train]'`, which is the spelling `lucid-data download --splits` has always required — a bare `--splits train` is refused by both. One flag's syntax is not a second thing to learn. The `--help` line for it is less self-describing than `download`'s, the `| None` union suppressing the `[ITEM,...]` metavar; cosmetic, and not worth changing the annotation for.
 
-## Phase 10 — Consolidation
+## 📦 Phase 10 — Consolidation
 
 ### WP-065 — what three tiers say that none of them says alone
 
@@ -940,3 +940,31 @@ Nothing turned out to be shared. `lucid-data download` reaches `download_dataset
 Removing the alias also removed the one exemption to the project's underscore-flag rule, and AGENTS.md sec. 2 was stale on a second count anyway: `lucid-predict` shipped in WP-089 and the bullet still counted three commands. Both corrected in the same edit, since they are one sentence describing one surface.
 
 Two references are left standing deliberately. The reproduction report's "commands as run" blocks keep their dashed spellings — they record what was executed at the version named, and editing them would falsify the record rather than update it — with the surrounding prose changed to say the alias *was* removed and that the block must be read through its replacements rather than run as written.
+
+## 🔁 Phase 11 — Rolling, toward 0.5.0
+
+### WP-113 — an emoji changes the anchor a renderer derives
+
+<a id="wp-113"></a>
+
+Decoration with one load-bearing consequence. GitHub and Python-Markdown both slugify a heading by stripping what is not a word character and joining the rest with hyphens, so `## 🧠 How a modern YOLO works` no longer answers to `#how-a-modern-yolo-works` — the stripped emoji leaves the leading separator behind. The README's own audience table links to four of its H2 sections, and every one of those links would have gone dead in the same commit that made the page prettier, with nothing failing anywhere.
+
+The fix is not to spell the new slug. The two renderers this project publishes through do not have to agree on what a slug becomes, and one that today keeps a leading hyphen is free to trim it tomorrow — so a link written against a derived anchor is a link written against a renderer's current behaviour. Explicit `<a id=>` tags above the four headings are what the research log already uses for exactly this reason: they are greppable, they survive a retitle, and they mean the same thing to both renderers.
+
+**Two gates read heading text and had to stop.** `test_report_sections` pinned four `## `-prefixed literals from the reproduction report and `test_decisions_carry_all_ids` pinned `## ADR-00N`; both would have failed on a purely visual edit while reporting a missing section, which is a gate that misdescribes its own finding. They now compare undecorated titles — a lead token holding no ASCII alphanumeric is decoration, anything else is title — so the assertion is about which sections exist, which is what it was always for.
+
+The emoji themselves are chosen per section and reused across files only where the subject is the same: 🎯 for detection, 🖌️ for segmentation, 🔄 for oriented detection, in the roadmap phase, the log phase, the model card and the training recipe alike. A palette walked in file order would have been faster to produce and would carry no information.
+
+### WP-113b — a README cannot be relative in two places at once
+
+<a id="wp-113b"></a>
+
+`pyproject.toml` hands `README.md` to setuptools as the long description, and PyPI resolves its relative targets against `pypi.org`: the three training-curve figures render as broken images and every `docs/…` link 404s. The same file has to stay relative in the git tree, where relative is exactly what works. So the rewrite belongs to the moment of packaging rather than to the file, and it is opt-in per invocation — `--ref v0.4.0` or `LUCID_YOLO_RELEASE_REF` — so an ordinary `make build` or a `pip install .` cannot reach it.
+
+**Two hosts, because the two link classes fail differently.** A figure served through `github.com/.../blob` renders an entire HTML page inside an `<img>`, which is a broken image; a document served through `raw.githubusercontent.com` hands the reader unrendered markdown. Images therefore resolve through `raw`, documents through `blob`, and the classifier keys on the markdown image bang *or* the target's suffix, since an HTML `<img src=>` carries no bang.
+
+**A branch may not be pinned.** A released wheel's README is a snapshot of one tree, and a link into `main` describes whatever that branch holds when a reader clicks it — which is how a page for 0.4.0 ends up documenting code that shipped years later. Only a `v0.MINOR.PATCH` tag or a full commit sha is accepted.
+
+**The slug is read from `project.urls.Homepage`, and reading it exposed a live defect.** The declared homepage was `Borda/lit-YOLOs`; the repository's canonical `full_name` is `Borda/lucid-YOLO`. GitHub redirects a renamed repository's HTML URLs, so the stale slug looks fine in a browser and every `blob` link would have worked — but `raw.githubusercontent.com` does not redirect, so precisely the three figures this package exists to publish would have 404'd, while the links beside them resolved. A rename is invisible until something reads the metadata programmatically.
+
+What the tests cannot establish is whether the produced URLs resolve. The repository is private at the time of writing, so every generated link 404s for an anonymous reader regardless of correctness; the URLs become true when the repository is public and the tag exists. That is stated rather than asserted, because a test that fetched them would be a test of the repository's visibility settings.

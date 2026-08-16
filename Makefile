@@ -9,7 +9,9 @@ TASK      ?= det
 DATA_ROOT ?=
 DATASET   ?=
 
-.PHONY: setup lint test test-gpu precommit gate gate-gpu golden golden-gpu freeze-goldens overfit shapes check-data build clean
+TAG       ?=
+
+.PHONY: setup lint test test-gpu precommit gate gate-gpu golden golden-gpu freeze-goldens overfit shapes check-data build dist-pypi clean
 
 setup:
 	$(UV) venv --python 3.11 $(VENV)
@@ -87,10 +89,22 @@ check-data:
 	@test -n "$(DATA_ROOT)" || { echo "usage: make check-data DATA_ROOT=/path/to/data [DATASET=coco|dota|yolo]"; exit 1; }
 	$(PY) -m lucid_yolo.cli.data check --data_root $(DATA_ROOT) $(if $(DATASET),--dataset $(DATASET),)
 
-# Standard PEP 517 build (setuptools backend): sdist + wheel into dist/.
+# Standard PEP 517 build (setuptools backend): sdist + wheel into dist/. The README
+# ships exactly as committed — relative links, correct in a checkout, dead on PyPI.
 build:
 	rm -rf dist
 	$(PY) -m build
+
+# The build whose artifacts are meant for PyPI. TAG names the tag the README's links are
+# pinned to, and is the flag that makes this a release build rather than a local one; the
+# rewrite is reverted whether the build succeeds or fails, so the tree is left as found.
+dist-pypi:
+	@test -n "$(TAG)" || { echo "usage: make dist-pypi TAG=v0.MINOR.PATCH"; exit 1; }
+	rm -rf dist
+	@$(PY) scripts/absolutize_readme.py --ref $(TAG) || exit 1; \
+	status=0; $(PY) -m build || status=$$?; \
+	$(PY) scripts/absolutize_readme.py --revert || exit 1; \
+	exit $$status
 
 clean:
 	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache .coverage build dist src/*.egg-info

@@ -1,8 +1,8 @@
-# Model card — lucid-yolo oriented detector (n scale)
+# 🔄 Model card — lucid-yolo oriented detector (n scale)
 
 Covers the oriented detection model produced by the OBB-smoke tier run, released as `0.3.0`. That tier was accepted at its human gate (roadmap 064) on 2026-08-14, on the evidence recorded in `REPRODUCTION_REPORT.md`. One card per task family; detection and instance segmentation have their own.
 
-## Model details
+## 📇 Model details
 
 |  |  |
 | -- | -- |
@@ -20,13 +20,13 @@ The oriented head is the detector's own dual head with `predict_angle` enabled (
 
 Parameter and FLOP fidelity is gated rather than asserted, but against a weaker reference than the other two tasks: [R1] publishes no oriented parameter table, so `test_param_flops.py` holds the oriented scales against this project's own frozen goldens. Those numbers pin the topology against drift; they do not corroborate it against the paper.
 
-## Intended use
+## 🧭 Intended use
 
 **Intended.** Reproduction research: verifying the paper's oriented-detection claims, ablating the A44 composition and the A49/A50 term choices, and serving as a readable from-scratch implementation of NMS-free oriented detection. As with the detector, the `e2e` path is the interesting artifact — oriented boxes come out of a forward containing no suppression op.
 
 **Not intended.** Any operational use, and this is a stronger statement than for the COCO models. DOTA is aerial imagery; the categories are vehicles, ships, aircraft, storage tanks, harbours and sports facilities. Applications of aerial object detection include surveillance and targeting, and nothing about this model's licence, provenance or quality supports deployment for them. DOTA's own terms permit academic use only. Beyond that: production use of any kind, safety-critical or rights-affecting decisions, measurement of real-world object dimensions from predicted boxes, or any setting where a per-tile rotated mAP50 of 0.52 on 15 aerial categories would be read as a reliable perception system.
 
-## Training data
+## 🗂️ Training data
 
 DOTA-v1.0 (R18) `train` split — 1,411 images, 98,990 instances across 15 categories, oriented four-point annotations. No other data; no pretraining (D2). The `test` split's ground truth is withheld by the authors and was neither downloaded nor used.
 
@@ -36,7 +36,7 @@ DOTA's composition limits apply directly. It is satellite and aerial imagery of 
 
 **Terms.** DOTA states: *"All images and their associated annotations in DOTA can be used for academic purposes only, but any commercial use is prohibited."* Google Earth imagery within it carries Google Earth's terms additionally. Weights trained on it inherit that restriction, which is why this card's Licensing section differs from the other two.
 
-## Training procedure
+## 🏋️ Training procedure
 
 |  |  |
 | -- | -- |
@@ -50,7 +50,7 @@ DOTA's composition limits apply directly. It is satellite and aerial imagery of 
 
 The wiring gate that precedes any DOTA launch is `scripts/overfit_micro.py --task obb`: 100 images, 592 instances, 4 classes, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train rotated mAP50 **0.9390** against a 0.9 floor (`goldens/gpu/overfit_micro_obb.json`).
 
-## Evaluation
+## 📊 Evaluation
 
 Scored by `lucid-eval` on the DOTA-v1.0 **val** split tiled the same way training data was: 10,132 tiles, 101,209 instances, of which 16,528 are flagged difficult. Rotated mAP under the A24 protocol — exact polygon-intersection IoU, ten thresholds, 101-point interpolated recall, 300 detections per tile, R18's difficult rule.
 
@@ -65,7 +65,7 @@ EMA is worth `+0.0047` mAP50-95 and `+0.0102` mAP50 here — small, positive, an
 
 The same checkpoint scores 0.2914 / 0.5242 on Apple MPS and 0.2914 / 0.5243 on CUDA — agreement to four decimals across two accelerators and two operators, which is stronger evidence about the evaluator than about the model.
 
-## Limitations
+## ⚠️ Limitations
 
 **The A44 composition is the model's defining constraint.** An oriented box is produced by rotating an axis-aligned rectangle about its own centre, so the centre and extents are predicted in the unrotated frame and the heading is a separate scalar. Objects whose rotated extent is poorly described by that construction are systematically harder for it than a formulation predicting the rotated box directly.
 
@@ -77,7 +77,7 @@ The same checkpoint scores 0.2914 / 0.5242 on Apple MPS and 0.2914 / 0.5243 on C
 
 **Smoke tier.** 50 epochs at the smallest scale against the paper's 500/600-epoch schedules, one seed, one benchmark.
 
-## Licensing
+## 📜 Licensing
 
 Code and report: Apache-2.0.
 

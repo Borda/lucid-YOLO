@@ -39,6 +39,12 @@ jobs:
           uv pip install --python .venv/bin/python -e . --group dev
       - name: Release guard (re-runs the full gate)
         run: .venv/bin/python scripts/release_guard.py --tag "${{ github.ref_name }}"
+      # README.md is the PyPI long description, and PyPI resolves its relative links
+      # against pypi.org: every figure is a broken image and every docs link a 404
+      # unless they are pinned to this tag first. The checkout is disposable, so the
+      # rewrite is not reverted.
+      - name: Pin README links to the tag being released
+        run: .venv/bin/python scripts/absolutize_readme.py --ref "${{ github.ref_name }}"
       - name: Build sdist and wheel
         run: uv build --out-dir dist
       - name: Upload distributions as artifacts

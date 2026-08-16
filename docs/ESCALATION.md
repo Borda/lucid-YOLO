@@ -1,4 +1,4 @@
-# Escalation Log
+# 🚨 Escalation Log
 
 Blocked-WP entries per the anti-guessing rule (AGENTS.md sec. 4). An agent stops and writes an entry here — then waits for a human decision — when any of these occur:
 
@@ -10,7 +10,7 @@ Blocked-WP entries per the anti-guessing rule (AGENTS.md sec. 4). An agent stops
 
 Escalation is success, not failure: this log plus the assumption register is the research output a from-code port could never produce.
 
-## Entry template
+## 🧾 Entry template
 
 ```markdown
 ## <date> — WP-<NNN> <slug>
@@ -22,6 +22,6 @@ Escalation is success, not failure: this log plus the assumption register is the
 - **Resolution** (filled by human):
 ```
 
-## Entries
+## 📌 Entries
 
 *(none yet)*

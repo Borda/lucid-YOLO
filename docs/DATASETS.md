@@ -1,10 +1,10 @@
-# Provisioning the datasets
+# 🗂️ Provisioning the datasets
 
 Datasets are never committed to this repository and never downloaded by test code (AGENTS.md sec. 3). Every unit gate runs offline against synthetic fixtures (A26/D12b); only the WPs marked `[DATA]` need a real tree, and a tier acceptance run needs one that passes `lucid-data check`.
 
 This file says where each dataset comes from, what has to be on disk before a run starts, and — since WP-099d — how the two dataset formats lay out on disk and what their annotations actually contain. None of it is restated from memory: the provisioning sections follow what `lucid_yolo.data.check` validates, and the **Dataset formats** reference below follows `lucid_yolo.data.layout`, `.coco`, `.yolo` and `.dota` — those modules are the specification, and every claim below cites the one it came from.
 
-## COCO 2017 (R12)
+## 🖼️ COCO 2017 (R12)
 
 Automated, because the archives are served from a stable public host (`images.cocodataset.org`) at fixed URLs:
 
@@ -16,7 +16,7 @@ lucid-data check    --data_root /data/coco
 
 Transfers stream to a `.part` file and are renamed on completion, so a killed run resumes rather than leaving a truncated archive, and an already-extracted split is skipped without touching the network. The official archives publish no authoritative SHA-256 digests, so none are hard-coded; the computed digest of every archive is printed, and an expected one may be enforced per archive with `--sha256`.
 
-## DOTA-v1.0 (R18)
+## 🛰️ DOTA-v1.0 (R18)
 
 **Manual, and it stays manual.** The distribution has no equivalent of `images.cocodataset.org`: the dataset page offers Google Drive and Baidu Drive folders, which are interactive pages rather than archive URLs. A folder link cannot be resolved to a stable file URL without rendering JavaScript, the Drive large-file path adds a confirmation interstitial, and Baidu Drive requires an account. A downloader written against any of that is a scraper of someone else's UI, which breaks silently and off-repository. So `lucid-data download` covers COCO only, and DOTA provisioning is an operator step.
 
@@ -88,7 +88,7 @@ The tiles are a build artifact and are never committed. The output is a COCO con
 
 Overlap is a real choice, not a default to accept unread. Pixels are amplified by `(patch / (patch - overlap))²`: 512 px of overlap is R18's own crop stride and costs 4.0x, while the 200 px of A21 costs about 1.55x. Larger overlap means fewer objects severed by a tile edge and a longer epoch.
 
-## Dataset formats
+## 🧩 Dataset formats
 
 This is a reader's map, not a restatement: every claim below cites the module that enforces it, and none of it substitutes for reading that module when something is unclear.
 
@@ -192,7 +192,7 @@ A YOLO root's own `data.yaml` outranks this table for any split it names. `resol
 
 `detect_layout` is the one caller with no reader of its own to ask — `DetectionDataModule` is handed a bare `data_root` and has to decide which reader it calls for, which is the question neither table above answers on its own. It probes both layout tables in full — by directory and file existence only, per the *layout*/*format* distinction above — and raises if neither is satisfied, naming every path tried, or if **both** are, since across the two tables the loser is a different label space and a different image set, not another spelling of the same reader (A63; `detect_layout`, `lucid_yolo/data/layout.py`).
 
-## Where a provisioned tree belongs on a hosted runtime
+## ☁️ Where a provisioned tree belongs on a hosted runtime
 
 A hosted runtime is ephemeral and its local disk goes with it, so the two halves of a run belong in different places.
 
@@ -200,7 +200,7 @@ A hosted runtime is ephemeral and its local disk goes with it, so the two halves
 
 **Checkpoints and logs go the other way**, onto storage that outlives the runtime. That is `--trainer.default_root_dir`, and it belongs to the launch rather than to provisioning: docs/TRAINING.md carries it, along with the three tiers' commands.
 
-## License terms, and what they constrain
+## 📜 License terms, and what they constrain
 
 DOTA is not permissively licensed. The dataset page states:
 

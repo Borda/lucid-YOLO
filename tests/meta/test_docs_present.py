@@ -16,7 +16,7 @@ MODEL_CARDS = DOCS / "model_cards"
 #: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted. Raise it when adding
 #: a work package; never lower it.
-_WP_FLOOR = 112
+_WP_FLOOR = 113
 
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
@@ -86,6 +86,19 @@ def test_assumption_ids_parse_contiguous() -> None:
     assert len(ids) == len(set(ids)), "duplicate assumption ids"
     assert sorted(ids) == list(range(1, max(ids) + 1)), f"non-contiguous assumption ids: {sorted(ids)}"
     assert max(ids) >= 26, "register must carry at least A1-A26"
+
+
+def _undecorated(title: str) -> str:
+    """Strip a heading's leading emoji, leaving the title the registers are asserted on.
+
+    Every H1 and H2 across the docs carries a topical emoji (WP-113), which is decoration:
+    a gate that pinned it would fail on a re-picked icon while reporting a missing section.
+    A lead token holding no ASCII alphanumeric is that decoration; anything else is title.
+    """
+    lead, _, rest = title.partition(" ")
+    if rest and not any(char.isalnum() and char.isascii() for char in lead):
+        return rest.strip()
+    return title
 
 
 def _table_cells(line: str) -> list[str]:
@@ -201,14 +214,17 @@ def test_provenance_carries_allowlist_ids() -> None:
     assert ids >= set(range(1, 22)), f"provenance missing source ids: {sorted(set(range(1, 22)) - ids)}"
 
 
-#: Section headings `REPRODUCTION_REPORT.md` must carry, in the order D10 appends them: the
+#: Section titles `REPRODUCTION_REPORT.md` must carry, in the order D10 appends them: the
 #: three per-release tiers plus the WP-065 consolidation. Copied from the file itself, not
 #: retyped -- each uses an em dash, and a hyphen-typed copy would silently never match.
+#: Stored without the `##` marker and without the leading emoji (WP-113): the heading's
+#: decoration is presentation, and pinning it here would make a purely visual edit fail a
+#: test about which sections exist.
 _REPORT_SECTIONS = (
-    "## 0.1.0 — Detection",
-    "## 0.2.0 — Instance segmentation",
-    "## 0.3.0 — Oriented detection",
-    "## Consolidated note — detection, segmentation, oriented detection",
+    "0.1.0 — Detection",
+    "0.2.0 — Instance segmentation",
+    "0.3.0 — Oriented detection",
+    "Consolidated note — detection, segmentation, oriented detection",
 )
 
 
@@ -222,7 +238,9 @@ def test_report_sections() -> None:
     every heading exactly as it was, and this test unaffected.
     """
     text = (DOCS / "REPRODUCTION_REPORT.md").read_text(encoding="utf-8")
-    missing = [heading for heading in _REPORT_SECTIONS if heading not in text]
+    headings = {line.lstrip("# ").strip() for line in text.splitlines() if line.startswith("## ")}
+    titles = {_undecorated(heading) for heading in headings}
+    missing = [title for title in _REPORT_SECTIONS if title not in titles]
     assert not missing, f"REPRODUCTION_REPORT.md missing section headings: {missing}"
 
 
@@ -243,4 +261,4 @@ def test_decisions_carry_all_ids() -> None:
     assert d_ids == set(range(1, max(d_ids) + 1)), f"decision ids are not contiguous from 1: {sorted(d_ids)}"
     assert max(d_ids) >= _DECISION_FLOOR, f"decisions shrank below D{_DECISION_FLOOR}: {sorted(d_ids)}"
     for adr in ("ADR-001", "ADR-002", "ADR-003", "ADR-004"):
-        assert f"## {adr}" in text, f"missing {adr} section"
+        assert re.search(rf"^## .*\b{adr}\b", text, flags=re.MULTILINE), f"missing {adr} section"

@@ -1,8 +1,8 @@
-# Provenance Log
+# 📚 Provenance Log
 
 Every design decision in this repository cites its public source. This file is the clean-room evidence record: sources are logged here on first use, and every commit carries a `Provenance:` trailer referencing the source ids below. No Ultralytics code surface, config, weight, or web property (including docs.ultralytics.com) has been consulted at any point — see the denylist in AGENTS.md.
 
-## Source allowlist
+## ✅ Source allowlist
 
 Admissible references. Anything not on this list requires a DECISIONS.md entry before first use; denylisted surfaces are never admissible.
 
@@ -60,7 +60,7 @@ Reference *implementations* (R25–R28) are admitted under D13/ADR-004 on two st
 | R15 | Withdrawn (blueprint v1.4). Formerly the prose pages of docs.ultralytics.com; removed because the site is generated from the AGPL repository. Retained as a numbered placeholder so R16–R21 ids stay stable. No page was ever consulted. |
 | R19 | Legal-evidence citation only, never an implementation source: Ultralytics GitHub org discussion 14008 (public, non-code) stating licensing terms "apply to the specific implementation of the YOLO models, not the conceptual model itself." Collected at planning time by the planning role. |
 
-## Naming evidence record
+## 🏷️ Naming evidence record
 
 Package name `lucid-yolo` uses "YOLO" as a model-family/category term. Evidence:
 
@@ -71,7 +71,7 @@ Package name `lucid-yolo` uses "YOLO" as a model-family/category term. Evidence:
 
 Usage discipline: "YOLO26", "YOLO11", "Ultralytics", and their logos never appear in package names, module paths, class names, or model identifiers. Nominative references to the paper ("the YOLO26 paper, arXiv:2606.03748") are the only usage. The YOLO26 method implementation is exposed under the feature name `e2e` (variants `lucid-yolo-e2e-{n,s,m,l,x}`), never a version number.
 
-## Audit record
+## 🔍 Audit record
 
 Periodic audits of the clean-room contract (AGENTS.md denylist) against the full execution record. Method and detailed findings live in the project's design document (sec. 12); this table is the versioned summary.
 
@@ -79,7 +79,7 @@ Periodic audits of the clean-room contract (AGENTS.md denylist) against the full
 | -- | -- | -- | -- |
 | 2026-08-02 | WP-001–WP-069, 56 commits, audited at `975ff50` | codebase/dependency sweep · commit provenance trail (55/56 trailers, all allowlist-cited) · complete session fetch log (only R1, R7, R8, R12, R21 endpoints; zero denylisted domains) · delegated-work hand-over records · persistent agent memory | Upheld — no Ultralytics code, config, weights, or docs consulted at any point; every design input traces to R1–R24 or a registered assumption |
 
-## Usage log
+## 📝 Usage log
 
 First-use log of sources consulted during implementation. Papers are cited by arXiv id; access dates recorded per session.
 

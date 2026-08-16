@@ -52,6 +52,10 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 - A `⏸` status for a row waiting on something outside this repository, distinct from `⬜`: rows 074 and 075 are deferred pending an upstream `rf100-vl` merge, and a queue that spells "not started" and "not startable from here" the same way loses the difference exactly when someone picks the next row (WP-074, WP-075).
 
+- The README is rewritten as a poster rather than a manual: why the project exists and what it does not claim, four audiences each with a start-here link, the architecture as a diagram, the reproduced numbers per tier with their training-curve figures, and the six top-level decisions argued with evidence and cross-linked to the registers that hold it. Every top-level and second-level heading across the README and `docs/` then gained one topical emoji, and the four README sections other sections link to gained explicit anchor tags — a decorated heading no longer answers to the slug its text used to derive, so the links would have gone dead in the same commit that made the page readable (WP-113).
+
+- `scripts/absolutize_readme.py`, for the build whose artifacts go to PyPI: `README.md` is the long description, and PyPI resolves its relative targets against `pypi.org`, so the three training-curve figures render as broken images and every `docs/…` link 404s. Figures are rewritten through `raw.githubusercontent.com` and documents through `github.com/.../blob`, both pinned to the tag being released — a branch is refused, since a released page's links would then describe whatever that branch holds when a reader clicks them. Opt-in per invocation, so an ordinary build ships the file exactly as committed; `make dist-pypi TAG=v0.M.P` reverts afterwards and `release.yml` rewrites ahead of `uv build`. Reading the slug from the declared homepage exposed a stale one: the repository was renamed, GitHub redirects HTML URLs but `raw.githubusercontent.com` does not, so precisely the figures would have 404'd while the links beside them worked (WP-113b).
+
 ## [0.3.0] - 2026-08-14
 
 ### Added

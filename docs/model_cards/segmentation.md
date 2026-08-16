@@ -1,8 +1,8 @@
-# Model card — lucid-yolo segmenter (n scale)
+# 🖌️ Model card — lucid-yolo segmenter (n scale)
 
 Covers the segmentation model produced by the Seg-smoke tier run, released as `0.2.0`. That tier was accepted at its human gate (roadmap 054) on 2026-08-10, against the criterion recorded in `REPRODUCTION_REPORT.md`. One card per task family; detection has its own, oriented detection gets one at `0.3.0`.
 
-## Model details
+## 📇 Model details
 
 |  |  |
 | -- | -- |
@@ -20,19 +20,19 @@ The segmentation head sits on the detector's own backbone, neck and dual head: t
 
 Parameter and FLOP fidelity is gated rather than asserted: `test_param_flops.py` holds all five scales within ±3% params and ±5% FLOPs of [R1 Table S9]. The parameter tolerance is wider than detection's ±2% because the head's sizing rests on five registered assumptions (A14, A15, A18, A34, A35) rather than on published structure.
 
-## Intended use
+## 🧭 Intended use
 
 **Intended.** Reproduction research: verifying the paper's segmentation claims, ablating the prototype–coefficient mechanism, and serving as a readable from-scratch implementation of NMS-free instance segmentation. As with the detector, the `e2e` path is the interesting artifact — masks come out of a forward that contains no suppression op.
 
 **Not intended.** Production segmentation, safety-critical or rights-affecting decisions, medical or scientific measurement from mask areas, surveillance, biometric identification, or any deployment where 19 segm mAP on 80 common object categories would be mistaken for a reliable perception system. This is a smoke-tier reproduction at the smallest scale, evaluated on exactly one benchmark. Mask boundaries are quantized by a 160×160 prototype grid — 4 input pixels per prototype cell — so any use that depends on precise object extent, and especially on small objects, is outside what this model supports.
 
-## Training data
+## 🗂️ Training data
 
 COCO 2017 `train2017` — 118,287 images, 80 categories, polygon instance annotations under CC-BY-4.0 with images under their original Flickr terms. No other data; no pretraining (D2: no Objects365 initialization).
 
 COCO's documented composition limits apply to this model directly: category frequencies are long-tailed, scenes are web photography skewed toward particular geographies and contexts, and the `person` category carries all the demographic imbalance of that source. Nothing here corrects for it, and no fairness evaluation across subgroups has been run. COCO's polygon annotations are also themselves coarse — the masks this model imitates are human-drawn polygons, not pixel-exact segmentations.
 
-## Training procedure
+## 🏋️ Training procedure
 
 |  |  |
 | -- | -- |
@@ -47,7 +47,7 @@ COCO's documented composition limits apply to this model directly: category freq
 
 The wiring gate that precedes any COCO launch is `scripts/overfit_micro.py --task segment`: 100 images, 592 instances, 4 classes, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train mask IoU **0.8146** against a 0.7 floor (`goldens/gpu/overfit_micro_seg.json`).
 
-## Evaluation
+## 📊 Evaluation
 
 COCO val2017, all 5000 images, at 640 px through `lucid-eval`, which runs one forward per batch and decodes both paths from it. Boxes and masks are scored by two `torchmetrics` `MeanAveragePrecision` instances on the `faster_coco_eval` backend, masks at original image resolution against ground truth decoded from the COCO polygons (R12). EMA weights; raw weights were not evaluated for this run.
 
@@ -65,7 +65,7 @@ The NMS-free path costs 1.27 box AP and 0.81 segm AP against the NMS path. Masks
 
 No latency figures are published. Throughput is hardware-dependent and the project treats parameter/FLOP fidelity as the substitute claim.
 
-## Limitations
+## ⚠️ Limitations
 
 - **Accuracy.** 19.0 segm mAP is a smoke-tier result at the smallest scale, 50 epochs against the paper's 500–600. Expect frequent misses and confusions on anything but large, unambiguous, well-lit instances.
 - **Small objects are far weaker in masks than in boxes** — 3.7 segm mAP_S against 12.3 box mAP_S, a ratio of 0.30 where large objects reach 0.91. A 32-pixel object spans 8 prototype cells; below that, boundary quantization dominates whatever the coefficients predict.
@@ -78,19 +78,19 @@ No latency figures are published. Throughput is hardware-dependent and the proje
 - **No raw-weight evaluation** for this run, so the EMA contribution is unmeasured here.
 - **Not bitwise reproducible across platforms** (A26): libm last-bit rounding differs across OS and architecture; the goldens assert structural metrics with tolerance, not byte hashes.
 
-## Ethical considerations
+## 🤝 Ethical considerations
 
 A segmenter trained on COCO inherits COCO's `person` category, and a mask is a more precise readout of a person than a box is — silhouette, pose and body extent come out of it. Any deployment that segments people therefore carries surveillance and privacy implications this project has not assessed, and carries them further than the detector does. The intended-use section is a boundary, not a disclaimer: the model has no evaluation supporting use on people, and none is planned.
 
 Failure modes are unbounded in the sense that matters — no calibration study exists, so the confidence scores should not be read as probabilities, mask boundaries carry no uncertainty estimate at all, and the model gives no signal when it is operating outside its training distribution.
 
-## Licensing and provenance
+## 📜 Licensing and provenance
 
 Code and this report: Apache-2.0. Weights derive from COCO 2017; publication follows the dataset's terms and the release policy in D10.
 
 **Clean-room statement.** No file, configuration, weight, or code fragment from any Ultralytics repository, package, documentation site, or released checkpoint was opened, downloaded, imported, or consulted at any point in this project's history. Every design input traces to a paper, its cited primary literature, a registered assumption, or — for diagnosis only, never copying — a permissively licensed independent implementation registered under D13/ADR-004. The audit trail is `PROVENANCE.md`; the standing prohibitions are `AGENTS.md` sec. 7.
 
-## Citation
+## 🔖 Citation
 
 This reproduction has no publication. Cite the paper it reproduces:
 

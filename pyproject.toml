@@ -70,7 +70,12 @@ lucid-eval = "lucid_yolo.cli.eval:main"
 lucid-predict = "lucid_yolo.cli.predict:main"
 
 [project.urls]
-Homepage = "https://github.com/Borda/lit-YOLOs"
+# The canonical slug, not the one this checkout's remote still uses. GitHub redirects a
+# renamed repository's HTML URLs, so a stale slug looks fine in a browser; raw.github-
+# usercontent.com does not redirect, so the packaging rewrite that builds figure URLs
+# from this line would ship a page whose every image 404s. Verified against the GitHub
+# API, which reports full_name `Borda/lucid-YOLO` for the old path.
+Homepage = "https://github.com/Borda/lucid-YOLO"
 
 [tool.setuptools.dynamic]
 version = { attr = "lucid_yolo.__version__" }

@@ -1,6 +1,6 @@
-# Work-Package Roadmap
+# 🗺️ Work-Package Roadmap
 
-The agent's work queue: 112 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording follow-up work that landed after its package had closed. Transcribed from the governing blueprint (sec. 15) with a live status column.
+The agent's work queue: 113 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording follow-up work that landed after its package had closed. Transcribed from the governing blueprint (sec. 15) with a live status column.
 
 **Scope says what a package does, not what executing it taught.** Measurements, rejected approaches and negative results live in RESEARCH_LOG.md, linked per row as `· log`; choices the papers left open live in ASSUMPTIONS.md and are cited by id; release results live in REPRODUCTION_REPORT.md. A row that restates any of those is duplicating a record that has an owner.
 
@@ -8,7 +8,7 @@ The agent's work queue: 112 numbered work packages, one commit each, executed in
 
 Legend: **Dep** = prerequisite WPs · **[DATA]** needs a real dataset (synthetic stand-in per A26 for offline development only) · **[GPU]** needs an accelerator (MPS first, D12c) · **[HUMAN]** requires human action — never started autonomously. DoD = the test id(s) that must pass; every WP additionally requires `make gate` green. Status icons: ⬜ todo · 🔄 in-progress · ✅ done · ⛔ blocked (see docs/ESCALATION.md) · ⏸ deferred, scope still wanted but the start is waiting on something outside this repository, named in the row · ⊘ superseded, its scope delivered by another WP that names it. ⏸ is distinct from ⛔ on both sides: nothing here is stuck, and nothing outside is being escalated to. The status column is flipped to ✅ in the same commit that completes its WP.
 
-## Phase 0 — Foundation (WP-001…007)
+## 🧱 Phase 0 — Foundation (WP-001…007)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 | -- | -- | -- | -- | -- | -- |
@@ -20,7 +20,7 @@ Legend: **Dep** = prerequisite WPs · **[DATA]** needs a real dataset (synthetic
 | 006 | `ci(release): tag-gated release workflow and CHANGELOG` | `release.yml`; CHANGELOG scaffold; `make freeze-goldens` | Negative test: tag on red commit refused | 005 | ✅ |
 | 007 | `test(fixtures): micro dataset with boxes, polygons, rotated scenes` | Seeded synthetic scenes via fuse-augmentations (A26): det/seg boxes+polygons, rotated scenes; loaders | `tests/fixtures/test_fixtures_load.py` | 003 | ✅ |
 
-## Phase 1 — Data pipeline (WP-008…015)
+## 🚰 Phase 1 — Data pipeline (WP-008…015)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 | -- | -- | -- | -- | -- | -- |
@@ -33,7 +33,7 @@ Legend: **Dep** = prerequisite WPs · **[DATA]** needs a real dataset (synthetic
 | 014 | `feat(data): COCO dataset and LightningDataModule` [DATA] | Detection + polygon parsing, scale-aware augmentation policy, `make check-data` · [log](RESEARCH_LOG.md#wp-014) | `test_coco.py` (fixture-backed) + `check-data` on real COCO | 012,013 | ✅ |
 | 015 | `test(data): round-trip goldens and debug visualizer` | Augmented-batch checksums; annotated grid dump script | `goldens/data_checksums.json` frozen | 014 | ✅ |
 
-## Phase 2 — Architecture (WP-016…023)
+## 🏗️ Phase 2 — Architecture (WP-016…023)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 | -- | -- | -- | -- | -- | -- |
@@ -46,7 +46,7 @@ Legend: **Dep** = prerequisite WPs · **[DATA]** needs a real dataset (synthetic
 | 022 | `feat(models): dual detection head, reg_max=1` | o2o (300x6) + o2m (nc+4, 8400) branches, DFL-free ltrb regression (A9) · [log](RESEARCH_LOG.md#wp-022) | `test_head.py::test_dual_head_shapes` | 021 | ✅ |
 | 023 | `feat(models): scale registry, builder, param/FLOP fidelity gate` | 5-row dataclass registry, typed builders (ADR-001), fvcore counting · [log](RESEARCH_LOG.md#wp-023) | `test_param_flops.py::test_det_vs_table7` — plus/minus 2% params / 5% FLOPs, all 5 scales; **golden frozen** | 022 | ✅ |
 
-## Phase 3 — Assignment and losses (WP-024…030)
+## ⚖️ Phase 3 — Assignment and losses (WP-024…030)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 | -- | -- | -- | -- | -- | -- |
@@ -58,7 +58,7 @@ Legend: **Dep** = prerequisite WPs · **[DATA]** needs a real dataset (synthetic
 | 029 | `test(assign): synthetic assignment goldens` | 6x6 px GT: STAL >=1 candidate, vanilla TAL exactly 0 at stride 8 | `goldens/assignment_cases.json` frozen | 028 | ✅ |
 | 030 | `test(train): single-batch overfit and gradient flow` | 200-step monotonic loss decrease; no NaN/Inf; all leaf grads populated · [log](RESEARCH_LOG.md#wp-030) | `test_overfit_batch.py` | 029 | ✅ |
 
-## Phase 4 — MuSGD (WP-031…033)
+## 📉 Phase 4 — MuSGD (WP-031…033)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 | -- | -- | -- | -- | -- | -- |
@@ -66,7 +66,7 @@ Legend: **Dep** = prerequisite WPs · **[DATA]** needs a real dataset (synthetic
 | 032 | `feat(optim): MuSGD with parameter-type split` | >=2D: w_muon*Muon + w_sgd*SGD (A6, A7); 1D: pure SGD, no weight decay (A12) | `test_musgd.py::test_param_split`, `::test_step_shapes` | 031 | ✅ |
 | 033 | `test(optim): toy convergence golden vs SGD` | Fixed synthetic regression + micro-CNN; MuSGD reaches threshold in fewer steps · [log](RESEARCH_LOG.md#wp-033) | `goldens/optim_toy.json` frozen | 032 | ✅ |
 
-## Phase 5 — Lightning training loop (WP-034…040)
+## ⚡ Phase 5 — Lightning training loop (WP-034…040)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 | -- | -- | -- | -- | -- | -- |
@@ -78,7 +78,7 @@ Legend: **Dep** = prerequisite WPs · **[DATA]** needs a real dataset (synthetic
 | 039 | `feat(ptl): deterministic checkpoint and resume` | Seeded resume reproduces the loss trajectory within tolerance · [log](RESEARCH_LOG.md#wp-039) | `test_resume.py::test_trajectory_match` | 038 | ✅ |
 | 040 | `test(lit): overfit-100 integration golden` [GPU] | n-scale on a 100-image subset -> >=0.95 recall at IoU 0.5 on train · [log](RESEARCH_LOG.md#wp-040) | `goldens/overfit_micro_det.json` frozen | 039 | ✅ |
 
-## Phase 6 — Evaluation, release 0.1.0 (WP-041…046)
+## 🎯 Phase 6 — Evaluation, release 0.1.0 (WP-041…046)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 | -- | -- | -- | -- | -- | -- |
@@ -106,7 +106,7 @@ Legend: **Dep** = prerequisite WPs · **[DATA]** needs a real dataset (synthetic
 | 086 | `docs(policy): releases ship no trained weights` | WP-046's definition of done required published weights; the project does not release them, since the reproduction's claim rests on frozen goldens and fidelity gates rather than on a binary anyone can retrain from the recipe. Recorded as D14 and the 046 row amended; no tooling changed, `release.yml` having always uploaded only the sdist and wheel | `test_docs_present.py`; `release.yml` unchanged | 004 | ✅ |
 | 046 | `release: v0.1.0 detector` [HUMAN] | O3 cleared; CHANGELOG; goldens frozen to `0.1`; no trained weights (D14). **Superseded 2026-08-10 by 054**: no `v0.1.0` tag was ever cut, so there is no 0.1.0 to document or freeze against — the detector's history ships inside the single `## [0.2.0]` section and the goldens froze to `0.2` | `release.yml` green on tag `v0.1.0` | 045 | ⊘ |
 
-## Phase 7 — Instance segmentation, release 0.2.0 (WP-047…054)
+## 🖌️ Phase 7 — Instance segmentation, release 0.2.0 (WP-047…054)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 | -- | -- | -- | -- | -- | -- |
@@ -127,7 +127,7 @@ Legend: **Dep** = prerequisite WPs · **[DATA]** needs a real dataset (synthetic
 | 087f | `refine(configs): name tiers by what they are, not by letters` | The `<task>_tier_<letter>_<letter>` configs are renamed for what they are — `det_smoke`, `det_ablations`, `seg_smoke`, planned `obb_smoke` — and the tier names follow everywhere they are written, historical mentions included, with git history keeping the old ones. No behaviour changes · [log](RESEARCH_LOG.md#wp-087f) | `test_cli.py::test_configs_dir_is_non_empty`, `::test_config_dry_parses` over every shipped config, `::test_smoke_tier_resolves_variant_n_multipliers_and_gains` and the ablations counterpart; goldens unchanged | 087 | ✅ |
 | 054 | `release: v0.2.0 segmentation` [GPU][HUMAN] | Seg-smoke tier plus overfit-100. **ACCEPTED 2026-08-10** (run v9, batch 128 x 50 ep, lr 0.02, bf16-mixed): box mAP50-95 **26.12** EMA-NMS vs >25; segm/box ratio **0.728** NMS vs >=0.65, ratified as the standing Seg-tier criterion; mask IoU **0.8146** vs >=0.7; `val/loss` strictly decreasing over all 49 logged epochs. Froze `goldens/frozen/0.2` · [log](RESEARCH_LOG.md#wp-054) | Seg-smoke acceptance; `release.yml` green on `v0.2.0` | 053,087 | ✅ |
 
-## Phase 8 — Oriented detection, release 0.3.0 (WP-055…064)
+## 🔄 Phase 8 — Oriented detection, release 0.3.0 (WP-055…064)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 | -- | -- | -- | -- | -- | -- |
@@ -155,7 +155,7 @@ Legend: **Dep** = prerequisite WPs · **[DATA]** needs a real dataset (synthetic
 | 106 | `docs(obb): the oriented tier's record` | The 0.3.0 artifacts, matching what 0.1.0 and 0.2.0 carry: an oriented model card, the four-panel `obb_smoke_training.svg`, the reproduction-report section, standalone per-tile evaluations for EMA and raw weights. `plot_training.py` gains the oriented panels — an obb run logs no `val/mAP` (WP-102), so panel 1 falls back to the rotated pair. The three cards consolidate into `docs/model_cards/` | `tests/meta/test_docs_present.py` — every card in `docs/model_cards/` is a required doc, and every required card exists | 105 | ✅ |
 | 064 | `release: v0.3.0 oriented detection` [GPU][HUMAN] | OBB-smoke tier accepted 2026-08-14: run v10 at per-tile rotated mAP50 0.5242 and mAP50-95 0.2914 on DOTA-v1.0 val (EMA, 10,132 tiles), overfit-100 wiring gate at 0.9390 against a 0.9 floor, O4 resolved, 0.2 goldens green and 0.3 frozen beside them. The whole-image tile-merge policy this row also owned is **not** delivered here and moves to WP-107 · [log](RESEARCH_LOG.md#wp-064) | OBB-smoke acceptance; `make gate` green; changelog section and frozen goldens for 0.3 | 063 | ✅ |
 
-## Phase 9 — Inference and generalization (WP-089…092, 074…075, 099, 107)
+## 🔮 Phase 9 — Inference and generalization (WP-089…092, 074…075, 099, 107)
 
 Deliberately after all three task phases rather than inside each. A predict path is where preprocessing and coordinate-frame mistakes surface, so building all three against one settled decode surface catches disagreements between them that a per-phase predict cannot see. It also keeps the release train clean: 0.1.0 already shipped, and retrofitting a detector-only predict into it now would mean carrying segmentation code in a detection release.
 
@@ -181,7 +181,7 @@ Deliberately after all three task phases rather than inside each. A predict path
 | 099c | `feat(data): YOLO layout in the check module and a worked config` | `check_dataset` learns the YOLO tree, and an unstated `--dataset` probes instead of defaulting to `coco`: a pre-flight answering a different question than its run reports a missing `train2017` for a root that trains fine. `dota` stays named, no run reading it and no probe covering it. `configs/det_yolo_smoke.yaml` is the worked `--data.layout` example · [log](RESEARCH_LOG.md#wp-099c) | `tests/data/test_check.py` — a YOLO root validates with no `--dataset`; a missing label file names split and stem, a malformed row names `{path}:3:`, and a class the `data.yaml` does not declare fails as `outside 0..1` | 099b | ✅ |
 | 099e | `feat(data): the splits a check is asked for` | `check_dataset` gains `splits`, threaded through `_check_root` into `check_yolo_root` / `check_dota_root`; unstated keeps each layout's own `YOLO_SPLITS` / `DOTA_SPLITS`, named at the branch that knows the layout. `coco` refuses the flag, its two splits being the published fact its counts come from; an empty tuple raises in both root checkers · [log](RESEARCH_LOG.md#wp-099e) | `tests/data/test_check.py::TestCheckDatasetSplits` — a train-only YOLO root passes with `--splits '[train]'` and fails without it; `coco` and `()` each raise, the latter from the library entry too | 099c | ✅ |
 
-## Phase 10 — Consolidation, release 0.4.0, then rolling (WP-065…067, 109, 110)
+## 📦 Phase 10 — Consolidation, release 0.4.0, then rolling (WP-065…067, 109, 110)
 
 | WP | Commit subject | Scope | DoD | Dep | Status |
 | -- | -- | -- | -- | -- | -- |
@@ -191,7 +191,7 @@ Deliberately after all three task phases rather than inside each. A predict path
 | 110 | `refine(cli): drop the deprecated download alias` | The removal 0.3.0 put in writing in three places — `[project.scripts]`, AGENTS.md sec. 2, the 0.3.0 changelog — carried out on schedule: the console script, the argparse parser that served only it, and its `__main__` twin. `lucid-data download` is untouched. Every operator-facing string naming the alias names the surviving spelling now, the `--verify` repair hint included — asserted runnable rather than merely present · [log](RESEARCH_LOG.md#wp-110) | `tests/cli/test_cli_surface.py::test_the_deprecated_download_alias_is_gone` and `tests/data/test_download.py::test_the_repair_hint_names_a_command_that_still_parses` | 089, 096 | ✅ |
 | 067 | `release: v0.4.0 consolidated note and examples` [HUMAN] | The worked example is drawn with `matplotlib` (R29), not `supervision`, which D16 refused: it hard-requires `av`, whose wheel ships a GPL `libx264` under BSD-3-Clause metadata. `scripts/draw_predictions.py` draws a checkpoint's own answer for all three tasks — boxes, per-instance masks, rotated quadrilaterals rather than their upright envelopes. Then the tag, and the roadmap reopened for the next 0.MINOR · [log](RESEARCH_LOG.md#wp-067) | `tests/scripts/test_draw_predictions.py`, and `release.yml` green on `v0.4.0` | 066 | 🔄 |
 
-## Phase 11 — Rolling, toward 0.5.0 (WP-111…112)
+## 🔁 Phase 11 — Rolling, toward 0.5.0 (WP-111…113)
 
 Opened at the 0.4.0 release, and deliberately opened with two rows rather than a plan: both are deferrals this repository already recorded in writing, so they are the queue's own backlog rather than a new direction. What a 0.5.0 is for is decided when there is a run behind it.
 
@@ -199,13 +199,15 @@ Opened at the 0.4.0 release, and deliberately opened with two rows rather than a
 | -- | -- | -- | -- | -- | -- |
 | 111 | `exp(obb): a whole-image oriented figure` [GPU][HUMAN] | The number WP-107 made possible and no run has produced: the OBB-smoke checkpoint re-scored through `merge_whole_images` on whole DOTA-v1.0 val images rather than per tile, so the project has one oriented figure comparable to something published. Every oriented number through 0.4.0 is per tile and says so; this is what would let a report stop saying it | A whole-image rotated mAP50-95 in the reproduction report, beside the per-tile figure rather than replacing it (D10) | 107, 064 | ⬜ |
 | 112 | `refine(export): one exportable decode path` | The decode composition exists twice — `predict.py`'s end-to-end path and WP-066's graph wrappers — with nothing forcing them to agree. WP-066 recorded the drift risk and left it on the smallest-change rule, since nothing shipped needed a third caller. A shared `src/lucid_yolo/export.py` composing deploy and decode is the natural home if a later package needs an exportable path it can ship | `tests/models/test_onnx_export.py` passes against the shared composition rather than its own wrappers | 066 | ⬜ |
+| 113 | `docs(all): an emoji on every top-level heading` | Every H1 and H2 across README.md and `docs/**` carries one topical emoji, chosen per section rather than decoratively repeated, so a long register scrolls as landmarks instead of undifferentiated grey. The four README headings other sections link to gain explicit `<a id=>` anchors, since an emoji changes the slug a renderer derives · [log](RESEARCH_LOG.md#wp-113) | `tests/meta/test_docs_present.py` passes with its section assertions keyed on titles rather than decoration; every in-page link still resolves | 067 | ✅ |
+| 113b | `feat(scripts): absolute README links for PyPI` | `scripts/absolutize_readme.py` rewrites the README's repository-relative links to absolute ones at packaging time: figures through `raw.githubusercontent.com`, documents through `github.com/.../blob`, both pinned to the tag being released. Opt-in per invocation (`--ref` or `LUCID_YOLO_RELEASE_REF`), reverted after a local build, wired into `release.yml` ahead of `uv build`. Lettered off 113 and landed in its commit: it exists because that upgrade gave the README figures worth publishing · [log](RESEARCH_LOG.md#wp-113b) | `tests/scripts/test_absolutize_readme.py`, including that an ordinary build cannot trigger the rewrite and that the workflow rewrites before it builds | 067 | ✅ |
 
 Beyond 0.4.0 the train continues on the same discipline — pose/RLE (R14), classification, export matrix, RF100-VL generalization (WP-074/075) — each a new phase of WPs and its own gated 0.MINOR. No 1.0, ever (ADR-002).
 
-## Critical path and parallelism
+## ⛓️ Critical path and parallelism
 
 Strictly sequential: 001 -> 007 -> 015 -> 023 -> 030 -> 033 -> 040 -> 046. WP-016…019 (blocks), WP-024 (CIoU), and WP-031 (Newton–Schulz) have no interdependencies and may be executed in any order once WP-003 lands. Phases 7 and 8 are strictly gated on releases 0.1.0 and 0.2.0 respectively — task heads never land on an unproven detector.
 
-## Failure budget
+## ⚠️ Failure budget
 
 If a WP's DoD cannot be met after two documented assumption iterations, escalate (AGENTS.md sec. 4). Fidelity-gate WPs (023, 052, 062) are the expected escalation sites: they are where the papers' block-level ambiguity meets a hard published number, and where an honest reproduction earns its credibility.
