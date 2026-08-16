@@ -1,0 +1,27 @@
+{
+  "producer": "scripts.golden_producers:data_pipeline_metrics",
+  "tolerances": {
+    "num_samples": 0.0,
+    "total_instances": 0.0,
+    "polygon_ring_count": 0.0,
+    "image_channels": 0.0,
+    "image_height": 0.0,
+    "image_width": 0.0,
+    "image_mean_sum": 0.05,
+    "image_std_sum": 0.05,
+    "bbox_area_sum": 2.0,
+    "bbox_coord_sum": 2.0
+  },
+  "values": {
+    "num_samples": 8.0,
+    "total_instances": 179.0,
+    "polygon_ring_count": 179.0,
+    "image_channels": 3.0,
+    "image_height": 128.0,
+    "image_width": 128.0,
+    "image_mean_sum": 3.392,
+    "image_std_sum": 1.0084,
+    "bbox_area_sum": 32923.115,
+    "bbox_coord_sum": 44082.663
+  }
+}

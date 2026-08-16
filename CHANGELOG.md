@@ -2,6 +2,56 @@
 
 All notable changes to lucid-yolo are documented here, following the Keep a Changelog convention; versioning is a perpetual 0.x release train — no 1.0 is ever planned, promised, or tagged — per ADR-002 (docs/DECISIONS.md).
 
+## [0.4.0] - 2026-08-15
+
+### Added
+
+- Single-image inference for all three tasks, as a library call and as the fourth console script `lucid-predict`: `predict_image` for detections, `predict_segmentation` for instance masks and `predict_oriented` for rotated boxes, each answering in the original image's coordinates through the letterbox inverse rather than in canvas coordinates. The three refuse each other by name — `forward` returns a `DualHeadOutput` for every task, so a segmentation checkpoint handed to the detection path produced boxes with its mask branch never consulted — and `--ema`, `--device` and `--output` keep `lucid-eval`'s spellings, so the two commands cannot disagree about what a flag means (WP-089, WP-090, WP-091).
+
+- `RotatedNMSDecoder`: the oriented tier now has the suppression baseline the axis-aligned tier has reported since 0.1, greedy and class-wise over the one-to-many branch by the exact polygon `rotated_iou`, on canonicalized boxes. `predict_oriented(decoder="nms")` decodes where it used to raise, on an unchanged signature — the refusal WP-091 shipped is lifted rather than worked around (WP-091b, A24).
+
+- `merge_whole_images`: tile detections are un-letterboxed, translated by the window origin recorded at tiling time and scored against whole-image ground truth reassembled from the tiles' own annotations, with seam duplicates resolved by core ownership rather than by suppression — an NMS-free path has no suppression stage in which to drop the duplicate. Every oriented figure this project published before this was a per-tile figure, and a per-tile score never pays the duplicate-detection cost a whole-image score charges (WP-107, A53, A59).
+
+- A YOLO-format dataset reader: a `data.yaml` plus a `labels/<split>/*.txt` tree of normalized rows produces the same `Targets` container the COCO path does, so assignment, loss and metric code is untouched. Oriented rows arrive as eight normalized polygon coordinates and are canonicalized to the long-edge convention on load (WP-099, A54–A56).
+
+- `DetectionDataModule` dispatches on layout: a YOLO root trains through `lucid-yolo fit` and not only through a library call, the reader chosen by which layout `data_root` actually satisfies rather than by a flag the operator has to remember (WP-099b).
+
+- The pre-run check learns the YOLO tree, and an unstated `--dataset` probes instead of defaulting to COCO: pointed at a YOLO root with no flag it used to report a missing `train2017` for a tree `fit` trains on without complaint. The probe is `detect_layout`, the same one the datamodule dispatches on, so the pre-flight resolves a root exactly as the run does or fails the same way (WP-099c).
+
+- `check_dataset(splits=...)`, threaded into both root checkers. A third-party export shipping only `train` — a correct export whose validation split was never cut — failed a pre-flight on a `val` nobody had promised. An empty `splits` is refused rather than honoured, since checking no split would report a pass over a root nothing had been read from (WP-099e).
+
+- An export gate on the deployed one-to-one graph, all three heads: the exported ONNX carries no `NonMaxSuppression` node and does carry the `TopK` that stands in for suppression, at the static output shape `TopKDecoder` documents, and run under onnxruntime it reproduces the checkpoint-loaded module's own decode — class ids exactly, boxes to 4.6e-05. Nothing ships: `onnx` and `onnxruntime` are dev-group only, the export itself being `torch.onnx.export` (WP-066, A9, A23, A30, A37, A45).
+
+- A third surface on the licence audit: the files each wheel's `RECORD` declares it installed, matched by filename against a named table of copyleft native libraries. A wheel can declare a permissive licence, ship licence documents that name no copyleft anywhere, and vendor a GPL binary regardless — `av`, which `supervision` hard-requires, ships `libx264` under BSD-3-Clause metadata, and both older checks pass it clean. The check narrows that hole rather than closing it, and says so: a library the table does not name passes exactly as `av` did (WP-109, D16).
+
+- `scripts/draw_predictions.py`, the release's worked example: a checkpoint and an image to a figure showing what the model answered — boxes for a `detect` checkpoint, boxes and per-instance mask overlays for a `segment` one, rotated quadrilaterals for an `obb` one rather than their upright envelopes, which are a different rectangle from the one the model reported. The drawing functions take an already-computed prediction rather than a checkpoint, which is what makes the geometry assertable in a repository that ships no trained weights (D14). `matplotlib` stays a `dev` dependency: nothing under `src/lucid_yolo/` imports it, so a wheel a consumer installs pulls no plotting stack. The roadmap row named `supervision`, which is refused — it hard-requires `av`, whose wheel ships a GPL `libx264` under BSD-3-Clause metadata (WP-067, D16).
+
+### Changed
+
+- `rotated_iou` and the seven private helpers it exclusively owns move from `eval/dota_eval.py` to `data/rotated_geom.py`. WP-091b had put an evaluation module on the decode path's import graph for a function that is pure geometry with no evaluation content (WP-091c).
+
+- One rotated-box shape check where `rotated_geom.py` carried two. Their conditions were character-identical and differed only in the letter naming the row count: `rotated_iou`'s signature distinguishes `(M, 5)` from `(N, 5)` because the result is `(M, N)`, but the predicate each operand satisfies is the same one, so a second letter in the rejection named a difference the check never tested (WP-091d).
+
+- `losses/probiou.py`'s own shape guard is pinned as a contract rather than folded into that one: it accepts arbitrary leading dimensions where `rotated_geom` requires exactly 2-D, which is deliberate — the loss is elementwise in its leading shape and its in-tree caller passes `(P, 5)` from the assignment (WP-091e, A19).
+
+### Removed
+
+- `lucid-download` is removed, as 0.3.0 said it would be: `lucid-data download` is the only spelling. The alias took dashed flags (`--data-root`, `--splits train val`, a bare `--force`) where the replacement's are underscored and list-valued (`--data_root`, `--splits '[train,val]'`, `--force true`), so a copy-pasted 0.2.x command needs re-spelling rather than renaming. `python -m lucid_yolo.data.download` goes with it, having run the same parser; `python -m lucid_yolo.cli.data download` is the module-invocation equivalent. Every repair hint and docstring fragment that spelled the alias now names a command that parses — including one that used its flag grammar without naming it, which no grep for the command could have found — and the hint is asserted by re-parsing what it prints rather than by matching its text (WP-110).
+
+### Fixed
+
+- `decode_instance_masks` on an empty instance axis: `F.interpolate` treats that axis as channels and rejects a zero-length one outright, so an image with no kept detections raised a `RuntimeError` where it should have returned nothing. It returns the empty stack now — the case an image with no detections reaches on the ordinary path (WP-090b).
+
+### Documentation
+
+- The reproduction report gains a consolidated note reading the detection, segmentation and oriented sections against each other. It appends rather than merges, because D10 makes the report append-only and merging three sections would rewrite three records three human gates signed off on; it says in its own first line that it is not a fourth tier. What the consolidation produces is an absence: the NMS-free deploy path's cost against NMS is the one quantity all three tiers could have reported in the same units, and the oriented tier never evaluated an NMS baseline at all (WP-065).
+
+- `docs/DATASETS.md` gains a reference section putting the COCO and YOLO trees side by side, with every citation naming the enclosing symbol instead of a line range — line numbers rotted three times while that one section was being written, two of them shipped, and the values were right each time with only the references wrong (WP-099d).
+
+- The roadmap and the research log are two files rather than one column: Scope states what a package does, and the measurements, rejected approaches and negative results it taught move to `docs/RESEARCH_LOG.md`, linked per row. Thirty-two cells were then compressed toward the table's own median, a 286-character median against a 1709-character worst case (WP-003, WP-108).
+
+- A `⏸` status for a row waiting on something outside this repository, distinct from `⬜`: rows 074 and 075 are deferred pending an upstream `rf100-vl` merge, and a queue that spells "not started" and "not startable from here" the same way loses the difference exactly when someone picks the next row (WP-074, WP-075).
+
 ## [0.3.0] - 2026-08-14
 
 ### Added
