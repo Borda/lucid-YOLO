@@ -31,13 +31,27 @@ def reset_random_seeds() -> None:
 
 
 def _grid_points() -> Tensor:
-    """Return the 16 stride-8 anchor centres of a 4x4 grid; x fastest, row-major."""
+    """Return the 16 stride-8 anchor centres of a 4x4 grid; x fastest, row-major.
+
+    Examples:
+        >>> points = _grid_points()
+        >>> points.shape
+        torch.Size([16, 2])
+        >>> points[:2].tolist()
+        [[4.0, 4.0], [12.0, 4.0]]
+    """
     points, _ = make_anchor_points([(4, 4)], [8])
     return points
 
 
 def _boxes_from_leaf(leaf: Tensor) -> Tensor:
-    """Build unit-size ``xyxy`` boxes (x2 > x1, y2 > y1) from a differentiable leaf."""
+    """Build unit-size ``xyxy`` boxes (x2 > x1, y2 > y1) from a differentiable leaf.
+
+    Examples:
+        >>> leaf = torch.tensor([[2.0, 3.0]])
+        >>> _boxes_from_leaf(leaf).tolist()
+        [[2.0, 3.0, 3.0, 4.0]]
+    """
     return torch.stack([leaf[..., 0], leaf[..., 1], leaf[..., 0] + 1.0, leaf[..., 1] + 1.0], dim=-1)
 
 

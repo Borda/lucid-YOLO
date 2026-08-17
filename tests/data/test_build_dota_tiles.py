@@ -33,7 +33,18 @@ SIDE = 24
 
 
 def _write_split(root: Path, split: str, labels: dict[str, list[str]]) -> Path:
-    """Write a synthetic DOTA split: one PNG plus one label file per entry."""
+    """Write a synthetic DOTA split: one PNG plus one label file per entry.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     line = _axis_aligned_line(2.0, 2.0, 6.0, 4.0, "plane", 0)
+        ...     split_dir = _write_split(Path(tmp), "val", {"P0001": [line]})
+        ...     sorted(p.name for p in (split_dir / "images").iterdir())
+        ...     sorted(p.name for p in (split_dir / "labelTxt").iterdir())
+        ['P0001.png']
+        ['P0001.txt']
+    """
     split_dir = root / split
     (split_dir / "images").mkdir(parents=True)
     (split_dir / "labelTxt").mkdir(parents=True)
@@ -45,7 +56,12 @@ def _write_split(root: Path, split: str, labels: dict[str, list[str]]) -> Path:
 
 
 def _axis_aligned_line(x0: float, y0: float, x1: float, y1: float, name: str, difficult: int) -> str:
-    """One R18 label line for an axis-aligned rectangle, corners clockwise from top-left."""
+    """One R18 label line for an axis-aligned rectangle, corners clockwise from top-left.
+
+    Examples:
+        >>> _axis_aligned_line(2.0, 2.0, 6.0, 4.0, "plane", 0)
+        '2.0 2.0 6.0 2.0 6.0 4.0 2.0 4.0 plane 0'
+    """
     return f"{x0} {y0} {x1} {y0} {x1} {y1} {x0} {y1} {name} {difficult}"
 
 
@@ -65,12 +81,35 @@ def built_root(tmp_path: Path) -> Path:
 
 
 def _payload(root: Path, split: str = "val") -> dict[str, list[dict[str, object]]]:
-    """Read a built split's instances JSON."""
+    """Read a built split's instances JSON.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     dota, tiles = Path(tmp) / "dota", Path(tmp) / "tiles"
+        ...     line = _axis_aligned_line(2.0, 2.0, 6.0, 4.0, "plane", 0)
+        ...     _ = _write_split(dota, "val", {"P0001": [line]})
+        ...     _ = build.convert_split(dota / "val", tiles, "val", patch=PATCH, overlap=OVERLAP)
+        ...     sorted(_payload(tiles))
+        ['annotations', 'categories', 'images', 'info']
+    """
     return json.loads((root / "annotations" / f"instances_{split}.json").read_text(encoding="utf-8"))
 
 
 def _dataset_index(root: Path, file_name: str, split: str = "val") -> int:
-    """Index of one tile in the dataset, which reads images in the JSON's own order."""
+    """Index of one tile in the dataset, which reads images in the JSON's own order.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     dota, tiles = Path(tmp) / "dota", Path(tmp) / "tiles"
+        ...     line = _axis_aligned_line(2.0, 2.0, 6.0, 4.0, "plane", 0)
+        ...     _ = _write_split(dota, "val", {"P0001": [line]})
+        ...     _ = build.convert_split(dota / "val", tiles, "val", patch=PATCH, overlap=OVERLAP)
+        ...     name = _payload(tiles)["images"][0]["file_name"]
+        ...     _dataset_index(tiles, str(name))
+        0
+    """
     names = [str(record["file_name"]) for record in _payload(root, split)["images"]]
     return names.index(file_name)
 
@@ -190,7 +229,15 @@ def test_the_report_counts_what_was_written(tmp_path: Path) -> None:
 
 
 def _multi_image_split(root: Path) -> Path:
-    """Write a four-image split, enough that a pool's completion order can differ from source order."""
+    """Write a four-image split, enough that a pool's completion order can differ from source order.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     split_dir = _multi_image_split(Path(tmp))
+        ...     len(list((split_dir / "images").iterdir()))
+        4
+    """
     return _write_split(
         root / "dota",
         "val",

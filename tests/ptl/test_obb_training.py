@@ -124,7 +124,13 @@ class _LogRecorder:
 
 
 def _tiny_module(task: str = "obb", **overrides: float) -> DetectionLitModule:
-    """Build an n-scale module with a low channel cap for fast CPU tests."""
+    """Build an n-scale module with a low channel cap for fast CPU tests.
+
+    Examples:
+        >>> module = _tiny_module()
+        >>> module.task
+        'obb'
+    """
     gains: dict[str, float] = {
         "box_gain": _BOX_GAIN,
         "cls_gain": _CLS_GAIN,
@@ -142,6 +148,11 @@ def _oriented_targets(num_boxes: int, difficult: Tensor | None = None) -> Target
     Elongation and rotation are load-bearing, not incidental: an axis-aligned or square
     target sits at the stationary point of both angular terms, where a correctly wired
     angle stem legitimately receives zero gradient.
+
+    Examples:
+        >>> targets = _oriented_targets(2)
+        >>> targets.boxes.shape, targets.rboxes.shape
+        (torch.Size([2, 4]), torch.Size([2, 5]))
     """
     centre = torch.rand(num_boxes, 2) * 60.0 + 50.0
     long_edge = torch.rand(num_boxes) * 30.0 + 30.0
@@ -159,13 +170,28 @@ def _oriented_targets(num_boxes: int, difficult: Tensor | None = None) -> Target
 
 
 def _oriented_batch() -> tuple[Tensor, list[Targets]]:
-    """Build a two-image batch with ragged (2 and 1) instance counts."""
+    """Build a two-image batch with ragged (2 and 1) instance counts.
+
+    Examples:
+        >>> images, targets = _oriented_batch()
+        >>> images.shape, [t.boxes.shape[0] for t in targets]
+        (torch.Size([2, 3, 160, 160]), [2, 1])
+    """
     images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
     return images, [_oriented_targets(2), _oriented_targets(1)]
 
 
 def _has_gradient(module: nn.Module) -> bool:
-    """Return whether any parameter of ``module`` carries a non-zero gradient."""
+    """Return whether any parameter of ``module`` carries a non-zero gradient.
+
+    Examples:
+        >>> layer = nn.Linear(2, 1)
+        >>> _has_gradient(layer)
+        False
+        >>> layer(torch.ones(1, 2)).backward()
+        >>> _has_gradient(layer)
+        True
+    """
     return any(parameter.grad is not None and bool(parameter.grad.abs().sum() > 0) for parameter in module.parameters())
 
 
@@ -307,7 +333,13 @@ def test_detect_step_reproduces_the_pre_change_snapshot(single_threaded: None) -
 
 
 def _snapshot_targets(num_boxes: int) -> Targets:
-    """Rebuild the axis-aligned targets the pre-change snapshot was captured over."""
+    """Rebuild the axis-aligned targets the pre-change snapshot was captured over.
+
+    Examples:
+        >>> targets = _snapshot_targets(3)
+        >>> targets.boxes.shape, targets.labels.shape
+        (torch.Size([3, 4]), torch.Size([3]))
+    """
     top_left = torch.rand(num_boxes, 2) * 80.0
     size = torch.rand(num_boxes, 2) * 40.0 + 10.0
     return Targets(
@@ -317,7 +349,16 @@ def _snapshot_targets(num_boxes: int) -> Targets:
 
 
 def _gradient_norm(module: nn.Module) -> float:
-    """Return the float64 L2 norm over every parameter gradient of ``module``."""
+    """Return the float64 L2 norm over every parameter gradient of ``module``.
+
+    Examples:
+        >>> layer = nn.Linear(1, 1, bias=False)
+        >>> with torch.no_grad():
+        ...     _ = layer.weight.fill_(1.0)
+        >>> layer(torch.tensor([[3.0]])).backward()
+        >>> _gradient_norm(layer)
+        3.0
+    """
     squares = torch.stack(
         [parameter.grad.detach().flatten().double().pow(2).sum() for parameter in module.parameters()]
     )
@@ -382,7 +423,15 @@ def test_rotated_candidacy_reaches_the_assigner() -> None:
 
 
 def _dense_inputs(module: DetectionLitModule, images: Tensor, target: Targets) -> tuple[Tensor, ...]:
-    """Return the positional arguments ``DualBranchLoss`` takes for a one-image batch."""
+    """Return the positional arguments ``DualBranchLoss`` takes for a one-image batch.
+
+    Examples:
+        >>> module = _tiny_module()
+        >>> images = torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE)
+        >>> inputs = _dense_inputs(module, images, _oriented_targets(1))
+        >>> len(inputs)
+        9
+    """
     head_out = module(images)
     anchor_points, strides = module._anchor_grid(images.shape[-2], images.shape[-1], images.device)
     gt_boxes, gt_labels, gt_mask = pad_targets([target])
@@ -444,7 +493,12 @@ def test_oriented_terms_follow_the_assignment_not_the_positive_order() -> None:
 
 
 def _validated_module(batch: tuple[Tensor, list[Targets]]) -> tuple[DetectionLitModule, _LogRecorder]:
-    """Run one validation batch plus the epoch end on an ``obb`` module."""
+    """Run one validation batch plus the epoch end on an ``obb`` module.
+
+    Examples:
+        >>> callable(_validated_module)  # needs a live _LogRecorder-backed module
+        True
+    """
     module = _tiny_module().eval()
     module.log = _LogRecorder()  # type: ignore[method-assign]
     module.validation_step(batch, 0)

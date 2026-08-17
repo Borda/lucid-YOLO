@@ -39,12 +39,30 @@ def _seed_rng() -> None:
 
 
 def _grid(height: int, width: int, stride: int = 8) -> tuple[Tensor, Tensor]:
-    """Return ``(anchor_points, strides)`` for a single ``(height, width)`` level."""
+    """Return ``(anchor_points, strides)`` for a single ``(height, width)`` level.
+
+    Examples:
+        >>> points, strides = _grid(2, 2, stride=8)
+        >>> points
+        tensor([[ 4.,  4.],
+                [12.,  4.],
+                [ 4., 12.],
+                [12., 12.]])
+        >>> strides.tolist()
+        [8.0, 8.0, 8.0, 8.0]
+    """
     return make_anchor_points([(height, width)], [stride])
 
 
 def _pairwise_iou(box_a: Tensor, box_b: Tensor) -> float:
-    """Return the IoU of two ``xyxy`` boxes (test-side, never used by the module)."""
+    """Return the IoU of two ``xyxy`` boxes (test-side, never used by the module).
+
+    Examples:
+        >>> round(_pairwise_iou(torch.tensor([0.0, 0.0, 2.0, 2.0]), torch.tensor([1.0, 1.0, 3.0, 3.0])), 4)
+        0.1429
+        >>> _pairwise_iou(torch.tensor([0.0, 0.0, 2.0, 2.0]), torch.tensor([0.0, 0.0, 2.0, 2.0]))
+        1.0
+    """
     inter_x1 = torch.maximum(box_a[0], box_b[0])
     inter_y1 = torch.maximum(box_a[1], box_b[1])
     inter_x2 = torch.minimum(box_a[2], box_b[2])
@@ -193,6 +211,13 @@ def _ranking_scores() -> Tensor:
 
     Image 0 ranks ``[2, 5, 0, 4, 1, 3]`` and image 1 ``[3, 1, 5, 2, 0, 4]``; the
     two differ, so a per-image index base that leaked across the batch shows up.
+
+    Examples:
+        >>> scores = _ranking_scores()
+        >>> scores.shape
+        torch.Size([2, 6, 2])
+        >>> scores[0, :, 0].argsort(descending=True).tolist()  # image 0's anchor rank
+        [2, 5, 0, 4, 1, 3]
     """
     class_zero = torch.tensor([[1.0, -3.0, 5.0, -5.0, 0.0, 3.0], [-1.0, 4.0, 0.5, 6.0, -2.0, 2.0]])
     scores = torch.full((2, 6, 2), -20.0)

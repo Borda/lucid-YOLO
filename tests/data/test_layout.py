@@ -32,6 +32,14 @@ def _write_layout(root: Path, images: str, annotations: str) -> tuple[Path, Path
 
     Returns:
         The ``(images directory, annotation file)`` pair created.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     images_dir, ann_file = _write_layout(Path(tmp), "val2017", "annotations/instances_val2017.json")
+        ...     images_dir.is_dir(), ann_file.read_text()
+        (True, '{}')
     """
     images_dir = root / images
     annotation_file = root / annotations

@@ -43,12 +43,24 @@ _BAND_HIGH = 1.2
 
 
 def _singular_values(result: torch.Tensor) -> torch.Tensor:
-    """Return the singular values of ``result`` evaluated in float32."""
+    """Return the singular values of ``result`` evaluated in float32.
+
+    Examples:
+        >>> _singular_values(torch.eye(3)).tolist()
+        [1.0, 1.0, 1.0]
+    """
     return torch.linalg.svdvals(result.to(torch.float32))
 
 
 def _random_conditioned(rows: int, cols: int, dtype: torch.dtype) -> torch.Tensor:
-    """Build a random ``rows x cols`` matrix with singular values in [0.5, 2.0]."""
+    """Build a random ``rows x cols`` matrix with singular values in [0.5, 2.0].
+
+    Examples:
+        >>> _ = torch.manual_seed(0)
+        >>> matrix = _random_conditioned(4, 4, torch.float32)
+        >>> matrix.shape, matrix.dtype
+        (torch.Size([4, 4]), torch.float32)
+    """
     rank = min(rows, cols)
     left = torch.linalg.qr(torch.randn(rows, rank))[0]
     right = torch.linalg.qr(torch.randn(cols, rank))[0]

@@ -86,7 +86,13 @@ AXIS_ALIGNED_TOLERANCE = 1e-3
 
 
 def _load_script() -> ModuleType:
-    """Load ``scripts/draw_predictions.py`` as an importable module."""
+    """Load ``scripts/draw_predictions.py`` as an importable module.
+
+    Examples:
+        >>> module = _load_script()
+        >>> hasattr(module, "draw_detections")
+        True
+    """
     spec = importlib.util.spec_from_file_location("draw_predictions", SCRIPT_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -121,6 +127,13 @@ def _two_instances() -> SegmentedPrediction:
 
     The masks share no pixel, so "which overlay is this" is answerable from the artist
     alone; the scores straddle 0.5, so one threshold separates them.
+
+    Examples:
+        >>> prediction = _two_instances()
+        >>> prediction.detections.shape
+        torch.Size([2, 6])
+        >>> prediction.masks.shape
+        torch.Size([2, 48, 64])
     """
     masks = torch.zeros(2, IMAGE_HEIGHT, IMAGE_WIDTH, dtype=torch.bool)
     masks[0, 4:16, 4:20] = True
@@ -141,6 +154,10 @@ def _rotated_corners(rbox: tuple[float, float, float, float, float]) -> NDArray[
     :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons`: the local corner ring is
     rotated by ``theta`` about the origin and translated to the centre, measuring from
     ``+x`` towards ``+y`` on the y-down image grid, which is this project's convention.
+
+    Examples:
+        >>> _rotated_corners((0.0, 0.0, 4.0, 4.0, 0.0)).tolist()
+        [[-2.0, -2.0], [2.0, -2.0], [2.0, 2.0], [-2.0, 2.0]]
     """
     centre_x, centre_y, width, height, theta = rbox
     rotation = np.array([[math.cos(theta), -math.sin(theta)], [math.sin(theta), math.cos(theta)]])

@@ -42,7 +42,14 @@ def _seed() -> None:
 
 
 def _legacy_o2o_topk(scores: torch.Tensor, boxes: torch.Tensor, k: int) -> torch.Tensor:
-    """Reimplement the pre-WP-053a ``o2o_topk`` body verbatim, as the reference ranking."""
+    """Reimplement the pre-WP-053a ``o2o_topk`` body verbatim, as the reference ranking.
+
+    Examples:
+        >>> scores = torch.tensor([[[0.1, 0.9], [0.9, 0.1]]])
+        >>> boxes = torch.zeros(1, 2, 4)
+        >>> _legacy_o2o_topk(scores, boxes, k=1).shape
+        torch.Size([1, 1, 6])
+    """
     _, num_anchors, _ = scores.shape
     confidence = scores.sigmoid()
     max_conf, class_index = confidence.max(dim=-1)
@@ -55,7 +62,15 @@ def _legacy_o2o_topk(scores: torch.Tensor, boxes: torch.Tensor, k: int) -> torch
 
 
 def _saturated_prototypes(grid: int, region: slice) -> torch.Tensor:
-    """Return a ``(1, 1, grid, grid)`` prototype that is ``+10`` inside ``region`` and ``-10`` outside."""
+    """Return a ``(1, 1, grid, grid)`` prototype that is ``+10`` inside ``region`` and ``-10`` outside.
+
+    Examples:
+        >>> proto = _saturated_prototypes(4, slice(1, 3))
+        >>> proto.shape
+        torch.Size([1, 1, 4, 4])
+        >>> bool(proto[0, 0, 1:3, 1:3].eq(10.0).all()), float(proto[0, 0, 0, 0])
+        (True, -10.0)
+    """
     prototypes = torch.full((1, 1, grid, grid), -_SATURATED)
     prototypes[0, 0, region, region] = _SATURATED
     return prototypes

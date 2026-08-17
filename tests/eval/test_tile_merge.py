@@ -66,6 +66,10 @@ def _ring(rbox: list[float]) -> list[float]:
 
     Returns:
         The eight-value quadrilateral ring.
+
+    Examples:
+        >>> len(_ring([0.0, 0.0, 2.0, 2.0, 0.0]))
+        8
     """
     corners = rboxes_to_polygons(torch.tensor([rbox], dtype=torch.float32))[0]
     return [float(value) for value in corners.reshape(-1)]
@@ -82,6 +86,11 @@ def _annotation(image_id: int, rbox: list[float], *, label: int = 0, difficult: 
 
     Returns:
         The annotation record.
+
+    Examples:
+        >>> ann = _annotation(1, [0.0, 0.0, 2.0, 2.0, 0.0], label=2)
+        >>> ann["image_id"], ann["category_id"], ann["difficult"], ann["iscrowd"]
+        (1, 3, 0, 0)
     """
     return {
         "id": 0,
@@ -111,6 +120,15 @@ def _layout(
 
     Returns:
         Path of the written file.
+
+    Examples:
+        >>> import json, tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     out = _layout(Path(tmp), [TileWindow("a.png", (0, 0), (4, 4))], [])
+        ...     data = json.loads(out.read_text())
+        >>> data["images"][0]["file_name"], data["images"][0]["window"]
+        ('tile_0.png', [0, 0, 4, 4])
     """
     images: list[dict[str, object]] = []
     for index, window in enumerate(windows):
@@ -152,6 +170,10 @@ def _detections(rows: list[list[float]], pad: int = 1) -> Tensor:
 
     Returns:
         The ``(len(rows) + pad, 7)`` block.
+
+    Examples:
+        >>> _detections([[1.0, 2.0, 3.0, 4.0, 0.0, 0.9, 0.0]], pad=2).shape
+        torch.Size([3, 7])
     """
     return torch.tensor([*rows, *([[0.0] * 7] * pad)], dtype=torch.float32)
 
@@ -161,6 +183,10 @@ def _two_tile_windows() -> list[TileWindow]:
 
     Returns:
         Both tiles of ``source.png``, in window order.
+
+    Examples:
+        >>> [(w.source_image, w.origin, w.size) for w in _two_tile_windows()]
+        [('source.png', (0, 0), (6, 6)), ('source.png', (4, 0), (6, 6))]
     """
     return [
         TileWindow("source.png", (int(window[0]), int(window[1])), (_PATCH, _PATCH))
@@ -590,6 +616,10 @@ def _at(centres: Tensor, coordinate: float) -> Tensor:
 
     Returns:
         ``(N,)`` bool mask.
+
+    Examples:
+        >>> _at(torch.tensor([1.0, 2.0, 2.0]), 2.0).tolist()
+        [False, True, True]
     """
     return torch.isclose(centres, torch.full_like(centres, coordinate))
 
@@ -599,6 +629,10 @@ def _empty() -> dict[str, Tensor]:
 
     Returns:
         A prediction dict with no rows.
+
+    Examples:
+        >>> {key: tuple(value.shape) for key, value in _empty().items()}
+        {'rboxes': (0, 5), 'scores': (0,), 'labels': (0,)}
     """
     return {
         "rboxes": torch.zeros(0, 5),

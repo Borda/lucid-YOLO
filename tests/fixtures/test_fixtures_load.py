@@ -24,7 +24,17 @@ _OBB_CORNER_COORDS = 8  # exactly 4 (x, y) corner points for a rotated box
 
 
 def _sha256(path: Path) -> str:
-    """Return the hex SHA-256 digest of a file's bytes."""
+    """Return the hex SHA-256 digest of a file's bytes.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = Path(tmp) / "blob.bin"
+        ...     _ = path.write_bytes(b"hello")
+        ...     _sha256(path)
+        '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
+    """
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 

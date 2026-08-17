@@ -53,7 +53,13 @@ def _features(
     channels: tuple[int, int, int] = _CHANNELS,
     batch: int = 2,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Build stride-8/16/32 neck features for an ``input_size`` square image."""
+    """Build stride-8/16/32 neck features for an ``input_size`` square image.
+
+    Examples:
+        >>> features = _features(128)
+        >>> [f.shape for f in features]
+        [torch.Size([2, 16, 16, 16]), torch.Size([2, 32, 8, 8]), torch.Size([2, 64, 4, 4])]
+    """
     return tuple(
         torch.randn(batch, level_channels, input_size // stride, input_size // stride)
         for level_channels, stride in zip(channels, _STRIDES, strict=True)
@@ -61,7 +67,13 @@ def _features(
 
 
 def _prechange_state_dict_keys() -> tuple[str, ...]:
-    """Return the fixed WP-046 state-dict key sequence for the n-scale head."""
+    """Return the fixed WP-046 state-dict key sequence for the n-scale head.
+
+    Examples:
+        >>> keys = _prechange_state_dict_keys()
+        >>> len(keys), keys[0], keys[-1]
+        (312, 'o2o.box_stems.0.0.0.conv.conv.weight', 'o2m.cls_stems.2.2.bias')
+    """
     return tuple(
         f"{branch}.{stem}.{level}.{suffix}"
         for branch in ("o2o", "o2m")
@@ -75,7 +87,12 @@ def _prechange_branch_output(
     branch: torch.nn.Module,
     features: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run the exact WP-046 box/class prediction loop for one branch."""
+    """Run the exact WP-046 box/class prediction loop for one branch.
+
+    Examples:
+        >>> callable(_prechange_branch_output)  # needs a live head branch module
+        True
+    """
     box_stems = branch.box_stems
     cls_stems = branch.cls_stems
     cls_levels = []

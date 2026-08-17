@@ -72,12 +72,23 @@ def _seed_rng() -> None:
 
 
 def _feature_sizes(input_size: int) -> list[tuple[int, int]]:
-    """Return the per-level ``(H, W)`` cell counts for a square input."""
+    """Return the per-level ``(H, W)`` cell counts for a square input.
+
+    Examples:
+        >>> _feature_sizes(128)
+        [(16, 16), (8, 8), (4, 4)]
+    """
     return [(input_size // stride, input_size // stride) for stride in _STRIDES]
 
 
 def _make_features(input_size: int, batch: int = 2) -> tuple[torch.Tensor, ...]:
-    """Build random neck-style feature maps at strides 8/16/32 for the ``n`` widths."""
+    """Build random neck-style feature maps at strides 8/16/32 for the ``n`` widths.
+
+    Examples:
+        >>> features = _make_features(128)
+        >>> [f.shape for f in features]
+        [torch.Size([2, 64, 16, 16]), torch.Size([2, 128, 8, 8]), torch.Size([2, 256, 4, 4])]
+    """
     return tuple(
         torch.randn(batch, channels, height, width)
         for channels, (height, width) in zip(_N_SCALE_CHANNELS, _feature_sizes(input_size), strict=True)
@@ -85,12 +96,24 @@ def _make_features(input_size: int, batch: int = 2) -> tuple[torch.Tensor, ...]:
 
 
 def _anchor_grid(input_size: int) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return the shared anchor points and per-anchor strides for a square input."""
+    """Return the shared anchor points and per-anchor strides for a square input.
+
+    Examples:
+        >>> points, strides = _anchor_grid(128)
+        >>> points.shape, strides.shape
+        (torch.Size([336, 2]), torch.Size([336]))
+    """
     return make_anchor_points(_feature_sizes(input_size), _STRIDES)
 
 
 def _oriented_head() -> DualDetectionHead:
-    """Return an evaluated head with the angle branch enabled."""
+    """Return an evaluated head with the angle branch enabled.
+
+    Examples:
+        >>> head = _oriented_head()
+        >>> head.training
+        False
+    """
     return DualDetectionHead(_N_SCALE_CHANNELS, num_classes=_NUM_CLASSES, predict_angle=True).eval()
 
 

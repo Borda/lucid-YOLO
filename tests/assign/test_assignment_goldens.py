@@ -24,7 +24,13 @@ ASSIGNMENT_GOLDEN = REPO_ROOT / "goldens" / "assignment_cases.json"
 
 
 def _load_harness() -> ModuleType:
-    """Load ``scripts/check_goldens.py`` as an importable module."""
+    """Load ``scripts/check_goldens.py`` as an importable module.
+
+    Examples:
+        >>> module = _load_harness()
+        >>> callable(module.check_golden)
+        True
+    """
     spec = importlib.util.spec_from_file_location("check_goldens", HARNESS_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

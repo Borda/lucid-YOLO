@@ -28,14 +28,34 @@ def reset_random_seeds() -> Iterator[None]:
 
 
 def _param_with_grad(*shape: int) -> torch.nn.Parameter:
-    """Return a parameter of ``shape`` with a random gradient already attached."""
+    """Return a parameter of ``shape`` with a random gradient already attached.
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> param = _param_with_grad(2, 3)
+        >>> param.shape, param.grad.shape
+        (torch.Size([2, 3]), torch.Size([2, 3]))
+        >>> isinstance(param, torch.nn.Parameter)
+        True
+    """
     param = torch.nn.Parameter(torch.randn(*shape))
     param.grad = torch.randn(*shape)
     return param
 
 
 def _expected_muon_update(nesterov_grad: torch.Tensor, ns_steps: int) -> torch.Tensor:
-    """Recompute the Muon branch by hand: scaled orthogonalization of the 2D view."""
+    """Recompute the Muon branch by hand: scaled orthogonalization of the 2D view.
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> update = _expected_muon_update(torch.randn(4, 4), ns_steps=5)
+        >>> update.shape
+        torch.Size([4, 4])
+        >>> bool(torch.isfinite(update).all())
+        True
+    """
     matrix = nesterov_grad.reshape(nesterov_grad.shape[0], -1)
     rows, cols = matrix.shape
     orthogonal = orthogonalize(matrix, steps=ns_steps)

@@ -52,13 +52,23 @@ def reset_random_seeds() -> Iterator[None]:
 
 
 def _dataset(fixture_dir: Path, transforms: object = None) -> CocoDetectionDataset:
-    """Build a dataset over the fixture's single ``train`` split."""
+    """Build a dataset over the fixture's single ``train`` split.
+
+    Examples:
+        >>> callable(_dataset)  # needs a live detseg_fixture_dir fixture
+        True
+    """
     split = fixture_dir / "train"
     return CocoDetectionDataset(split, split / "_annotations.coco.json", transforms=transforms)  # type: ignore[arg-type]
 
 
 def _first_nonempty(dataset: CocoDetectionDataset) -> tuple[torch.Tensor, Targets]:
-    """Return the first sample carrying at least one box."""
+    """Return the first sample carrying at least one box.
+
+    Examples:
+        >>> callable(_first_nonempty)  # needs a dataset built from a live fixture
+        True
+    """
     for index in range(len(dataset)):
         image, targets = dataset[index]
         if targets.boxes.shape[0] > 0:
@@ -178,7 +188,13 @@ def test_scale_policy_rejects_unknown_variant() -> None:
 
 
 def _ragged_targets() -> list[Targets]:
-    """Build a mixed batch: an image with boxes+polygons+rbox, an empty one, a box-only image."""
+    """Build a mixed batch: an image with boxes+polygons+rbox, an empty one, a box-only image.
+
+    Examples:
+        >>> targets = _ragged_targets()
+        >>> [t.boxes.shape[0] for t in targets]
+        [2, 0, 3]
+    """
     with_polys = Targets(
         boxes=torch.tensor([[0.0, 0.0, 4.0, 4.0], [1.0, 1.0, 2.0, 2.0]]),
         labels=torch.tensor([3, 7]),
@@ -194,7 +210,12 @@ def _ragged_targets() -> list[Targets]:
 
 
 def _assert_targets_identical(actual: list[Targets], expected: list[Targets]) -> None:
-    """Assert two target lists match tensor-for-tensor (dtype, shape and value)."""
+    """Assert two target lists match tensor-for-tensor (dtype, shape and value).
+
+    Examples:
+        >>> targets = _ragged_targets()
+        >>> _assert_targets_identical(targets, targets)  # no output means the lists matched
+    """
     assert len(actual) == len(expected)
     for got, want in zip(actual, expected, strict=True):
         for field in ("boxes", "labels", "rboxes"):
@@ -285,7 +306,12 @@ def _datamodule(
     val_num_workers: int | None = None,
     persistent_workers: bool = False,
 ) -> DetectionDataModule:
-    """Build a datamodule pointing both splits at the fixture's single split."""
+    """Build a datamodule pointing both splits at the fixture's single split.
+
+    Examples:
+        >>> callable(_datamodule)  # needs a live detseg_fixture_dir fixture
+        True
+    """
     split = fixture_dir / "train"
     annotation = split / "_annotations.coco.json"
     return DetectionDataModule(
@@ -418,7 +444,12 @@ class _StubWorkerInfo:
 
 
 def _draw_after_init(monkeypatch: pytest.MonkeyPatch, pipeline: object, seed: int) -> float:
-    """Seed ``pipeline`` through ``_init_worker`` as torch would, and return its next draw."""
+    """Seed ``pipeline`` through ``_init_worker`` as torch would, and return its next draw.
+
+    Examples:
+        >>> callable(_draw_after_init)  # needs a live pipeline built by a datamodule
+        True
+    """
     monkeypatch.setattr(dm, "get_worker_info", lambda: _StubWorkerInfo(pipeline, seed))
     dm._init_worker(0)
     return float(torch.rand((), generator=pipeline._generator))
@@ -601,7 +632,16 @@ def test_dataloader_pin_memory_explicit_override(detseg_fixture_dir: Path) -> No
 
 
 def _write_fake_split(images_dir: Path, annotation_file: Path, count: int) -> None:
-    """Create ``count`` empty image files and a matching annotation JSON."""
+    """Create ``count`` empty image files and a matching annotation JSON.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     images, ann = Path(tmp) / "images", Path(tmp) / "ann.json"
+        ...     _write_fake_split(images, ann, 3)
+        ...     len(list(images.iterdir())), len(json.loads(ann.read_text())["images"])
+        (3, 3)
+    """
     images_dir.mkdir(parents=True, exist_ok=True)
     annotation_file.parent.mkdir(parents=True, exist_ok=True)
     for index in range(count):
@@ -610,7 +650,16 @@ def _write_fake_split(images_dir: Path, annotation_file: Path, count: int) -> No
 
 
 def _write_fake_coco_root(root: Path, train: int, val: int) -> None:
-    """Materialise a minimal fake COCO 2017 layout under ``root``."""
+    """Materialise a minimal fake COCO 2017 layout under ``root``.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     _write_fake_coco_root(root, train=2, val=1)
+        ...     sorted(p.name for p in root.iterdir())
+        ['annotations', 'train2017', 'val2017']
+    """
     annotations = root / "annotations"
     _write_fake_split(root / "train2017", annotations / "instances_train2017.json", train)
     _write_fake_split(root / "val2017", annotations / "instances_val2017.json", val)

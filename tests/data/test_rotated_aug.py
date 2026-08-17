@@ -100,35 +100,71 @@ def reset_random_seeds() -> Iterator[None]:
 
 
 def _generator(seed: int = 1234) -> torch.Generator:
-    """Return a CPU generator seeded to ``seed`` for reproducible sampling."""
+    """Return a CPU generator seeded to ``seed`` for reproducible sampling.
+
+    Examples:
+        >>> _generator(7).initial_seed()
+        7
+    """
     return torch.Generator().manual_seed(seed)
 
 
 def _rboxes(*thetas: float, cx: float = 64.0, cy: float = 60.0, w: float = 20.0, h: float = 8.0) -> Tensor:
-    """Build one ``(M, 5)`` rotated box per angle, all at the same centre and extents."""
+    """Build one ``(M, 5)`` rotated box per angle, all at the same centre and extents.
+
+    Examples:
+        >>> _rboxes(0.0, 0.5).shape
+        torch.Size([2, 5])
+        >>> _rboxes(0.0)[0].tolist()
+        [64.0, 60.0, 20.0, 8.0, 0.0]
+    """
     return torch.tensor([[cx, cy, w, h, theta] for theta in thetas])
 
 
 def _paired(rboxes: Tensor) -> Targets:
-    """Wrap rotated boxes as WP-056 targets: one label each, boxes the rotated envelopes."""
+    """Wrap rotated boxes as WP-056 targets: one label each, boxes the rotated envelopes.
+
+    Examples:
+        >>> targets = _paired(_rboxes(0.0, 0.5))
+        >>> targets.boxes.shape
+        torch.Size([2, 4])
+        >>> targets.labels.tolist()
+        [0, 1]
+    """
     corners = rboxes_to_polygons(rboxes)
     boxes = torch.cat([corners.amin(dim=1), corners.amax(dim=1)], dim=1)
     return Targets(boxes=boxes, labels=torch.arange(rboxes.shape[0], dtype=torch.int64), rboxes=rboxes)
 
 
 def _image(side: int = _CANVAS) -> Tensor:
-    """Return a deterministic CHW image of the given square side."""
+    """Return a deterministic CHW image of the given square side.
+
+    Examples:
+        >>> _image(4).shape
+        torch.Size([3, 4, 4])
+    """
     return torch.rand(3, side, side)
 
 
 def _similarity(angle: float, scale: float, tx: float, ty: float) -> Tensor:
-    """Return the ``3x3`` float64 rotation-scale-translation matrix (a similarity)."""
+    """Return the ``3x3`` float64 rotation-scale-translation matrix (a similarity).
+
+    Examples:
+        >>> _similarity(0.0, 1.0, 2.0, 3.0).tolist()
+        [[1.0, -0.0, 2.0], [0.0, 1.0, 3.0], [0.0, 0.0, 1.0]]
+    """
     cos, sin = scale * math.cos(angle), scale * math.sin(angle)
     return torch.tensor([[cos, -sin, tx], [sin, cos, ty], [0.0, 0.0, 1.0]], dtype=torch.float64)
 
 
 def _ring_distance(first: Tensor, second: Tensor) -> Tensor:
-    """Symmetric nearest-corner distance between two ``(M, 4, 2)`` corner batches."""
+    """Symmetric nearest-corner distance between two ``(M, 4, 2)`` corner batches.
+
+    Examples:
+        >>> corners = torch.zeros(1, 4, 2)
+        >>> float(_ring_distance(corners, corners))
+        0.0
+    """
     pairwise = torch.cdist(first, second)
     forward = pairwise.min(dim=2).values.amax(dim=1)
     backward = pairwise.min(dim=1).values.amax(dim=1)
@@ -136,25 +172,49 @@ def _ring_distance(first: Tensor, second: Tensor) -> Tensor:
 
 
 def _box_distance(first: Tensor, second: Tensor) -> Tensor:
-    """Per-instance corner distance between two ``(M, 5)`` rotated-box batches."""
+    """Per-instance corner distance between two ``(M, 5)`` rotated-box batches.
+
+    Examples:
+        >>> rboxes = _rboxes(0.3)
+        >>> float(_box_distance(rboxes, rboxes))
+        0.0
+    """
     return _ring_distance(rboxes_to_polygons(first), rboxes_to_polygons(second))
 
 
 def _envelopes(rboxes: Tensor) -> Tensor:
-    """Return the ``(M, 4)`` axis-aligned envelopes of a rotated-box batch."""
+    """Return the ``(M, 4)`` axis-aligned envelopes of a rotated-box batch.
+
+    Examples:
+        >>> _envelopes(_rboxes(0.0)).tolist()
+        [[54.0, 56.0, 74.0, 64.0]]
+    """
     corners = rboxes_to_polygons(rboxes)
     return torch.cat([corners.amin(dim=1), corners.amax(dim=1)], dim=1)
 
 
 def _assert_canonical(rboxes: Tensor) -> None:
-    """Assert every row satisfies the long-edge invariants ``w >= h`` and the angle range."""
+    """Assert every row satisfies the long-edge invariants ``w >= h`` and the angle range.
+
+    Examples:
+        >>> _assert_canonical(canonicalize(_rboxes(0.0)))
+        >>> try:
+        ...     _assert_canonical(_rboxes(-1.5))  # below _THETA_LOW, not canonical
+        ... except AssertionError:
+        ...     print("not canonical")
+        not canonical
+    """
     assert bool((rboxes[:, 2] >= rboxes[:, 3]).all())
     assert bool((rboxes[:, 4] >= _THETA_LOW).all())
     assert bool((rboxes[:, 4] < _THETA_HIGH).all())
 
 
 def _assert_one_instance_axis(targets: Targets) -> None:
-    """Assert boxes, labels and rotated boxes still share one instance axis (WP-056)."""
+    """Assert boxes, labels and rotated boxes still share one instance axis (WP-056).
+
+    Examples:
+        >>> _assert_one_instance_axis(_paired(_rboxes(0.0, 0.5)))
+    """
     assert targets.labels.shape[0] == targets.boxes.shape[0]
     assert targets.rboxes.shape[0] == targets.boxes.shape[0]
 
@@ -457,6 +517,11 @@ def _parallelogram_fit_residual(warped: Tensor) -> Tensor:
     The warped quad has half-vectors ``p`` (first edge) and ``q`` (last edge) about its
     centre; the fit keeps ``p`` and replaces ``q`` by ``|q|`` along ``p``'s perpendicular,
     displacing every corner by ``2 |q| sin(s / 2)`` for the misalignment ``s``.
+
+    Examples:
+        >>> corners = rboxes_to_polygons(_rboxes(0.0)).double()  # an unsheared rectangle
+        >>> _parallelogram_fit_residual(corners).tolist()
+        [0.0]
     """
     half_first = (warped[:, 1] - warped[:, 0]) / 2.0
     half_second = (warped[:, 3] - warped[:, 0]) / 2.0

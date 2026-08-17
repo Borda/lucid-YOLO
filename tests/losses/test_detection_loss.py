@@ -35,7 +35,18 @@ def _make_assign(
     target_boxes: Tensor,
     align_weights: Tensor,
 ) -> AssignResult:
-    """Assemble an AssignResult, deriving gt_index from the foreground mask."""
+    """Assemble an AssignResult, deriving gt_index from the foreground mask.
+
+    Examples:
+        >>> assign = _make_assign(
+        ...     fg_mask=torch.tensor([[True, False]]),
+        ...     target_labels=torch.tensor([[0, -1]]),
+        ...     target_boxes=torch.tensor([[[0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 0.0, 0.0]]]),
+        ...     align_weights=torch.tensor([[1.0, 0.0]]),
+        ... )
+        >>> assign.gt_index
+        tensor([[ 0, -1]])
+    """
     gt_index = torch.where(fg_mask, torch.zeros_like(target_labels), torch.full_like(target_labels, -1))
     return AssignResult(
         fg_mask=fg_mask,

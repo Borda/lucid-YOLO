@@ -66,7 +66,15 @@ class _LogRecorder:
 
 
 def _tiny_module(task: str = "segment") -> DetectionLitModule:
-    """Build an n-scale module with a low channel cap for fast CPU tests."""
+    """Build an n-scale module with a low channel cap for fast CPU tests.
+
+    Examples:
+        >>> module = _tiny_module()
+        >>> module.task
+        'segment'
+        >>> _tiny_module(task="detect").task
+        'detect'
+    """
     return DetectionLitModule(
         depth=0.34,
         width=0.25,
@@ -81,13 +89,29 @@ def _tiny_module(task: str = "segment") -> DetectionLitModule:
 
 
 def _rectangle_ring(box: Tensor) -> Tensor:
-    """Return the four-point polygon ring tracing an ``xyxy`` box."""
+    """Return the four-point polygon ring tracing an ``xyxy`` box.
+
+    Examples:
+        >>> _rectangle_ring(torch.tensor([0.0, 0.0, 4.0, 2.0]))
+        tensor([[0., 0.],
+                [4., 0.],
+                [4., 2.],
+                [0., 2.]])
+    """
     x1, y1, x2, y2 = box.tolist()
     return torch.tensor([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=torch.float32)
 
 
 def _synthetic_targets(num_boxes: int) -> Targets:
-    """Build ``num_boxes`` valid ``xyxy`` targets, each with its own polygon ring."""
+    """Build ``num_boxes`` valid ``xyxy`` targets, each with its own polygon ring.
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> targets = _synthetic_targets(2)
+        >>> targets.boxes.shape, len(targets.polygons)
+        (torch.Size([2, 4]), 2)
+    """
     top_left = torch.rand(num_boxes, 2) * 80.0
     size = torch.rand(num_boxes, 2) * 40.0 + 10.0
     boxes = torch.cat([top_left, top_left + size], dim=1)
@@ -96,18 +120,40 @@ def _synthetic_targets(num_boxes: int) -> Targets:
 
 
 def _synthetic_batch() -> tuple[Tensor, list[Targets]]:
-    """Build a two-image batch with ragged (2 and 1) instance counts."""
+    """Build a two-image batch with ragged (2 and 1) instance counts.
+
+    Examples:
+        >>> images, targets = _synthetic_batch()
+        >>> images.shape, [t.boxes.shape[0] for t in targets]
+        (torch.Size([2, 3, 160, 160]), [2, 1])
+    """
     images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
     return images, [_synthetic_targets(2), _synthetic_targets(1)]
 
 
 def _has_gradient(module: nn.Module) -> bool:
-    """Return whether any parameter of ``module`` carries a non-zero gradient."""
+    """Return whether any parameter of ``module`` carries a non-zero gradient.
+
+    Examples:
+        >>> layer = nn.Linear(2, 1)
+        >>> _has_gradient(layer)
+        False
+        >>> layer(torch.ones(1, 2)).backward()
+        >>> _has_gradient(layer)
+        True
+    """
     return any(parameter.grad is not None and bool(parameter.grad.abs().sum() > 0) for parameter in module.parameters())
 
 
 def _reference_detection_loss(module: DetectionLitModule, batch: tuple[Tensor, list[Targets]]) -> Tensor:
-    """Score the dual detection loss over ``batch`` through the public API alone."""
+    """Score the dual detection loss over ``batch`` through the public API alone.
+
+    Examples:
+        >>> module = _tiny_module("detect")
+        >>> loss = _reference_detection_loss(module, _synthetic_batch())
+        >>> loss.shape, bool(torch.isfinite(loss))
+        (torch.Size([]), True)
+    """
     images, targets = batch
     head_out = module(images)
     feature_sizes = [(_IMG_SIZE // stride, _IMG_SIZE // stride) for stride in _STRIDES]
@@ -258,6 +304,10 @@ def _looped_branch_mask_loss(
     Kept verbatim as an oracle rather than deleted with the code: it is the form
     whose result the Det/Seg goldens were frozen against, and it is the only thing
     that can show the padded batched gather changed the *speed* and nothing else.
+
+    Examples:
+        >>> callable(_looped_branch_mask_loss)  # needs a live AssignResult from a real step
+        True
     """
     mask_logits: list[Tensor] = []
     mask_targets: list[Tensor] = []
@@ -341,7 +391,14 @@ def test_detect_total_is_exactly_the_dual_detection_loss() -> None:
 
 
 def _collated_masks(images: Tensor, targets: list[Targets]) -> list[Tensor]:
-    """Rasterise a batch's masks the way a segmentation loader's workers do."""
+    """Rasterise a batch's masks the way a segmentation loader's workers do.
+
+    Examples:
+        >>> images, targets = _synthetic_batch()
+        >>> masks = _collated_masks(images, targets)
+        >>> len(masks), masks[0].shape[0]
+        (2, 2)
+    """
     _, packed = collate_detection(list(zip(images, targets, strict=True)), mask_targets=True)
     masks = unpack_masks(packed)
     assert masks is not None  # the collate was asked to rasterise
@@ -415,7 +472,12 @@ def test_masks_rasterised_for_another_grid_are_rejected() -> None:
 
 
 def _validated_module(batch: tuple[Tensor, list[Targets]] | tuple[Tensor, list[Targets], list[Tensor]]) -> _LogRecorder:
-    """Run one validation batch plus the epoch end, and return the log recorder."""
+    """Run one validation batch plus the epoch end, and return the log recorder.
+
+    Examples:
+        >>> callable(_validated_module)  # needs a live _LogRecorder-backed module
+        True
+    """
     module = _tiny_module("segment" if len(batch) == 3 else "detect").eval()
     recorder = _LogRecorder()
     module.log = recorder  # type: ignore[method-assign]
@@ -487,6 +549,11 @@ def _toy_segment_output() -> SegmentOutput:
     therefore a single lit row, and *which* row identifies the anchor whose
     coefficients were used — the one thing a real model's near-uniform masks cannot
     show.
+
+    Examples:
+        >>> output = _toy_segment_output()
+        >>> output.prototypes.shape, output.detect.o2o_coeff.shape
+        (torch.Size([1, 4, 8, 8]), torch.Size([1, 8, 4]))
     """
     prototypes = torch.full((1, _TOY_COEFFS, _TOY_GRID, _TOY_GRID), -_TOY_LOGIT)
     for k in range(_TOY_COEFFS):

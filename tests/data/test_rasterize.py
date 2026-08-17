@@ -31,7 +31,12 @@ _TRIANGLE_SIDE = 12
 
 
 def _square_ring(x_min: float, y_min: float, x_max: float, y_max: float) -> torch.Tensor:
-    """Build the four-point ring of an axis-aligned rectangle, clockwise from top-left."""
+    """Build the four-point ring of an axis-aligned rectangle, clockwise from top-left.
+
+    Examples:
+        >>> _square_ring(2.0, 2.0, 6.0, 6.0).tolist()
+        [[2.0, 2.0], [6.0, 2.0], [6.0, 6.0], [2.0, 6.0]]
+    """
     return torch.tensor([[x_min, y_min], [x_max, y_min], [x_max, y_max], [x_min, y_max]])
 
 
@@ -78,6 +83,11 @@ def _looped_rasterize_polygon(ring: torch.Tensor, height: int, width: int) -> to
     Kept as an oracle rather than deleted: it is the form every segmentation
     target and every copy-paste mask was produced by until the vectorisation, so
     it is what "the output did not change" has to be measured against.
+
+    Examples:
+        >>> mask = _looped_rasterize_polygon(_square_ring(2.0, 2.0, 6.0, 6.0), 8, 8)
+        >>> mask.shape, int(mask.sum())
+        (torch.Size([8, 8]), 16)
     """
     ys = torch.arange(height, dtype=torch.float32).view(height, 1)
     xs = torch.arange(width, dtype=torch.float32).view(1, width)
@@ -92,7 +102,12 @@ def _looped_rasterize_polygon(ring: torch.Tensor, height: int, width: int) -> to
 
 
 def _regular_ring(vertices: int, radius: float = 5.1) -> torch.Tensor:
-    """Build a ``(vertices, 2)`` ring on an irrational-radius circle, off the pixel lattice."""
+    """Build a ``(vertices, 2)`` ring on an irrational-radius circle, off the pixel lattice.
+
+    Examples:
+        >>> _regular_ring(4).shape
+        torch.Size([4, 2])
+    """
     angles = torch.arange(vertices, dtype=torch.float32) * (2 * math.pi / vertices)
     return torch.stack([7.3 + radius * torch.cos(angles), 6.9 + (radius - 0.4) * torch.sin(angles)], dim=-1)
 

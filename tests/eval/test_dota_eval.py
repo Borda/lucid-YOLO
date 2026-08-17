@@ -93,6 +93,11 @@ def oracle_iou(box_a: Tensor, box_b: Tensor) -> float:
     Consumes the corners :func:`~lucid_yolo.data.rotated_geom.rboxes_to_polygons` emits so
     the comparison isolates the clipping arithmetic, and evaluates them in float64 so the
     oracle is not limited by the precision it is auditing.
+
+    Examples:
+        >>> box = torch.tensor([0.0, 0.0, 4.0, 2.0, 0.0])
+        >>> round(oracle_iou(box, box), 6)
+        1.0
     """
     polygon_a = Polygon(rboxes_to_polygons(box_a[None].double())[0].tolist())
     polygon_b = Polygon(rboxes_to_polygons(box_b[None].double())[0].tolist())
@@ -101,7 +106,15 @@ def oracle_iou(box_a: Tensor, box_b: Tensor) -> float:
 
 
 def _rbox(values: list[float]) -> Tensor:
-    """Return a single ``(1, 5)`` float32 rotated box from its five parameters."""
+    """Return a single ``(1, 5)`` float32 rotated box from its five parameters.
+
+    Examples:
+        >>> box = _rbox([0.0, 0.0, 4.0, 2.0, 0.3])
+        >>> box.shape
+        torch.Size([1, 5])
+        >>> box.dtype
+        torch.float32
+    """
     return torch.tensor([values], dtype=torch.float32)
 
 
@@ -118,6 +131,13 @@ def _sweep_pairs(count: int) -> tuple[Tensor, Tensor]:
     only way to reach the **near-coincident** regime. That regime is the one worth
     reaching: its edges are near-parallel, so the crossing parameters are the
     worst-conditioned quantities the kernel computes, and its overlaps run to 1.
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> first, second = _sweep_pairs(4)
+        >>> first.shape, second.shape
+        (torch.Size([4, 5]), torch.Size([4, 5]))
     """
     angle_index = torch.randint(0, _SWEEP_ANGLES.numel(), (count, 2))
     centres = (torch.rand(count, 2) - 0.5) * 40.0
@@ -139,6 +159,13 @@ def _perfect_case(count: int, match_index: int) -> tuple[list[dict[str, Tensor]]
 
     Scores descend with the row index, so ``match_index`` doubles as the rank of the only
     detection that can become a true positive.
+
+    Examples:
+        >>> preds, targets = _perfect_case(count=4, match_index=2)
+        >>> preds[0]["rboxes"][2, :2].tolist()
+        [100.0, 100.0]
+        >>> targets[0]["rboxes"].tolist()
+        [[100.0, 100.0, 20.0, 10.0, 0.20000000298023224]]
     """
     target = torch.tensor([[100.0, 100.0, 20.0, 10.0, 0.2]])
     boxes = torch.tensor([[1000.0 + row, 1000.0, 4.0, 2.0, 0.0] for row in range(count)])
@@ -863,6 +890,15 @@ def _axis_aligned_fixture() -> tuple[
     of nothing. Class :data:`_STARVED_CLASS` is skipped entirely in every other image, so
     at least one class saturates well below full recall rather than every curve running to
     1. Randomness comes from the autouse seed, so the fixture is fixed run to run.
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> rotated_preds, rotated_targets, box_preds, box_targets = _axis_aligned_fixture()
+        >>> len(rotated_preds), len(rotated_targets), len(box_preds), len(box_targets)
+        (24, 24, 24, 24)
+        >>> sorted(box_targets[0].keys())
+        ['boxes', 'labels']
     """
     rotated_preds, rotated_targets, box_preds, box_targets = [], [], [], []
     for image in range(_FIXTURE_IMAGES):
@@ -907,13 +943,28 @@ def _boundary_targets(found: int, positives: int) -> tuple[Tensor, Tensor]:
     ``positives`` well-separated ground truths of one class, of which the first ``found``
     are returned as exact copies, so every detection is a true positive and the attained
     recall is exactly ``found / positives``.
+
+    Examples:
+        >>> ground_truth, detections = _boundary_targets(found=2, positives=3)
+        >>> ground_truth.shape, detections.shape
+        (torch.Size([3, 5]), torch.Size([2, 5]))
+        >>> torch.equal(detections, ground_truth[:2])
+        True
     """
     ground_truth = torch.tensor([[100.0 * index, 100.0, 20.0, 10.0, 0.0] for index in range(positives)])
     return ground_truth, ground_truth[:found].clone()
 
 
 def _boundary_case(found: int, positives: int) -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
-    """Return rotated prediction and target dicts whose recall is exactly ``found/positives``."""
+    """Return rotated prediction and target dicts whose recall is exactly ``found/positives``.
+
+    Examples:
+        >>> preds, targets = _boundary_case(found=2, positives=3)
+        >>> preds[0]["rboxes"].shape, targets[0]["rboxes"].shape
+        (torch.Size([2, 5]), torch.Size([3, 5]))
+        >>> preds[0]["scores"].tolist()
+        [0.8999999761581421, 0.5]
+    """
     ground_truth, detections = _boundary_targets(found, positives)
     preds = [
         {
@@ -933,7 +984,13 @@ def _boundary_case(found: int, positives: int) -> tuple[list[dict[str, Tensor]],
 
 
 def _boundary_case_axis_aligned(found: int, positives: int) -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
-    """Return the same exact-recall fixture in the axis-aligned vocabulary."""
+    """Return the same exact-recall fixture in the axis-aligned vocabulary.
+
+    Examples:
+        >>> preds, targets = _boundary_case_axis_aligned(found=2, positives=3)
+        >>> preds[0]["boxes"].shape, targets[0]["boxes"].shape
+        (torch.Size([2, 4]), torch.Size([3, 4]))
+    """
     ground_truth, detections = _boundary_targets(found, positives)
     preds = [
         {
@@ -947,6 +1004,11 @@ def _boundary_case_axis_aligned(found: int, positives: int) -> tuple[list[dict[s
 
 
 def _to_xyxy(rboxes: Tensor) -> Tensor:
-    """Return the ``xyxy`` corners of zero-angle rotated boxes."""
+    """Return the ``xyxy`` corners of zero-angle rotated boxes.
+
+    Examples:
+        >>> _to_xyxy(torch.tensor([[10.0, 10.0, 4.0, 2.0, 0.0]])).tolist()
+        [[8.0, 9.0, 12.0, 11.0]]
+    """
     half = rboxes[:, 2:4] / 2
     return torch.cat([rboxes[:, :2] - half, rboxes[:, :2] + half], dim=1)

@@ -85,6 +85,15 @@ def _targets_by_image(doc: dict[str, object]) -> dict[int, dict[str, torch.Tenso
 
     Every image in the document gets an entry — images without annotations map to
     empty ``(0, 4)`` box / ``(0,)`` label tensors, so any yielded image id resolves.
+
+    Examples:
+        >>> ann = {"image_id": 1, "bbox": [0.0, 0.0, 2.0, 3.0], "category_id": 5}
+        >>> doc = {"images": [{"id": 1}], "annotations": [ann]}
+        >>> targets = _targets_by_image(doc)
+        >>> targets[1]["boxes"].tolist()
+        [[0.0, 0.0, 2.0, 3.0]]
+        >>> targets[1]["labels"].tolist()
+        [5]
     """
     boxes: dict[int, list[list[float]]] = {int(image["id"]): [] for image in doc["images"]}  # type: ignore[union-attr]
     labels: dict[int, list[int]] = {int(image["id"]): [] for image in doc["images"]}  # type: ignore[union-attr]
@@ -112,6 +121,10 @@ def _eval_batch(
     each to ``[0, 1]``, letterboxes it onto the canvas, and stacks them with their
     COCO image ids and original ``(height, width)`` sizes — the batch contract the
     :class:`~lucid_yolo.eval.coco_eval.DualPathEvaluator` consumes.
+
+    Examples:
+        >>> callable(_eval_batch)  # needs a real fixture_dir with COCO images/annotations on disk
+        True
     """
     split_dir = fixture_dir / _SPLIT
     doc = json.loads((split_dir / _ANNOTATION).read_text(encoding="utf-8"))
@@ -173,7 +186,17 @@ def test_detections_to_predictions_score_floor() -> None:
 
 
 def _single_image_gt() -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-    """A one-box prediction that exactly matches its one-box target (score 1.0)."""
+    """A one-box prediction that exactly matches its one-box target (score 1.0).
+
+    Examples:
+        >>> pred, target = _single_image_gt()
+        >>> pred["boxes"].tolist()
+        [[10.0, 12.0, 30.0, 42.0]]
+        >>> pred["scores"].tolist()
+        [1.0]
+        >>> target["labels"].tolist()
+        [5]
+    """
     box = torch.tensor([[10.0, 12.0, 30.0, 42.0]])  # xyxy
     pred = {"boxes": box, "scores": torch.tensor([1.0]), "labels": torch.tensor([5])}
     target = {"boxes": box, "labels": torch.tensor([5])}
@@ -251,22 +274,47 @@ def test_evaluate_bbox_empty_preds_is_zeroed() -> None:
 
 
 def _load_fixture_doc(fixture_dir: Path) -> dict[str, object]:
-    """Load the full detseg fixture COCO annotation document as a dict."""
+    """Load the full detseg fixture COCO annotation document as a dict.
+
+    Examples:
+        >>> callable(_load_fixture_doc)  # needs a real fixture_dir; reads a COCO json file from disk
+        True
+    """
     return json.loads((fixture_dir / _SPLIT / _ANNOTATION).read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 
 def _image_order(targets: dict[int, dict[str, torch.Tensor]]) -> list[int]:
-    """Deterministic image-id order shared by target and prediction lists."""
+    """Deterministic image-id order shared by target and prediction lists.
+
+    Examples:
+        >>> _image_order({3: {}, 1: {}, 2: {}})
+        [1, 2, 3]
+    """
     return sorted(targets)
 
 
 def _targets_list(targets: dict[int, dict[str, torch.Tensor]], order: list[int]) -> list[dict[str, torch.Tensor]]:
-    """Materialize the per-image target dicts in ``order``."""
+    """Materialize the per-image target dicts in ``order``.
+
+    Examples:
+        >>> targets = {1: {"boxes": torch.zeros(0, 4)}, 2: {"boxes": torch.ones(1, 4)}}
+        >>> _targets_list(targets, [2, 1])[0]["boxes"].shape
+        torch.Size([1, 4])
+    """
     return [targets[image_id] for image_id in order]
 
 
 def _perfect_preds(target_list: list[dict[str, torch.Tensor]]) -> list[dict[str, torch.Tensor]]:
-    """Score-1.0 predictions sitting exactly on each image's target boxes."""
+    """Score-1.0 predictions sitting exactly on each image's target boxes.
+
+    Examples:
+        >>> target_list = [{"boxes": torch.tensor([[0.0, 0.0, 2.0, 2.0]]), "labels": torch.tensor([1])}]
+        >>> preds = _perfect_preds(target_list)
+        >>> preds[0]["scores"].tolist()
+        [1.0]
+        >>> torch.equal(preds[0]["boxes"], target_list[0]["boxes"])
+        True
+    """
     return [
         {"boxes": target["boxes"], "scores": torch.ones(len(target["boxes"])), "labels": target["labels"]}
         for target in target_list
@@ -274,7 +322,13 @@ def _perfect_preds(target_list: list[dict[str, torch.Tensor]]) -> list[dict[str,
 
 
 def _jittered_preds(target_list: list[dict[str, torch.Tensor]], fraction: float) -> list[dict[str, torch.Tensor]]:
-    """Predictions with every box shifted by ``fraction`` of its own width/height."""
+    """Predictions with every box shifted by ``fraction`` of its own width/height.
+
+    Examples:
+        >>> target_list = [{"boxes": torch.tensor([[0.0, 0.0, 2.0, 2.0]]), "labels": torch.tensor([1])}]
+        >>> _jittered_preds(target_list, 0.5)[0]["boxes"].tolist()
+        [[1.0, 1.0, 3.0, 3.0]]
+    """
     preds: list[dict[str, torch.Tensor]] = []
     for target in target_list:
         boxes = target["boxes"].clone()
@@ -292,7 +346,13 @@ def _shuffled_preds(
     target_list: list[dict[str, torch.Tensor]],
     category_ids: list[int],
 ) -> list[dict[str, torch.Tensor]]:
-    """Correct boxes with every label cyclically shifted to the next (wrong) category id."""
+    """Correct boxes with every label cyclically shifted to the next (wrong) category id.
+
+    Examples:
+        >>> target_list = [{"boxes": torch.tensor([[0.0, 0.0, 2.0, 2.0]]), "labels": torch.tensor([5])}]
+        >>> _shuffled_preds(target_list, [5, 7])[0]["labels"].tolist()
+        [7]
+    """
     shift = {cid: category_ids[(index + 1) % len(category_ids)] for index, cid in enumerate(category_ids)}
     preds: list[dict[str, torch.Tensor]] = []
     for target in target_list:
@@ -308,6 +368,14 @@ def _ranked_preds(target_list: list[dict[str, torch.Tensor]]) -> list[dict[str, 
     The wrong candidate has zero IoU with the target yet outranks the correct one on
     score, so a ranking-aware metric must be dragged down by it even though the correct
     box is present.
+
+    Examples:
+        >>> target_list = [{"boxes": torch.tensor([[0.0, 0.0, 2.0, 2.0]]), "labels": torch.tensor([1])}]
+        >>> preds = _ranked_preds(target_list)
+        >>> preds[0]["boxes"].shape
+        torch.Size([2, 4])
+        >>> [round(score, 4) for score in preds[0]["scores"].tolist()]
+        [0.9, 0.95]
     """
     preds: list[dict[str, torch.Tensor]] = []
     for target in target_list:
@@ -342,6 +410,14 @@ def _oracle_preds(
     tensor (the true box, its true category as a contiguous label, score 1.0), with
     ``pad_rows`` all-zero rows appended to mimic a fixed-size decoder's padding; the batch
     is decoded back into per-image prediction dicts in ``order``.
+
+    Examples:
+        >>> doc = {"annotations": [{"image_id": 1, "bbox": [0.0, 0.0, 2.0, 3.0], "category_id": 5}]}
+        >>> preds = _oracle_preds(doc, [1], {5: 0}, {0: 5})
+        >>> preds[0]["boxes"].tolist()
+        [[0.0, 0.0, 2.0, 3.0]]
+        >>> preds[0]["labels"].tolist()
+        [5]
     """
     anns_by_image: dict[int, list[dict[str, object]]] = {image_id: [] for image_id in order}
     for ann in doc["annotations"]:  # type: ignore[union-attr]
@@ -452,6 +528,13 @@ def _boundary_case(found: int, positives: int) -> tuple[list[dict[str, Tensor]],
     returned as exact copies. Every detection is therefore a true positive at every IoU
     threshold, precision is 1 all the way along, and the interpolated curve is flat — so
     the average is purely a count of sampled grid points and can be derived by hand.
+
+    Examples:
+        >>> preds, targets = _boundary_case(2, 3)
+        >>> preds[0]["boxes"].shape
+        torch.Size([2, 4])
+        >>> targets[0]["boxes"].shape
+        torch.Size([3, 4])
     """
     centres = torch.tensor([[_BOUNDARY_PITCH * index, _BOUNDARY_PITCH] for index in range(positives)])
     half = torch.tensor([_BOUNDARY_HALF_WIDTH, _BOUNDARY_HALF_HEIGHT])

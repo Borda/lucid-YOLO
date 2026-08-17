@@ -35,7 +35,15 @@ _TARGET_KEYS = {"boxes", "labels", "iscrowd", "area"}
 
 
 def _payload() -> dict[str, object]:
-    """Return a two-image COCO payload where the higher id is listed first."""
+    """Return a two-image COCO payload where the higher id is listed first.
+
+    Examples:
+        >>> payload = _payload()
+        >>> [image["id"] for image in payload["images"]]
+        [2, 1]
+        >>> len(payload["annotations"])
+        1
+    """
     return {
         "categories": [{"id": 7}, {"id": 3}],
         "images": [

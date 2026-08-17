@@ -23,18 +23,33 @@ from lucid_yolo.data import (
 
 
 def _boxes(n: int) -> torch.Tensor:
-    """Return ``n`` distinct float32 xyxy boxes."""
+    """Return ``n`` distinct float32 xyxy boxes.
+
+    Examples:
+        >>> _boxes(2).tolist()
+        [[0.0, 0.0, 1.0, 1.0], [1.0, 1.0, 2.0, 2.0]]
+    """
     base = torch.arange(n, dtype=torch.float32).reshape(n, 1)
     return torch.cat([base, base, base + 1.0, base + 1.0], dim=1)
 
 
 def _labels(n: int) -> torch.Tensor:
-    """Return ``n`` int64 labels."""
+    """Return ``n`` int64 labels.
+
+    Examples:
+        >>> _labels(3).tolist()
+        [0, 1, 2]
+    """
     return torch.arange(n, dtype=torch.int64)
 
 
 def _rboxes(m: int) -> torch.Tensor:
-    """Return ``m`` float32 long-edge rotated boxes."""
+    """Return ``m`` float32 long-edge rotated boxes.
+
+    Examples:
+        >>> _rboxes(2).tolist()
+        [[0.0, 0.0, 2.0, 1.0, 0.0], [1.0, 1.0, 3.0, 2.0, 0.0]]
+    """
     base = torch.arange(m, dtype=torch.float32).reshape(m, 1)
     return torch.cat([base, base, base + 2.0, base + 1.0, base * 0.0], dim=1)
 

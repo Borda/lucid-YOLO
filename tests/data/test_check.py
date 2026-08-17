@@ -70,6 +70,13 @@ def _write_split(root: Path, split_dir: str, rows: dict[str, list[str]]) -> None
         root: The dataset root.
         split_dir: Directory holding the split's ``images``/``labels`` pair.
         rows: Label rows keyed by image stem; an empty list writes an empty label file.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     _write_split(Path(tmp), "train", {"img1": ["0 0.5 0.5 0.1 0.1"]})
+        ...     sorted((Path(tmp) / "train" / "images").iterdir())[0].name
+        'img1.jpg'
     """
     images_dir, labels_dir = root / split_dir / "images", root / split_dir / "labels"
     images_dir.mkdir(parents=True)
@@ -80,7 +87,15 @@ def _write_split(root: Path, split_dir: str, rows: dict[str, list[str]]) -> None
 
 
 def _write_data_yaml(root: Path, body: str) -> Path:
-    """Write ``body`` as the root's ``data.yaml`` and return the file path."""
+    """Write ``body`` as the root's ``data.yaml`` and return the file path.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = _write_data_yaml(Path(tmp), "train: train\\n")
+        ...     path.name, path.read_text()
+        ('data.yaml', 'train: train\\n')
+    """
     path = root / DATA_YAML_NAME
     path.write_text(body, encoding="utf-8")
     return path

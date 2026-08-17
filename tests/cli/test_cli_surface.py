@@ -42,14 +42,27 @@ EXPECTED_SCRIPTS = {
 
 
 def _declared_scripts() -> dict[str, str]:
-    """Read ``[project.scripts]`` from ``pyproject.toml``."""
+    """Read ``[project.scripts]`` from ``pyproject.toml``.
+
+    Examples:
+        >>> _declared_scripts() == EXPECTED_SCRIPTS
+        True
+    """
     payload = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     scripts: dict[str, str] = payload["project"]["scripts"]
     return scripts
 
 
 def _write_checkpoint(task: str, path: Path) -> Path:
-    """Save a tiny checkpoint of ``task`` that :func:`load_eval_module` can read."""
+    """Save a tiny checkpoint of ``task`` that :func:`load_eval_module` can read.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     out = _write_checkpoint("detect", Path(tmp) / "ckpt.pt")
+        ...     out.is_file()
+        True
+    """
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=2, task=task)
     torch.save(
         {

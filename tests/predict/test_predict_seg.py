@@ -143,7 +143,17 @@ class _PlantedSegmentationModule(DetectionLitModule):
 
 
 def _planted_prototypes(batch: int, height: int, width: int) -> Tensor:
-    """Build ``(B, K, H/4, W/4)`` prototypes holding one saturated rectangle each in 0 and 1."""
+    """Build ``(B, K, H/4, W/4)`` prototypes holding one saturated rectangle each in 0 and 1.
+
+    Examples:
+        >>> prototypes = _planted_prototypes(1, 64, 128)
+        >>> prototypes.shape
+        torch.Size([1, 32, 16, 32])
+        >>> bool((prototypes[0, 0, 6:12, 0:6] == PRESENT_LOGIT).all())
+        True
+        >>> float(prototypes[0, 0, 0, 0]) == ABSENT_LOGIT
+        True
+    """
     prototypes = torch.full((batch, DEFAULT_NUM_COEFFS, height // 4, width // 4), ABSENT_LOGIT)
     y_start, y_stop = _PROTO_CELLS_Y
     for channel, (x_start, x_stop) in enumerate(_PROTO_CELLS_X):
@@ -152,7 +162,14 @@ def _planted_prototypes(batch: int, height: int, width: int) -> Tensor:
 
 
 def _tight_extent(mask: Tensor) -> tuple[int, int, int, int]:
-    """Return a mask's occupied ``xyxy`` extent, half-open, in its own pixel indices."""
+    """Return a mask's occupied ``xyxy`` extent, half-open, in its own pixel indices.
+
+    Examples:
+        >>> mask = torch.zeros(8, 8, dtype=torch.bool)
+        >>> mask[2:5, 3:6] = True
+        >>> _tight_extent(mask)
+        (3, 2, 6, 5)
+    """
     rows = torch.nonzero(mask.any(dim=1)).flatten()
     cols = torch.nonzero(mask.any(dim=0)).flatten()
     return int(cols[0]), int(rows[0]), int(cols[-1]) + 1, int(rows[-1]) + 1

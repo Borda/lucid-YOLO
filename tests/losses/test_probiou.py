@@ -53,6 +53,11 @@ def literal_bhattacharyya(pred: Tensor, target: Tensor) -> Tensor:
 
     The oracle, not the implementation: it keeps both subtractions the module docstring
     removes, so it is accurate in float64 and visibly inaccurate in float32.
+
+    Examples:
+        >>> pred, target = _pair([10.0, 10.0, 8.0, 4.0, 0.3], [12.0, 9.0, 6.0, 5.0, 1.1])
+        >>> round(literal_bhattacharyya(pred, target).item(), 6)
+        0.322025
     """
     x1, y1, w1, h1, theta1 = pred.unbind(dim=-1)
     x2, y2, w2, h2, theta2 = target.unbind(dim=-1)
@@ -88,6 +93,11 @@ def integrated_bhattacharyya_coefficient(pred: list[float], target: list[float],
     Only the sample *placement* comes from that observation — the values summed are
     ``sqrt(p(x) q(x))`` computed pointwise, so the oracle remains independent of the
     closed form it checks.
+
+    Examples:
+        >>> box = [5.0, 5.0, 5.0, 5.0, 0.0]
+        >>> round(integrated_bhattacharyya_coefficient(box, box, steps=51), 4)  # a box against itself
+        1.0
     """
     mean1, cov1 = _gaussian(pred)
     mean2, cov2 = _gaussian(target)
@@ -107,7 +117,15 @@ def integrated_bhattacharyya_coefficient(pred: list[float], target: list[float],
 
 
 def _gaussian(rbox: list[float]) -> tuple[Tensor, Tensor]:
-    """Build the ``(mean, covariance)`` R17 assigns to one rotated box."""
+    """Build the ``(mean, covariance)`` R17 assigns to one rotated box.
+
+    Examples:
+        >>> mean, cov = _gaussian([0.0, 0.0, 4.0, 2.0, 0.0])  # axis-aligned, no rotation to mix axes
+        >>> mean.tolist()
+        [0.0, 0.0]
+        >>> [round(v, 4) for v in cov.diagonal().tolist()]
+        [1.3333, 0.3333]
+    """
     cx, cy, width, height, theta = rbox
     cos, sin = math.cos(theta), math.sin(theta)
     rotation = torch.tensor([[cos, -sin], [sin, cos]], dtype=torch.float64)
@@ -116,19 +134,39 @@ def _gaussian(rbox: list[float]) -> tuple[Tensor, Tensor]:
 
 
 def _density(points: Tensor, mean: Tensor, cov: Tensor) -> Tensor:
-    """Evaluate a 2-D Gaussian density on a grid of points."""
+    """Evaluate a 2-D Gaussian density on a grid of points.
+
+    Examples:
+        >>> mean, cov = _gaussian([0.0, 0.0, 4.0, 2.0, 0.0])
+        >>> round(_density(torch.zeros(1, 2, dtype=torch.float64), mean, cov).item(), 6)  # peak, at the mean
+        0.238732
+    """
     offset = points - mean
     quadratic = torch.einsum("...i,ij,...j->...", offset, torch.linalg.inv(cov), offset)
     return torch.exp(-0.5 * quadratic) / (2 * math.pi * torch.sqrt(torch.linalg.det(cov)))
 
 
 def _pair(pred: list[float], target: list[float], dtype: torch.dtype = torch.float64) -> tuple[Tensor, Tensor]:
-    """Wrap two box literals as single-row tensors."""
+    """Wrap two box literals as single-row tensors.
+
+    Examples:
+        >>> pred, target = _pair([1.0, 2.0, 3.0, 4.0, 0.0], [5.0, 6.0, 7.0, 8.0, 0.0])
+        >>> pred.shape, target.shape
+        (torch.Size([1, 5]), torch.Size([1, 5]))
+        >>> pred.dtype
+        torch.float64
+    """
     return torch.tensor([pred], dtype=dtype), torch.tensor([target], dtype=dtype)
 
 
 def _elongated_sweep(aspect: float, count: int = 1024, scale: float = 1024.0) -> tuple[Tensor, Tensor]:
-    """Random float64 box pairs at a fixed aspect ratio, offset in all five parameters."""
+    """Random float64 box pairs at a fixed aspect ratio, offset in all five parameters.
+
+    Examples:
+        >>> pred, target = _elongated_sweep(aspect=2.0, count=4, scale=100.0)
+        >>> pred.shape, target.shape
+        (torch.Size([4, 5]), torch.Size([4, 5]))
+    """
     pred = torch.stack(
         [
             torch.rand(count, dtype=torch.float64) * scale,

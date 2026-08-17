@@ -102,7 +102,12 @@ class _StubDataModule:
 
 
 def _datamodule(fixture_dir: Path) -> DetectionDataModule:
-    """Build a datamodule pointing both splits at the fixture's single split."""
+    """Build a datamodule pointing both splits at the fixture's single split.
+
+    Examples:
+        >>> callable(_datamodule)  # needs the live detseg_fixture_dir fixture on disk
+        True
+    """
     split = fixture_dir / "train"
     annotation = split / "_annotations.coco.json"
     return DetectionDataModule(
@@ -119,7 +124,12 @@ def _datamodule(fixture_dir: Path) -> DetectionDataModule:
 
 
 def _run_schedule(datamodule: DetectionDataModule, close_mosaic: int) -> list[float]:
-    """Run a ``_MAX_EPOCHS`` dry fit and return the per-epoch mosaic probabilities."""
+    """Run a ``_MAX_EPOCHS`` dry fit and return the per-epoch mosaic probabilities.
+
+    Examples:
+        >>> callable(_run_schedule)  # needs a live datamodule and a real Trainer.fit run
+        True
+    """
     probe = _MosaicProbe(datamodule)
     trainer = Trainer(
         max_epochs=_MAX_EPOCHS,

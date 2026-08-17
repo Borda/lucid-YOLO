@@ -36,22 +36,45 @@ def reset_random_seeds() -> Iterator[None]:
 
 
 def _generator(seed: int = 1234) -> torch.Generator:
-    """Return a CPU generator seeded to ``seed`` for reproducible sampling."""
+    """Return a CPU generator seeded to ``seed`` for reproducible sampling.
+
+    Examples:
+        >>> _generator(42).initial_seed()
+        42
+    """
     return torch.Generator().manual_seed(seed)
 
 
 def _image() -> torch.Tensor:
-    """Return a random CHW float image on a single tile."""
+    """Return a random CHW float image on a single tile.
+
+    Examples:
+        >>> _image().shape
+        torch.Size([3, 32, 32])
+    """
     return torch.rand(3, _TILE, _TILE)
 
 
 def _one_box_targets() -> Targets:
-    """Build a single small box well inside the tile (never clipped when centred)."""
+    """Build a single small box well inside the tile (never clipped when centred).
+
+    Examples:
+        >>> _one_box_targets().boxes.tolist()
+        [[8.0, 8.0, 16.0, 16.0]]
+    """
     return Targets(boxes=torch.tensor([[8.0, 8.0, 16.0, 16.0]]), labels=torch.tensor([0]))
 
 
 def _polygon_targets() -> Targets:
-    """Build one square polygon ring well inside the tile, with its matching box."""
+    """Build one square polygon ring well inside the tile, with its matching box.
+
+    Examples:
+        >>> targets = _polygon_targets()
+        >>> targets.boxes.shape
+        torch.Size([1, 4])
+        >>> len(targets.polygons)
+        1
+    """
     rings = [torch.tensor([[8.0, 8.0], [20.0, 8.0], [20.0, 24.0], [8.0, 24.0]])]
     boxes = boxes_from_polygons(rings)
     labels = torch.zeros(len(rings), dtype=torch.int64)
@@ -59,7 +82,15 @@ def _polygon_targets() -> Targets:
 
 
 def _items(targets_factory: Callable[[], Targets]) -> list[tuple[torch.Tensor, Targets]]:
-    """Return four ``(image, targets)`` pairs, each built from ``targets_factory``."""
+    """Return four ``(image, targets)`` pairs, each built from ``targets_factory``.
+
+    Examples:
+        >>> items = _items(_one_box_targets)
+        >>> len(items)
+        4
+        >>> items[0][0].shape
+        torch.Size([3, 32, 32])
+    """
     return [(_image(), targets_factory()) for _ in range(_MOSAIC_COUNT)]
 
 

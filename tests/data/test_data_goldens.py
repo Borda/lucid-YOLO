@@ -25,7 +25,13 @@ GOLDEN = REPO_ROOT / "goldens" / "data_checksums.json"
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
-    """Load a ``scripts/`` module by file path (``scripts`` is not a package)."""
+    """Load a ``scripts/`` module by file path (``scripts`` is not a package).
+
+    Examples:
+        >>> mod = _load_module("_doctest_check_goldens", REPO_ROOT / "scripts" / "check_goldens.py")
+        >>> callable(mod.check_golden)
+        True
+    """
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

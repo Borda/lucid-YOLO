@@ -67,7 +67,16 @@ def reset_random_seeds() -> Iterator[None]:
 
 
 def _write_image(path: Path) -> None:
-    """Write one fixture-sized PNG at ``path``, creating its directory."""
+    """Write one fixture-sized PNG at ``path``, creating its directory.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = Path(tmp) / "images" / "frame.png"
+        ...     _write_image(path)
+        ...     path.is_file()
+        True
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     write_png(torch.zeros(3, _HEIGHT, _WIDTH, dtype=torch.uint8), str(path))
 
@@ -81,6 +90,13 @@ def _write_labels(path: Path, rows: list[str]) -> Path:
 
     Returns:
         The path written.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = _write_labels(Path(tmp) / "labels" / "frame.txt", ["0 0.5 0.5 0.1 0.1"])
+        ...     path.read_text()
+        '0 0.5 0.5 0.1 0.1\\n'
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(f"{row}\n" for row in rows), encoding="utf-8")
@@ -97,6 +113,13 @@ def _write_data_yaml(root: Path, entry: str = "../train/images", names: tuple[st
 
     Returns:
         The path of the written file.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = _write_data_yaml(Path(tmp))
+        ...     "nc: " + str(len(_NAMES)) in path.read_text()
+        True
     """
     listed = "".join(f"- {name}\n" for name in names)
     text = f"names:\n{listed}nc: {len(names)}\nroboflow:\n  license: CC BY 4.0\ntrain: {entry}\n"
@@ -116,6 +139,13 @@ def _build_root(root: Path, rows: list[str], *, spelling: str = "per-split") -> 
 
     Returns:
         ``root``, now holding a ``data.yaml``, one image and its label file.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = _build_root(Path(tmp), ["0 0.5 0.5 0.1 0.1"])
+        ...     (root / "train" / "images" / "frame.png").is_file()
+        True
     """
     images, labels = (
         (root / "train" / "images", root / "train" / "labels")

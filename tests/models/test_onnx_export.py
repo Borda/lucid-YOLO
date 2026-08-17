@@ -166,6 +166,23 @@ def _discriminative(module: DetectionLitModule) -> DetectionLitModule:
 
     Returns:
         The same module, in eval mode.
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> spec = scale_spec(_VARIANT)
+        >>> module = DetectionLitModule(
+        ...     depth=spec.depth, width=spec.width, max_channels=spec.max_channels,
+        ...     num_classes=_NUM_CLASSES, task="detect",
+        ... )
+        >>> tuned = _discriminative(module)
+        >>> tuned.training
+        False
+        >>> with torch.no_grad():
+        ...     probe = torch.rand(1, 3, *_CANVAS, generator=torch.Generator().manual_seed(5))
+        ...     std = float(tuned(probe).o2o_cls.std())
+        >>> round(std, 1)
+        2.0
     """
     generator = torch.Generator().manual_seed(11)
     module.train()
@@ -194,6 +211,19 @@ def _checkpoint_module(task: str, tmp: Path) -> DetectionLitModule:
 
     Returns:
         The eval-mode module :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     tmp_path = Path(tmp)
+        ...     module = _checkpoint_module("detect", tmp_path)
+        ...     (tmp_path / "detect.ckpt").is_file()
+        True
+        >>> module.training
+        False
     """
     spec = scale_spec(_VARIANT)
     built = _discriminative(
@@ -235,6 +265,17 @@ def _deployed(module: DetectionLitModule, task: str) -> nn.Module:
 
     Returns:
         The eval-mode ``deploy()`` view, sharing the checkpoint's weights.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     module = _checkpoint_module("detect", Path(tmp))
+        >>> deployed = _deployed(module, "detect")
+        >>> deployed.training
+        False
     """
     model = _MODELS[task](_VARIANT, num_classes=_NUM_CLASSES)
     missing, _ = model.load_state_dict(module.state_dict(), strict=False)
@@ -252,6 +293,20 @@ def _eager_reference(module: DetectionLitModule, task: str, image: Tensor) -> li
 
     Returns:
         The decoded detection tuple, followed by instance masks for ``"segment"``.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     module = _checkpoint_module("detect", Path(tmp))
+        >>> image = torch.rand(1, 3, *_CANVAS, generator=torch.Generator().manual_seed(7))
+        >>> reference = _eager_reference(module, "detect", image)
+        >>> len(reference)
+        1
+        >>> reference[0].shape
+        torch.Size([1, 300, 6])
     """
     points, strides = anchor_grid(_CANVAS, torch.device("cpu"))
     with torch.no_grad():
@@ -285,6 +340,18 @@ def _op_types(model: onnx.ModelProto) -> set[str]:
 
     Returns:
         The set of op type names appearing anywhere in the model.
+
+    Examples:
+        >>> from onnx import helper, TensorProto
+        >>> relu = helper.make_node("Relu", ["x"], ["y"])
+        >>> sigmoid = helper.make_node("Sigmoid", ["y"], ["z"])
+        >>> graph = helper.make_graph(
+        ...     [relu, sigmoid], "g",
+        ...     [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1])],
+        ...     [helper.make_tensor_value_info("z", TensorProto.FLOAT, [1])],
+        ... )
+        >>> sorted(_op_types(helper.make_model(graph)))
+        ['Relu', 'Sigmoid']
     """
     found: set[str] = set()
 
@@ -312,6 +379,18 @@ def _static_shape(value: onnx.ValueInfoProto) -> tuple[int, ...]:
 
     Raises:
         AssertionError: If any dimension is symbolic rather than a fixed size.
+
+    Examples:
+        >>> from onnx import helper, TensorProto
+        >>> value = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 3, 128, 128])
+        >>> _static_shape(value)
+        (1, 3, 128, 128)
+        >>> symbolic = helper.make_tensor_value_info("y", TensorProto.FLOAT, ["batch", 3])
+        >>> try:
+        ...     _static_shape(symbolic)
+        ... except AssertionError as exc:
+        ...     str(exc).startswith("y has a symbolic dimension: 'batch'")
+        True
     """
     dims = []
     for dim in value.type.tensor_type.shape.dim:
@@ -334,6 +413,11 @@ def _paired(rows: np.ndarray) -> np.ndarray:
 
     Returns:
         The permutation that puts ``rows`` in canonical order.
+
+    Examples:
+        >>> rows = np.array([[1.0, 2.0, 3.0, 4.0, 0.9, 1.0], [1.0, 2.0, 3.0, 4.0, 0.5, 0.0]])
+        >>> _paired(rows).tolist()
+        [1, 0]
     """
     keys = np.round(rows, _PAIR_QUANTUM)
     return np.lexsort(tuple(keys[:, column] for column in reversed(range(keys.shape[1]))))

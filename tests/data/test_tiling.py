@@ -60,12 +60,23 @@ _PLACEMENT_CASES = [
 
 
 def _rbox(cx: float, cy: float, w: float, h: float, theta: float) -> torch.Tensor:
-    """Build a one-row ``(1, 5)`` rotated-box tensor."""
+    """Build a one-row ``(1, 5)`` rotated-box tensor.
+
+    Examples:
+        >>> _rbox(1.0, 2.0, 3.0, 4.0, 0.5).tolist()
+        [[1.0, 2.0, 3.0, 4.0, 0.5]]
+    """
     return torch.tensor([[cx, cy, w, h, theta]], dtype=torch.float32)
 
 
 def _targets(rboxes: torch.Tensor, labels: list[int]) -> Targets:
-    """Build targets whose axis-aligned boxes are the envelopes of ``rboxes`` (WP-056)."""
+    """Build targets whose axis-aligned boxes are the envelopes of ``rboxes`` (WP-056).
+
+    Examples:
+        >>> targets = _targets(_rbox(10.0, 10.0, 4.0, 2.0, 0.0), [1])
+        >>> targets.boxes.tolist(), targets.labels.tolist()
+        ([[8.0, 9.0, 12.0, 11.0]], [1])
+    """
     polygons = rboxes_to_polygons(rboxes)
     boxes = torch.cat([polygons.amin(dim=1), polygons.amax(dim=1)], dim=1)
     return Targets(boxes=boxes, labels=torch.tensor(labels, dtype=torch.int64), rboxes=rboxes)
@@ -74,7 +85,13 @@ def _targets(rboxes: torch.Tensor, labels: list[int]) -> Targets:
 def _random_rboxes(
     generator: torch.Generator, count: int, centres: tuple[float, float], extents: tuple[float, float]
 ) -> torch.Tensor:
-    """Draw ``count`` canonical-extent rotated boxes with centres and extents in the given ranges."""
+    """Draw ``count`` canonical-extent rotated boxes with centres and extents in the given ranges.
+
+    Examples:
+        >>> gen = torch.Generator().manual_seed(0)
+        >>> _random_rboxes(gen, count=2, centres=(0.0, 10.0), extents=(1.0, 5.0)).shape
+        torch.Size([2, 5])
+    """
     centre = torch.rand((count, 2), generator=generator) * (centres[1] - centres[0]) + centres[0]
     extent = torch.rand((count, 2), generator=generator) * (extents[1] - extents[0]) + extents[0]
     angle = torch.rand((count, 1), generator=generator) * (2 * math.pi) - math.pi
@@ -82,19 +99,35 @@ def _random_rboxes(
 
 
 def _shapely_clip(rbox: torch.Tensor, window: torch.Tensor) -> BaseGeometry:
-    """Oracle clip: shapely's intersection of one rotated box's polygon with the window."""
+    """Oracle clip: shapely's intersection of one rotated box's polygon with the window.
+
+    Examples:
+        >>> geom = _shapely_clip(_rbox(5.0, 5.0, 4.0, 4.0, 0.0), torch.tensor([0, 0, 10, 10]))
+        >>> round(geom.area, 4)
+        16.0
+    """
     corners = rboxes_to_polygons(rbox.reshape(1, 5).to(torch.float64))[0]
     x0, y0, x1, y1 = (float(v) for v in window.tolist())
     return Polygon(corners.tolist()).intersection(shapely_box(x0, y0, x1, y1))
 
 
 def _clip_vertices(rbox: torch.Tensor, window: torch.Tensor) -> torch.Tensor:
-    """Oracle clipped-region vertices as a ``(Q, 2)`` float32 tensor, ring closure dropped."""
+    """Oracle clipped-region vertices as a ``(Q, 2)`` float32 tensor, ring closure dropped.
+
+    Examples:
+        >>> _clip_vertices(_rbox(5.0, 5.0, 4.0, 4.0, 0.0), torch.tensor([0, 0, 10, 10])).shape
+        torch.Size([4, 2])
+    """
     return torch.tensor(_shapely_clip(rbox, window).exterior.coords[:-1], dtype=torch.float32)
 
 
 def _inflate(rbox: torch.Tensor, slack: float = 2e-3) -> torch.Tensor:
-    """Widen a ``(5,)`` box by ``slack`` on each side, absorbing float32 slack in a containment test."""
+    """Widen a ``(5,)`` box by ``slack`` on each side, absorbing float32 slack in a containment test.
+
+    Examples:
+        >>> _inflate(torch.tensor([1.0, 1.0, 4.0, 2.0, 0.0])).shape
+        torch.Size([1, 5])
+    """
     grown = rbox.clone().reshape(1, 5)
     grown[:, 2:4] += 2 * slack
     return grown
@@ -432,7 +465,13 @@ def test_tiles_of_a_synthetic_obb_image_account_for_every_instance(obb_fixture_d
 
 
 def _tiled_area_total(image: torch.Tensor, rboxes: torch.Tensor) -> float:
-    """Sum one instance's clipped area over every tile of ``image`` (patch 64, overlap 16)."""
+    """Sum one instance's clipped area over every tile of ``image`` (patch 64, overlap 16).
+
+    Examples:
+        >>> image = torch.zeros(3, 20, 20)
+        >>> round(_tiled_area_total(image, _rbox(10.0, 10.0, 4.0, 4.0, 0.0)), 4)
+        16.0
+    """
     targets = _targets(rboxes, [0])
     difficult = torch.zeros(1, dtype=torch.bool)
     original = float(rboxes[0, 2] * rboxes[0, 3])
@@ -441,7 +480,12 @@ def _tiled_area_total(image: torch.Tensor, rboxes: torch.Tensor) -> float:
 
 
 def _fixture_obb_quads(dataset_dir: Path) -> torch.Tensor:
-    """Read the rotated quadrilaterals of the fixture image that carries the most instances."""
+    """Read the rotated quadrilaterals of the fixture image that carries the most instances.
+
+    Examples:
+        >>> callable(_fixture_obb_quads)  # needs a live obb_fixture_dir fixture (generated dataset dir)
+        True
+    """
     annotations = json.loads((dataset_dir / "train" / "_annotations.coco.json").read_text(encoding="utf-8"))
     by_image: dict[int, list[list[float]]] = {}
     for annotation in annotations["annotations"]:
@@ -451,7 +495,12 @@ def _fixture_obb_quads(dataset_dir: Path) -> torch.Tensor:
 
 
 def _fixture_image_size(dataset_dir: Path) -> tuple[int, int]:
-    """Return the fixture set's ``(height, width)``; the generator writes one square size."""
+    """Return the fixture set's ``(height, width)``; the generator writes one square size.
+
+    Examples:
+        >>> callable(_fixture_image_size)  # needs a live obb_fixture_dir fixture (generated dataset dir)
+        True
+    """
     annotations = json.loads((dataset_dir / "train" / "_annotations.coco.json").read_text(encoding="utf-8"))
     record = annotations["images"][0]
     return int(record["height"]), int(record["width"])

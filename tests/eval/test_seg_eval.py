@@ -67,7 +67,15 @@ _IMAGE_SIZE = (64, 64)
 
 
 def _filled_mask(box: list[float], image_size: tuple[int, int] = _IMAGE_SIZE) -> Tensor:
-    """Return a mask that is ``True`` exactly on ``box``'s pixels."""
+    """Return a mask that is ``True`` exactly on ``box``'s pixels.
+
+    Examples:
+        >>> mask = _filled_mask([1.0, 1.0, 3.0, 2.0], image_size=(4, 4))
+        >>> mask.shape
+        torch.Size([1, 4, 4])
+        >>> int(mask.sum())
+        2
+    """
     mask = torch.zeros((1, *image_size), dtype=torch.bool)
     x1, y1, x2, y2 = (int(value) for value in box)
     mask[0, y1:y2, x1:x2] = True
@@ -75,7 +83,15 @@ def _filled_mask(box: list[float], image_size: tuple[int, int] = _IMAGE_SIZE) ->
 
 
 def _prediction(box: list[float], mask: Tensor) -> dict[str, Tensor]:
-    """Build a single-detection prediction dict at score 1.0."""
+    """Build a single-detection prediction dict at score 1.0.
+
+    Examples:
+        >>> pred = _prediction([1.0, 2.0, 3.0, 4.0], torch.zeros((1, 4, 4), dtype=torch.bool))
+        >>> pred["boxes"].tolist()
+        [[1.0, 2.0, 3.0, 4.0]]
+        >>> pred["labels"].tolist()
+        [5]
+    """
     return {
         "boxes": torch.tensor([box], dtype=torch.float32),
         "scores": torch.tensor([1.0]),
@@ -85,7 +101,13 @@ def _prediction(box: list[float], mask: Tensor) -> dict[str, Tensor]:
 
 
 def _target(box: list[float], mask: Tensor) -> dict[str, Tensor]:
-    """Build a single-instance ground-truth dict."""
+    """Build a single-instance ground-truth dict.
+
+    Examples:
+        >>> tgt = _target([1.0, 2.0, 3.0, 4.0], torch.zeros((1, 4, 4), dtype=torch.bool))
+        >>> sorted(tgt.keys())
+        ['boxes', 'labels', 'masks']
+    """
     return {"boxes": torch.tensor([box], dtype=torch.float32), "labels": torch.tensor([_CATEGORY]), "masks": mask}
 
 
@@ -184,7 +206,12 @@ def test_padding_rows_drop_masks_and_boxes_by_the_same_filter() -> None:
 
 
 def _loader(fixture_dir: Path, letterbox: Letterbox) -> list[tuple[Tensor, list[int], list[tuple[int, int]]]]:
-    """Materialize one letterboxed batch of the first few fixture images."""
+    """Materialize one letterboxed batch of the first few fixture images.
+
+    Examples:
+        >>> callable(_loader)  # needs the live detseg_fixture_dir fixture on disk
+        True
+    """
     split_dir = fixture_dir / _SPLIT
     images, _, _ = load_eval_annotations(split_dir / _ANNOTATION)
     return list(letterboxed_batches(images[:_NUM_IMAGES], split_dir, letterbox, _NUM_IMAGES))
@@ -224,6 +251,12 @@ def _saturate_mask_branch(model: Segmenter) -> None:
     entirely the wrong anchors, because every mask is empty either way. Positive
     output biases on the box stems, the coefficient stems and the prototype
     convolution make the whole chain produce real geometry to compare.
+
+    Examples:
+        >>> model = Segmenter("n", num_classes=4).eval()
+        >>> _saturate_mask_branch(model)
+        >>> float(model.protonet.layers[-1].bias[0].detach())
+        1.0
     """
     with torch.no_grad():
         torch.nn.init.constant_(model.protonet.layers[-1].bias, 1.0)
@@ -235,7 +268,13 @@ def _saturate_mask_branch(model: Segmenter) -> None:
 
 
 def _segmentation_evaluator(label_map: dict[int, int], letterbox: Letterbox) -> DualPathEvaluator:
-    """Build the evaluator around a saturated untrained segmenter."""
+    """Build the evaluator around a saturated untrained segmenter.
+
+    Examples:
+        >>> evaluator = _segmentation_evaluator({0: 5}, Letterbox(160))
+        >>> type(evaluator).__name__
+        'DualPathEvaluator'
+    """
     model = Segmenter("n", num_classes=_NUM_CLASSES).eval()
     _saturate_mask_branch(model)
     return DualPathEvaluator(model, TopKDecoder(k=_MAX_DET), NMSDecoder(max_det=_MAX_DET), label_map, letterbox)
@@ -276,6 +315,13 @@ def _mixed_batches() -> list[tuple[list[dict[str, Tensor]], list[dict[str, Tenso
     accumulation bug is invisible. These three -- a perfect instance, a
     mask-missed instance, another perfect one -- land the aggregate strictly
     between 0 and 1, and each batch alone gives something else.
+
+    Examples:
+        >>> batches = _mixed_batches()
+        >>> len(batches)
+        3
+        >>> [len(preds) for preds, _ in batches]
+        [1, 1, 1]
     """
     good = (_prediction(_BOX, _filled_mask(_BOX)), _target(_BOX, _filled_mask(_BOX)))
     missed_mask = _prediction(_BOX, torch.zeros((1, *_IMAGE_SIZE), dtype=torch.bool))

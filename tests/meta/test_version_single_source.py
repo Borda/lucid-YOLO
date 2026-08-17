@@ -27,7 +27,12 @@ VERSION_ATTR = "lucid_yolo.__version__"
 
 
 def _pyproject() -> dict[str, object]:
-    """Parse ``pyproject.toml`` into a dict."""
+    """Parse ``pyproject.toml`` into a dict.
+
+    Examples:
+        >>> "project" in _pyproject()
+        True
+    """
     return tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
 
 

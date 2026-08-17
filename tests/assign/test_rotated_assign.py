@@ -62,6 +62,13 @@ def _rotated_scene(
     Anchor centres are x, y in {4, 12, 20, 28}. Class-0 score is 0.9 at every anchor
     and every predicted box equals ``gt_boxes``, so the alignment metric is flat and
     the positive set is decided purely by candidacy.
+
+    Examples:
+        >>> scores, pred_boxes, points, gt_boxes, gt_labels, gt_mask, gt_rboxes = _rotated_scene(
+        ...     _TINY_RBOX, _TINY_GT
+        ... )
+        >>> scores.shape, pred_boxes.shape, points.shape
+        (torch.Size([1, 16, 1]), torch.Size([1, 16, 4]), torch.Size([16, 2]))
     """
     points, _ = make_anchor_points([(4, 4)], [8])  # (16, 2)
     scores = torch.full((1, 16, 1), 0.9)
@@ -72,7 +79,14 @@ def _rotated_scene(
 
 
 def _positive_indices(result: AssignResult) -> tuple[int, ...]:
-    """Anchor indices marked foreground in a single-image assignment result."""
+    """Anchor indices marked foreground in a single-image assignment result.
+
+    Examples:
+        >>> scene = _rotated_scene(_TINY_RBOX, _TINY_GT)
+        >>> result = TaskAlignedAssigner(topk=4)(*scene)
+        >>> isinstance(_positive_indices(result), tuple)
+        True
+    """
     return tuple(int(index) for index in result.fg_mask[0].nonzero().flatten())
 
 
@@ -182,6 +196,11 @@ def _frozen_scene() -> tuple[torch.Tensor, ...]:
     Two ground truths per image (the second image's second slot is padding), scores and
     predicted boxes derived from the anchor index by arithmetic so the scene carries no
     RNG and no stored fixture.
+
+    Examples:
+        >>> scores, pred_boxes, points, gt_boxes, gt_labels, gt_mask = _frozen_scene()
+        >>> scores.shape, pred_boxes.shape, gt_boxes.shape
+        (torch.Size([2, 16, 2]), torch.Size([2, 16, 4]), torch.Size([2, 2, 4]))
     """
     points, _ = make_anchor_points([(4, 4)], [8])  # (16, 2)
     anchor = torch.arange(16, dtype=torch.float32)
@@ -208,6 +227,13 @@ def _expected_result(rows: list[tuple[int, int, int, int, list[float], float]]) 
     Each row is ``(image, anchor, gt_index, label, box, align_weight)``; every anchor not
     listed carries the documented background sentinels (``-1`` index and label, zero box,
     zero weight), so a stray positive breaks the comparison just as a wrong value does.
+
+    Examples:
+        >>> result = _expected_result([(0, 5, 0, 1, [1.0, 2.0, 3.0, 4.0], 0.5)])
+        >>> int(result.fg_mask.sum())
+        1
+        >>> int(result.gt_index[0, 5]), int(result.target_labels[0, 5])
+        (0, 1)
     """
     fg_mask = torch.zeros(2, 16, dtype=torch.bool)
     gt_index = torch.full((2, 16), -1, dtype=torch.long)

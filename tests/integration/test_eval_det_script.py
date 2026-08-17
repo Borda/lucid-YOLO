@@ -42,12 +42,26 @@ _SEGM_KEYS = {_SEGM_PREFIX + key for key in _METRIC_KEYS}
 
 
 def _module(task: str) -> DetectionLitModule:
-    """Build an untrained n-scale module for ``task``."""
+    """Build an untrained n-scale module for ``task``.
+
+    Examples:
+        >>> _module("detect").task
+        'detect'
+    """
     return DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=_NUM_CLASSES, task=task)
 
 
 def _write_checkpoint(module: DetectionLitModule, path: Path) -> Path:
-    """Save ``module`` in the Lightning checkpoint layout ``load_from_checkpoint`` reads."""
+    """Save ``module`` in the Lightning checkpoint layout ``load_from_checkpoint`` reads.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     ckpt = _write_checkpoint(_module("detect"), Path(tmp) / "detect.ckpt")
+        ...     ckpt.is_file()
+        True
+    """
     torch.save(
         {
             "state_dict": module.state_dict(),
@@ -63,7 +77,19 @@ def _write_checkpoint(module: DetectionLitModule, path: Path) -> Path:
 
 
 def _data_root(fixture_dir: Path, tmp_path: Path) -> Path:
-    """Lay the fixture split out under the ``val2017`` layout the script expects."""
+    """Lay the fixture split out under the ``val2017`` layout the script expects.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> import synthetic
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     tmp_path = Path(tmp)
+        ...     fixture_dir = synthetic.generate_detseg_fixtures(tmp_path / "src")
+        ...     root = _data_root(fixture_dir, tmp_path)
+        ...     sorted(p.name for p in root.iterdir())
+        ['annotations', 'val2017']
+    """
     root = tmp_path / "coco"
     (root / "annotations").mkdir(parents=True)
     split_dir = fixture_dir / _SPLIT
@@ -73,7 +99,26 @@ def _data_root(fixture_dir: Path, tmp_path: Path) -> Path:
 
 
 def _run(checkpoint: Path, root: Path, tmp_path: Path, *extra: str) -> dict[str, dict[str, float]]:
-    """Run the command and return the ``report`` half of its JSON output."""
+    """Run the command and return the ``report`` half of its JSON output.
+
+    ``eval_cli.main`` prints its progress report to stdout, which is redirected here to
+    keep the example deterministic (same pattern as ``tests/data/test_download.py``).
+
+    Examples:
+        >>> import contextlib, io, tempfile
+        >>> from pathlib import Path
+        >>> import synthetic
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     tmp_path = Path(tmp)
+        ...     fixture_dir = synthetic.generate_detseg_fixtures(tmp_path / "src")
+        ...     _ = torch.manual_seed(0)
+        ...     checkpoint = _write_checkpoint(_module("detect"), tmp_path / "detect.ckpt")
+        ...     root = _data_root(fixture_dir, tmp_path)
+        ...     with contextlib.redirect_stdout(io.StringIO()):
+        ...         report = _run(checkpoint, root, tmp_path)
+        >>> sorted(report)
+        ['e2e', 'nms']
+    """
     output = tmp_path / f"report{len(extra)}.json"
     eval_cli.main(
         [

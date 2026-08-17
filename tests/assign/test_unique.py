@@ -33,7 +33,15 @@ def reset_random_seeds() -> None:
 
 
 def _grid_points() -> Tensor:
-    """Return the 16 stride-8 anchor centres of a 4x4 grid; x fastest, row-major."""
+    """Return the 16 stride-8 anchor centres of a 4x4 grid; x fastest, row-major.
+
+    Examples:
+        >>> points = _grid_points()
+        >>> points.shape
+        torch.Size([16, 2])
+        >>> points[:2].tolist()
+        [[4.0, 4.0], [12.0, 4.0]]
+    """
     points, _ = make_anchor_points([(4, 4)], [8])
     return points
 

@@ -121,7 +121,13 @@ class _FixedDetectionDataset(Dataset[tuple[Tensor, Targets]]):
 
 
 def _build_samples() -> list[tuple[Tensor, Targets]]:
-    """Precompute the fixed sample list from a local generator (independent of global RNG)."""
+    """Precompute the fixed sample list from a local generator (independent of global RNG).
+
+    Examples:
+        >>> samples = _build_samples()
+        >>> len(samples), samples[0][0].shape, samples[0][1].boxes.shape
+        (8, torch.Size([3, 64, 64]), torch.Size([2, 4]))
+    """
     generator = torch.Generator().manual_seed(_SEED)
     samples: list[tuple[Tensor, Targets]] = []
     for _ in range(_DATASET_SIZE):
@@ -142,6 +148,13 @@ def _collate_unpacked(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list
     the same collate -> restore round-trip the datamodule performs in production
     (dequantizing the uint8 images and unpacking the targets) so the module
     receives its float images and ragged target list.
+
+    Examples:
+        >>> boxes = torch.tensor([[8.0, 8.0, 24.0, 24.0]])
+        >>> sample = (torch.randn(3, 64, 64), Targets(boxes=boxes, labels=torch.tensor([1])))
+        >>> images, targets = _collate_unpacked([sample])
+        >>> images.shape, len(targets)
+        (torch.Size([1, 3, 64, 64]), 1)
     """
     return unpack_batch(collate_detection(batch))
 
@@ -159,12 +172,23 @@ def train_loader() -> DataLoader[tuple[Tensor, Targets]]:
 
 
 def _tiny_module() -> DetectionLitModule:
-    """Build an n-scale module with a low channel cap for fast CPU training."""
+    """Build an n-scale module with a low channel cap for fast CPU training.
+
+    Examples:
+        >>> _tiny_module().task
+        'detect'
+    """
     return DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=_NUM_CLASSES)
 
 
 def _trainer(*callbacks: Callback) -> Trainer:
-    """Build a deterministic ``max_epochs=4`` CPU trainer with the given callbacks."""
+    """Build a deterministic ``max_epochs=4`` CPU trainer with the given callbacks.
+
+    Examples:
+        >>> trainer = _trainer()
+        >>> trainer.max_epochs, trainer.num_sanity_val_steps
+        (4, 0)
+    """
     return Trainer(
         max_epochs=_MAX_EPOCHS,
         accelerator="cpu",

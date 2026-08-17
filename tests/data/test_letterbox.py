@@ -31,7 +31,14 @@ def reset_random_seeds() -> Iterator[None]:
 
 
 def _random_polygons(n: int, n_points: int = 5) -> list[torch.Tensor]:
-    """Return ``n`` float32 rings of ``n_points`` points inside the source image."""
+    """Return ``n`` float32 rings of ``n_points`` points inside the source image.
+
+    Examples:
+        >>> _ = torch.manual_seed(0)
+        >>> rings = _random_polygons(2, n_points=3)
+        >>> len(rings), rings[0].shape, rings[0].dtype
+        (2, torch.Size([3, 2]), torch.float32)
+    """
     rings: list[torch.Tensor] = []
     for _ in range(n):
         xs = torch.rand(n_points) * _ORIG_W
@@ -41,7 +48,14 @@ def _random_polygons(n: int, n_points: int = 5) -> list[torch.Tensor]:
 
 
 def _targets_with_polygons(n: int = 6) -> Targets:
-    """Build targets whose boxes are exactly the extent of their polygon rings."""
+    """Build targets whose boxes are exactly the extent of their polygon rings.
+
+    Examples:
+        >>> _ = torch.manual_seed(0)
+        >>> targets = _targets_with_polygons(n=2)
+        >>> targets.boxes.shape, targets.labels.tolist(), len(targets.polygons)
+        (torch.Size([2, 4]), [0, 1], 2)
+    """
     polygons = _random_polygons(n)
     boxes = boxes_from_polygons(polygons)
     labels = torch.arange(n, dtype=torch.int64)
@@ -49,7 +63,12 @@ def _targets_with_polygons(n: int = 6) -> Targets:
 
 
 def _image() -> torch.Tensor:
-    """Return a random CHW float image at the source size."""
+    """Return a random CHW float image at the source size.
+
+    Examples:
+        >>> _image().shape
+        torch.Size([3, 500, 800])
+    """
     return torch.rand(3, _ORIG_H, _ORIG_W)
 
 
@@ -200,5 +219,10 @@ class TestDeterminism:
 
 
 def _forward_matrix(r: float, pad_top: int, pad_left: int = 0) -> torch.Tensor:
-    """Build the float32 forward letterbox affine for the fixed-width source case."""
+    """Build the float32 forward letterbox affine for the fixed-width source case.
+
+    Examples:
+        >>> _forward_matrix(0.5, pad_top=10, pad_left=2).tolist()
+        [[0.5, 0.0, 2.0], [0.0, 0.5, 10.0], [0.0, 0.0, 1.0]]
+    """
     return torch.tensor([[r, 0.0, pad_left], [0.0, r, pad_top], [0.0, 0.0, 1.0]], dtype=torch.float32)

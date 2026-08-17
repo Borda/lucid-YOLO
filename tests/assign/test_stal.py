@@ -41,6 +41,13 @@ def _tiny_gt_scene(
     ``[5, 5, 11, 11]``. Class-0 scores are 0.9 at every candidate anchor; the
     caller supplies the ``(1, 16, 4)`` predicted boxes so each test controls the
     IoU against the original ground truth.
+
+    Examples:
+        >>> points, scores, boxes, gt_boxes, gt_labels, gt_mask = _tiny_gt_scene(torch.zeros(1, 16, 4))
+        >>> points.shape, scores.shape, gt_boxes.shape
+        (torch.Size([16, 2]), torch.Size([1, 16, 1]), torch.Size([1, 1, 4]))
+        >>> int((scores[0, :, 0] == 0.9).sum())  # the four STAL candidate anchors
+        4
     """
     points, _ = make_anchor_points([(4, 4)], [8])  # (16, 2)
     scores = torch.zeros(1, 16, 1)

@@ -66,7 +66,14 @@ def reset_random_seeds() -> None:
 
 
 def _step_ulps(value: float, steps: int) -> float:
-    """Return ``value`` moved ``steps`` float32 ulps, negative steps moving downwards."""
+    """Return ``value`` moved ``steps`` float32 ulps, negative steps moving downwards.
+
+    Examples:
+        >>> _step_ulps(0.0, 0)
+        0.0
+        >>> _step_ulps(_HALF_PI, 1) > _HALF_PI > _step_ulps(_HALF_PI, -1)
+        True
+    """
     current = torch.tensor(value, dtype=torch.float32)
     towards = torch.tensor(-torch.inf if steps < 0 else torch.inf, dtype=torch.float32)
     for _ in range(abs(steps)):
@@ -75,7 +82,15 @@ def _step_ulps(value: float, steps: int) -> float:
 
 
 def _wrap_inputs() -> list[float]:
-    """Residuals spanning several turns, plus both ulps around every wrap boundary."""
+    """Residuals spanning several turns, plus both ulps around every wrap boundary.
+
+    Examples:
+        >>> values = _wrap_inputs()
+        >>> len(values)  # 9 plain residuals plus 5 boundaries x 3 ulp offsets
+        24
+        >>> values[:3]
+        [0.0, 0.3, -0.3]
+    """
     plain = [0.0, 0.3, -0.3, 1.2, -1.2, 7.5, -7.5, 100.0, -100.0]
     boundaries = [_HALF_PI, -_HALF_PI, 3 * _HALF_PI, -3 * _HALF_PI, 5 * _HALF_PI]
     return plain + [_step_ulps(bound, step) for bound in boundaries for step in (-1, 0, 1)]
@@ -87,6 +102,11 @@ def _loss_curve(pred: Tensor, target: float = 0.0, side: float = 8.0) -> Tensor:
     A single anchor of weight one normalizes by ``S = 1`` and, for the square target used
     here, carries ``omega = 1`` — so each entry is the bare penalty the loss puts on that
     angular error, read through the public function rather than reimplemented.
+
+    Examples:
+        >>> curve = _loss_curve(torch.tensor([0.0, _QUARTER_PI]))
+        >>> [round(float(value), 4) for value in curve]  # zero at target, one at the diagonal
+        [0.0, 1.0]
     """
     one, sides = torch.ones(1), torch.full((1,), side)
     return torch.stack(
@@ -95,7 +115,14 @@ def _loss_curve(pred: Tensor, target: float = 0.0, side: float = 8.0) -> Tensor:
 
 
 def _single(pred: float, target: float, width: float = 8.0, height: float = 8.0, weight: float = 1.0) -> Tensor:
-    """Loss for one anchor, given as plain floats."""
+    """Loss for one anchor, given as plain floats.
+
+    Examples:
+        >>> round(float(_single(pred=_QUARTER_PI, target=0.0)), 4)  # the diagonal, square target
+        1.0
+        >>> float(_single(pred=0.0, target=0.0))  # exact match
+        0.0
+    """
     return square_angle_loss(
         torch.tensor([pred]),
         torch.tensor([target]),

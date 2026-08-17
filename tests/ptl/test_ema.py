@@ -102,14 +102,29 @@ class _SyntheticVectorDataset(Dataset[tuple[Tensor, int]]):
 
 
 def _fitted_callback(module: LightningModule, **kwargs: float) -> EMACallback:
-    """Build a callback and run ``on_fit_start`` so its shadow is initialised."""
+    """Build a callback and run ``on_fit_start`` so its shadow is initialised.
+
+    Examples:
+        >>> module = _TinyEMAModule()
+        >>> callback = _fitted_callback(module, decay=0.9, tau=1)
+        >>> callback._shadow is not None
+        True
+    """
     callback = EMACallback(**kwargs)  # type: ignore[arg-type]
     callback.on_fit_start(_DUMMY_TRAINER, module)
     return callback
 
 
 def _batch_end(callback: EMACallback, module: LightningModule, batch_idx: int) -> None:
-    """Invoke ``on_train_batch_end`` with the dummy trainer and unused step payloads."""
+    """Invoke ``on_train_batch_end`` with the dummy trainer and unused step payloads.
+
+    Examples:
+        >>> module = _TinyEMAModule()
+        >>> callback = _fitted_callback(module, decay=0.9, tau=1)
+        >>> _batch_end(callback, module, 0)
+        >>> callback._num_updates
+        1
+    """
     callback.on_train_batch_end(_DUMMY_TRAINER, module, None, None, batch_idx)
 
 

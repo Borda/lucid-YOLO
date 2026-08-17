@@ -33,12 +33,27 @@ def _seed_rng() -> None:
 
 
 def _grid(height: int, width: int, stride: int = 8) -> tuple[Tensor, Tensor]:
-    """Return ``(anchor_points, strides)`` for a single ``(height, width)`` level."""
+    """Return ``(anchor_points, strides)`` for a single ``(height, width)`` level.
+
+    Examples:
+        >>> points, strides = _grid(1, 1, stride=8)
+        >>> points.tolist()
+        [[4.0, 4.0]]
+        >>> strides.tolist()
+        [8.0]
+    """
     return make_anchor_points([(height, width)], [stride])
 
 
 def _pairwise_iou(box_a: Tensor, box_b: Tensor) -> float:
-    """Return the IoU of two ``xyxy`` boxes (test-side helper)."""
+    """Return the IoU of two ``xyxy`` boxes (test-side helper).
+
+    Examples:
+        >>> a = torch.tensor([0.0, 0.0, 10.0, 10.0])
+        >>> b = torch.tensor([5.0, 0.0, 15.0, 10.0])  # half-width overlap
+        >>> round(_pairwise_iou(a, b), 4)
+        0.3333
+    """
     inter_x1 = torch.maximum(box_a[0], box_b[0])
     inter_y1 = torch.maximum(box_a[1], box_b[1])
     inter_x2 = torch.minimum(box_a[2], box_b[2])
@@ -186,6 +201,10 @@ def _two_stage_scores() -> Tensor:
     surviving set is a prefix of the dense anchor order, and neither is a prefix
     of the *thresholded* order, so an index that names a row's position within
     either intermediate set is distinguishable from one that names its anchor.
+
+    Examples:
+        >>> _two_stage_scores().shape
+        torch.Size([2, 6, 2])
     """
     scores = torch.full((2, 6, 2), -20.0)
     scores[0, 2, 0] = 6.0  # strongest of image 0, class 0

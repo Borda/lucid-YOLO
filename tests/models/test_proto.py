@@ -25,7 +25,13 @@ def _features(
     spatial_sizes: tuple[tuple[int, int], tuple[int, int], tuple[int, int]],
     batch: int = 2,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Build deterministic stride-ordered feature maps with the requested sizes."""
+    """Build deterministic stride-ordered feature maps with the requested sizes.
+
+    Examples:
+        >>> x1, x2, x3 = _features(((12, 20), (6, 10), (3, 5)))
+        >>> x1.shape, x2.shape, x3.shape
+        (torch.Size([2, 2, 12, 20]), torch.Size([2, 3, 6, 10]), torch.Size([2, 5, 3, 5]))
+    """
     return tuple(
         torch.randn(batch, channels, height, width)
         for channels, (height, width) in zip(_CHANNELS, spatial_sizes, strict=True)

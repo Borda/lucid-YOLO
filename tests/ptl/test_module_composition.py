@@ -57,7 +57,15 @@ _VARIANT_PARAMS = [pytest.param(name, id=name) for name in VARIANTS]
 
 
 def _snapshot_module() -> DetectionLitModule:
-    """Build a detection module at the exact scale the pre-change snapshot was taken at."""
+    """Build a detection module at the exact scale the pre-change snapshot was taken at.
+
+    Examples:
+        >>> module = _snapshot_module()
+        >>> module.task
+        'detect'
+        >>> len(tuple(module.state_dict()))
+        714
+    """
     return DetectionLitModule(
         depth=_SNAPSHOT_DEPTH,
         width=_SNAPSHOT_WIDTH,
@@ -67,7 +75,13 @@ def _snapshot_module() -> DetectionLitModule:
 
 
 def _module_for(variant: str, task: str = "detect") -> DetectionLitModule:
-    """Build a Lightning module from a named variant's raw multipliers."""
+    """Build a Lightning module from a named variant's raw multipliers.
+
+    Examples:
+        >>> module = _module_for("n", task="detect")
+        >>> module.task, module.hparams["num_classes"]
+        ('detect', 80)
+    """
     spec = VARIANTS[variant]
     return DetectionLitModule(
         depth=spec.depth,

@@ -22,6 +22,13 @@ def _build_dual_gt_scene() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, to
     Anchor centres are x, y in {2, 6, 10, 14}; row-major index ``i*4 + j``.
     GT0 = [0, 0, 8, 8] (class 0): candidates {0, 1, 4, 5} (centres <= 8).
     GT1 = [8, 8, 16, 16] (class 1): candidates {10, 11, 14, 15} (centres >= 8).
+
+    Examples:
+        >>> points, scores, boxes, gt_boxes, gt_labels, gt_mask = _build_dual_gt_scene()
+        >>> points.shape, scores.shape, boxes.shape
+        (torch.Size([16, 2]), torch.Size([1, 16, 2]), torch.Size([1, 16, 4]))
+        >>> gt_boxes.shape, gt_labels.tolist(), gt_mask.tolist()
+        (torch.Size([1, 2, 4]), [[0, 1]], [[True, True]])
     """
     points, _ = make_anchor_points([(4, 4)], [4])  # (16, 2)
     scores = torch.zeros(1, 16, 2)

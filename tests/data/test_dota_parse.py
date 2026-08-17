@@ -58,7 +58,16 @@ _THREE_OBJECT_LINES = "\n".join(
 
 
 def _write_labels(path: Path, text: str) -> Path:
-    """Write ``text`` as a ``labelTxt`` file at ``path`` and return the path."""
+    """Write ``text`` as a ``labelTxt`` file at ``path`` and return the path.
+
+    Examples:
+        >>> import tempfile
+        >>> written = _write_labels(Path(tempfile.mkdtemp()) / "P0001.txt", "0 0 2 0 2 1 0 1 plane 0\\n")
+        >>> written.name
+        'P0001.txt'
+        >>> written.read_text(encoding="utf-8")
+        '0 0 2 0 2 1 0 1 plane 0\\n'
+    """
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -89,6 +98,10 @@ def _build_dota_root(obb_dir: Path, root: Path) -> _DotaFixture:
     it transcribes directly onto a DOTA object line; category ids are mapped onto
     :data:`DOTA_CLASSES` cyclically and every third object is flagged difficult, so both
     ``difficult`` policies have something to act on.
+
+    Examples:
+        >>> callable(_build_dota_root)  # needs the obb_fixture_dir/tmp_path pytest fixtures
+        True
     """
     document = json.loads((obb_dir / _FIXTURE_SPLIT / _FIXTURE_ANNOTATION).read_text(encoding="utf-8"))
     by_image: dict[int, list[dict[str, object]]] = {}

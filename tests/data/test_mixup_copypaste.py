@@ -34,23 +34,53 @@ def reset_random_seeds() -> Iterator[None]:
 
 
 def _generator(seed: int = 1234) -> torch.Generator:
-    """Return a CPU generator seeded to ``seed`` for reproducible sampling."""
+    """Return a CPU generator seeded to ``seed`` for reproducible sampling.
+
+    Examples:
+        >>> torch.rand(1, generator=_generator()).item()
+        0.028979241847991943
+    """
     return torch.Generator().manual_seed(seed)
 
 
 def _square_ring(x0: float, y0: float, x1: float, y1: float) -> torch.Tensor:
-    """Return the four-point ring of an axis-aligned square ``(x0, y0)-(x1, y1)``."""
+    """Return the four-point ring of an axis-aligned square ``(x0, y0)-(x1, y1)``.
+
+    Examples:
+        >>> _square_ring(1.0, 1.0, 5.0, 5.0).tolist()
+        [[1.0, 1.0], [5.0, 1.0], [5.0, 5.0], [1.0, 5.0]]
+    """
     return torch.tensor([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])
 
 
 def _polygon_source(label: int = 5) -> Targets:
-    """Return a source instance: one square polygon with its matching box and label."""
+    """Return a source instance: one square polygon with its matching box and label.
+
+    Examples:
+        >>> source = _polygon_source(label=3)
+        >>> source.boxes.tolist()
+        [[1.0, 1.0, 5.0, 5.0]]
+        >>> source.labels.tolist()
+        [3]
+        >>> len(source.polygons)
+        1
+    """
     ring = _square_ring(1.0, 1.0, 5.0, 5.0)
     return Targets(boxes=torch.tensor([[1.0, 1.0, 5.0, 5.0]]), labels=torch.tensor([label]), polygons=[ring])
 
 
 def _boxes_only(count: int) -> Targets:
-    """Return ``count`` boxes with labels but no polygons (never a paste candidate)."""
+    """Return ``count`` boxes with labels but no polygons (never a paste candidate).
+
+    Examples:
+        >>> targets = _boxes_only(2)
+        >>> targets.boxes.tolist()
+        [[0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 2.0, 2.0]]
+        >>> targets.labels.tolist()
+        [0, 0]
+        >>> targets.polygons
+        []
+    """
     boxes = torch.tensor([[0.0, 0.0, 2.0, 2.0]]).repeat(count, 1)
     return Targets(boxes=boxes, labels=torch.zeros(count, dtype=torch.int64))
 

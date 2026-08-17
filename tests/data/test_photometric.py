@@ -27,12 +27,25 @@ def reset_random_seeds() -> Iterator[None]:
 
 
 def _generator(seed: int = 1234) -> torch.Generator:
-    """Return a CPU generator seeded to ``seed`` for reproducible sampling."""
+    """Return a CPU generator seeded to ``seed`` for reproducible sampling.
+
+    Examples:
+        >>> _generator(7).initial_seed()
+        7
+    """
     return torch.Generator().manual_seed(seed)
 
 
 def _targets() -> Targets:
-    """Build a small mixed-modality target set (boxes + polygons + rotated boxes)."""
+    """Build a small mixed-modality target set (boxes + polygons + rotated boxes).
+
+    Examples:
+        >>> targets = _targets()
+        >>> targets.boxes.shape
+        torch.Size([2, 4])
+        >>> len(targets.polygons)
+        2
+    """
     boxes = torch.tensor([[10.0, 12.0, 30.0, 34.0], [40.0, 20.0, 55.0, 50.0]])
     labels = torch.tensor([3, 7])
     polygons = [

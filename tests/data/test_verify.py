@@ -27,7 +27,16 @@ def _write_split(
     *,
     on_disk: Sequence[str] | None = None,
 ) -> None:
-    """Write a fake split: annotations listing ``annotated``, files ``on_disk``."""
+    """Write a fake split: annotations listing ``annotated``, files ``on_disk``.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     _write_split(root, "val2017", "instances_val2017.json", _names(2))
+        ...     sorted(p.name for p in (root / "val2017").iterdir())
+        ['000000000000.jpg', '000000000001.jpg']
+    """
     (root / split_dir).mkdir(parents=True, exist_ok=True)
     (root / "annotations").mkdir(parents=True, exist_ok=True)
     images = [{"id": i, "file_name": name, "height": 4, "width": 4} for i, name in enumerate(annotated)]
@@ -37,7 +46,12 @@ def _write_split(
 
 
 def _names(count: int) -> list[str]:
-    """Return ``count`` COCO-style zero-padded jpg file names."""
+    """Return ``count`` COCO-style zero-padded jpg file names.
+
+    Examples:
+        >>> _names(2)
+        ['000000000000.jpg', '000000000001.jpg']
+    """
     return [f"{i:012d}.jpg" for i in range(count)]
 
 

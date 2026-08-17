@@ -43,6 +43,11 @@ def _build_cli(*args: str) -> DetectionCLI:
     Mirrors :func:`lucid_yolo.cli.train.main` (same ``deterministic``/seed defaults)
     but forces ``run=False`` so the model and datamodule are instantiated without
     launching ``fit``.
+
+    Examples:
+        >>> cli = _build_cli("--config", str(packaged_config("det_smoke")))
+        >>> isinstance(cli.model, DetectionLitModule)
+        True
     """
     return DetectionCLI(
         DetectionLitModule,
@@ -107,7 +112,13 @@ def test_configs_leave_determinism_to_cli_default() -> None:
 
 
 def _config_cli(path: Path, *extra: str) -> DetectionCLI:
-    """Build the CLI from a config file plus any extra override args."""
+    """Build the CLI from a config file plus any extra override args.
+
+    Examples:
+        >>> cli = _config_cli(packaged_config("det_smoke"))
+        >>> isinstance(cli.model, DetectionLitModule)
+        True
+    """
     return _build_cli("--config", str(path), *extra)
 
 

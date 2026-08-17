@@ -34,12 +34,23 @@ def reset_random_seeds() -> Iterator[None]:
 
 
 def _generator(seed: int = 1234) -> torch.Generator:
-    """Return a CPU generator seeded to ``seed`` for reproducible sampling."""
+    """Return a CPU generator seeded to ``seed`` for reproducible sampling.
+
+    Examples:
+        >>> _generator(7).initial_seed()
+        7
+    """
     return torch.Generator().manual_seed(seed)
 
 
 def _polygon_targets(canvas: int) -> Targets:
-    """Build three polygon rings inside a ``canvas``-sized square, with matching boxes."""
+    """Build three polygon rings inside a ``canvas``-sized square, with matching boxes.
+
+    Examples:
+        >>> targets = _polygon_targets(64)
+        >>> targets.boxes.shape, targets.labels.tolist(), len(targets.polygons)
+        (torch.Size([3, 4]), [0, 1, 2], 3)
+    """
     rings = [
         torch.tensor([[10.0, 12.0], [30.0, 12.0], [30.0, 34.0], [10.0, 34.0]]),
         torch.tensor([[40.0, 20.0], [55.0, 20.0], [55.0, 50.0], [40.0, 50.0]]),

@@ -48,7 +48,13 @@ def test_warmup_decay_factor_is_monotonic_after_warmup() -> None:
 
 
 def _module(**kwargs: float) -> DetectionLitModule:
-    """Build a minimal n-scale-ish module with the given schedule overrides."""
+    """Build a minimal n-scale-ish module with the given schedule overrides.
+
+    Examples:
+        >>> module = _module(lr=0.02)
+        >>> module.hparams.lr
+        0.02
+    """
     return DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4, **kwargs)
 
 

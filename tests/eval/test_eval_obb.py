@@ -58,7 +58,12 @@ def tiled_root(tmp_path: Path) -> Path:
 
 
 def _datamodule(root: Path) -> object:
-    """A val-only datamodule over the built split, set up and ready to iterate."""
+    """A val-only datamodule over the built split, set up and ready to iterate.
+
+    Examples:
+        >>> callable(_datamodule)  # needs the tiled_root fixture's on-disk tiled split
+        True
+    """
     datamodule = evaluate.build_datamodule(root, "val", img_size=IMG_SIZE, batch_size=2, variant="n")
     datamodule.setup("validate")
     return datamodule
@@ -146,6 +151,10 @@ def _run_report(module: DetectionLitModule, root: Path, output: Path) -> dict[st
 
     Returns:
         The parsed report payload.
+
+    Examples:
+        >>> callable(_run_report)  # needs the tiled_root fixture's on-disk tiled split
+        True
     """
     assert (
         evaluate.run(

@@ -31,12 +31,23 @@ def _seed_rng() -> None:
 
 
 def _feature_sizes(input_size: int) -> list[tuple[int, int]]:
-    """Return the per-level ``(H, W)`` cell counts for a square input."""
+    """Return the per-level ``(H, W)`` cell counts for a square input.
+
+    Examples:
+        >>> _feature_sizes(640)
+        [(80, 80), (40, 40), (20, 20)]
+    """
     return [(input_size // stride, input_size // stride) for stride in _STRIDES]
 
 
 def _make_features(input_size: int, channels: tuple[int, int, int], batch: int = 2) -> tuple[torch.Tensor, ...]:
-    """Build random neck-style feature maps at strides 8/16/32."""
+    """Build random neck-style feature maps at strides 8/16/32.
+
+    Examples:
+        >>> features = _make_features(640, (64, 128, 256))
+        >>> [f.shape for f in features]
+        [torch.Size([2, 64, 80, 80]), torch.Size([2, 128, 40, 40]), torch.Size([2, 256, 20, 20])]
+    """
     return tuple(
         torch.randn(batch, ch, height, width)
         for ch, (height, width) in zip(channels, _feature_sizes(input_size), strict=True)

@@ -78,7 +78,12 @@ def _seed_rng() -> None:
 
 
 def _ltrb_from_envelope(envelope: tuple[float, float, float, float], point: Tensor, stride: Tensor) -> Tensor:
-    """Return the raw ltrb distances that decode to ``envelope`` from ``point``."""
+    """Return the raw ltrb distances that decode to ``envelope`` from ``point``.
+
+    Examples:
+        >>> _ltrb_from_envelope((0.0, 0.0, 8.0, 8.0), torch.tensor([4.0, 4.0]), torch.tensor(4.0)).tolist()
+        [1.0, 1.0, 1.0, 1.0]
+    """
     x1, y1, x2, y2 = envelope
     return torch.tensor(
         [
@@ -110,6 +115,13 @@ def _plant(
 
     Returns:
         ``(cls_logits, raw_ltrb, angles, anchor_points, strides)`` for a batch of one.
+
+    Examples:
+        >>> cls_logits, raw_ltrb, angles, points, strides = _plant([(32.0, 32.0, 20.0, 2.0, 0.7)], [6.0], [1])
+        >>> cls_logits.shape
+        torch.Size([1, 4, 3])
+        >>> round(float(angles[0, 0, 0]), 4)
+        0.7
     """
     points, strides = make_anchor_points([_GRID], [_STRIDE])
     anchors = points.shape[0]
@@ -126,7 +138,12 @@ def _plant(
 
 
 def _envelope_iou(first: tuple[float, ...], second: tuple[float, ...]) -> float:
-    """Return the IoU of two rotated boxes' axis-aligned envelopes — what upright NMS sees."""
+    """Return the IoU of two rotated boxes' axis-aligned envelopes — what upright NMS sees.
+
+    Examples:
+        >>> _envelope_iou((0.0, 0.0, 4.0, 4.0, 0.0), (0.0, 0.0, 4.0, 4.0, 0.0))
+        1.0
+    """
     corners = []
     for centre_x, centre_y, width, height, theta in (first, second):
         half_w = (width * abs(math.cos(theta)) + height * abs(math.sin(theta))) / 2
@@ -139,7 +156,14 @@ def _envelope_iou(first: tuple[float, ...], second: tuple[float, ...]) -> float:
 
 
 def _survivors(detections: Tensor) -> Tensor:
-    """Return one image's rows with a non-zero score, dropping the padding."""
+    """Return one image's rows with a non-zero score, dropping the padding.
+
+    Examples:
+        >>> detections = torch.zeros(1, 3, 7)
+        >>> detections[0, 0, 5] = 0.9
+        >>> _survivors(detections).shape
+        torch.Size([1, 7])
+    """
     return detections[0, detections[0, :, 5] > 0.0]
 
 

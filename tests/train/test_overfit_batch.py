@@ -134,7 +134,12 @@ def reset_random_seeds() -> Iterator[None]:
 
 
 def _first_nonempty_targets(dataset: CocoDetectionDataset, count: int) -> list[Targets]:
-    """Return the first ``count`` samples' targets that carry at least one box."""
+    """Return the first ``count`` samples' targets that carry at least one box.
+
+    Examples:
+        >>> callable(_first_nonempty_targets)  # needs a live CocoDetectionDataset
+        True
+    """
     collected: list[Targets] = []
     for index in range(len(dataset)):
         _, targets = dataset[index]
@@ -146,7 +151,16 @@ def _first_nonempty_targets(dataset: CocoDetectionDataset, count: int) -> list[T
 
 
 def _pad_targets(targets_list: list[Targets]) -> tuple[Tensor, Tensor, Tensor]:
-    """Pad a ragged list of targets into dense ``(B, N, *)`` boxes/labels/mask."""
+    """Pad a ragged list of targets into dense ``(B, N, *)`` boxes/labels/mask.
+
+    Examples:
+        >>> from lucid_yolo.data.targets import Targets
+        >>> a = Targets(boxes=torch.zeros(2, 4), labels=torch.zeros(2, dtype=torch.int64))
+        >>> b = Targets(boxes=torch.zeros(1, 4), labels=torch.zeros(1, dtype=torch.int64))
+        >>> gt_boxes, gt_labels, gt_mask = _pad_targets([a, b])
+        >>> gt_boxes.shape, gt_mask.tolist()
+        (torch.Size([2, 2, 4]), [[True, True], [True, False]])
+    """
     batch = len(targets_list)
     max_n = max(targets.boxes.shape[0] for targets in targets_list)
     gt_boxes = torch.zeros(batch, max_n, 4)
@@ -161,7 +175,12 @@ def _pad_targets(targets_list: list[Targets]) -> tuple[Tensor, Tensor, Tensor]:
 
 
 def _load_batch(fixture_dir: Path) -> _Batch:
-    """Build the letterboxed overfit batch and its anchor grid from the fixture."""
+    """Build the letterboxed overfit batch and its anchor grid from the fixture.
+
+    Examples:
+        >>> callable(_load_batch)  # needs a live detseg_fixture_dir fixture
+        True
+    """
     split = fixture_dir / "train"
     dataset = CocoDetectionDataset(split, split / "_annotations.coco.json", transforms=Letterbox(_IMG_SIZE))
     gt_boxes, gt_labels, gt_mask = _pad_targets(_first_nonempty_targets(dataset, _BATCH_SIZE))
@@ -178,7 +197,18 @@ def _load_batch(fixture_dir: Path) -> _Batch:
 
 
 def _new_predictions(batch: _Batch) -> tuple[nn.Parameter, nn.Parameter]:
-    """Create the two zero-initialized learnable prediction tensors for ``batch``."""
+    """Create the two zero-initialized learnable prediction tensors for ``batch``.
+
+    Examples:
+        >>> batch = _Batch(
+        ...     anchor_points=torch.zeros(5, 2), strides=torch.ones(5),
+        ...     gt_boxes=torch.zeros(2, 1, 4), gt_labels=torch.zeros(2, 1, dtype=torch.int64),
+        ...     gt_mask=torch.ones(2, 1, dtype=torch.bool), num_classes=4,
+        ... )
+        >>> logits, box_raw = _new_predictions(batch)
+        >>> logits.shape, box_raw.shape
+        (torch.Size([2, 5, 4]), torch.Size([2, 5, 4]))
+    """
     anchors = batch.anchor_points.shape[0]
     logits = nn.Parameter(torch.zeros(_BATCH_SIZE, anchors, batch.num_classes))
     box_raw = nn.Parameter(torch.zeros(_BATCH_SIZE, anchors, 4))
@@ -186,7 +216,15 @@ def _new_predictions(batch: _Batch) -> tuple[nn.Parameter, nn.Parameter]:
 
 
 def _decode_boxes(box_raw: Tensor, anchor_points: Tensor, strides: Tensor) -> Tensor:
-    """Map raw box params to valid ``xyxy`` via anchor-centred, stride-scaled ltrb."""
+    """Map raw box params to valid ``xyxy`` via anchor-centred, stride-scaled ltrb.
+
+    Examples:
+        >>> anchor_points = torch.tensor([[10.0, 10.0]])
+        >>> strides = torch.tensor([8.0])
+        >>> boxes = _decode_boxes(torch.zeros(1, 1, 4), anchor_points, strides)
+        >>> [round(v, 3) for v in boxes[0, 0].tolist()]
+        [4.455, 4.455, 15.545, 15.545]
+    """
     distances = F.softplus(box_raw) * strides.view(1, -1, 1)  # (B, A, 4), non-negative
     left, top, right, bottom = distances.unbind(-1)
     center_x = anchor_points[:, 0]
@@ -198,7 +236,20 @@ def _decode_boxes(box_raw: Tensor, anchor_points: Tensor, strides: Tensor) -> Te
 
 
 def _components(out: DualLossOutput) -> tuple[Tensor, ...]:
-    """Return every scalar component of a dual-loss output for finiteness checks."""
+    """Return every scalar component of a dual-loss output for finiteness checks.
+
+    Examples:
+        >>> anchor_points, strides = torch.zeros(1, 2), torch.ones(1)
+        >>> boxes = torch.tensor([[[0.0, 0.0, 1.0, 1.0]]])
+        >>> gt_boxes = torch.zeros(1, 1, 4)
+        >>> gt_labels, gt_mask = torch.zeros(1, 1, dtype=torch.int64), torch.ones(1, 1, dtype=torch.bool)
+        >>> logits = torch.zeros(1, 1, 4)
+        >>> out = DualBranchLoss()(
+        ...     logits, boxes, logits, boxes, anchor_points, gt_boxes, gt_labels, gt_mask, strides=strides
+        ... )
+        >>> len(_components(out))
+        9
+    """
     return (
         out.total,
         out.o2m.total,
@@ -213,20 +264,48 @@ def _components(out: DualLossOutput) -> tuple[Tensor, ...]:
 
 
 def _grad(param: Tensor) -> Tensor:
-    """Return a leaf's populated gradient, asserting ``backward`` filled it in."""
+    """Return a leaf's populated gradient, asserting ``backward`` filled it in.
+
+    Examples:
+        >>> param = nn.Parameter(torch.ones(1))
+        >>> (param * 3).backward()
+        >>> _grad(param)
+        tensor([3.])
+    """
     assert param.grad is not None, "expected a gradient after backward"
     return param.grad
 
 
 def _step_is_finite(out: DualLossOutput, logits: Tensor, box_raw: Tensor) -> bool:
-    """Whether every loss component and both post-backward gradients are finite."""
+    """Whether every loss component and both post-backward gradients are finite.
+
+    Examples:
+        >>> batch = _Batch(
+        ...     anchor_points=torch.zeros(1, 2), strides=torch.ones(1),
+        ...     gt_boxes=torch.zeros(2, 1, 4), gt_labels=torch.zeros(2, 1, dtype=torch.int64),
+        ...     gt_mask=torch.ones(2, 1, dtype=torch.bool), num_classes=4,
+        ... )
+        >>> logits, box_raw = _new_predictions(batch)
+        >>> boxes = _decode_boxes(box_raw, batch.anchor_points, batch.strides)
+        >>> out = DualBranchLoss()(
+        ...     logits, boxes, logits, boxes, batch.anchor_points, batch.gt_boxes, batch.gt_labels, batch.gt_mask
+        ... )
+        >>> out.total.backward()
+        >>> _step_is_finite(out, logits, box_raw)
+        True
+    """
     if not all(bool(torch.isfinite(component).all()) for component in _components(out)):
         return False
     return bool(torch.isfinite(_grad(logits)).all()) and bool(torch.isfinite(_grad(box_raw)).all())
 
 
 def _run_overfit(batch: _Batch) -> _Trajectory:
-    """Overfit the learnable predictions on ``batch`` for ``_STEPS`` Adam steps."""
+    """Overfit the learnable predictions on ``batch`` for ``_STEPS`` Adam steps.
+
+    Examples:
+        >>> callable(_run_overfit)  # 200 Adam steps -- exercised by the module's own tests
+        True
+    """
     logits, box_raw = _new_predictions(batch)
     loss_fn = DualBranchLoss()
     optimizer = torch.optim.Adam([logits, box_raw], lr=_LR)
@@ -244,7 +323,18 @@ def _run_overfit(batch: _Batch) -> _Trajectory:
 
 
 def _one_step(batch: _Batch, alpha: float) -> _StepResult:
-    """Run a single forward/backward at branch weight ``alpha`` and report diagnostics."""
+    """Run a single forward/backward at branch weight ``alpha`` and report diagnostics.
+
+    Examples:
+        >>> batch = _Batch(
+        ...     anchor_points=torch.zeros(1, 2), strides=torch.ones(1),
+        ...     gt_boxes=torch.zeros(2, 1, 4), gt_labels=torch.zeros(2, 1, dtype=torch.int64),
+        ...     gt_mask=torch.ones(2, 1, dtype=torch.bool), num_classes=4,
+        ... )
+        >>> result = _one_step(batch, alpha=0.5)
+        >>> result.components_finite, result.grads_finite
+        (True, True)
+    """
     logits, box_raw = _new_predictions(batch)
     loss_fn = DualBranchLoss()
     loss_fn.alpha = alpha
@@ -263,7 +353,12 @@ def _one_step(batch: _Batch, alpha: float) -> _StepResult:
 
 
 def _window_mean(totals: list[float], start: int) -> float:
-    """Mean of the ``_WINDOW`` loss values beginning at ``start``."""
+    """Mean of the ``_WINDOW`` loss values beginning at ``start``.
+
+    Examples:
+        >>> _window_mean([1.0, 2.0, 3.0, 4.0], start=1)  # doctest: +ELLIPSIS
+        3...
+    """
     window = totals[start : start + _WINDOW]
     return sum(window) / len(window)
 

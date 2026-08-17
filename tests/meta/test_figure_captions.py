@@ -69,6 +69,11 @@ def _render(labels: list[str]) -> dict[str, Glyphs]:
     One figure carries every label, so a whole SVG is checked against a single
     render. Glyph indices do not depend on position or size, and the reference
     goes to a string buffer, so nothing here touches the committed files.
+
+    Examples:
+        >>> glyphs = _render(["hi"])
+        >>> list(glyphs)
+        ['hi']
     """
     figure = plt.figure()
     for position, label in enumerate(labels):

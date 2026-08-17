@@ -45,19 +45,40 @@ def _seed_rng() -> None:
 
 
 def _anchor_count() -> int:
-    """Return the anchor count for a square ``_IMG_SIZE`` input from the shared grid."""
+    """Return the anchor count for a square ``_IMG_SIZE`` input from the shared grid.
+
+    Examples:
+        >>> _anchor_count()
+        336
+    """
     feature_sizes = [(_IMG_SIZE // stride, _IMG_SIZE // stride) for stride in _STRIDES]
     anchor_points, _ = make_anchor_points(feature_sizes, _STRIDES)
     return int(anchor_points.shape[0])
 
 
 def _build() -> Segmenter:
-    """Return the small evaluated segmenter shared by the gates below."""
+    """Return the small evaluated segmenter shared by the gates below.
+
+    Examples:
+        >>> segmenter = _build()
+        >>> type(segmenter).__name__
+        'Segmenter'
+        >>> segmenter.training
+        False
+    """
     return Segmenter(_VARIANT, num_classes=_NUM_CLASSES, num_coeffs=_NUM_COEFFS).eval()
 
 
 def _capture_input(store: dict[str, Tensor], key: str) -> Callable[[nn.Module, tuple[Tensor, ...]], None]:
-    """Build a forward pre-hook recording the exact tensor object a module received."""
+    """Build a forward pre-hook recording the exact tensor object a module received.
+
+    Examples:
+        >>> store: dict[str, Tensor] = {}
+        >>> hook = _capture_input(store, "x")
+        >>> hook(None, (torch.tensor([1.0, 2.0]),))
+        >>> store["x"].tolist()
+        [1.0, 2.0]
+    """
 
     def hook(module: nn.Module, inputs: tuple[Tensor, ...]) -> None:
         store[key] = inputs[0]

@@ -111,6 +111,13 @@ def _collate_unpacked(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list
     form never fires; this wrapper runs the same collate -> restore round-trip the
     datamodule performs in production (dequantizing the uint8 images and unpacking the
     targets) so the module receives its float images and ragged target list.
+
+    Examples:
+        >>> boxes = torch.tensor([[8.0, 8.0, 24.0, 24.0]])
+        >>> sample = (torch.randn(3, 32, 32), Targets(boxes=boxes, labels=torch.tensor([1])))
+        >>> images, targets = _collate_unpacked([sample])
+        >>> images.shape, len(targets)
+        (torch.Size([1, 3, 32, 32]), 1)
     """
     return unpack_batch(collate_detection(batch))
 

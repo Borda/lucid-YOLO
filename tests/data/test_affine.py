@@ -29,17 +29,37 @@ def reset_random_seeds() -> Iterator[None]:
 
 
 def _generator(seed: int = 1234) -> torch.Generator:
-    """Return a CPU generator seeded to ``seed`` for reproducible sampling."""
+    """Return a CPU generator seeded to ``seed`` for reproducible sampling.
+
+    Examples:
+        >>> torch.rand(1, generator=_generator()).item()
+        0.028979241847991943
+    """
     return torch.Generator().manual_seed(seed)
 
 
 def _image() -> torch.Tensor:
-    """Return a random CHW float image on the canvas."""
+    """Return a random CHW float image on the canvas.
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> _image().shape
+        torch.Size([3, 64, 64])
+    """
     return torch.rand(3, _CANVAS, _CANVAS)
 
 
 def _polygon_targets() -> Targets:
-    """Build two square polygon rings well inside the canvas, with matching boxes."""
+    """Build two square polygon rings well inside the canvas, with matching boxes.
+
+    Examples:
+        >>> targets = _polygon_targets()
+        >>> targets.boxes.tolist()
+        [[10.0, 12.0, 30.0, 34.0], [40.0, 20.0, 55.0, 50.0]]
+        >>> targets.labels.tolist()
+        [0, 1]
+    """
     rings = [
         torch.tensor([[10.0, 12.0], [30.0, 12.0], [30.0, 34.0], [10.0, 34.0]]),
         torch.tensor([[40.0, 20.0], [55.0, 20.0], [55.0, 50.0], [40.0, 50.0]]),

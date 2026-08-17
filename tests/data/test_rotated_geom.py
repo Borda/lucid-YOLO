@@ -72,12 +72,24 @@ _ROUNDTRIP_CASES = [
 
 
 def _rbox(w: float, h: float, theta: float) -> torch.Tensor:
-    """Return a single ``(1, 5)`` float32 rotated box centred at ``(7, -2)``."""
+    """Return a single ``(1, 5)`` float32 rotated box centred at ``(7, -2)``.
+
+    Examples:
+        >>> _rbox(6.0, 3.0, 0.3)
+        tensor([[ 7.0000, -2.0000,  6.0000,  3.0000,  0.3000]])
+    """
     return torch.tensor([[7.0, -2.0, w, h, theta]], dtype=torch.float32)
 
 
 def _step_ulps(value: torch.Tensor, steps: int) -> float:
-    """Return ``value`` moved ``steps`` float32 ulps, negative steps moving downwards."""
+    """Return ``value`` moved ``steps`` float32 ulps, negative steps moving downwards.
+
+    Examples:
+        >>> _step_ulps(torch.tensor(1.0), 1) > 1.0
+        True
+        >>> _step_ulps(torch.tensor(1.0), 0) == 1.0
+        True
+    """
     current = value.to(torch.float32)
     towards = torch.tensor(-torch.inf if steps < 0 else torch.inf, dtype=torch.float32)
     for _ in range(abs(steps)):
@@ -90,6 +102,13 @@ def _point_grid() -> torch.Tensor:
 
     The fractional offsets keep every point clear of any test box's edges, so a
     containment comparison cannot flip on a point sitting exactly on a boundary.
+
+    Examples:
+        >>> grid = _point_grid()
+        >>> grid.shape
+        torch.Size([625, 2])
+        >>> [round(v, 3) for v in grid[0].tolist()]
+        [1.123, -7.923]
     """
     axis = torch.arange(-6.0, 6.5, 0.5, dtype=torch.float32)
     xs, ys = torch.meshgrid(axis + 7.123, axis - 1.923, indexing="ij")

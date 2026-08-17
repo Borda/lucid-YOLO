@@ -21,6 +21,10 @@ def _load_guard() -> ModuleType:
 
     The module is registered in ``sys.modules`` before execution so its frozen
     dataclass resolves its own module under ``from __future__ import annotations``.
+
+    Examples:
+        >>> callable(_load_guard().main)
+        True
     """
     spec = importlib.util.spec_from_file_location("release_guard", GUARD_PATH)
     assert spec is not None and spec.loader is not None
@@ -34,7 +38,15 @@ guard = _load_guard()
 
 
 def _write_changelog(tmp_path: Path, version: str) -> Path:
-    """Write a minimal changelog carrying a ``## [<version>]`` section."""
+    """Write a minimal changelog carrying a ``## [<version>]`` section.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = _write_changelog(Path(tmp), "0.1.0")
+        ...     "## [0.1.0]" in path.read_text()
+        True
+    """
     path = tmp_path / "CHANGELOG.md"
     path.write_text(f"# Changelog\n\n## [{version}]\n\n### Added\n\n- thing\n", encoding="utf-8")
     return path

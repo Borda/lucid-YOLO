@@ -45,7 +45,17 @@ _COPY_PASTE_VARIANT = "x"
 
 
 def _write_image(path: Path) -> None:
-    """Write one fixture-sized PNG at ``path``, creating its directory."""
+    """Write one fixture-sized PNG at ``path``, creating its directory.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     png = Path(tmp) / "sub" / "frame0.png"
+        ...     _write_image(png)
+        ...     png.is_file()
+        True
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     write_png(torch.zeros(3, _HEIGHT, _WIDTH, dtype=torch.uint8), str(path))
 
@@ -58,6 +68,13 @@ def _coco_payload() -> dict[str, object]:
 
     Returns:
         The payload, ready to serialise.
+
+    Examples:
+        >>> payload = _coco_payload()
+        >>> sorted(payload.keys())
+        ['annotations', 'categories', 'images']
+        >>> len(payload["images"])
+        2
     """
     return {
         "images": [
@@ -87,6 +104,14 @@ def _write_coco_root(root: Path) -> Path:
 
     Returns:
         ``root``, now holding both splits and their annotation files.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = _write_coco_root(Path(tmp))
+        ...     sorted(p.name for p in (root / "train").iterdir())
+        ['frame0.png', 'frame1.png']
     """
     for split in ("train", "val"):
         for stem in _IMAGE_STEMS:
@@ -110,6 +135,14 @@ def _write_yolo_root(root: Path, row: str = _DETECTION_ROW) -> Path:
 
     Returns:
         ``root``, now holding ``data.yaml``, both image trees and their label trees.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = _write_yolo_root(Path(tmp))
+        ...     (root / "data.yaml").is_file()
+        True
     """
     for directory in ("train", "valid"):
         for stem in _IMAGE_STEMS:
@@ -132,6 +165,14 @@ def _datamodule(data_root: Path, **kwargs: object) -> DetectionDataModule:
 
     Returns:
         The constructed datamodule; no split is built until ``setup``.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     dm = _datamodule(Path(tmp))
+        ...     type(dm).__name__
+        'DetectionDataModule'
     """
     settings: dict[str, object] = {
         "batch_size": 2,

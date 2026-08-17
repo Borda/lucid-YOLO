@@ -61,6 +61,13 @@ def _converged_state() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.
 
     Returns:
         ``(logits, ltrb, anchor_points, strides, gt_boxes, gt_labels)``.
+
+    Examples:
+        >>> logits, ltrb, anchor_points, strides, gt_boxes, gt_labels = _converged_state()
+        >>> anchor_points.shape[0] == strides.shape[0]
+        True
+        >>> gt_boxes.shape, gt_labels.shape
+        (torch.Size([1, 1, 4]), torch.Size([1, 1]))
     """
     box = torch.tensor([16.0, 16.0, 112.0, 112.0])
     grids = []
@@ -82,7 +89,13 @@ def _converged_state() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.
 
 
 def _l1_term(strides: torch.Tensor | None) -> float:
-    """Return the raw one-to-one L1 term for the converged state in the given frame."""
+    """Return the raw one-to-one L1 term for the converged state in the given frame.
+
+    Examples:
+        >>> _, _, _, strides, _, _ = _converged_state()
+        >>> _l1_term(strides) < 1.0
+        True
+    """
     logits, ltrb, anchor_points, anchor_strides, gt_boxes, gt_labels = _converged_state()
     boxes = decode_ltrb(ltrb, anchor_points, anchor_strides)
     gt_mask = torch.ones(1, 1, dtype=torch.bool)

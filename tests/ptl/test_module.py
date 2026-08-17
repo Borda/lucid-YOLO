@@ -66,12 +66,28 @@ def reset_random_seeds() -> Iterator[None]:
 
 
 def _tiny_module(task: str = "detect") -> DetectionLitModule:
-    """Build an n-scale module with a low channel cap for fast CPU tests."""
+    """Build an n-scale module with a low channel cap for fast CPU tests.
+
+    Examples:
+        >>> module = _tiny_module()
+        >>> module.task
+        'detect'
+        >>> _tiny_module(task="segment").task
+        'segment'
+    """
     return DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=_NUM_CLASSES, task=task)
 
 
 def _synthetic_targets(num_boxes: int) -> Targets:
-    """Build ``num_boxes`` valid ``xyxy`` targets inside the test image."""
+    """Build ``num_boxes`` valid ``xyxy`` targets inside the test image.
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> targets = _synthetic_targets(2)
+        >>> targets.boxes.shape, targets.labels.shape
+        (torch.Size([2, 4]), torch.Size([2]))
+    """
     top_left = torch.rand(num_boxes, 2) * 80.0
     size = torch.rand(num_boxes, 2) * 40.0 + 10.0
     boxes = torch.cat([top_left, top_left + size], dim=1)
@@ -80,14 +96,35 @@ def _synthetic_targets(num_boxes: int) -> Targets:
 
 
 def _synthetic_batch() -> tuple[Tensor, list[Targets]]:
-    """Build a two-image batch with ragged (2 and 1) instance counts."""
+    """Build a two-image batch with ragged (2 and 1) instance counts.
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> images, targets = _synthetic_batch()
+        >>> images.shape
+        torch.Size([2, 3, 160, 160])
+        >>> [target.boxes.shape[0] for target in targets]
+        [2, 1]
+    """
     images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
     targets = [_synthetic_targets(2), _synthetic_targets(1)]
     return images, targets
 
 
 def _with_polygons(target: Targets) -> Targets:
-    """Attach the rectangular ring of each box, so a segment module can supervise masks."""
+    """Attach the rectangular ring of each box, so a segment module can supervise masks.
+
+    Examples:
+        >>> boxes = torch.tensor([[0.0, 0.0, 4.0, 2.0]])
+        >>> target = Targets(boxes=boxes, labels=torch.tensor([0]))
+        >>> polygoned = _with_polygons(target)
+        >>> len(polygoned.polygons), polygoned.polygons[0]
+        (1, tensor([[0., 0.],
+                [4., 0.],
+                [4., 2.],
+                [0., 2.]]))
+    """
     rings = [
         torch.tensor([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=torch.float32)
         for x1, y1, x2, y2 in target.boxes.tolist()
@@ -96,13 +133,33 @@ def _with_polygons(target: Targets) -> Targets:
 
 
 def _synthetic_batch_with_polygons() -> tuple[Tensor, list[Targets]]:
-    """Build the same ragged batch with one polygon ring per instance."""
+    """Build the same ragged batch with one polygon ring per instance.
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> images, targets = _synthetic_batch_with_polygons()
+        >>> [len(target.polygons) for target in targets]  # one ring per box
+        [2, 1]
+    """
     images, targets = _synthetic_batch()
     return images, [_with_polygons(target) for target in targets]
 
 
 def _dual_loss_output(module: DetectionLitModule, images: Tensor, targets: list[Targets]) -> DualLossOutput:
-    """Score the module's own dual detection loss over a batch (the reference total)."""
+    """Score the module's own dual detection loss over a batch (the reference total).
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> module = _tiny_module()
+        >>> images, targets = _synthetic_batch()
+        >>> out = _dual_loss_output(module, images, targets)
+        >>> isinstance(out, DualLossOutput)
+        True
+        >>> bool(torch.isfinite(out.total))
+        True
+    """
     head_out = module(images)
     points, strides = module._anchor_grid(images.shape[-2], images.shape[-1], images.device)
     gt_boxes, gt_labels, gt_mask = pad_targets(targets)
@@ -126,6 +183,16 @@ def _collate_unpacked(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list
     fires, so this loader-side wrapper reproduces the same collate -> restore round
     trip the datamodule runs in production (dequantizing the uint8 images and
     unpacking the targets), handing the module its float images and ragged list.
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> sample = (torch.randn(3, _IMG_SIZE, _IMG_SIZE), _synthetic_targets(2))
+        >>> images, targets = _collate_unpacked([sample])
+        >>> images.shape
+        torch.Size([1, 3, 160, 160])
+        >>> len(targets)
+        1
     """
     return unpack_batch(collate_detection(batch))
 

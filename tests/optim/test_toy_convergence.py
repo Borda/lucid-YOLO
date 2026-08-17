@@ -24,7 +24,13 @@ GOLDEN = REPO_ROOT / "goldens" / "optim_toy.json"
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
-    """Load a ``scripts/`` module by file path and register it for dataclass/exec support."""
+    """Load a ``scripts/`` module by file path and register it for dataclass/exec support.
+
+    Examples:
+        >>> module = _load_module("check_goldens_doctest", HARNESS_PATH)
+        >>> hasattr(module, "check_golden")
+        True
+    """
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
