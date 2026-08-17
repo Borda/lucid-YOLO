@@ -27,7 +27,7 @@ globs only top-level and ``frozen/`` goldens — never recomputes it; it is chec
 only under ``check_goldens.py --include-gpu`` on a machine with an accelerator.
 
 The model recipe (variant, optimizer/loss gains, the progressive-loss endpoints,
-seed, batch size) is read from ``configs/overfit_100.yaml`` so that file stays the
+seed, batch size) is read from ``lucid_yolo/configs/overfit_100.yaml`` so that file stays the
 single source of truth. The image size (:data:`_IMG_SIZE`), the epoch budget
 (:data:`_EPOCHS`, tuned above the recipe's documented 40 to clear the floor from
 scratch), and the gradient clip (:data:`_GRAD_CLIP`, standing in for the deferred-A8
@@ -208,7 +208,7 @@ _BOX_COLUMNS = 4
 
 @dataclass(frozen=True)
 class Recipe:
-    """Hyperparameters read from ``configs/overfit_100.yaml`` for the overfit run.
+    """Hyperparameters read from ``lucid_yolo/configs/overfit_100.yaml`` for the overfit run.
 
     Attributes:
         variant: Scale letter selecting the compound-scaling multipliers.
@@ -245,7 +245,7 @@ class Recipe:
 def load_recipe(path: Path = _RECIPE_PATH) -> Recipe:
     """Load the overfit hyperparameters from the LightningCLI-style recipe YAML.
 
-    Reads ``configs/overfit_100.yaml`` and lifts the model/optimizer/loss knobs, the
+    Reads ``lucid_yolo/configs/overfit_100.yaml`` and lifts the model/optimizer/loss knobs, the
     ``variant``, ``seed`` and ``batch_size`` so that file stays the single source of
     truth for the model recipe. The placeholder ``data`` paths are ignored — the slice
     is generated fresh. The epoch budget is **not** taken from the config's documented
@@ -254,7 +254,7 @@ def load_recipe(path: Path = _RECIPE_PATH) -> Recipe:
     from epoch 0, exactly as the config's ``close_mosaic == max_epochs`` intends.
 
     Args:
-        path: The recipe YAML path. Defaults to ``configs/overfit_100.yaml``.
+        path: The recipe YAML path. Defaults to ``lucid_yolo/configs/overfit_100.yaml``.
 
     Returns:
         The parsed :class:`Recipe`.

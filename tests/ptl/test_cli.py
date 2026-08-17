@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the detection LightningCLI and the experiment configs (WP-038).
 
-Covers the DoD: every file under ``configs/`` dry-parses through the CLI parser
+Covers the DoD: every file under ``lucid_yolo/configs/`` dry-parses through the CLI parser
 (``LightningCLI(run=False)`` -- classes are instantiated, ``fit`` never runs) and
 the resolved config survives a YAML round trip unchanged
 (``test_yaml_roundtrip``). Alongside those, the ADR-001 boundary is asserted from
@@ -31,7 +31,7 @@ from lucid_yolo.models.registry import scale_spec
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.module import DetectionLitModule
 
-#: Packaged configs tree (``lucid_yolo/configs``; the repo-root ``configs`` symlinks here).
+#: Packaged configs tree.
 _CONFIGS_DIR = Path(lucid_yolo.__file__).resolve().parent / "configs"
 #: Every experiment config, sorted for stable parametrization ids.
 _CONFIG_PATHS = sorted(_CONFIGS_DIR.glob("*.yaml"))

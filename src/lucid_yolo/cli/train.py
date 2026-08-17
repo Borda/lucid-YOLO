@@ -6,7 +6,7 @@
 :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule`, so a run is launched
 entirely from YAML::
 
-    python -m lucid_yolo.cli.train fit --config configs/det_smoke.yaml
+    python -m lucid_yolo.cli.train fit --config det_smoke.yaml
 
 or, once the package is installed, through the ``lucid-yolo`` console script.
 
