@@ -262,9 +262,22 @@ Evaluated by `lucid-eval` on the DOTA-v1.0 val split, tiled identically: 10,132 
 
 EMA is worth `+0.0047` mAP50-95 — small, positive, and the opposite sign to Det-smoke, where raw scored marginally higher.
 
-**Every figure above is per tile.** Detections from overlapping tiles are not merged back onto whole images: on an NMS-free path two tiles detecting one object have nothing to suppress the duplicate, so the merge is a policy that must be decided rather than inherited, and it belongs to roadmap 064. A per-tile score never pays the duplicate cost whole-image evaluation charges, so **these numbers are not comparable to published DOTA results**. That is a property of the measurement, not a hedge about its precision.
+**Every figure above is per tile.** Detections from overlapping tiles are not merged back onto whole images here: on an NMS-free path two tiles detecting one object have nothing to suppress the duplicate, so the merge is a policy that must be decided rather than inherited. WP-107 built that policy and roadmap 111 runs it against this checkpoint, below. A per-tile score never pays the duplicate cost whole-image evaluation charges, so **these numbers are not comparable to published DOTA results**. That is a property of the measurement, not a hedge about its precision.
 
 **Two independent measurements agree to four decimals.** The same checkpoint scores 0.2914 / 0.5242 on Apple MPS here and 0.2914 / 0.5243 on CUDA in the operator's own run — two accelerators, two tile builds from the same source archive, two machines. That is evidence about the evaluator and the tiler, not about the model, and it is the strongest cross-platform agreement this project has recorded; A26 still declines to claim bitwise reproduction.
+
+### The whole-image figure (roadmap 111)
+
+The same checkpoint, re-scored through `merge_whole_images` (WP-107) on the same DOTA-v1.0 val split, CUDA, 458 source images:
+
+| weights | scope | rotated mAP50-95 | rotated mAP50 | rotated mAP75 | rotated mAR_300 |
+| -- | -- | -- | -- | -- | -- |
+| EMA | per tile | 0.2914 | 0.5242 | 0.2770 | 0.5075 |
+| EMA | whole image | **0.3146** | 0.5484 | 0.3111 | 0.5193 |
+
+Every figure rises, not falls. WP-107's own log entry states the merge in isolation "can only *lower*" a per-tile number, and that remains true of core ownership alone — the reason this run runs the other way is A60, exercised here for the first time against real data: whole-image scoring drops the per-tile 300-detection cap (`o2o_rotated_topk`'s own emission limit, A47), because a source image assembled from roughly 22 tiles is not one forward pass and re-imposing 300 on it would measure a truncation rather than the model. That cap-lifting and the core-ownership merge run together in this measurement rather than separately, so the split between them is not isolated here — see [research log](RESEARCH_LOG.md#wp-111).
+
+This is, for the first time, a figure of the same *statistic* [R1 Tables 10-11] report — whole-image rotated mAP. It is still not compared against those tables in this section: the deviations below (epoch budget, no pretraining, batch/resolution choices) stand regardless of which statistic is quoted, and the design's own target is the paper's relative claims, not its absolute ones (design doc §5.11, §7).
 
 ### Acceptance, and a criterion that no longer fits
 
@@ -282,7 +295,7 @@ What the acceptance was given on:
 
 The stability row is stated precisely because Det-smoke and Seg-smoke both recorded strictly monotone validation descent and this run did not. Fifteen of forty-nine epoch-to-epoch steps rise, and the shape of that set is what makes it noise rather than divergence: the only two rises worth a number are 5.7% at epoch 3 and 8.4% at epoch 9, inside the warmup and just after it, while every rise from epoch 32 onward is at most 0.15% — six of them, on a curve that is by then flat to three decimals. The minimum is at epoch 48 rather than 49, by 0.0023. This is a different observation from the earlier two tiers, so it is written as one rather than folded into the same "monotonic" phrase.
 
-**What a fit criterion would need.** Roadmap 064 owns the whole-image merge, and a whole-image number is the first figure this project could compare against anything published. Until then the honest statement is the one this section makes: a per-tile rotated mAP50 of 0.52 from a 50-epoch n-scale run, on a task whose wiring gate passes at 0.94, with no external reference point.
+**What a fit criterion would need.** Roadmap 111, below, delivers the whole-image number this project could compare against anything published — but no such comparison is drawn in this section, deliberately (design doc §5.11, §7): the smoke tier's epoch budget, missing pretraining and resolution choices stand whichever statistic is quoted. The honest statement remains the one this section makes: a per-tile rotated mAP50 of 0.52 from a 50-epoch n-scale run, on a task whose wiring gate passes at 0.94, with no external reference point.
 
 ### Reading the training curves
 
@@ -319,7 +332,7 @@ Assumptions the oriented tier exercised. Full register in `ASSUMPTIONS.md`.
 
 1. **Epoch budget.** 50 epochs at n scale, against the paper's from-scratch schedules. A smoke tier by design.
 2. **No Objects365 pretraining, no evolutionary hyperparameter search** (D2).
-3. **Per-tile evaluation only.** [R1 Tables 10-11] report whole-image rotated mAP50-95 on DOTA-v1.0 val. This run reports per-tile, and the two are not the same statistic. No comparison to the paper's oriented numbers is made anywhere in this section, deliberately.
+3. **No comparison to the paper's oriented numbers.** [R1 Tables 10-11] report whole-image rotated mAP50-95 on DOTA-v1.0 val; this section now reports that statistic too (roadmap 111), but deliberately does not set it beside R1's figures — the epoch budget, missing pretraining and other deviations in this list apply regardless of which statistic is quoted, and the design's own target is the paper's relative claims (design doc §5.11, §7).
 4. **Batch 64 at 1024 px**, against 128 at 640 for the COCO tiers — 2.56× the pixels per image, so a third more pixels per step than Det-smoke's budget rather than a match for it. `lr` stayed at the config's 0.01 rather than being scaled.
 5. **512 px tiling overlap**, R18's figure rather than A21's default; see above.
 6. **The angle gain is this project's, not the paper's.** [R1] states Eq. 15 and its internal lambda and never its weight against the other terms; 0.25 is A22's reasoning, revised once already.

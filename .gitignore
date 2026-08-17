@@ -189,6 +189,4 @@ venv.bak/
 venv/
 wheels/
 .DS_Store
-
-# Parked committed bytes while `make dist-pypi` ships a README with absolute links.
-README.md.orig
+results/
