@@ -7,25 +7,30 @@ repos:
     rev: v6.0.0
     hooks:
       - id: end-of-file-fixer
+        name: "🔚 fix end of files"
         # Generated figures are byte-reproducible from scripts/plot_training.py;
         # rewriting them here would make every regeneration a spurious diff.
         exclude: ^docs/figures/.*\.svg$
       - id: trailing-whitespace
+        name: "🧹 trim trailing whitespace"
         exclude: ^docs/figures/.*\.svg$
       - id: check-yaml
+        name: "🧾 check yaml"
         # mkdocs.yml is excluded here and re-checked below: MkDocs loads it with
         # yaml.Loader, and this hook uses safe_load, which cannot construct the
         # `!!python/name:` tag Material's mermaid fence needs.
         exclude: ^mkdocs\.yml$
       - id: check-yaml
-        name: check yaml (mkdocs, unsafe tags)
+        name: "🔓 check yaml (mkdocs, unsafe tags)"
         # --unsafe checks the syntax without constructing objects, so the file is
         # still parsed rather than skipped — which is the half that catches an
         # indentation slip in a 120-line nav.
         args: ["--unsafe"]
         files: ^mkdocs\.yml$
       - id: check-toml
+        name: "⚙️ check toml"
       - id: check-added-large-files
+        name: "🐘 check for added large files"
         args: ["--maxkb=512"]
   - repo: https://github.com/hukkin/mdformat
     rev: 1.0.0
@@ -36,7 +41,7 @@ repos:
       # apply that dialect to files no site renders — the README, AGENTS.md, CHANGELOG.md
       # — so each instance is scoped to the surface it actually formats for.
       - id: mdformat
-        name: mdformat (outside docs/)
+        name: "✏️ mdformat (outside docs/)"
         # Core mdformat is CommonMark-only: it parses a GFM table as a paragraph,
         # and --wrap=no would then collapse every row onto one line. The plugin
         # (MIT, like mdformat itself) is what keeps the governance tables intact.
@@ -51,7 +56,7 @@ repos:
         # anyone chose. `docs/` is excluded here because the instance below owns it.
         exclude: ^(\.(plans|temp|reports|notes|experiments|cache)/|docs/)
       - id: mdformat
-        name: mdformat (docs/, mkdocs dialect)
+        name: "📚 mdformat (docs/, mkdocs dialect)"
         # mdformat-mkdocs (MIT) formats what the site renders and core mdformat would
         # mangle or flatten: MkDocs-style admonitions, content tabs, and the nested-list
         # indentation Material is sensitive to. It requires mdformat>=1.0.0 and
@@ -66,7 +71,7 @@ repos:
       # ruff-format then normalizes the quotes and indentation around it, so this order
       # converges in one pass where the reverse leaves ruff's output for the next commit.
       - id: docformatter
-        name: docformatter (PEP 257 docstrings)
+        name: "🐍 docformatter (PEP 257 docstrings)"
         # Config lives in [tool.docformatter]; passed explicitly because the hook runs
         # from an isolated environment and `--in-place` is the half that makes it a
         # formatter rather than a checker.
@@ -80,8 +85,10 @@ repos:
     rev: v0.16.1
     hooks:
       - id: ruff-check
+        name: "🦀 ruff check"
         args: ["--fix"]
       - id: ruff-format
+        name: "🎨 ruff format"
   - repo: local
     hooks:
       - id: mypy
@@ -155,24 +162,33 @@ repos:
         entry: .venv/bin/python scripts/lint/check_commit_trailers.py --file
         language: system
         stages: [commit-msg]
-      # `make golden` is the automatic path (part of `make gate`); this hook exists so
-      # the same check is individually callable (`pre-commit run --hook-stage manual
-      # golden-check`) without also running lint/test/the rest of the gate. `stages:
-      # [manual]` keeps it off every commit -- goldens retrain/recompute and are not
-      # cheap enough to run on a diff a golden file itself did not touch.
+      # commit-msg only sees the message being written right now; this is the
+      # --all-files-reachable half, re-validating every commit not yet on
+      # origin/main so a run over the whole tree also re-checks history, not
+      # just the newest message.
+      - id: commit-trailers-history
+        name: "📜 provenance commit trailers (unpushed history)"
+        entry: .venv/bin/python scripts/lint/check_commit_trailers.py --range origin/main..HEAD
+        language: system
+        pass_filenames: false
+        stages: [pre-commit, manual]
+      # `make golden` is the automatic path (part of `make gate`); `stages:
+      # [pre-commit, manual]` means it also runs on `pre-commit run --all-files`,
+      # at the cost of `make gate` invoking check_goldens.py twice (once here,
+      # once via the `golden` target) -- accepted so `--all-files` exercises
+      # every hook, not most of them.
       - id: golden-check
-        name: "🥇 metric golden regression (manual)"
+        name: "🥇 metric golden regression"
         entry: .venv/bin/python scripts/check_goldens.py
         language: system
         pass_filenames: false
-        stages: [manual]
-      # Release-tag time only; a no-arg invocation is a safe no-op everywhere else
-      # (`_current_tag` resolves `None` when HEAD is not exactly a tag). `stages:
-      # [manual]` keeps it off every commit for the same individually-callable
-      # uniformity as `golden-check`, not because it is unsafe to run.
+        stages: [pre-commit, manual]
+      # A no-arg invocation is a safe no-op off a tag (`_current_tag` resolves
+      # `None` when HEAD is not exactly a tag), so running it on every
+      # `--all-files` costs one `git describe` call and nothing else.
       - id: release-guard
-        name: "🛡️ release tag guard (manual)"
+        name: "🛡️ release tag guard"
         entry: .venv/bin/python scripts/release_guard.py
         language: system
         pass_filenames: false
-        stages: [manual]
+        stages: [pre-commit, manual]

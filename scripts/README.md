@@ -16,9 +16,9 @@ Every script below is a `main(argv) -> int` CLI with Google-style docstrings and
 
 | Script | Does | Invoked by | Test |
 | -- | -- | -- | -- |
-| `check_goldens.py` | Golden harness (WP-005): recomputes every `goldens/*.json` producer and compares against the frozen value, tolerance-checked. Also the `golden-check` manual pre-commit hook. | `make golden`, `make golden-gpu --include-gpu`, `pre-commit run --hook-stage manual golden-check` | `_tests/test_check_goldens.py` |
+| `check_goldens.py` | Golden harness (WP-005): recomputes every `goldens/*.json` producer and compares against the frozen value, tolerance-checked. Also the `golden-check` pre-commit hook. | `make golden`, `make golden-gpu --include-gpu`, every commit / `pre-commit run --all-files`, or standalone via `pre-commit run --hook-stage manual golden-check` | `_tests/test_check_goldens.py` |
 | `golden_producers.py` | The zero-argument, deterministic producer functions `check_goldens.py` discovers and recomputes — one per frozen golden. | Imported by `check_goldens.py`; also imported directly as a fixture source by several `tests/` suites (`tests/assign/`, `tests/data/`) | doctests only (no dedicated `_tests/test_golden_producers.py` — its producers are exercised transitively via `check_goldens.py` and the goldens it feeds) |
-| `release_guard.py` | Release gate (WP-006): a candidate tag ships only if it's a shippable `v0.MINOR.PATCH` string (ADR-002: no 1.0, ever), its changelog section exists, and `make gate` is green. No-op (exit 0) when `HEAD` isn't exactly a tag. | Release WPs [HUMAN]; also the `release-guard` manual pre-commit hook | `_tests/test_release_guard.py` |
+| `release_guard.py` | Release gate (WP-006): a candidate tag ships only if it's a shippable `v0.MINOR.PATCH` string (ADR-002: no 1.0, ever), its changelog section exists, and `make gate` is green. No-op (exit 0) when `HEAD` isn't exactly a tag. | Release WPs [HUMAN]; also the `release-guard` pre-commit hook, every commit / `pre-commit run --all-files`, or standalone via `pre-commit run --hook-stage manual release-guard` | `_tests/test_release_guard.py` |
 | `overfit_micro.py` | Overfit-100 integration golden (WP-040): trains the full stack on a fixed ~100-image synthetic slice and gates on train recall@0.5 ≥ 0.95. Needs an accelerator. | `make overfit`, `make overfit FREEZE=1` | `_tests/test_overfit_micro.py` (`gpu`/`data`-marked, run via `make test-gpu`) |
 | `shapes_regression.py` | Synthetic-shapes generalization golden (WP-083): trains on 1,800 generated scenes, scores a held-out 200 through both decode paths. Needs an accelerator, ~2 min. | `make shapes`, `make shapes FREEZE=1` | `_tests/test_shapes_regression.py` (`gpu`/`data`-marked, run via `make test-gpu`) |
 | `plot_training.py` | Renders a run's `lightning_logs/version_N/metrics.csv` as a deterministic three- or four-panel SVG for the reproduction report — fixed hashsalt, suppressed date metadata. | Release WPs, by hand | doctests only (no dedicated `_tests/test_plot_training.py`) |
@@ -33,7 +33,8 @@ Every checker here used to be a `tests/meta/` pytest test scanning the live repo
 | Script | Hook id | Checks | Runs when |
 | -- | -- | -- | -- |
 | `audit_licenses.py` | `license-audit` | Every installed distribution's declared license is Apache-compatible; flags an undeclared license per tier; scans shipped native binaries for copyleft libraries a wheel vendors without declaring. | Every commit (`always_run` — installed-environment state can drift without a tracked-file diff) |
-| `check_commit_trailers.py` | `commit-trailers` | The commit message matches AGENTS.md sec. 5: Conventional Commits subject, mandatory `WP:`/`Provenance:`/`Assumptions:`/`Gate:` trailers, provenance ids resolvable against `docs/PROVENANCE.md`. | `commit-msg` stage |
+| `check_commit_trailers.py` | `commit-trailers` | The commit message matches AGENTS.md sec. 5: Conventional Commits subject, mandatory `WP:`/`Provenance:`/`Assumptions:`/`Gate:` trailers, provenance ids resolvable against `docs/PROVENANCE.md`. | `commit-msg` stage, on the message being written |
+| `check_commit_trailers.py` | `commit-trailers-history` | Same contract, re-validated (`--range origin/main..HEAD`) over every commit not yet on `origin/main` — the `--all-files`-reachable sibling of `commit-trailers`, which has no commit message to read outside `commit-msg` stage. | Every commit / `pre-commit run --all-files`, or standalone |
 | `audit_test_doctests.py` | `test-doctest-audit` | Every non-fixture, non-`test_` module-level helper under `tests/` and `scripts/_tests/` carries a `>>>` doctest Example. | A `test_*.py` file changes, under either root |
 | `audit_docs_present.py` | `docs-present` | The docs-governance register is structurally intact: required files exist, `ASSUMPTIONS.md`/`ROADMAP.md`/`DECISIONS.md`/`PROVENANCE.md` parse as contiguous registers, cross-links resolve. | A `docs/*.md`, `AGENTS.md`, or `README.md` changes |
 | `audit_docs_site.py` | `docs-site` | The MkDocs Material site publishes the whole `docs/` tree: every page in the nav and vice versa, `tables` declared, identity fields matching `pyproject.toml`. | `mkdocs.yml`, `docs/**`, `pyproject.toml`, or the docs workflow changes |
@@ -41,10 +42,7 @@ Every checker here used to be a `tests/meta/` pytest test scanning the live repo
 | `audit_license_headers.py` | `license-headers` | `LICENSE` is Apache-2.0, `NOTICE` carries the Redmon/YOLO attribution, `README.md` carries the non-affiliation disclaimer, every `src/` file carries its SPDX header. | `LICENSE`, `NOTICE`, `README.md`, or a `src/*.py` file changes |
 | `audit_version_single_source.py` | `version-single-source` | `pyproject.toml` declares the version dynamic and `lucid_yolo.__init__.__version__` is the one place it's actually written. | `pyproject.toml` or `src/lucid_yolo/__init__.py` changes |
 
-Two more hooks live in `.pre-commit-config.yaml` under `repo: local` but audit core scripts rather than `scripts/lint/`, both `stages: [manual]` — never on a commit, only `pre-commit run --hook-stage manual <id>`:
-
-- `golden-check` → `check_goldens.py` (already the comparison `make golden` runs)
-- `release-guard` → `release_guard.py` (release-tag time only)
+Three more hooks live in `.pre-commit-config.yaml` under `repo: local` but audit core scripts rather than `scripts/lint/`, listed in the core table above: `golden-check` → `check_goldens.py`, `release-guard` → `release_guard.py`, `commit-trailers-history` → `check_commit_trailers.py --range`. All three carry `stages: [pre-commit, manual]` — every commit and `pre-commit run --all-files`, plus standalone via `pre-commit run --hook-stage manual <id>`.
 
 ## Tests (`scripts/_tests/*.py`)
 
