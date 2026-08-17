@@ -54,12 +54,12 @@ from types import ModuleType
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AUDIT_PATH = REPO_ROOT / "scripts" / "audit_licenses.py"
+AUDIT_PATH = REPO_ROOT / "scripts" / "lint" / "audit_licenses.py"
 
 
 @pytest.fixture(scope="session")
 def audit() -> ModuleType:
-    """Load ``scripts/audit_licenses.py`` as an importable module.
+    """Load ``scripts/lint/audit_licenses.py`` as an importable module.
 
     A fixture rather than a module-level import: ``scripts/`` is not a package, so the
     module has to be loaded by path, and doing that at import time makes collecting this
@@ -183,7 +183,15 @@ def test_short_gpl_license_field_is_flagged(audit: ModuleType) -> None:
 
 
 def _bundling_dist(name: str, body: str, filename: str = "LICENSE.txt") -> _StubDist:
-    """A distribution declaring a permissive license while vendoring ``body``."""
+    """A distribution declaring a permissive license while vendoring ``body``.
+
+    Examples:
+        >>> dist = _bundling_dist("vendors-lgpl", "License: LGPL-2.1-or-later\\n")
+        >>> dist.metadata.get_all("License-File")
+        ['LICENSE.txt']
+        >>> dist.read_text("licenses/LICENSE.txt")
+        'License: LGPL-2.1-or-later\\n'
+    """
     return _StubDist(
         _StubMetadata(
             name,
@@ -457,7 +465,16 @@ COPYLEFT_HEADERS = (
 
 
 def _undeclared_dist(name: str, documents: dict[str, str] | None = None) -> _StubDist:
-    """A distribution with no license field, optionally shipping license documents."""
+    """A distribution with no license field, optionally shipping license documents.
+
+    Examples:
+        >>> bare = _undeclared_dist("says-nothing")
+        >>> bare.metadata.get_all("License-File")
+        []
+        >>> shipped = _undeclared_dist("has-doc", {"LICENSE": "Apache text"})
+        >>> shipped.read_text("licenses/LICENSE")
+        'Apache text'
+    """
     documents = documents or {}
     return _StubDist(
         _StubMetadata(name, license_files=tuple(documents)),
@@ -466,7 +483,23 @@ def _undeclared_dist(name: str, documents: dict[str, str] | None = None) -> _Stu
 
 
 def _tiered_pyproject(tmp_path: Path, base: Sequence[str], dev: Sequence[str], docs: Sequence[str]) -> Path:
-    """Write a minimal pyproject declaring one tier's roots each."""
+    """Write a minimal pyproject declaring one tier's roots each.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = _tiered_pyproject(Path(tmp), base=["alpha"], dev=["beta"], docs=[])
+        ...     print(path.read_text())
+        [project]
+        name = "x"
+        version = "0"
+        dependencies = ["alpha"]
+        <BLANKLINE>
+        [dependency-groups]
+        dev = ["beta"]
+        docs = []
+        <BLANKLINE>
+    """
     path = tmp_path / "pyproject.toml"
     path.write_text(
         "[project]\nname = 'x'\nversion = '0'\n"

@@ -55,7 +55,7 @@ jobs:
       # unaudited environment is an unaudited dependency — run it where the
       # exposure enters.
       - name: Dependency license audit over the docs environment
-        run: .venv/bin/python scripts/audit_licenses.py
+        run: .venv/bin/python scripts/lint/audit_licenses.py
       - name: Build the site (strict)
         run: .venv/bin/python -m mkdocs build --strict
       # Skipped on pull requests: it reads the repository's Pages configuration and

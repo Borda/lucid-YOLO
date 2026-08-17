@@ -97,15 +97,25 @@ repos:
       # RECORD, is ~0.15 s of that — measured against 0.09 s for the two checks alone.
       - id: license-audit
         name: dependency license audit
-        entry: .venv/bin/python scripts/audit_licenses.py
+        entry: .venv/bin/python scripts/lint/audit_licenses.py
         language: system
         pass_filenames: false
         always_run: true
+      # Pure repo content (tests/**/test_*.py), not installed-environment state, so
+      # unlike license-audit this only needs to run when a test file actually changed
+      # rather than on every commit. Split off WP-117 into its own script (WP-129):
+      # pytest stays scoped to the functional core, this stays a lint gate.
+      - id: test-doctest-audit
+        name: doctest coverage over tests/**/test_*.py helpers
+        entry: .venv/bin/python scripts/lint/audit_test_doctests.py
+        language: system
+        pass_filenames: false
+        files: ^tests/.*/test_[^/]+\.py$
       # Runs where the contract is actually enforceable. The CI equivalent was
       # dropped: on a squash merge the validated per-commit messages are replaced
       # by the squash message, so CI was checking text that never lands.
       - id: commit-trailers
         name: provenance commit trailers
-        entry: .venv/bin/python scripts/check_commit_trailers.py --file
+        entry: .venv/bin/python scripts/lint/check_commit_trailers.py --file
         language: system
         stages: [commit-msg]

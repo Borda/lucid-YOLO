@@ -15,12 +15,20 @@ from types import ModuleType
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-VALIDATOR_PATH = REPO_ROOT / "scripts" / "check_commit_trailers.py"
+VALIDATOR_PATH = REPO_ROOT / "scripts" / "lint" / "check_commit_trailers.py"
 PROVENANCE_PATH = REPO_ROOT / "docs" / "PROVENANCE.md"
 
 
 def _load_validator() -> ModuleType:
-    """Load ``scripts/check_commit_trailers.py`` as an importable module."""
+    """Load ``scripts/lint/check_commit_trailers.py`` as an importable module.
+
+    Examples:
+        >>> module = _load_validator()
+        >>> module.__name__
+        'check_commit_trailers'
+        >>> callable(module.validate_message)
+        True
+    """
     spec = importlib.util.spec_from_file_location("check_commit_trailers", VALIDATOR_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

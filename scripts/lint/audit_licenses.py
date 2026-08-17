@@ -93,7 +93,7 @@ from packaging.utils import NormalizedName, canonicalize_name
 #: The project's own metadata, located from this file rather than from installed
 #: metadata: the tiers are a property of what the repository declares, and the docs
 #: CI job installs the site toolchain without installing the project at all.
-PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
+PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 #: Matches GPL-family identifiers (AGPL-3.0, GPLv2, LGPL, "GNU General Public License").
 COPYLEFT_PATTERN = re.compile(r"\b(?:[AL]?GPL|GNU (?:Affero |Lesser )?General Public License)", re.IGNORECASE)

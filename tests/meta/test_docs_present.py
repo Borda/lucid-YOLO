@@ -16,7 +16,7 @@ MODEL_CARDS = DOCS / "model_cards"
 #: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted. Raise it when adding
 #: a work package; never lower it.
-_WP_FLOOR = 127
+_WP_FLOOR = 129
 
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
@@ -103,6 +103,12 @@ def _undecorated(title: str) -> str:
     Every H1 and H2 across the docs carries a topical emoji (WP-113), which is decoration:
     a gate that pinned it would fail on a re-picked icon while reporting a missing section.
     A lead token holding no ASCII alphanumeric is that decoration; anything else is title.
+
+    Examples:
+        >>> _undecorated("🚀 Getting Started")
+        'Getting Started'
+        >>> _undecorated("Getting Started")
+        'Getting Started'
     """
     lead, _, rest = title.partition(" ")
     if rest and not any(char.isalnum() and char.isascii() for char in lead):
@@ -111,7 +117,12 @@ def _undecorated(title: str) -> str:
 
 
 def _table_cells(line: str) -> list[str]:
-    """Split one markdown table row into its cells, honoring backslash-escaped pipes."""
+    """Split one markdown table row into its cells, honoring backslash-escaped pipes.
+
+    Examples:
+        >>> _table_cells(r"| a | b\\|c | d |")
+        ['a', 'b|c', 'd']
+    """
     cells, current, escaped = [], "", False
     for char in line.strip().strip("|"):
         if escaped:

@@ -53,7 +53,7 @@ dev = [
   "build>=1.2",
   "types-PyYAML",
   "types-tqdm",
-  # `scripts/audit_licenses.py` imports it directly for marker and extras evaluation:
+  # `scripts/lint/audit_licenses.py` imports it directly for marker and extras evaluation:
   # attributing a distribution to a dependency tier means walking the requirement graph
   # the way an installer would, and a hand-rolled marker evaluator would be a second,
   # worse implementation of a solved problem. Arrived transitively before WP-115 (pytest
@@ -88,7 +88,7 @@ dev = [
 # "Currently unlicensed - unsuitable for production use". This project admits permissive
 # licences only, and an unlicensed dependency is not one: the default is no grant at all,
 # which is stricter than the AGPL the audit bans. And the audit would not catch it:
-# `scripts/audit_licenses.py` matches a GPL-family pattern against what a distribution
+# `scripts/lint/audit_licenses.py` matches a GPL-family pattern against what a distribution
 # declares, so a distribution declaring nothing matches nothing and passes silently. The
 # cap is what keeps that resolution from happening in the first place. Lift it when
 # 2.x ships a permissive LICENSE, verified from the repository rather than from the notice.

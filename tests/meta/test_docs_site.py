@@ -36,12 +36,22 @@ _NavLoader.add_multi_constructor(
 
 
 def _config() -> dict[str, Any]:
-    """Parse ``mkdocs.yml`` into a plain dict."""
+    """Parse ``mkdocs.yml`` into a plain dict.
+
+    Examples:
+        >>> "nav" in _config()
+        True
+    """
     return yaml.load(MKDOCS_YML.read_text(encoding="utf-8"), Loader=_NavLoader)
 
 
 def _nav_targets(node: Any) -> list[str]:
-    """Collect every page path a nav tree points at, at any depth."""
+    """Collect every page path a nav tree points at, at any depth.
+
+    Examples:
+        >>> _nav_targets(["a.md", {"Section": ["b.md", "c.md"]}])
+        ['a.md', 'b.md', 'c.md']
+    """
     if isinstance(node, str):
         return [node]
     if isinstance(node, list):
@@ -149,5 +159,5 @@ def test_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed() ->
 
     build = "python -m mkdocs build --strict"
 
-    assert "scripts/audit_licenses.py" in workflow, "the docs environment is never audited"
-    assert workflow.index("scripts/audit_licenses.py") < workflow.index(build)
+    assert "scripts/lint/audit_licenses.py" in workflow, "the docs environment is never audited"
+    assert workflow.index("scripts/lint/audit_licenses.py") < workflow.index(build)
