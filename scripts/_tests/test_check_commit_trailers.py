@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Meta tests: commit-trailer validator (WP-004).
+"""Functional-core tests: commit-trailer validator (WP-004).
 
 Guards the provenance-carrying commit contract (AGENTS.md sec. 5): a valid
 message passes, a missing WP trailer fails, an unknown provenance id fails, a

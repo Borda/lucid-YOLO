@@ -85,7 +85,7 @@ repos:
   - repo: local
     hooks:
       - id: mypy
-        name: mypy (strict)
+        name: "🧠 mypy (strict)"
         entry: .venv/bin/python -m mypy
         language: system
         types: [python]
@@ -96,26 +96,83 @@ repos:
       # native libraries they ship; WP-109's binary scan, which walks every wheel's
       # RECORD, is ~0.15 s of that — measured against 0.09 s for the two checks alone.
       - id: license-audit
-        name: dependency license audit
+        name: "⚖️ dependency license audit"
         entry: .venv/bin/python scripts/lint/audit_licenses.py
         language: system
         pass_filenames: false
         always_run: true
-      # Pure repo content (tests/**/test_*.py), not installed-environment state, so
-      # unlike license-audit this only needs to run when a test file actually changed
-      # rather than on every commit. Split off WP-117 into its own script (WP-129):
-      # pytest stays scoped to the functional core, this stays a lint gate.
+      # Pure repo content (tests/**/test_*.py, scripts/_tests/test_*.py), not
+      # installed-environment state, so unlike license-audit this only needs to run
+      # when a test file actually changed rather than on every commit. Split off
+      # WP-117 into its own script (WP-129); scripts/_tests/ added in WP-130 when
+      # every scripts/-testing file moved out of tests/ to sit beside its subject.
       - id: test-doctest-audit
-        name: doctest coverage over tests/**/test_*.py helpers
+        name: "📝 doctest coverage over test_*.py helpers"
         entry: .venv/bin/python scripts/lint/audit_test_doctests.py
         language: system
         pass_filenames: false
-        files: ^tests/.*/test_[^/]+\.py$
+        files: ^(tests/.*/test_[^/]+\.py|scripts/_tests/test_[^/]+\.py)$
+      # Docs-governance register: every doc a WP's DoD promised actually exists.
+      - id: docs-present
+        name: "📋 docs governance register presence"
+        entry: .venv/bin/python scripts/lint/audit_docs_present.py
+        language: system
+        pass_filenames: false
+        files: ^(docs/.*\.md|AGENTS\.md|README\.md)$
+      # MkDocs Material site: nav entries, plugin/extension list, identity fields.
+      - id: docs-site
+        name: "🗺️ mkdocs site config and nav"
+        entry: .venv/bin/python scripts/lint/audit_docs_site.py
+        language: system
+        pass_filenames: false
+        files: ^(mkdocs\.yml|docs/.*|pyproject\.toml|\.github/workflows/docs\.yml)$
+      # A figure's rendered caption text must match the source string that drew it.
+      - id: figure-captions
+        name: "🖼️ figure caption text matches source"
+        entry: .venv/bin/python scripts/lint/audit_figure_captions.py
+        language: system
+        pass_filenames: false
+        files: ^(docs/figures/.*\.svg|docs/REPRODUCTION_REPORT\.md)$
+      # LICENSE/NOTICE/README wording plus the SPDX header every src/ file carries.
+      - id: license-headers
+        name: "📄 license and attribution headers"
+        entry: .venv/bin/python scripts/lint/audit_license_headers.py
+        language: system
+        pass_filenames: false
+        files: ^(LICENSE|NOTICE|README\.md|src/.*\.py)$
+      # pyproject.toml and src/lucid_yolo/__init__.py must name the same version.
+      - id: version-single-source
+        name: "🔢 package version single source of truth"
+        entry: .venv/bin/python scripts/lint/audit_version_single_source.py
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|src/lucid_yolo/__init__\.py)$
       # Runs where the contract is actually enforceable. The CI equivalent was
       # dropped: on a squash merge the validated per-commit messages are replaced
       # by the squash message, so CI was checking text that never lands.
       - id: commit-trailers
-        name: provenance commit trailers
+        name: "🏷️ provenance commit trailers"
         entry: .venv/bin/python scripts/lint/check_commit_trailers.py --file
         language: system
         stages: [commit-msg]
+      # `make golden` is the automatic path (part of `make gate`); this hook exists so
+      # the same check is individually callable (`pre-commit run --hook-stage manual
+      # golden-check`) without also running lint/test/the rest of the gate. `stages:
+      # [manual]` keeps it off every commit -- goldens retrain/recompute and are not
+      # cheap enough to run on a diff a golden file itself did not touch.
+      - id: golden-check
+        name: "🥇 metric golden regression (manual)"
+        entry: .venv/bin/python scripts/check_goldens.py
+        language: system
+        pass_filenames: false
+        stages: [manual]
+      # Release-tag time only; a no-arg invocation is a safe no-op everywhere else
+      # (`_current_tag` resolves `None` when HEAD is not exactly a tag). `stages:
+      # [manual]` keeps it off every commit for the same individually-callable
+      # uniformity as `golden-check`, not because it is unsafe to run.
+      - id: release-guard
+        name: "🛡️ release tag guard (manual)"
+        entry: .venv/bin/python scripts/release_guard.py
+        language: system
+        pass_filenames: false
+        stages: [manual]

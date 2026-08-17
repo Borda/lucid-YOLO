@@ -9,7 +9,7 @@ that an unchanged codebase reproduces byte-identical values on every run.
 Four real producers live here. :func:`fixture_checksums` derives its metrics from
 the seeded WP-007 synthetic fixtures. Because those fixtures live under
 ``tests/fixtures/`` (not an importable package), they are loaded by file path via
-``importlib.util`` — the same trick ``tests/meta/test_license_audit.py`` uses.
+``importlib.util`` — the same trick ``scripts/_tests/test_audit_licenses.py`` uses.
 :func:`data_pipeline_metrics` (WP-015) draws a fixed set of samples through the
 Phase-1 augmentation pipeline (mosaic/affine/letterbox/mixup/copy-paste/photometric)
 over those fixtures with a fixed seed and records platform-stable batch metrics:

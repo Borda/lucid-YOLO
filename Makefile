@@ -45,7 +45,7 @@ gate: precommit test golden
 # frozen detection overfit golden drifted for six days while WP-078 changed the
 # objective underneath it. This target is that schedule.
 test-gpu:
-	$(PY) -m pytest -m "gpu or data" tests
+	$(PY) -m pytest -m "gpu or data" tests scripts
 
 # Recompute every golden including the goldens/gpu/ subtree. These producers
 # retrain models rather than reading a file: overfit_micro_det and

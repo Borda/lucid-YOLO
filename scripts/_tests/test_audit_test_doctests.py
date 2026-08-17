@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Meta tests: doctest-coverage audit script (WP-129, split off WP-117).
+"""Functional-core tests: doctest-coverage audit script (WP-129, split off WP-117).
 
 Covers ``scripts/lint/audit_test_doctests.py``'s public contract in isolation, on
 synthetic files under ``tmp_path`` rather than against the live ``tests/`` tree --
@@ -98,3 +98,12 @@ def test_the_live_tests_tree_is_currently_clean() -> None:
     that touches any test file, not just a new one.
     """
     assert audit.find_missing(REPO_ROOT / "tests") == []
+
+
+def test_the_live_scripts_tests_tree_is_currently_clean() -> None:
+    """The real ``scripts/_tests/`` tree the pre-commit hook scans has no missing Examples.
+
+    ``scripts/_tests/`` carries the functional-core tests for ``scripts/`` modules
+    (WP-130) and is the hook's second default root, alongside ``tests/`` above.
+    """
+    assert audit.find_missing(REPO_ROOT / "scripts" / "_tests") == []

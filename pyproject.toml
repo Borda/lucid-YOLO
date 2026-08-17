@@ -157,7 +157,11 @@ max-returns = 6
 python_version = "3.11"
 strict = true
 files = ["src", "scripts"]
-mypy_path = "src"
+# scripts/_tests/ carries the same monkeypatch/spec-loaded-module character as tests/,
+# which this config has never held to strict typing -- excluded for the same reason.
+exclude = ["^scripts/_tests/"]
+mypy_path = "src:."
+explicit_package_bases = true
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
@@ -166,7 +170,10 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+# importlib avoids the bare-basename collision two non-package conftest.py roots
+# (tests/, scripts/_tests/) would otherwise hit under the default prepend mode --
+# each gets a module identity keyed on its full path instead of its file stem.
+addopts = "-ra --strict-markers --import-mode=importlib"
 markers = [
   "gpu: needs an accelerator (MPS/CUDA); excluded from offline unit gate",
   "data: needs a generated or real dataset on disk",

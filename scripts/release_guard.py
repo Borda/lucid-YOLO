@@ -162,6 +162,27 @@ def check_gate(gate_cmd: str) -> CheckResult:
     return CheckResult("gate", True, f"gate command {gate_cmd!r} passed")
 
 
+def _current_tag() -> str | None:
+    """Return the tag exactly naming ``HEAD``, or ``None`` when there is none.
+
+    Backs :func:`main`'s ``--tag`` default so the guard is runnable as a
+    pre-commit hook with no per-invocation argument: most commits are not on a
+    tag, and the hook has nothing to check for them.
+
+    Examples:
+        >>> _current_tag() is None or isinstance(_current_tag(), str)
+        True
+    """
+    completed = subprocess.run(
+        ["git", "describe", "--tags", "--exact-match", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.stdout.strip() if completed.returncode == 0 else None
+
+
 def evaluate(tag: str, changelog: Path, gate_cmd: str) -> list[CheckResult]:
     """Run every release-guard check and return their results in order.
 
@@ -212,7 +233,11 @@ def main(argv: list[str] | None = None) -> int:
         ```
     """
     parser = argparse.ArgumentParser(description="Decide whether a release tag may ship.")
-    parser.add_argument("--tag", required=True, help="candidate tag, e.g. v0.1.0")
+    parser.add_argument(
+        "--tag",
+        default=None,
+        help="candidate tag, e.g. v0.1.0 (default: the tag exactly naming HEAD, if any)",
+    )
     parser.add_argument(
         "--changelog",
         type=Path,
@@ -226,7 +251,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    results = evaluate(args.tag, args.changelog, args.gate_cmd)
+    tag = args.tag if args.tag is not None else _current_tag()
+    if tag is None:
+        print("release guard: HEAD is not exactly a tag — nothing to check")
+        return 0
+
+    results = evaluate(tag, args.changelog, args.gate_cmd)
     for result in results:
         marker = "PASS" if result.passed else "FAIL"
         print(f"{marker} [{result.name}] {result.detail}")

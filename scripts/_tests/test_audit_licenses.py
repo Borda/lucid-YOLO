@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Meta tests: dependency-license audit rejects copyleft (WP-004, WP-063).
+"""Functional-core tests: dependency-license audit rejects copyleft (WP-004, WP-063).
 
 Guards the Apache-compatibility policy: the copyleft pattern must catch the
 GPL family and spare permissive licenses, and ``find_copyleft_violations`` must

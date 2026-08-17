@@ -9,7 +9,7 @@ same learning rate, and reports the steps each needs to hit the threshold.
 
 The harness and producer modules live under ``scripts/`` (not an importable
 package), so they are loaded by file path via ``importlib.util`` -- the same
-pattern ``tests/meta/test_golden_harness.py`` uses.
+pattern ``scripts/_tests/test_check_goldens.py`` uses.
 """
 
 import importlib.util

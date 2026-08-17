@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Doctest-coverage audit for ``tests/**/test_*.py`` helpers (WP-129, split off WP-117).
+"""Doctest-coverage audit for ``test_*.py`` helpers (WP-129/130, split off WP-117).
+
+Scans both ``tests/`` and ``scripts/_tests/`` by default -- the latter holds the
+functional-core tests for ``scripts/`` modules (WP-130) and carries the same
+helper-needs-an-Example expectation.
 
 ``pytest --doctest-modules`` (WP-085, ``make test``) turns a helper's ``Examples:``
 block into an executable check the moment it exists, but nothing forces the block
@@ -28,6 +32,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TESTS_DIR = REPO_ROOT / "tests"
+DEFAULT_SCRIPTS_TESTS_DIR = REPO_ROOT / "scripts" / "_tests"
 
 #: Decorator names that mark a function as a fixture rather than a helper, in
 #: either bare (``@pytest.fixture``) or call (``@pytest.fixture(scope="module")``)
@@ -173,12 +178,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--tests-dir",
         type=Path,
-        default=DEFAULT_TESTS_DIR,
-        help=f"directory to scan (default: {DEFAULT_TESTS_DIR})",
+        action="append",
+        dest="tests_dirs",
+        default=None,
+        help=f"directory to scan; repeatable (default: {DEFAULT_TESTS_DIR}, {DEFAULT_SCRIPTS_TESTS_DIR})",
     )
     args = parser.parse_args(argv)
+    tests_dirs = args.tests_dirs if args.tests_dirs is not None else [DEFAULT_TESTS_DIR, DEFAULT_SCRIPTS_TESTS_DIR]
 
-    missing = find_missing(args.tests_dir)
+    missing = [item for tests_dir in tests_dirs for item in find_missing(tests_dir)]
     if missing:
         print(f"doctest-audit FAILED: {len(missing)} helper(s) missing a doctest Example")
         for item in missing:

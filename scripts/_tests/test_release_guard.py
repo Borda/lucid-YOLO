@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Meta tests: the release guard refuses unshippable tags (WP-006).
+"""Functional-core tests: the release guard refuses unshippable tags (WP-006).
 
 Covers the DoD negative cases — a tag on a red gate, a tag missing its changelog
 section, and a 1.x tag (ADR-002) are each refused — plus the happy path and a
 malformed tag string. The guard is loaded via the spec-loading pattern used in
-``tests/meta/test_license_audit.py`` so ``scripts/`` need not be importable.
+``scripts/_tests/test_audit_licenses.py`` so ``scripts/`` need not be importable.
 """
 
 import importlib.util
@@ -92,3 +92,16 @@ def test_adr_002_refusal_names_the_policy() -> None:
 def test_zero_major_tag_check_passes() -> None:
     """The tag check accepts a plain zero-major tag on its own."""
     assert guard.check_tag("v0.3.0").passed
+
+
+def test_main_without_tag_falls_back_to_head(monkeypatch, tmp_path: Path) -> None:
+    """Omitting --tag resolves it from the current HEAD, exactly like passing it."""
+    changelog = _write_changelog(tmp_path, "0.1.0")
+    monkeypatch.setattr(guard, "_current_tag", lambda: "v0.1.0")
+    assert guard.main(["--changelog", str(changelog), "--gate-cmd", "true"]) == 0
+
+
+def test_main_without_tag_or_release_passes_with_nothing_to_check(monkeypatch) -> None:
+    """HEAD not being exactly a tag is not a refusal -- most commits are not releases."""
+    monkeypatch.setattr(guard, "_current_tag", lambda: None)
+    assert guard.main([]) == 0

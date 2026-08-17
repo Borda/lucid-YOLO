@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Meta tests: golden harness and frozen-golden regression (WP-005).
+"""Functional-core tests: golden harness and frozen-golden regression (WP-005).
 
 Exercises the harness end to end against the repository's real goldens, then
 drives its failure paths with throwaway golden directories: a tampered value, a
