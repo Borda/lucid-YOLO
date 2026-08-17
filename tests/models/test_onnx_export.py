@@ -76,6 +76,7 @@ from lucid_yolo.assign.grid import anchor_grid
 from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.eval.checkpoint import load_eval_module
 from lucid_yolo.eval.segment_decode import decode_instance_masks
+from lucid_yolo.export import DetectExportGraph, E2EExportGraph, OrientedExportGraph, SegmentExportGraph
 from lucid_yolo.models.build import Detector, OrientedDetector, Segmenter
 from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.registry import scale_spec
@@ -140,60 +141,13 @@ class _Exported:
     reference: list[Tensor]
 
 
-class _E2EGraph(nn.Module):
-    """A deployed model plus its E2E decode, as one exportable module.
-
-    Subclasses supply only :meth:`forward`, which is where the three tasks differ; the
-    anchor grid is baked in here as buffers so every task's graph takes the image alone.
-
-    Args:
-        deployed: The ``deploy()`` view whose dense outputs the decode consumes.
-    """
-
-    def __init__(self, deployed: nn.Module) -> None:
-        super().__init__()
-        self.deployed = deployed
-        points, strides = anchor_grid(_CANVAS, torch.device("cpu"))
-        self.register_buffer("anchor_points", points)
-        self.register_buffer("strides", strides)
-        self.decoder = TopKDecoder()
-
-
-class _DetectGraph(_E2EGraph):
-    """Detection E2E graph: dense one-to-one outputs to the A9 tuple."""
-
-    def forward(self, image: Tensor) -> Tensor:
-        """Decode an image batch into ``(B, 300, 6)`` detections."""
-        cls, box = self.deployed(image)
-        return self.decoder(cls, box, self.anchor_points, self.strides)
-
-
-class _SegmentGraph(_E2EGraph):
-    """Segmentation E2E graph: the A9 tuple beside its Equation 7 instance masks."""
-
-    def forward(self, image: Tensor) -> tuple[Tensor, Tensor]:
-        """Decode an image batch into ``(B, 300, 6)`` detections and their masks."""
-        cls, box, coeff, prototypes = self.deployed(image)
-        detections, anchor_index = self.decoder.decode_with_indices(cls, box, self.anchor_points, self.strides)
-        gathered = coeff.gather(1, anchor_index.unsqueeze(-1).expand(-1, -1, coeff.shape[-1]))
-        masks = decode_instance_masks(prototypes, gathered, detections[..., :4], image_size=_CANVAS)
-        return detections, masks
-
-
-class _OrientedGraph(_E2EGraph):
-    """Oriented E2E graph: dense one-to-one outputs to the A45 rotated tuple."""
-
-    def forward(self, image: Tensor) -> Tensor:
-        """Decode an image batch into ``(B, 300, 7)`` rotated detections."""
-        cls, box, angle = self.deployed(image)
-        rboxes = decode_rboxes(box, angle, self.anchor_points, self.strides)
-        return o2o_rotated_topk(cls, rboxes)
-
-
-_GRAPHS: dict[str, type[_E2EGraph]] = {
-    "detect": _DetectGraph,
-    "segment": _SegmentGraph,
-    "obb": _OrientedGraph,
+#: Deployable graph class per task. Promoted to :mod:`lucid_yolo.export` (WP-112) so
+#: this fixture and :mod:`lucid_yolo.predict`'s single-image "e2e" path are provably
+#: the same composition rather than two that merely resemble each other.
+_GRAPHS: dict[str, type[E2EExportGraph]] = {
+    "detect": DetectExportGraph,
+    "segment": SegmentExportGraph,
+    "obb": OrientedExportGraph,
 }
 
 
@@ -393,7 +347,7 @@ def exported(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFa
     torch.manual_seed(0)
 
     module = _checkpoint_module(task, tmp)
-    graph = _GRAPHS[task](_deployed(module, task)).eval()
+    graph = _GRAPHS[task](_deployed(module, task), canvas=_CANVAS).eval()
     image = torch.rand(1, 3, *_CANVAS, generator=torch.Generator().manual_seed(7))
     reference = _eager_reference(module, task, image)
 
