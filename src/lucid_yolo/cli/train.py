@@ -49,8 +49,8 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import ProgressBar, RichProgressBar, TQDMProgressBar
+from pytorch_lightning import Callback, Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint, ProgressBar, RichProgressBar, TQDMProgressBar
 from pytorch_lightning.cli import ArgsType, LightningArgumentParser, LightningCLI
 from pytorch_lightning.loggers import CSVLogger, Logger, TensorBoardLogger
 
@@ -120,6 +120,29 @@ _DEFAULT_CONFIG = "det_smoke"
 _DEFAULT_PROGRESS_BAR = "tqdm"
 
 
+def _checkpoint_filename(task: str, variant: str) -> str:
+    """Return a checkpoint filename template naming the run's task and scale variant.
+
+    Lightning's own unnamed-run default is ``"{epoch}-{step}"`` (rendered
+    ``epoch=X-step=Y.ckpt``); this keeps that suffix — and the metric-templating
+    machinery that fills it in — intact, and only prepends the run identity that
+    was previously recoverable only by opening ``hparams.yaml`` (WP-127).
+
+    Args:
+        task: The module's supervision task (``"detect"``, ``"segment"``, or ``"obb"``).
+        variant: The scale-registry row letter (e.g. ``"n"``, ``"s"``).
+
+    Returns:
+        A filename template, ``{epoch}``/``{step}`` still literal for
+        :class:`~pytorch_lightning.callbacks.ModelCheckpoint` to fill in.
+
+    Examples:
+        >>> _checkpoint_filename("segment", "s")
+        'segment_s_{epoch}-{step}'
+    """
+    return f"{task}_{variant}_{{epoch}}-{{step}}"
+
+
 class DetectionCLI(LightningCLI):
     """LightningCLI wiring the detection module/datamodule with a ``variant`` link.
 
@@ -170,17 +193,40 @@ class DetectionCLI(LightningCLI):
         # `rboxes` — which trains the plain detection objective and reports nothing wrong.
         parser.link_arguments("model.task", "data.rotated_targets", compute_fn=lambda task: task == "obb")
 
+    def _add_trainer_default_callback(self, callback: Callback) -> None:
+        """Append ``callback`` to ``trainer_defaults["callbacks"]`` without replacing it.
+
+        The only injection channel that *extends* the config's callback list
+        instead of replacing it outright.
+
+        Args:
+            callback: The callback instance to append.
+        """
+        defaults_callbacks = self.trainer_defaults.get("callbacks", [])
+        if not isinstance(defaults_callbacks, list):
+            defaults_callbacks = [defaults_callbacks]
+        self.trainer_defaults = {**self.trainer_defaults, "callbacks": [*defaults_callbacks, callback]}
+
     def instantiate_trainer(self, **kwargs: Any) -> Trainer:
         """Instantiate the trainer with the ``--progress_bar`` choice and default loggers.
 
         Lightning's own default is rich-when-available, whose live rendering
         prints one line per refresh in notebook cell output (Colab/Jupyter), so
-        the choice is made explicit here: the selected bar is appended through
-        ``trainer_defaults["callbacks"]`` — the only injection channel that
-        *extends* the config's callback list instead of replacing it — and
-        ``none`` disables the bar entirely. A ``ProgressBar`` instance placed
-        directly in ``trainer.callbacks`` by a user config still wins: Lightning
-        rejects two bars, so the default injection is skipped in that case.
+        the choice is made explicit here: the selected bar is appended via
+        :meth:`_add_trainer_default_callback`, and ``none`` disables the bar
+        entirely. A ``ProgressBar`` instance placed directly in
+        ``trainer.callbacks`` by a user config still wins: Lightning rejects two
+        bars, so the default injection is skipped in that case.
+
+        The checkpoint filename gets the same treatment (WP-127): a bare
+        ``lightning_logs/version_N`` numbers the *run*, not the checkpoint
+        inside it, so identifying what a saved ``.ckpt`` trained meant opening
+        its ``hparams.yaml``. Unless a config already places a
+        :class:`~pytorch_lightning.callbacks.ModelCheckpoint` in
+        ``trainer.callbacks``, one is injected with
+        :func:`_checkpoint_filename` naming the task and scale variant;
+        ``dirpath`` is left at Lightning's own default (``<version dir>/checkpoints``),
+        so no already-written checkpoint moves or is renamed.
 
         When the config leaves ``trainer.logger`` at its default (``null`` or
         ``true`` — Lightning's TensorBoard-only auto-pick), the default is
@@ -198,15 +244,17 @@ class DetectionCLI(LightningCLI):
         """
         choice = str(self._get(self.config_init, "progress_bar", default=_DEFAULT_PROGRESS_BAR))
         trainer_config = self._get(self.config_init, "trainer", default={})
-        user_bar = any(isinstance(callback, ProgressBar) for callback in trainer_config.get("callbacks") or [])
+        trainer_callbacks = trainer_config.get("callbacks") or []
+        user_bar = any(isinstance(callback, ProgressBar) for callback in trainer_callbacks)
         if choice == "none":
             kwargs.setdefault("enable_progress_bar", False)
         elif not user_bar:
             bar: ProgressBar = RichProgressBar() if choice == "rich" else TQDMProgressBar()
-            defaults_callbacks = self.trainer_defaults.get("callbacks", [])
-            if not isinstance(defaults_callbacks, list):
-                defaults_callbacks = [defaults_callbacks]
-            self.trainer_defaults = {**self.trainer_defaults, "callbacks": [*defaults_callbacks, bar]}
+            self._add_trainer_default_callback(bar)
+        user_checkpoint = any(isinstance(callback, ModelCheckpoint) for callback in trainer_callbacks)
+        if not user_checkpoint:
+            variant = str(self._get(self.config_init, "variant", default=_DEFAULT_VARIANT))
+            self._add_trainer_default_callback(ModelCheckpoint(filename=_checkpoint_filename(self.model.task, variant)))
         if trainer_config.get("logger") in (None, True) and "logger" not in kwargs:
             kwargs["logger"] = _default_loggers(trainer_config.get("default_root_dir"))
         return super().instantiate_trainer(**kwargs)

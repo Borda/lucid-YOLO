@@ -597,6 +597,16 @@ What made it safe to drop now is that nothing in the tree still needed it. Every
 
 The one place the symlink was load-bearing rather than redundant was prose: `train.py`'s own module docstring showed `python -m lucid_yolo.cli.train fit --config configs/det_smoke.yaml`, a literal root-relative path that only resolved because the symlink put a real directory at `configs/`. That is now the bare-name form the resolver was actually built for. `AGENTS.md`'s `configs/data/*.yaml` and two comments in `tests/ptl/test_cli.py` and `scripts/overfit_micro.py` that named the bare `configs/` directory are reworded to `src/lucid_yolo/configs/...` or `lucid_yolo/configs/...` for the same reason -- accurate once nothing at repo root answers to that name. Historical entries elsewhere (`ENGINEERING_LOG.md`'s own WP-099b entry, completed roadmap rows for WP-038 and WP-099c) describe what was true when they were written and are left alone; a backfilled record does not get edited to match a later decision.
 
+### WP-127 — a version number is not a run's identity
+
+<a id="wp-127"></a>
+
+Lightning's own default checkpoint path is `lightning_logs/version_N/checkpoints/epoch=X-step=Y.ckpt` -- `version_N` numbers the *run*, sequentially, across every task and scale a working tree has ever fit; nothing in the path names what the run actually trained. WP-111's re-scoring of WP-064's OBB-smoke checkpoint hit this directly: `version_10` said nothing until cross-referenced against its `hparams.yaml`'s `task: obb` field, a step that only works because the checkpoint happened to still carry its hyperparameters.
+
+The fix stays inside `DetectionCLI.instantiate_trainer` (`cli/train.py`), the same injection seam WP-038 already uses for the progress bar and the default logger pair: unless a config places its own `ModelCheckpoint` in `trainer.callbacks`, one is now injected with `filename=_checkpoint_filename(self.model.task, variant)` -- a new pure helper prefixing `{task}_{variant}_` onto Lightning's own `{epoch}-{step}` template, left as a literal placeholder so `ModelCheckpoint`'s own metric-filling machinery still resolves it. `dirpath` is left at Lightning's default (`<version dir>/checkpoints`), so `lightning_logs/version_N` numbering is untouched and no already-written checkpoint moves or is renamed -- only new runs pick up the prefix. `task` comes from `self.model.task` (the instantiated module, already built by the time `instantiate_trainer` runs) rather than the raw config, since only the module's own default (`task="detect"`) is guaranteed correct once link-computed arguments are in play.
+
+The injection duplicated the progress-bar callback's four-line "append without replacing the config's own list" pattern verbatim, so it moved into a small `_add_trainer_default_callback` method both call into, rather than being copy-pasted a second time.
+
 ### WP-129 — a check that scans the repo is not a unit test of it
 
 <a id="wp-129"></a>
