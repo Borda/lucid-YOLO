@@ -16,7 +16,7 @@ MODEL_CARDS = DOCS / "model_cards"
 #: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted. Raise it when adding
 #: a work package; never lower it.
-_WP_FLOOR = 116
+_WP_FLOOR = 118
 
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
@@ -33,6 +33,7 @@ REQUIRED_FILES = (
     DOCS / "TRAINING.md",
     DOCS / "REPRODUCTION_REPORT.md",
     DOCS / "RESEARCH_LOG.md",
+    DOCS / "ENGINEERING_LOG.md",
     MODEL_CARDS / "detection.md",
     MODEL_CARDS / "segmentation.md",
     MODEL_CARDS / "obb.md",
@@ -53,23 +54,31 @@ def test_every_model_card_is_a_required_file() -> None:
     assert on_disk == required, f"model cards not in REQUIRED_FILES: {sorted(on_disk - required)}"
 
 
-def test_every_research_log_link_resolves() -> None:
-    """Each ``RESEARCH_LOG.md#anchor`` the roadmap cites is an anchor that file defines.
+def test_every_log_link_resolves() -> None:
+    """Each ``<LOG>.md#anchor`` the roadmap cites is an anchor that log file defines.
 
-    The roadmap's Scope column carries what a package does and hands the measurements,
-    rejections and negative results to the research log. That split is only safe while the
-    pointers hold: a renamed section leaves a row citing evidence a reader cannot reach,
-    and nothing about the roadmap itself would look wrong. Anchors are explicit ``<a id=>``
-    tags rather than heading slugs, so they are greppable and survive a retitle.
+    WP-118 split what was one research log into a fidelity log and an engineering log,
+    by claim rather than by work package: a WP whose finding straddles both gets one
+    entry in each, cross-linked, so a roadmap row may cite either file or both. That
+    split is only safe while the pointers hold: a renamed section leaves a row citing
+    evidence a reader cannot reach, and nothing about the roadmap itself would look
+    wrong. Anchors are explicit ``<a id=>`` tags rather than heading slugs, so they are
+    greppable and survive a retitle.
     """
     roadmap = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")
-    log = (DOCS / "RESEARCH_LOG.md").read_text(encoding="utf-8")
+    logs = {
+        "RESEARCH_LOG.md": (DOCS / "RESEARCH_LOG.md").read_text(encoding="utf-8"),
+        "ENGINEERING_LOG.md": (DOCS / "ENGINEERING_LOG.md").read_text(encoding="utf-8"),
+    }
 
-    cited = set(re.findall(r"RESEARCH_LOG\.md#([\w-]+)", roadmap))
-    defined = set(re.findall(r'<a id="([\w-]+)">', log))
+    cited_total = 0
+    for name, log in logs.items():
+        cited = set(re.findall(rf"{re.escape(name)}#([\w-]+)", roadmap))
+        defined = set(re.findall(r'<a id="([\w-]+)">', log))
+        cited_total += len(cited)
+        assert cited <= defined, f"roadmap cites undefined {name} anchors: {sorted(cited - defined)}"
 
-    assert cited, "no roadmap row links the research log"
-    assert cited <= defined, f"roadmap cites undefined research-log anchors: {sorted(cited - defined)}"
+    assert cited_total, "no roadmap row links either log"
 
 
 def test_policy_docs_exist() -> None:

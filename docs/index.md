@@ -65,10 +65,11 @@ The documents fall into three registers, and which one you want depends on what 
 | find where the papers ran out | [Assumption register](ASSUMPTIONS.md) | every gap, the choice made, its public basis, and how it was validated |
 | understand why the project is shaped this way | [Decision record](DECISIONS.md) | architecture and policy decisions, including four ADRs |
 | see what is done and what is next | [Work-package roadmap](ROADMAP.md) | the numbered work queue with live status |
-| learn what execution actually cost | [Research log](RESEARCH_LOG.md) | measurements, rejected approaches, and negative results, per work package |
+| learn what execution actually cost | [Research log](RESEARCH_LOG.md) | fidelity measurements, rejected modeling approaches, and negative results, per work package |
+| learn what the repo tooling cost | [Engineering log](ENGINEERING_LOG.md) | CI, packaging, licensing, and doc-tooling findings, split out of the research log by claim |
 | see where work stopped for a human | [Escalation log](ESCALATION.md) | the anti-guessing rule and every entry raised under it |
 
-The roadmap and the research log are deliberately split: the roadmap says what a work package does, the log says what executing it taught. A row that restates the other is duplicating a record with an owner.
+The roadmap and the two logs are deliberately split: the roadmap says what a work package does, the logs say what executing it taught. Between the two logs the split is by claim, not by work package -- a fidelity finding in one, a tooling finding in the other, and a WP whose finding is genuinely both gets one entry in each, cross-linked. A row that restates any of them is duplicating a record with an owner.
 
 ## 🚀 Running it yourself
 

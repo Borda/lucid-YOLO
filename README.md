@@ -196,7 +196,8 @@ Reproducibility here is a process, not a claim, and the process is visible in th
 - **`docs/PROVENANCE.md`** — every source this implementation is allowed to read, by id. Commit messages cite them.
 - **`docs/ASSUMPTIONS.md`** — every choice the papers left open, numbered and cited from the code that depends on it.
 - **`docs/DECISIONS.md`** — architecture and policy decisions, with the four ADRs behind them.
-- **`docs/RESEARCH_LOG.md`** — the measurements, the negative results, and the mistakes worth remembering.
+- **`docs/RESEARCH_LOG.md`** — fidelity measurements, negative results, and the modeling mistakes worth remembering.
+- **`docs/ENGINEERING_LOG.md`** — the same, for repo tooling: CI, packaging, licensing, doc generation. Split from the research log by claim, not by work package.
 - **`docs/REPRODUCTION_REPORT.md`** — append-only: a later release corrects an earlier claim by adding to it, never by editing the record away.
 
 The clean-room rule is absolute and it is what makes the reproduction mean anything: no reference implementation of this architecture was read, at any point, by anyone or anything working on this repository. What is permitted — papers, and permissively licensed implementations admitted for diagnostics — is listed in `PROVENANCE.md` with the decision that admitted it.

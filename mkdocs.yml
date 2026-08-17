@@ -121,4 +121,5 @@ nav:
   - Execution:
       - Work-package roadmap: ROADMAP.md
       - Research log: RESEARCH_LOG.md
+      - Engineering log: ENGINEERING_LOG.md
       - Escalation log: ESCALATION.md
