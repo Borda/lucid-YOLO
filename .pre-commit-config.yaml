@@ -71,6 +71,11 @@ repos:
         # from an isolated environment and `--in-place` is the half that makes it a
         # formatter rather than a checker.
         args: ["--in-place", "--config", "pyproject.toml"]
+        # Unpinned, this hook's env is built against whatever `python3` pre-commit
+        # resolves off PATH -- which drifted to a 3.10 install on this machine, below
+        # this project's own >=3.11 floor, and docformatter's own config reader needs
+        # `tomllib` (3.11+) to parse pyproject.toml. Pinned so PATH drift cannot repeat it.
+        language_version: python3.11
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.1
     hooks:
