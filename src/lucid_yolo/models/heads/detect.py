@@ -43,18 +43,25 @@ where ``A = 8400`` at a 640-pixel input. That ``A`` ordering matches
 :func:`~lucid_yolo.assign.grid.make_anchor_points` position-for-position, so the
 anchor point and stride of prediction ``a`` are simply row ``a`` of its outputs.
 
-Two branch outputs are **opt-in** and absent by default, so the accepted
+Three branch outputs are **opt-in** and absent by default, so the accepted
 detection-only head keeps its exact module tree, state-dict keys, and parameter
-count: the mask coefficients of the segmentation path (WP-047) and the
-orientation angle of the oriented path (WP-062). The angle branch is A20's
-reading of R1 sec. 3.4.3 — "a separate branch is adopted to predict the
-orientation angle" — built as a third per-level stem sharing the class and
-coefficient stems' shape but **not** their width (``channels // 2`` rather than
-A28's ``channels // 3``; :func:`_angle_stem_width` records the Table S11
-measurement behind the split), emitting **one scalar per location**. That
-scalar is the angle itself: R1 Eq. 13 makes ``theta_hat = z`` with no squashing
-nonlinearity, so :func:`_build_angle_stem` ends at a raw 1x1 and no activation
-follows it anywhere in the head. Decoding and range normalization live in
+count: the mask coefficients of the segmentation path (WP-047), the orientation
+angle of the oriented path (WP-062), and generic ``K``-point coordinates with
+per-axis uncertainty (WP-122). ``K`` is a constructor argument like
+``num_classes`` and ``num_coeffs``; the head does not encode a human-pose task.
+The keypoint stem emits raw coordinate offsets and raw, unbounded sigma values.
+No positivity mapping happens anywhere in this module: WP-123's hand-written RLE
+loss owns that equation-tied decision (A65).
+
+The angle branch is A20's reading of R1 sec. 3.4.3 — "a separate branch is
+adopted to predict the orientation angle" — built as a third per-level stem
+sharing the class and coefficient stems' shape but **not** their width
+(``channels // 2`` rather than A28's ``channels // 3``;
+:func:`_angle_stem_width` records the Table S11 measurement behind the split),
+emitting **one scalar per location**. That scalar is the angle itself: R1 Eq. 13
+makes ``theta_hat = z`` with no squashing nonlinearity, so
+:func:`_build_angle_stem` ends at a raw 1x1 and no activation follows it anywhere
+in the head. Decoding and range normalization live in
 :mod:`lucid_yolo.models.heads.obb`.
 
 Two pure helpers accompany the module and are reused by the E2E decoder
@@ -64,8 +71,8 @@ score-ranked ``(B, 300, 6)`` detection tuple ``[x1, y1, x2, y2, score, class]``
 (A9). The full NMS-free E2E decode module lands in WP-041 and reuses
 :func:`o2o_topk`.
 
-Provenance: R1 sec. 3.2.1, R1 sec. 3.2.2, R1 sec. 3.4.3, R1 Eq. 13, R1 Fig. S2, R6.
-Assumptions: A3, A9, A20, A28.
+Provenance: R1 sec. 3.2.1, R1 sec. 3.2.2, R1 sec. 3.4.3, R1 Eq. 13, R1 Fig. S2, R6, R14.
+Assumptions: A3, A9, A20, A28, A65.
 """
 
 from __future__ import annotations
@@ -94,6 +101,12 @@ _BOX_OUTPUTS = 4
 
 #: Number of orientation outputs per anchor: one scalar angle (A20, R1 sec. 3.4.3).
 _ANGLE_OUTPUTS = 1
+
+#: Number of raw coordinate outputs per keypoint: x and y offsets.
+_KEYPOINT_COORD_OUTPUTS = 2
+
+#: Number of raw uncertainty outputs per keypoint: sigma_x and sigma_y (R14).
+_KEYPOINT_SIGMA_OUTPUTS = 2
 
 #: Default mask-coefficient width ``K=32`` from assumption A14; callers opt in
 #: explicitly so the accepted detection-only module tree remains unchanged.
@@ -387,6 +400,46 @@ def _build_angle_stem(channels: int) -> nn.Sequential:
     )
 
 
+def _build_keypoint_stem(channels: int, num_keypoints: int) -> nn.Sequential:
+    """Build one level's raw coordinate-and-uncertainty keypoint stem.
+
+    The stem follows the shared two-depthwise-separable-unit shape used by the
+    coefficient stem, with :func:`_stem_width` providing A28's
+    ``max(16, channels // 3)`` hidden width. Unlike the angle task, no R1 Table
+    S11 or other allowlisted measurement covers a keypoint task — R1 does not
+    cover one at all, and R14 is registered for the future pose milestone only —
+    so inventing a keypoint-specific width would be unmeasured. Reusing the
+    shared width matches :func:`_build_coeff_stem`'s precedent.
+
+    The final 1x1 emits four raw channels per point in point-major order: for
+    zero-based point ``i``, channels ``4*i`` through ``4*i+3`` are
+    ``(x_offset, y_offset, sigma_x, sigma_y)``. Nothing follows the convolution.
+    Coordinates are unbounded offsets like the angle, and sigma is equally raw
+    and unbounded here; WP-123's RLE loss owns any positivity mapping (A65).
+
+    Args:
+        channels: Input channel count of the level.
+        num_keypoints: Number of generic points emitted per anchor.
+
+    Returns:
+        The keypoint stem for one level, emitting ``(B, 4 * num_keypoints, H,
+        W)``.
+
+    Examples:
+        >>> import torch
+        >>> stem = _build_keypoint_stem(64, 3).eval()
+        >>> stem(torch.zeros(1, 64, 8, 8)).shape
+        torch.Size([1, 12, 8, 8])
+    """
+    hidden = _stem_width(channels)
+    outputs = (_KEYPOINT_COORD_OUTPUTS + _KEYPOINT_SIGMA_OUTPUTS) * num_keypoints
+    return nn.Sequential(
+        _depthwise_separable(channels, hidden),
+        _depthwise_separable(hidden, hidden),
+        nn.Conv2d(hidden, outputs, 1),
+    )
+
+
 def _flatten_level(feature_map: Tensor) -> Tensor:
     """Flatten a ``(B, C, H, W)`` prediction map to ``(B, H * W, C)`` row-major.
 
@@ -415,15 +468,17 @@ class _DetectionBranch(nn.Module):
     8/16/32). :class:`DualDetectionHead` holds two of these — the one-to-one and
     one-to-many branches — with disjoint parameters. Forward flattens and
     concatenates the per-level maps into dense ``(B, A, num_classes)`` scores and
-    ``(B, A, 4)`` raw ltrb distances. Two further stem sets are built only when
+    ``(B, A, 4)`` raw ltrb distances. Three further stem sets are built only when
     explicitly requested: mask-coefficient stems emitting tanh-bounded
-    ``(B, A, num_coeffs)`` vectors (WP-047), and an orientation stem emitting the
-    raw ``(B, A, 1)`` angle of A20 (WP-062).
+    ``(B, A, num_coeffs)`` vectors (WP-047), orientation stems emitting the raw
+    ``(B, A, 1)`` angle of A20 (WP-062), and keypoint stems emitting raw
+    coordinates and uncertainty as ``(B, A, K, 2)`` tensors (WP-122).
 
-    The optional stems are constructed **after** the box and class stems, so a
-    branch that requests neither draws exactly the random numbers the
-    detection-only branch has always drawn: enabling a stem set must not perturb
-    the initialization of the parameters that were already accepted.
+    Optional stems are constructed **after** the box and class stems, and a new
+    optional stem is constructed after any other already-enabled optional stem.
+    A previously accepted configuration therefore draws exactly the random
+    numbers it drew before: enabling a later stem set must not perturb the
+    initialization of parameters that already existed.
 
     Args:
         in_channels: Per-level input channel counts ``(N3, N4, N5)`` in stride
@@ -433,6 +488,8 @@ class _DetectionBranch(nn.Module):
             tree and prediction computation detection-only.
         predict_angle: Build the orientation stems (A20). ``False`` leaves the
             module tree and prediction computation angle-free.
+        num_keypoints: Optional generic point count. ``None`` leaves the module
+            tree and prediction computation keypoint-free.
     """
 
     def __init__(
@@ -441,18 +498,26 @@ class _DetectionBranch(nn.Module):
         num_classes: int,
         num_coeffs: int | None = None,
         predict_angle: bool = False,
+        num_keypoints: int | None = None,
     ) -> None:
         super().__init__()
         self.coeff_stems: nn.ModuleList | None = None
         self.angle_stems: nn.ModuleList | None = None
+        self.keypoint_stems: nn.ModuleList | None = None
         self.box_stems = nn.ModuleList(_build_box_stem(channels) for channels in in_channels)
         self.cls_stems = nn.ModuleList(_build_cls_stem(channels, num_classes) for channels in in_channels)
         if num_coeffs is not None:
             self.coeff_stems = nn.ModuleList(_build_coeff_stem(channels, num_coeffs) for channels in in_channels)
         if predict_angle:
             self.angle_stems = nn.ModuleList(_build_angle_stem(channels) for channels in in_channels)
+        if num_keypoints is not None:
+            self.keypoint_stems = nn.ModuleList(
+                _build_keypoint_stem(channels, num_keypoints) for channels in in_channels
+            )
 
-    def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> tuple[Tensor, Tensor, Tensor | None, Tensor | None]:
+    def forward(
+        self, features: tuple[Tensor, Tensor, Tensor]
+    ) -> tuple[Tensor, Tensor, Tensor | None, Tensor | None, Tensor | None, Tensor | None]:
         """Predict dense scores, ltrb distances, and whichever optional outputs exist.
 
         The returned tuple has a **fixed** width whatever the branch was built
@@ -465,11 +530,13 @@ class _DetectionBranch(nn.Module):
             features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32.
 
         Returns:
-            The quadruple ``(cls, box, coeff, angle)``. ``cls`` is raw class
-            logits ``(B, A, num_classes)``, ``box`` raw ltrb distances
-            ``(B, A, 4)``, ``coeff`` tanh-bounded ``(B, A, num_coeffs)`` or
-            ``None``, and ``angle`` the raw ``(B, A, 1)`` orientation of R1
-            Eq. 13 or ``None``. ``A`` sums ``H * W`` over levels.
+            The sextuple ``(cls, box, coeff, angle, keypoints,
+            keypoint_sigma)``. ``cls`` is raw class logits ``(B, A,
+            num_classes)``, ``box`` raw ltrb distances ``(B, A, 4)``, ``coeff``
+            tanh-bounded ``(B, A, num_coeffs)`` or ``None``, ``angle`` the raw
+            ``(B, A, 1)`` orientation of R1 Eq. 13 or ``None``, and the last two
+            values are raw ``(B, A, K, 2)`` coordinate offsets and unbounded
+            uncertainty or ``None``. ``A`` sums ``H * W`` over levels.
         """
         cls_levels: list[Tensor] = []
         box_levels: list[Tensor] = []
@@ -478,7 +545,8 @@ class _DetectionBranch(nn.Module):
             cls_levels.append(_flatten_level(cls_stem(feature)))
         cls = torch.cat(cls_levels, dim=1)
         box = torch.cat(box_levels, dim=1)
-        return cls, box, self._coefficients(features), self._angles(features)
+        keypoints, keypoint_sigma = self._keypoints(features)
+        return cls, box, self._coefficients(features), self._angles(features), keypoints, keypoint_sigma
 
     def _coefficients(self, features: tuple[Tensor, Tensor, Tensor]) -> Tensor | None:
         """Run the coefficient stems, tanh-activated, or return ``None`` if absent.
@@ -520,6 +588,32 @@ class _DetectionBranch(nn.Module):
         ]
         return torch.cat(levels, dim=1)
 
+    def _keypoints(self, features: tuple[Tensor, Tensor, Tensor]) -> tuple[Tensor | None, Tensor | None]:
+        """Run the keypoint stems unactivated, or return ``(None, None)`` if absent.
+
+        Each flattened level follows the stem's point-major channel convention:
+        ``(x_offset, y_offset, sigma_x, sigma_y)`` per point. Reshaping makes the
+        point axis explicit before the first two and last two values are split.
+        Neither side receives an activation; in particular sigma remains raw and
+        unbounded until WP-123's RLE loss decides its positivity mapping (A65).
+
+        Args:
+            features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32.
+
+        Returns:
+            Dense raw coordinate offsets and sigma, each ``(B, A, K, 2)``, or
+            ``(None, None)`` when the branch was built without keypoint stems.
+        """
+        if self.keypoint_stems is None:
+            return None, None
+        levels: list[Tensor] = []
+        point_outputs = _KEYPOINT_COORD_OUTPUTS + _KEYPOINT_SIGMA_OUTPUTS
+        for feature, keypoint_stem in zip(features, self.keypoint_stems, strict=True):
+            flat = _flatten_level(keypoint_stem(feature))
+            levels.append(flat.reshape(flat.shape[0], flat.shape[1], -1, point_outputs))
+        points = torch.cat(levels, dim=1)
+        return points[..., :_KEYPOINT_COORD_OUTPUTS], points[..., _KEYPOINT_COORD_OUTPUTS:]
+
 
 @dataclass(frozen=True)
 class DualHeadOutput:
@@ -536,6 +630,9 @@ class DualHeadOutput:
     are deliberately **unactivated and unbounded**: R1 Eq. 13 predicts
     ``theta_hat = z``, so any range normalization belongs to the decode
     (:func:`~lucid_yolo.models.heads.obb.decode_rboxes`, A23), not here.
+    Keypoint-coordinate fields are likewise raw offsets. Keypoint-sigma fields
+    are raw and unbounded: no range or positivity normalization happens anywhere
+    in this head, and WP-123's RLE loss owns that mapping (A65).
 
     Attributes:
         o2m_cls: One-to-many class logits, shape ``(B, A, num_classes)``.
@@ -550,6 +647,16 @@ class DualHeadOutput:
             ``(B, A, 1)``, or ``None`` when the angle branch is disabled.
         o2o_angle: One-to-one raw orientation angles in radians, shape
             ``(B, A, 1)``, or ``None`` when the angle branch is disabled.
+        o2m_keypoints: One-to-many raw point-coordinate offsets, shape ``(B, A,
+            K, 2)``, or ``None`` when keypoints are disabled.
+        o2o_keypoints: One-to-one raw point-coordinate offsets, shape ``(B, A,
+            K, 2)``, or ``None`` when keypoints are disabled.
+        o2m_keypoint_sigma: One-to-many raw, unbounded per-axis uncertainty,
+            shape ``(B, A, K, 2)``, or ``None`` when keypoints are disabled.
+            WP-123's RLE loss owns the positivity mapping.
+        o2o_keypoint_sigma: One-to-one raw, unbounded per-axis uncertainty,
+            shape ``(B, A, K, 2)``, or ``None`` when keypoints are disabled.
+            WP-123's RLE loss owns the positivity mapping.
     """
 
     o2m_cls: Tensor
@@ -560,6 +667,10 @@ class DualHeadOutput:
     o2o_coeff: Tensor | None = None
     o2m_angle: Tensor | None = None
     o2o_angle: Tensor | None = None
+    o2m_keypoints: Tensor | None = None
+    o2o_keypoints: Tensor | None = None
+    o2m_keypoint_sigma: Tensor | None = None
+    o2o_keypoint_sigma: Tensor | None = None
 
 
 class DualDetectionHead(nn.Module):
@@ -581,6 +692,9 @@ class DualDetectionHead(nn.Module):
         predict_angle: Build both branches' orientation stems (A20). ``False``
             preserves the detection-only head exactly; the oriented model passes
             ``True``.
+        num_keypoints: Optional generic point count. ``None`` preserves the
+            existing head exactly; passing ``K`` builds coordinate-and-sigma
+            stems on both branches.
 
     Examples:
         >>> import torch
@@ -600,13 +714,27 @@ class DualDetectionHead(nn.Module):
         num_classes: int,
         num_coeffs: int | None = None,
         predict_angle: bool = False,
+        num_keypoints: int | None = None,
     ) -> None:
         super().__init__()
         self.num_classes = num_classes
         self.num_coeffs = num_coeffs
         self.predict_angle = predict_angle
-        self.o2o = _DetectionBranch(in_channels, num_classes, num_coeffs, predict_angle)
-        self.o2m = _DetectionBranch(in_channels, num_classes, num_coeffs, predict_angle)
+        self.num_keypoints = num_keypoints
+        self.o2o = _DetectionBranch(
+            in_channels,
+            num_classes,
+            num_coeffs=num_coeffs,
+            predict_angle=predict_angle,
+            num_keypoints=num_keypoints,
+        )
+        self.o2m = _DetectionBranch(
+            in_channels,
+            num_classes,
+            num_coeffs=num_coeffs,
+            predict_angle=predict_angle,
+            num_keypoints=num_keypoints,
+        )
 
     def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> DualHeadOutput:
         """Run both branches over the neck features.
@@ -618,10 +746,11 @@ class DualDetectionHead(nn.Module):
         Returns:
             A :class:`DualHeadOutput` with dense class logits, raw ltrb
             distances, and — for whichever optional stems were built — tanh mask
-            coefficients and raw orientation angles, for both branches.
+            coefficients, raw orientation angles, and raw point-coordinate and
+            uncertainty tensors, for both branches.
         """
-        o2m_cls, o2m_box, o2m_coeff, o2m_angle = self.o2m(features)
-        o2o_cls, o2o_box, o2o_coeff, o2o_angle = self.o2o(features)
+        o2m_cls, o2m_box, o2m_coeff, o2m_angle, o2m_keypoints, o2m_keypoint_sigma = self.o2m(features)
+        o2o_cls, o2o_box, o2o_coeff, o2o_angle, o2o_keypoints, o2o_keypoint_sigma = self.o2o(features)
         return DualHeadOutput(
             o2m_cls=o2m_cls,
             o2m_box=o2m_box,
@@ -631,6 +760,10 @@ class DualDetectionHead(nn.Module):
             o2o_coeff=o2o_coeff,
             o2m_angle=o2m_angle,
             o2o_angle=o2o_angle,
+            o2m_keypoints=o2m_keypoints,
+            o2o_keypoints=o2o_keypoints,
+            o2m_keypoint_sigma=o2m_keypoint_sigma,
+            o2o_keypoint_sigma=o2o_keypoint_sigma,
         )
 
 

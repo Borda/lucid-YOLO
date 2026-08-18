@@ -7,6 +7,7 @@ from lucid_yolo.models.heads.detect import (
     decode_ltrb,
     o2o_topk,
 )
+from lucid_yolo.models.heads.keypoint import decode_keypoints
 from lucid_yolo.models.heads.obb import RBOX_DET_WIDTH, decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.heads.proto import ProtoFusion, ProtoNet, assemble_masks
 from lucid_yolo.models.heads.semantic import SemanticAux
@@ -19,6 +20,7 @@ __all__ = [
     "ProtoNet",
     "SemanticAux",
     "assemble_masks",
+    "decode_keypoints",
     "decode_ltrb",
     "decode_rboxes",
     "o2o_rotated_topk",

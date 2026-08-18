@@ -267,7 +267,7 @@ class _DeployedDetector(nn.Module):
             The one-to-one branch's ``(cls, box)`` pair: dense class logits of
             shape ``(N, A, num_classes)`` and raw ltrb distances ``(N, A, 4)``.
         """
-        cls, box, _, _ = self.o2o(self.neck(self.backbone(image)))
+        cls, box, _, _, _, _ = self.o2o(self.neck(self.backbone(image)))
         return cls, box
 
 
@@ -405,7 +405,7 @@ class _DeployedOrientedDetector(nn.Module):
             logits ``(N, A, num_classes)``, raw ltrb distances ``(N, A, 4)``, and
             raw orientation angles ``(N, A, 1)``.
         """
-        cls, box, _, angle = self.o2o(self.neck(self.backbone(image)))
+        cls, box, _, angle, _, _ = self.o2o(self.neck(self.backbone(image)))
         assert angle is not None  # an OrientedDetector always builds the angle stems
         return cls, box, angle
 
@@ -607,7 +607,7 @@ class _DeployedSegmenter(nn.Module):
             ``(N, K, H/4, W/4)``.
         """
         features: tuple[Tensor, Tensor, Tensor] = self.neck(self.backbone(image))
-        cls, box, coeff, _ = self.o2o(features)
+        cls, box, coeff, _, _, _ = self.o2o(features)
         assert coeff is not None  # a Segmenter always builds the coefficient stems
         prototypes: Tensor = self.protonet(self.proto_fusion(features))
         return cls, box, coeff, prototypes
