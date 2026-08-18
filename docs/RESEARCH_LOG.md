@@ -464,6 +464,8 @@ Two citations for whoever picks this up: the collection is <https://github.com/r
 
 The licence question does **not** resolve with either route and is the thing most likely to kill the row. `rf100-vl` is Apache-2.0 **as tooling**; the 100 datasets it downloads carry their own licences, individually, and this project ships permissive-only. The Hugging Face alternative (`probicheaux/rf100-vl`, Apache-2.0, ungated, 15 domains, ~163k rows in COCO form) turns the tier into a download plus a parquet-to-COCO-layout conversion — no API key and no merge to own — but it does not answer what licence the underlying images carry.
 
+**Dropped 2026-08-18.** The deferral above named the condition to watch (PR 29 landing or being abandoned) but not one this project controls or a date to stop waiting on — the licence question that named itself the row's likeliest killer never resolved either. Rows 074 and 075 close ⊘ rather than stay ⏸ indefinitely; the design and citations above are kept as-is for whoever reopens the tier, unedited by this note per this log's own convention of leaving a historical entry describing what was true when it was written.
+
 ### WP-091b — a threshold with nothing to cite
 
 <a id="wp-091b"></a>
