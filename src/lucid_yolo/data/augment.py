@@ -272,10 +272,12 @@ class HorizontalFlip:
 
     With probability ``p`` (drawn per call) the image columns are reversed and every
     target modality is mirrored about the vertical axis at ``x = W / 2``: boxes swap and
-    reflect their x-extent (``x1' = W - x2``, ``x2' = W - x1``), polygon points reflect
-    (``x' = W - x``), and rotated boxes reflect their centre (``cx' = W - cx``) with the
-    angle negated and re-canonicalized (WP-058). With probability ``1 - p`` the image and
-    targets pass through unchanged.
+    reflect their x-extent (``x1' = W - x2``, ``x2' = W - x1``), polygon and keypoint
+    points reflect (``x' = W - x``), and rotated boxes reflect their centre
+    (``cx' = W - cx``) with the angle negated and re-canonicalized (WP-058). When a
+    dataset keypoint pair map is supplied, it then swaps left/right keypoint
+    identities (WP-120). With probability ``1 - p`` the image and targets pass
+    through unchanged.
 
     The rotated-box mirror is exact — an isometry maps the rectangle to a rectangle, and
     ``-theta`` names the mirrored long edge up to the half turn a rectangle is invariant
@@ -287,6 +289,9 @@ class HorizontalFlip:
         p: Probability of flipping. Defaults to ``0.5``.
         generator: Optional :class:`torch.Generator` for a seeded, reproducible flip
             draw. Defaults to ``None`` (global RNG).
+        keypoint_flip_pairs: Dataset-supplied ``(left_index, right_index)`` pairs on
+            the keypoint axis. ``None`` mirrors every keypoint x-coordinate without
+            an identity swap, the safe default when a task has no left/right symmetry.
 
     Attributes:
         last_flipped: Whether the most recent call flipped, or ``None`` before the
@@ -305,13 +310,29 @@ class HorizontalFlip:
         >>> _, out = flip(image, Targets(boxes=boxes, labels=torch.tensor([0])))
         >>> out.boxes.tolist()
         [[3.0, 0.0, 4.0, 2.0]]
+        >>> pose = Targets(
+        ...     boxes=torch.zeros((1, 4)), labels=torch.tensor([0]),
+        ...     keypoints=torch.tensor([[[1.0, 2.0], [3.0, 4.0]]]),
+        ...     keypoint_vis=torch.tensor([[2, 1]]),
+        ... )
+        >>> _, mirrored = HorizontalFlip(p=1.0, keypoint_flip_pairs=[(0, 1)])(
+        ...     torch.zeros((3, 2, 4)), pose
+        ... )
+        >>> mirrored.keypoints.tolist(), mirrored.keypoint_vis.tolist()
+        ([[[1.0, 4.0], [3.0, 2.0]]], [[1, 2]])
 
         ```
     """
 
-    def __init__(self, p: float = 0.5, generator: torch.Generator | None = None) -> None:
+    def __init__(
+        self,
+        p: float = 0.5,
+        generator: torch.Generator | None = None,
+        keypoint_flip_pairs: list[tuple[int, int]] | None = None,
+    ) -> None:
         self.p = float(p)
         self.generator = generator
+        self.keypoint_flip_pairs = keypoint_flip_pairs
         self.last_flipped: bool | None = None
 
     def __call__(self, image: Tensor, targets: Targets) -> tuple[Tensor, Targets]:
@@ -341,14 +362,14 @@ class HorizontalFlip:
         if not self.last_flipped:
             return image, targets
         width = float(image.shape[-1])
-        return image.flip(-1), self._mirror_targets(targets, width)
+        return image.flip(-1), self._mirror_targets(targets, width, self.keypoint_flip_pairs)
 
     def _draw(self) -> bool:
         """Return whether this call flips, sampling one uniform draw against ``p``."""
         return _uniform(0.0, 1.0, self.generator) < self.p
 
     @staticmethod
-    def _mirror_targets(targets: Targets, width: float) -> Targets:
+    def _mirror_targets(targets: Targets, width: float, keypoint_flip_pairs: list[tuple[int, int]] | None) -> Targets:
         """Mirror every modality about ``x = width / 2``, keeping alignment intact."""
         boxes = targets.boxes.clone()
         x1 = boxes[:, 0].clone()
@@ -360,6 +381,27 @@ class HorizontalFlip:
             mirrored[:, 0] = width - ring[:, 0]
             polygons.append(mirrored)
         rboxes = mirror_rboxes(targets.rboxes, width)
+        keypoints = targets.keypoints.clone()
+        keypoint_vis = targets.keypoint_vis.clone()
+        if keypoints.shape[0] > 0:
+            keypoints[..., 0] = width - targets.keypoints[..., 0]
+            if keypoint_flip_pairs is not None:
+                keypoint_count = keypoints.shape[1]
+                for pair in keypoint_flip_pairs:
+                    left_index, right_index = pair
+                    if (
+                        left_index < 0
+                        or right_index < 0
+                        or left_index >= keypoint_count
+                        or right_index >= keypoint_count
+                    ):
+                        raise ValueError(f"keypoint flip pair {pair} is out of range for K={keypoint_count}")
+                    left_keypoints = keypoints[:, left_index].clone()
+                    keypoints[:, left_index] = keypoints[:, right_index]
+                    keypoints[:, right_index] = left_keypoints
+                    left_vis = keypoint_vis[:, left_index].clone()
+                    keypoint_vis[:, left_index] = keypoint_vis[:, right_index]
+                    keypoint_vis[:, right_index] = left_vis
         # A mirror keeps the instance axis, so the per-instance R18 flags ride along.
         return Targets(
             boxes=boxes,
@@ -367,4 +409,6 @@ class HorizontalFlip:
             polygons=polygons,
             rboxes=rboxes,
             difficult=targets.difficult.clone(),
+            keypoints=keypoints,
+            keypoint_vis=keypoint_vis,
         )

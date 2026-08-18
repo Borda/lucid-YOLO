@@ -177,6 +177,44 @@ class TestHorizontalFlip:
             assert torch.allclose(dst[:, 0], width - src[:, 0])
             assert torch.allclose(dst[:, 1], src[:, 1])
 
+    def test_keypoints_mirror_without_identity_swap(self) -> None:
+        """Without pairs, every x coordinate mirrors while keypoint-column order stays fixed."""
+        flip = HorizontalFlip(p=1.0, generator=_generator())
+        targets = Targets(
+            boxes=torch.zeros((1, 4)),
+            labels=torch.tensor([0]),
+            keypoints=torch.tensor([[[1.0, 2.0], [7.0, 3.0]]]),
+            keypoint_vis=torch.tensor([[2, 1]]),
+        )
+        _, out = flip(torch.rand(3, 4, 10), targets)
+        assert out.keypoints.tolist() == [[[9.0, 2.0], [3.0, 3.0]]]
+        assert out.keypoint_vis.tolist() == [[2, 1]]
+
+    def test_keypoints_mirror_and_swap_supplied_pairs(self) -> None:
+        """A supplied pair swaps mirrored coordinates and visibility columns together."""
+        flip = HorizontalFlip(p=1.0, generator=_generator(), keypoint_flip_pairs=[(0, 1)])
+        targets = Targets(
+            boxes=torch.zeros((1, 4)),
+            labels=torch.tensor([0]),
+            keypoints=torch.tensor([[[1.0, 2.0], [7.0, 3.0]]]),
+            keypoint_vis=torch.tensor([[2, 1]]),
+        )
+        _, out = flip(torch.rand(3, 4, 10), targets)
+        assert out.keypoints.tolist() == [[[3.0, 3.0], [9.0, 2.0]]]
+        assert out.keypoint_vis.tolist() == [[1, 2]]
+
+    def test_out_of_range_keypoint_pair_raises(self) -> None:
+        """Pairs outside the supplied K-point axis are rejected with a clear error."""
+        flip = HorizontalFlip(p=1.0, generator=_generator(), keypoint_flip_pairs=[(0, 2)])
+        targets = Targets(
+            boxes=torch.zeros((1, 4)),
+            labels=torch.tensor([0]),
+            keypoints=torch.zeros((1, 2, 2)),
+            keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
+        )
+        with pytest.raises(ValueError, match=r"\(0, 2\).*K=2"):
+            flip(torch.rand(3, 4, 10), targets)
+
     def test_rbox_centre_mirror_and_theta_negation(self) -> None:
         """Rotated boxes reflect cx -> W - cx and negate theta (both in range); w/h stay put."""
         flip = HorizontalFlip(p=1.0, generator=_generator())

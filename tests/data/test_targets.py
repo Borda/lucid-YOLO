@@ -92,6 +92,151 @@ class TestTargetsValidation:
         assert t.rboxes.shape == (1, 5)
 
 
+class TestKeypoints:
+    """Keypoint tensors share the box instance axis and a common keypoint count."""
+
+    def test_valid_construction_succeeds(self) -> None:
+        """Float32 ``(N, K, 2)`` points and int64 ``(N, K)`` visibility values are accepted."""
+        keypoints = torch.tensor([[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]])
+        keypoint_vis = torch.tensor([[2, 1], [0, 2]])
+        targets = Targets(boxes=_boxes(2), labels=_labels(2), keypoints=keypoints, keypoint_vis=keypoint_vis)
+        assert torch.equal(targets.keypoints, keypoints)
+        assert torch.equal(targets.keypoint_vis, keypoint_vis)
+
+    def test_wrong_last_dimension_raises(self) -> None:
+        """Keypoints without xy columns are rejected."""
+        with pytest.raises(ValueError, match=r"keypoints must be \(N, K, 2\)"):
+            Targets(
+                boxes=_boxes(1),
+                labels=_labels(1),
+                keypoints=torch.zeros((1, 2, 3)),
+                keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
+            )
+
+    def test_wrong_keypoint_dtype_raises(self) -> None:
+        """Non-float32 coordinate tensors are rejected."""
+        with pytest.raises(TypeError, match="keypoints must be float32"):
+            Targets(
+                boxes=_boxes(1),
+                labels=_labels(1),
+                keypoints=torch.zeros((1, 2, 2), dtype=torch.float64),
+                keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
+            )
+
+    def test_wrong_visibility_dtype_raises(self) -> None:
+        """Non-int64 visibility tensors are rejected."""
+        with pytest.raises(TypeError, match="keypoint_vis must be int64"):
+            Targets(
+                boxes=_boxes(1),
+                labels=_labels(1),
+                keypoints=torch.zeros((1, 2, 2)),
+                keypoint_vis=torch.zeros((1, 2), dtype=torch.int32),
+            )
+
+    def test_mismatched_visibility_shape_raises(self) -> None:
+        """Visibility must have one scalar per instance/keypoint coordinate pair."""
+        with pytest.raises(ValueError, match=r"keypoint_vis must be \(N, K\)"):
+            Targets(
+                boxes=_boxes(1),
+                labels=_labels(1),
+                keypoints=torch.zeros((1, 2, 2)),
+                keypoint_vis=torch.zeros((1, 1), dtype=torch.int64),
+            )
+
+    def test_nonempty_keypoints_with_empty_visibility_raises(self) -> None:
+        """Present keypoints cannot be paired with the default empty visibility tensor."""
+        with pytest.raises(ValueError, match=r"keypoint_vis must be \(N, K\)"):
+            Targets(boxes=_boxes(1), labels=_labels(1), keypoints=torch.zeros((1, 2, 2)))
+
+    def test_empty_keypoints_with_nonempty_visibility_raises(self) -> None:
+        """Absent keypoints cannot be paired with visibility rows."""
+        with pytest.raises(ValueError, match="keypoint_vis count must be 0"):
+            Targets(
+                boxes=_boxes(1),
+                labels=_labels(1),
+                keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
+            )
+
+    def test_clone_is_independent(self) -> None:
+        """Mutating cloned keypoint tensors leaves their source tensors unchanged."""
+        original = Targets(
+            boxes=_boxes(1),
+            labels=_labels(1),
+            keypoints=torch.tensor([[[1.0, 2.0], [3.0, 4.0]]]),
+            keypoint_vis=torch.tensor([[2, 1]]),
+        )
+        clone = original.clone()
+        clone.keypoints.add_(10.0)
+        clone.keypoint_vis.fill_(0)
+        assert original.keypoints.tolist() == [[[1.0, 2.0], [3.0, 4.0]]]
+        assert original.keypoint_vis.tolist() == [[2, 1]]
+
+    def test_filter_keeps_selected_keypoint_rows(self) -> None:
+        """The instance mask selects matching keypoint and visibility rows."""
+        targets = Targets(
+            boxes=_boxes(3),
+            labels=_labels(3),
+            keypoints=torch.arange(12, dtype=torch.float32).reshape(3, 2, 2),
+            keypoint_vis=torch.tensor([[0, 1], [1, 2], [2, 0]]),
+        )
+        kept = targets.filter(torch.tensor([True, False, True]))
+        assert torch.equal(kept.keypoints, targets.keypoints[[0, 2]])
+        assert torch.equal(kept.keypoint_vis, targets.keypoint_vis[[0, 2]])
+
+    def test_concat_matching_keypoints_succeeds(self) -> None:
+        """Matching keypoint counts concatenate on the shared instance axis."""
+        first = Targets(
+            boxes=_boxes(1),
+            labels=_labels(1),
+            keypoints=torch.tensor([[[1.0, 2.0], [3.0, 4.0]]]),
+            keypoint_vis=torch.tensor([[2, 1]]),
+        )
+        second = Targets(
+            boxes=_boxes(2),
+            labels=_labels(2),
+            keypoints=torch.arange(8, dtype=torch.float32).reshape(2, 2, 2),
+            keypoint_vis=torch.tensor([[0, 1], [1, 2]]),
+        )
+        merged = Targets.concat([first, second])
+        assert merged.keypoints.shape == (3, 2, 2)
+        assert merged.keypoint_vis.tolist() == [[2, 1], [0, 1], [1, 2]]
+
+    def test_concat_mixed_keypoint_presence_raises(self) -> None:
+        """Concatenating annotated and keypoint-absent targets is rejected."""
+        with_keypoints = Targets(
+            boxes=_boxes(1),
+            labels=_labels(1),
+            keypoints=torch.zeros((1, 2, 2)),
+            keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
+        )
+        without_keypoints = Targets(boxes=_boxes(1), labels=_labels(1))
+        with pytest.raises(ValueError, match="mixed keypoint presence"):
+            Targets.concat([with_keypoints, without_keypoints])
+
+    def test_concat_mismatched_keypoint_count_raises(self) -> None:
+        """Targets with different K values cannot describe one concatenated keypoint batch."""
+        two_points = Targets(
+            boxes=_boxes(1),
+            labels=_labels(1),
+            keypoints=torch.zeros((1, 2, 2)),
+            keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
+        )
+        three_points = Targets(
+            boxes=_boxes(1),
+            labels=_labels(1),
+            keypoints=torch.zeros((1, 3, 2)),
+            keypoint_vis=torch.zeros((1, 3), dtype=torch.int64),
+        )
+        with pytest.raises(ValueError, match="keypoint counts"):
+            Targets.concat([two_points, three_points])
+
+    def test_empty_has_keypoint_shapes(self) -> None:
+        """The empty identity carries canonical zero-instance keypoint tensors."""
+        targets = Targets.empty()
+        assert targets.keypoints.shape == (0, 0, 2)
+        assert targets.keypoint_vis.shape == (0, 0)
+
+
 class TestClone:
     """Deep-copy independence."""
 
