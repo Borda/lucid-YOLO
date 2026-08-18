@@ -14,6 +14,7 @@ from lucid_yolo.losses.oriented_loss import (
 )
 from lucid_yolo.losses.probiou import probabilistic_iou, probiou_bhattacharyya_loss, probiou_hellinger_loss
 from lucid_yolo.losses.progressive import ProgressiveLossSchedule, progressive_alpha
+from lucid_yolo.losses.rle_loss import RLELoss
 from lucid_yolo.losses.semantic_loss import SemanticAuxOutput, semantic_aux_loss
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "DualLossOutput",
     "OrientedLossOutput",
     "ProgressiveLossSchedule",
+    "RLELoss",
     "SemanticAuxOutput",
     "aspect_ratio_weight",
     "box_iou_aligned",
