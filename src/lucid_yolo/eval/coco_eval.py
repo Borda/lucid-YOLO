@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""torchmetrics bbox mAP evaluation for both inference paths (WP-043, WP-069).
+"""COCO bbox, mask, and OKS keypoint evaluation (WP-043, WP-053b, WP-124).
 
 The detection acceptance instrument of blueprint sec. 5.11: ``bbox`` mAP50-95 on
 val2017, reported for **both** decode paths (E2E and non-E2E) from one checkpoint
@@ -11,6 +11,9 @@ The metric engine is
 :class:`torchmetrics.detection.MeanAveragePrecision` pinned to its
 ``faster_coco_eval`` backend (WP-069) — a COCOeval-faithful reimplementation, so
 the numbers match the classic COCO protocol with no compiled-extension dependency.
+The installed torchmetrics 1.9 wrapper exposes only ``bbox`` and ``segm`` IoU
+types, so :func:`evaluate_keypoints` drives the same backend's
+:class:`faster_coco_eval.COCOeval_faster` class directly for COCO OKS evaluation.
 
 Three pieces compose the protocol:
 
@@ -38,6 +41,14 @@ bbox statistics under their bare names and prefixes the mask ones with
 ``segm_``: a detection-only model's report is byte-for-byte the report it was
 before, and the presence of a ``segm_`` key is exactly the statement "this
 checkpoint has a mask branch".
+
+Keypoints (WP-124) add two one-shot functions without introducing a streaming
+model evaluator before the pose decode pipeline exists. :func:`keypoints_to_predictions`
+filters a fixed-size ``(B, N, K, 2)`` batch and maps contiguous labels back to COCO
+category ids; :func:`evaluate_keypoints` turns those tensors and WP-121's ground
+truth tensors into an in-memory COCO document, then reports the backend's ten
+standard OKS statistics. The citable COCO 17-point sigma table is fixed by
+:data:`COCO_KEYPOINT_OKS_SIGMAS` rather than inherited from a dependency default.
 
 The ground truth is supplied as torchmetrics target dicts
 (``{image_id: {"boxes": ..., "labels": ...}}`` in original image coordinates,
@@ -68,6 +79,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
 
 import torch
+from faster_coco_eval import COCO, COCOeval_faster
 from torchmetrics.detection import MeanAveragePrecision
 
 from lucid_yolo.assign.grid import HEAD_STRIDES, anchor_grid
@@ -84,11 +96,14 @@ if TYPE_CHECKING:
     from lucid_yolo.models.heads.detect import DualHeadOutput
 
 __all__ = [
+    "COCO_KEYPOINT_OKS_SIGMAS",
     "DualPathEvaluator",
     "detections_to_predictions",
     "evaluate_bbox",
     "evaluate_bbox_and_segm",
+    "evaluate_keypoints",
     "evaluate_segm",
+    "keypoints_to_predictions",
 ]
 
 #: The 12 scalar :class:`MeanAveragePrecision` metrics, AP first then AR, in the
@@ -144,6 +159,50 @@ _RECALL_POINTS = 101
 #: agreement at the boundaries, and the 36-index defect itself, so a torchmetrics that
 #: fixes its own grid is noticed rather than silently worked around forever.
 _RECALL_GRID: tuple[float, ...] = tuple(index / (_RECALL_POINTS - 1) for index in range(_RECALL_POINTS))
+
+#: The COCO 17-point OKS per-keypoint sigmas (R12), in COCO's own point order
+#: (nose, l/r eye, l/r ear, l/r shoulder, l/r elbow, l/r wrist, l/r hip, l/r
+#: knee, l/r ankle). Named explicitly here rather than left to
+#: faster_coco_eval's internal default (Params.setKpParams) so the value this
+#: project reports against is citable and version-independent, even though it
+#: currently equals that library default exactly -- verify this against
+#: `faster_coco_eval.core.cocoeval.Params.setKpParams`'s source before trusting
+#: this comment; if the library ever changes its own default, this project's
+#: reported numbers must not silently move with it.
+COCO_KEYPOINT_OKS_SIGMAS: tuple[float, ...] = (
+    0.026,
+    0.025,
+    0.025,
+    0.035,
+    0.035,
+    0.079,
+    0.079,
+    0.072,
+    0.072,
+    0.062,
+    0.062,
+    0.107,
+    0.107,
+    0.087,
+    0.087,
+    0.089,
+    0.089,
+)
+
+#: The ten scalar statistics in COCO's keypoint protocol. Unlike bbox/segm,
+#: keypoints have medium and large area buckets only, with no small bucket.
+_KEYPOINT_METRIC_KEYS: tuple[str, ...] = (
+    "AP_all",
+    "AP_50",
+    "AP_75",
+    "AP_medium",
+    "AP_large",
+    "AR_all",
+    "AR_50",
+    "AR_75",
+    "AR_medium",
+    "AR_large",
+)
 
 
 def detections_to_predictions(
@@ -215,6 +274,68 @@ def detections_to_predictions(
     ]
 
 
+def keypoints_to_predictions(
+    keypoints: Tensor,
+    scores: Tensor,
+    labels: Tensor,
+    label_to_category: Mapping[int, int],
+    score_floor: float = 0.0,
+) -> list[dict[str, Tensor]]:
+    """Convert fixed-size keypoint batches into COCO prediction dicts.
+
+    Each row of ``keypoints`` is one instance's ``K`` absolute-pixel ``(x, y)``
+    coordinates, such as the output of
+    :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints`. A row survives
+    when its per-instance detection score is strictly above ``score_floor`` — at
+    the default ``0.0``, this drops the score-zero padding rows that fill a fixed
+    decoder shape. Each contiguous class label is mapped **back** to its original
+    COCO category id via ``label_to_category``.
+
+    Args:
+        keypoints: Absolute pixel coordinates of shape ``(B, N, K, 2)``.
+        scores: Per-instance detection confidence of shape ``(B, N)``.
+        labels: Contiguous class labels of shape ``(B, N)``.
+        label_to_category: Mapping from contiguous class label to original COCO
+            category id.
+        score_floor: Rows with ``score`` at or below this are dropped. Defaults to
+            ``0.0`` (drop only score-zero padding rows).
+
+    Returns:
+        A length-``B`` list of prediction dicts, each with ``keypoints``
+        (``(M, K, 2)`` float), ``scores`` (``(M,)``), and ``labels`` (``(M,)``
+        long, original COCO category ids).
+
+    Examples:
+        >>> import torch
+        >>> points = torch.tensor(
+        ...     [[[[10.0, 12.0], [20.0, 22.0]], [[0.0, 0.0], [0.0, 0.0]]]]
+        ... )  # one real instance, one padding row
+        >>> scores = torch.tensor([[0.9, 0.0]])
+        >>> labels = torch.tensor([[1, 0]])
+        >>> preds = keypoints_to_predictions(points, scores, labels, {1: 42, 0: 1})
+        >>> tuple(preds[0]["keypoints"].shape), preds[0]["labels"].tolist()
+        ((1, 2, 2), [42])
+    """
+    dense_keypoints = keypoints.detach().to(device="cpu", dtype=torch.float32)
+    dense_scores = scores.detach().to(device="cpu", dtype=torch.float32)
+    dense_labels = labels.detach().to(device="cpu")
+    predictions: list[dict[str, Tensor]] = []
+    for image_keypoints, image_scores, image_labels in zip(dense_keypoints, dense_scores, dense_labels, strict=True):
+        keep = image_scores > score_floor
+        mapped_labels = torch.tensor(
+            [label_to_category[int(label)] for label in image_labels[keep]],
+            dtype=torch.long,
+        )
+        predictions.append(
+            {
+                "keypoints": image_keypoints[keep],
+                "scores": image_scores[keep],
+                "labels": mapped_labels,
+            }
+        )
+    return predictions
+
+
 def _image_to_prediction(
     detections: Tensor,
     label_to_category: Mapping[int, int],
@@ -276,6 +397,142 @@ def evaluate_bbox(
     if not preds:
         return dict.fromkeys(_METRIC_KEYS, 0.0)
     return _named_stats(_compute_metric(preds, targets, "bbox"), combined=False)
+
+
+def evaluate_keypoints(
+    preds: list[dict[str, Tensor]],
+    targets: list[dict[str, Tensor]],
+    sigmas: Sequence[float] = COCO_KEYPOINT_OKS_SIGMAS,
+) -> dict[str, float]:
+    """Score keypoint predictions with COCO's object keypoint similarity protocol.
+
+    Builds the minimal in-memory COCO ground-truth and result documents needed by
+    :class:`faster_coco_eval.COCOeval_faster`, then runs its native keypoint path.
+    Ground-truth ``visibility`` follows WP-121's tensor convention directly:
+    ``v == 0`` points are unlabeled and excluded from OKS, while ``v > 0`` points
+    define both the match distances and each instance's tight bounding-box area.
+    Predicted visibility is the COCO placeholder ``2`` because OKS reads only the
+    predicted coordinates and ground-truth visibility. An empty prediction input
+    yields all ten statistics at ``0.0`` rather than entering a degenerate backend
+    path.
+
+    Args:
+        preds: Per-image prediction dicts with ``keypoints`` (``(M, K, 2)``),
+            ``scores`` (``(M,)``), and ``labels`` (``(M,)`` original COCO category
+            ids), as produced by :func:`keypoints_to_predictions`.
+        targets: Position-aligned ground-truth dicts with ``keypoints``
+            (``(M, K, 2)``), ``visibility`` (``(M, K)`` int64), and ``labels``
+            (``(M,)`` original COCO category ids).
+        sigmas: Per-keypoint OKS sigmas in the tensors' point order. Defaults to
+            :data:`COCO_KEYPOINT_OKS_SIGMAS`, COCO's 17-point person convention.
+
+    Returns:
+        A ten-entry dict containing ``AP_all``, ``AP_50``, ``AP_75``, the medium
+        and large AP buckets, and the corresponding five ``AR_*`` statistics.
+        COCO keypoint evaluation defines no small-area bucket.
+
+    Examples:
+        >>> import torch
+        >>> points = torch.tensor([[[10.0, 10.0], [50.0, 50.0]]])
+        >>> preds = [{"keypoints": points, "scores": torch.tensor([1.0]), "labels": torch.tensor([1])}]
+        >>> targets = [{"keypoints": points, "visibility": torch.tensor([[2, 2]]), "labels": torch.tensor([1])}]
+        >>> stats = evaluate_keypoints(preds, targets, sigmas=[1.0, 1.0])
+        >>> round(stats["AP_all"], 3), round(stats["AP_50"], 3)
+        (1.0, 1.0)
+    """
+    if not preds:
+        return dict.fromkeys(_KEYPOINT_METRIC_KEYS, 0.0)
+
+    images = [{"id": image_id} for image_id in range(len(preds))]
+    annotations: list[dict[str, object]] = []
+    results: list[dict[str, object]] = []
+    category_ids: set[int] = set()
+    annotation_id = 1
+
+    for image_id, (prediction, target) in enumerate(zip(preds, targets, strict=True)):
+        target_keypoints = target["keypoints"].detach().to(device="cpu", dtype=torch.float32)
+        target_visibility = target["visibility"].detach().to(device="cpu", dtype=torch.long)
+        target_labels = target["labels"].detach().to(device="cpu", dtype=torch.long)
+        for instance_keypoints, instance_visibility, instance_label in zip(
+            target_keypoints, target_visibility, target_labels, strict=True
+        ):
+            visible = instance_visibility > 0
+            if bool(visible.any()):
+                visible_points = instance_keypoints[visible]
+                minimum = visible_points.amin(dim=0)
+                extent = visible_points.amax(dim=0) - minimum
+                width, height = float(extent[0]), float(extent[1])
+                x_min, y_min = float(minimum[0]), float(minimum[1])
+                area = max(width * height, 1.0)
+                bbox = [x_min, y_min, width, height]
+            else:
+                area = 1.0
+                bbox = [0.0, 0.0, 1.0, 1.0]
+
+            category_id = int(instance_label)
+            category_ids.add(category_id)
+            flat_keypoints = torch.cat(
+                (instance_keypoints, instance_visibility.to(torch.float32).unsqueeze(-1)),
+                dim=-1,
+            ).reshape(-1)
+            annotations.append(
+                {
+                    "id": annotation_id,
+                    "image_id": image_id,
+                    "category_id": category_id,
+                    "keypoints": flat_keypoints.tolist(),
+                    "num_keypoints": int(visible.sum()),
+                    "iscrowd": 0,
+                    "area": area,
+                    "bbox": bbox,
+                }
+            )
+            annotation_id += 1
+
+        prediction_keypoints = prediction["keypoints"].detach().to(device="cpu", dtype=torch.float32)
+        prediction_scores = prediction["scores"].detach().to(device="cpu", dtype=torch.float32)
+        prediction_labels = prediction["labels"].detach().to(device="cpu", dtype=torch.long)
+        for instance_keypoints, instance_score, instance_label in zip(
+            prediction_keypoints, prediction_scores, prediction_labels, strict=True
+        ):
+            category_id = int(instance_label)
+            category_ids.add(category_id)
+            visibility = torch.full(
+                (instance_keypoints.shape[0], 1),
+                2.0,
+                dtype=instance_keypoints.dtype,
+            )
+            flat_keypoints = torch.cat((instance_keypoints, visibility), dim=-1).reshape(-1)
+            results.append(
+                {
+                    "image_id": image_id,
+                    "category_id": category_id,
+                    "keypoints": flat_keypoints.tolist(),
+                    "score": float(instance_score),
+                }
+            )
+
+    if not results:
+        return dict.fromkeys(_KEYPOINT_METRIC_KEYS, 0.0)
+
+    annotation_dict = {
+        "images": images,
+        "annotations": annotations,
+        "categories": [{"id": category_id, "name": str(category_id)} for category_id in sorted(category_ids)],
+    }
+    with contextlib.redirect_stdout(io.StringIO()):
+        coco_ground_truth = COCO(annotation_dict)
+        coco_predictions = coco_ground_truth.loadRes(results)
+        evaluator = COCOeval_faster(
+            coco_ground_truth,
+            coco_predictions,
+            iouType="keypoints",
+            kpt_oks_sigmas=list(sigmas),
+        )
+        evaluator.evaluate()
+        evaluator.accumulate()
+        evaluator.summarize()
+    return cast("dict[str, float]", evaluator.stats_as_dict)
 
 
 def evaluate_segm(
