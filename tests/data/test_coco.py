@@ -166,6 +166,124 @@ def test_the_difficult_key_reaches_the_targets_channel(tmp_path: Path, oriented:
     assert targets.difficult.tolist() == [False, True]
 
 
+@pytest.fixture
+def keypoint_coco(tmp_path: Path) -> tuple[Path, dict[str, object]]:
+    """Create one image and a mutable two-instance COCO keypoint payload."""
+    split = tmp_path / "val"
+    split.mkdir()
+    from torchvision.io import write_png  # noqa: PLC0415 - test-local, the reader does not need it
+
+    write_png(torch.zeros(3, 8, 8, dtype=torch.uint8), str(split / "pose.png"))
+    payload: dict[str, object] = {
+        "images": [{"id": 1, "file_name": "pose.png", "height": 8, "width": 8}],
+        "annotations": [
+            {
+                "id": 1,
+                "image_id": 1,
+                "category_id": 1,
+                "bbox": [1, 1, 2, 2],
+                "segmentation": [[1.0, 1.0, 3.0, 1.0, 3.0, 3.0, 1.0, 3.0]],
+                "keypoints": [1.5, 2.0, 2, 2.5, 3.0, 1],
+            },
+            {
+                "id": 2,
+                "image_id": 1,
+                "category_id": 1,
+                "bbox": [4, 4, 2, 2],
+                "segmentation": [[4.0, 4.0, 6.0, 4.0, 6.0, 6.0, 4.0, 6.0]],
+                "keypoints": [4.5, 5.0, 0, 5.5, 6.0, 2],
+            },
+            {
+                "id": 3,
+                "image_id": 1,
+                "category_id": 1,
+                "bbox": [0, 0, 1, 1],
+                "segmentation": [[0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0]],
+                "iscrowd": 1,
+            },
+            {
+                "id": 4,
+                "image_id": 1,
+                "category_id": 1,
+                "bbox": [0, 0, 1, 1],
+                "segmentation": {"counts": [1], "size": [8, 8]},
+            },
+        ],
+        "categories": [{"id": 1, "name": "person"}],
+    }
+    return split, payload
+
+
+class TestKeypointParsing:
+    """Tests for opt-in COCO annotation-level keypoint parsing."""
+
+    @pytest.mark.parametrize("oriented", [pytest.param(False, id="axis-aligned"), pytest.param(True, id="oriented")])
+    def test_coordinates_and_visibility_reach_targets(
+        self, keypoint_coco: tuple[Path, dict[str, object]], oriented: bool
+    ) -> None:
+        """Retained instances produce aligned coordinate and visibility tensors.
+
+        Two usable annotations carry two keypoints each, while crowd and RLE
+        annotations omit the field entirely; only the retained instance axis may
+        be indexed and stacked on either box-reading path.
+        """
+        split, payload = keypoint_coco
+        (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        _, targets = CocoDetectionDataset(split, split / "instances.json", oriented=oriented, keypoints=True)[0]
+
+        assert targets.keypoints.shape == (2, 2, 2)
+        assert targets.keypoints.dtype == torch.float32
+        assert targets.keypoints.tolist() == [[[1.5, 2.0], [2.5, 3.0]], [[4.5, 5.0], [5.5, 6.0]]]
+        assert targets.keypoint_vis.shape == (2, 2)
+        assert targets.keypoint_vis.dtype == torch.int64
+        assert targets.keypoint_vis.tolist() == [[2, 1], [0, 2]]
+
+    def test_default_ignores_source_keypoints(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
+        """The default reader leaves both keypoint channels canonically empty.
+
+        Source data alone must not opt a detection reader into pose parsing, so
+        populated annotation fields still yield the WP-120 dataclass defaults.
+        """
+        split, payload = keypoint_coco
+        (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        _, targets = CocoDetectionDataset(split, split / "instances.json")[0]
+
+        assert targets.keypoints.shape == (0, 0, 2)
+        assert targets.keypoint_vis.shape == (0, 0)
+
+    def test_malformed_length_names_the_image(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
+        """A non-triplet annotation fails with its image name and bad length.
+
+        Four flat values cannot describe repeating ``x, y, v`` triples; raising
+        during dataset construction prevents a shifted coordinate/visibility split.
+        """
+        split, payload = keypoint_coco
+        annotations = payload["annotations"]
+        assert isinstance(annotations, list)
+        annotations[0]["keypoints"] = [1.0, 2.0, 2, 3.0]
+        (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        with pytest.raises(ValueError, match=r"pose\.png.*length 4"):
+            CocoDetectionDataset(split, split / "instances.json", keypoints=True)
+
+    def test_mismatched_counts_name_both_k_values(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
+        """Different per-instance K values fail before stacking one image.
+
+        A rectangular ``(N, K, 2)`` target cannot represent one and two points
+        together, so the reader identifies the image and both observed counts.
+        """
+        split, payload = keypoint_coco
+        annotations = payload["annotations"]
+        assert isinstance(annotations, list)
+        annotations[1]["keypoints"] = [4.5, 5.0, 2]
+        (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        with pytest.raises(ValueError, match=r"pose\.png.*K values \[1, 2\]"):
+            CocoDetectionDataset(split, split / "instances.json", keypoints=True)
+
+
 @pytest.mark.parametrize(
     ("variant", "expected"),
     [

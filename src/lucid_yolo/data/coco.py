@@ -39,6 +39,12 @@ Oriented reading (``oriented=True``, WP-088):
     ``rboxes`` up to the rectangle fit, and a second copy is one more modality every
     warp would have to keep consistent for no reader.
 
+Keypoint reading (``keypoints=True``, WP-121):
+    Each retained annotation's flat COCO ``keypoints`` field is split into
+    ``(K, 2)`` xy coordinates and ``(K,)`` visibility values, then stacked on the
+    same instance axis as boxes and labels. Visibility is carried through
+    unchanged; its training-time meaning is left to ``docs/ASSUMPTIONS.md``.
+
 The ``difficult`` key (A51, A53, WP-094):
     An annotation may carry a ``difficult`` flag, which this reader forwards onto the
     A51 channel of :class:`~lucid_yolo.data.targets.Targets`. It is not part of the COCO
@@ -83,6 +89,10 @@ _POINT_STRIDE = 2
 _MIN_RING_POINTS = 3
 #: Vertices of the quadrilateral an oriented annotation encodes its rotated box as.
 _QUAD_CORNERS = 4
+#: Values per COCO keypoint: ``x``, ``y`` and visibility.
+_KEYPOINT_STRIDE = 3
+#: Coordinate values retained from each COCO keypoint triplet.
+_KEYPOINT_COORDS = 2
 #: 8-bit image scale factor mapping ``uint8`` pixels into ``[0, 1]`` float.
 _UINT8_MAX = 255.0
 
@@ -177,6 +187,10 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         oriented: Read each annotation's four-point ring as a rotated box (WP-088;
             see the module docstring). ``False`` (the default) leaves the reader,
             and every target it has ever produced, exactly as it was.
+        keypoints: Parse each retained annotation's COCO ``keypoints`` field into
+            the WP-120 ``Targets.keypoints`` / ``keypoint_vis`` channels. ``False``
+            (the default) leaves the reader, and every target it has ever produced,
+            exactly as it was.
 
     Attributes:
         category_id_to_label: Mapping from COCO category id to contiguous label.
@@ -197,10 +211,12 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         annotation_file: Path,
         transforms: GeometricTransform | None = None,
         oriented: bool = False,
+        keypoints: bool = False,
     ) -> None:
         self._images_dir = images_dir
         self._transforms = transforms
         self._oriented = bool(oriented)
+        self._keypoints = bool(keypoints)
         with annotation_file.open(encoding="utf-8") as handle:
             payload = json.load(handle)
         self.category_id_to_label, self.label_to_category_id = _build_category_maps(payload["categories"])
@@ -266,11 +282,17 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         labels: list[int] = []
         polygons: list[Tensor] = []
         flags: list[bool] = []
+        keypoint_coords: list[Tensor] = []
+        keypoint_visibility: list[Tensor] = []
         for ann in annotations:
             parsed = self._parse_annotation(ann, record)
             if parsed is None:
                 continue
             box, label, ring, difficult = parsed
+            if self._keypoints:
+                coords, visibility = _parse_keypoints(ann["keypoints"], record.file_name)
+                keypoint_coords.append(coords)
+                keypoint_visibility.append(visibility)
             boxes.append(box)
             labels.append(label)
             polygons.append(ring)
@@ -279,8 +301,35 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             return Targets.empty()
         label_tensor = torch.tensor(labels, dtype=torch.int64)
         difficult_tensor = torch.tensor(flags, dtype=torch.bool)
+        keypoints_tensor: Tensor | None = None
+        keypoint_vis_tensor: Tensor | None = None
+        if self._keypoints:
+            counts = {int(coords.shape[0]) for coords in keypoint_coords}
+            if len(counts) != 1:
+                raise ValueError(
+                    f"{record.file_name}: keypoint reading needs one K across all instances; "
+                    f"got K values {sorted(counts)}"
+                )
+            keypoints_tensor = torch.stack(keypoint_coords, dim=0)
+            keypoint_vis_tensor = torch.stack(keypoint_visibility, dim=0)
         if self._oriented:
-            return _oriented_targets(polygons, label_tensor, record.file_name, difficult_tensor)
+            return _oriented_targets(
+                polygons,
+                label_tensor,
+                record.file_name,
+                difficult_tensor,
+                keypoints=keypoints_tensor,
+                keypoint_vis=keypoint_vis_tensor,
+            )
+        if keypoints_tensor is not None and keypoint_vis_tensor is not None:
+            return Targets(
+                boxes=torch.tensor(boxes, dtype=torch.float32),
+                labels=label_tensor,
+                polygons=polygons,
+                difficult=difficult_tensor,
+                keypoints=keypoints_tensor,
+                keypoint_vis=keypoint_vis_tensor,
+            )
         return Targets(
             boxes=torch.tensor(boxes, dtype=torch.float32),
             labels=label_tensor,
@@ -309,7 +358,47 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         return box, label, ring, difficult
 
 
-def _oriented_targets(rings: list[Tensor], labels: Tensor, file_name: str, difficult: Tensor) -> Targets:
+def _parse_keypoints(keypoints: object, file_name: str) -> tuple[Tensor, Tensor]:
+    """Split a flat COCO keypoint list into coordinates and visibility.
+
+    Args:
+        keypoints: Flat ``[x, y, v, ...]`` annotation value.
+        file_name: Image file name, named when the flat length is invalid.
+
+    Returns:
+        A ``((K, 2) float32 coordinates, (K,) int64 visibility)`` pair.
+
+    Raises:
+        ValueError: If ``keypoints`` is not a list or its length is not a
+            positive multiple of three.
+
+    Examples:
+        >>> coords, visibility = _parse_keypoints([1.5, 2.0, 2, 3.5, 4.0, 0], "pose.jpg")
+        >>> coords.tolist(), visibility.tolist()
+        ([[1.5, 2.0], [3.5, 4.0]], [2, 0])
+    """
+    if not isinstance(keypoints, list):
+        raise ValueError(
+            f"{file_name}: keypoints length must be a positive multiple of {_KEYPOINT_STRIDE}; "
+            f"got non-list {type(keypoints).__name__}"
+        )
+    length = len(keypoints)
+    if length == 0 or length % _KEYPOINT_STRIDE != 0:
+        raise ValueError(
+            f"{file_name}: keypoints length must be a positive multiple of {_KEYPOINT_STRIDE}; got length {length}"
+        )
+    values = torch.tensor(keypoints, dtype=torch.float32).reshape(-1, _KEYPOINT_STRIDE)
+    return values[:, :_KEYPOINT_COORDS], values[:, _KEYPOINT_COORDS].to(torch.int64)
+
+
+def _oriented_targets(
+    rings: list[Tensor],
+    labels: Tensor,
+    file_name: str,
+    difficult: Tensor,
+    keypoints: Tensor | None = None,
+    keypoint_vis: Tensor | None = None,
+) -> Targets:
     """Fit one image's quadrilateral rings to rotated boxes and their shared envelopes.
 
     Both axis-aligned and rotated boxes are derived from the *same* ring, which is what
@@ -323,9 +412,11 @@ def _oriented_targets(rings: list[Tensor], labels: Tensor, file_name: str, diffi
         labels: ``(N,)`` int64 class ids aligned with ``rings``.
         file_name: Image file name, named in the error when a ring is not a quad.
         difficult: ``(N,)`` bool R18 flags aligned with ``rings`` (A51).
+        keypoints: Optional ``(N, K, 2)`` float32 coordinates aligned with ``rings``.
+        keypoint_vis: Optional ``(N, K)`` int64 visibility paired with ``keypoints``.
 
     Returns:
-        Targets whose ``boxes``, ``labels``, ``rboxes`` and ``difficult`` share one
+        Targets whose box, label, difficult and optional keypoint channels share one
         instance axis and whose ``polygons`` is empty.
 
     Raises:
@@ -344,12 +435,18 @@ def _oriented_targets(rings: list[Tensor], labels: Tensor, file_name: str, diffi
             f"{file_name}: oriented reading needs a {_QUAD_CORNERS}-point ring per instance; "
             f"got ring sizes {sorted(sides)}"
         )
-    return Targets(
-        boxes=boxes_from_polygons(rings),
-        labels=labels,
-        rboxes=polygons_to_rboxes(torch.stack(rings, dim=0)),
-        difficult=difficult,
-    )
+    boxes = boxes_from_polygons(rings)
+    rboxes = polygons_to_rboxes(torch.stack(rings, dim=0))
+    if keypoints is not None and keypoint_vis is not None:
+        return Targets(
+            boxes=boxes,
+            labels=labels,
+            rboxes=rboxes,
+            difficult=difficult,
+            keypoints=keypoints,
+            keypoint_vis=keypoint_vis,
+        )
+    return Targets(boxes=boxes, labels=labels, rboxes=rboxes, difficult=difficult)
 
 
 def _build_category_maps(categories: list[dict[str, object]]) -> tuple[dict[int, int], dict[int, int]]:
