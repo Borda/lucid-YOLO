@@ -160,29 +160,30 @@ def test_dual_path_report(detseg_fixture_dir: Path) -> None:
         assert all(torch.isfinite(torch.tensor(value)) for value in stats.values())
 
 
-def test_detections_to_predictions_drops_padding_rows() -> None:
-    """Score-zero padding rows are dropped; only the scored detection survives."""
-    detections = torch.tensor([[[1.0, 2.0, 5.0, 6.0, 0.8, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]])
-    preds = detections_to_predictions(detections, label_to_category={0: 5})
-    assert len(preds) == 1
-    assert preds[0]["boxes"].shape == (1, 4)
-    assert preds[0]["scores"].tolist() == [pytest.approx(0.8)]
+class TestDetectionsToPredictions:
+    """Tests for ``detections_to_predictions``."""
 
+    def test_drops_padding_rows(self) -> None:
+        """Score-zero padding rows are dropped; only the scored detection survives."""
+        detections = torch.tensor([[[1.0, 2.0, 5.0, 6.0, 0.8, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]])
+        preds = detections_to_predictions(detections, label_to_category={0: 5})
+        assert len(preds) == 1
+        assert preds[0]["boxes"].shape == (1, 4)
+        assert preds[0]["scores"].tolist() == [pytest.approx(0.8)]
 
-def test_detections_to_predictions_xyxy_and_category_mapping() -> None:
-    """``xyxy`` corners are kept as-is and the contiguous label maps to its COCO category id."""
-    detections = torch.tensor([[[10.0, 20.0, 40.0, 80.0, 0.5, 2.0]]])
-    preds = detections_to_predictions(detections, label_to_category={2: 42})
-    assert preds[0]["boxes"].tolist() == [[10.0, 20.0, 40.0, 80.0]]  # unchanged xyxy corners
-    assert preds[0]["labels"].tolist() == [42]
+    def test_xyxy_and_category_mapping(self) -> None:
+        """``xyxy`` corners are kept as-is and the contiguous label maps to its COCO category id."""
+        detections = torch.tensor([[[10.0, 20.0, 40.0, 80.0, 0.5, 2.0]]])
+        preds = detections_to_predictions(detections, label_to_category={2: 42})
+        assert preds[0]["boxes"].tolist() == [[10.0, 20.0, 40.0, 80.0]]  # unchanged xyxy corners
+        assert preds[0]["labels"].tolist() == [42]
 
-
-def test_detections_to_predictions_score_floor() -> None:
-    """A positive score floor drops detections at or below it."""
-    detections = torch.tensor([[[0.0, 0.0, 4.0, 4.0, 0.30, 0.0], [0.0, 0.0, 4.0, 4.0, 0.10, 1.0]]])
-    preds = detections_to_predictions(detections, label_to_category={0: 1, 1: 2}, score_floor=0.2)
-    assert preds[0]["scores"].tolist() == [pytest.approx(0.30)]
-    assert preds[0]["labels"].tolist() == [1]
+    def test_score_floor(self) -> None:
+        """A positive score floor drops detections at or below it."""
+        detections = torch.tensor([[[0.0, 0.0, 4.0, 4.0, 0.30, 0.0], [0.0, 0.0, 4.0, 4.0, 0.10, 1.0]]])
+        preds = detections_to_predictions(detections, label_to_category={0: 1, 1: 2}, score_floor=0.2)
+        assert preds[0]["scores"].tolist() == [pytest.approx(0.30)]
+        assert preds[0]["labels"].tolist() == [1]
 
 
 def _single_image_gt() -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:

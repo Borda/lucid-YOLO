@@ -353,29 +353,41 @@ def test_tile_image_targets_walks_every_window() -> None:
     assert sum(tiled.targets.labels.shape[0] for _, _, tiled in tiles) > 0
 
 
-@pytest.mark.parametrize(
-    ("targets_kwargs", "difficult", "match"),
-    [
-        ({"polygons": [torch.zeros((3, 2))]}, torch.tensor([False]), "no polygons"),
-        ({}, torch.tensor([0]), "must be bool"),
-        ({}, torch.tensor([False, True]), "1-D of length 1"),
-    ],
-)
-def test_crop_targets_rejects_broken_inputs(
-    targets_kwargs: dict[str, list[torch.Tensor]], difficult: torch.Tensor, match: str
-) -> None:
-    """Polygons, a non-bool flag tensor and a mismatched flag length are all rejected."""
-    base = _targets(_rbox(5.0, 5.0, 4.0, 2.0, 0.0), [0])
-    targets = Targets(boxes=base.boxes, labels=base.labels, rboxes=base.rboxes, **targets_kwargs)
-    with pytest.raises((TypeError, ValueError), match=match):
-        crop_targets(targets, torch.tensor([0, 0, 10, 10]), difficult=difficult)
+class TestCropTargets:
+    """Tests for ``crop_targets``' own input validation."""
 
+    @pytest.mark.parametrize(
+        ("targets_kwargs", "difficult", "match"),
+        [
+            ({"polygons": [torch.zeros((3, 2))]}, torch.tensor([False]), "no polygons"),
+            ({}, torch.tensor([0]), "must be bool"),
+            ({}, torch.tensor([False, True]), "1-D of length 1"),
+        ],
+    )
+    def test_rejects_broken_inputs(
+        self, targets_kwargs: dict[str, list[torch.Tensor]], difficult: torch.Tensor, match: str
+    ) -> None:
+        """Polygons, a non-bool flag tensor and a mismatched flag length are all rejected."""
+        base = _targets(_rbox(5.0, 5.0, 4.0, 2.0, 0.0), [0])
+        targets = Targets(boxes=base.boxes, labels=base.labels, rboxes=base.rboxes, **targets_kwargs)
+        with pytest.raises((TypeError, ValueError), match=match):
+            crop_targets(targets, torch.tensor([0, 0, 10, 10]), difficult=difficult)
 
-def test_crop_targets_rejects_a_broken_input_instance_axis() -> None:
-    """A ``rboxes`` axis that does not match the instance axis is rejected, not zipped short."""
-    targets = Targets(boxes=torch.zeros((1, 4)), labels=torch.zeros(1, dtype=torch.int64), rboxes=torch.zeros((2, 5)))
-    with pytest.raises(ValueError, match="must share the instance axis"):
-        crop_targets(targets, torch.tensor([0, 0, 10, 10]), difficult=torch.tensor([False]))
+    def test_rejects_a_broken_input_instance_axis(self) -> None:
+        """A ``rboxes`` axis that does not match the instance axis is rejected, not zipped short."""
+        targets = Targets(
+            boxes=torch.zeros((1, 4)), labels=torch.zeros(1, dtype=torch.int64), rboxes=torch.zeros((2, 5))
+        )
+        with pytest.raises(ValueError, match="must share the instance axis"):
+            crop_targets(targets, torch.tensor([0, 0, 10, 10]), difficult=torch.tensor([False]))
+
+    def test_rejects_a_degenerate_window(self) -> None:
+        """A window with no extent, or the wrong shape, is a caller error rather than an empty crop."""
+        targets = _targets(_rbox(5.0, 5.0, 4.0, 2.0, 0.0), [0])
+        with pytest.raises(ValueError, match="positive extent"):
+            crop_targets(targets, torch.tensor([10, 0, 10, 5]), difficult=torch.tensor([False]))
+        with pytest.raises(ValueError, match=r"window must be \(4,\)"):
+            crop_targets(targets, torch.tensor([0, 0, 10]), difficult=torch.tensor([False]))
 
 
 def test_zero_area_annotation_is_dropped() -> None:
@@ -432,15 +444,6 @@ def test_image_shape_is_checked_before_any_cropping() -> None:
         crop_image(torch.zeros(4, 4), torch.tensor([0, 0, 2, 2]))
     with pytest.raises(ValueError, match=r"image must be \(C, H, W\)"):
         list(tile_image_targets(torch.zeros(4, 4), targets, difficult=torch.tensor([False])))
-
-
-def test_crop_targets_rejects_a_degenerate_window() -> None:
-    """A window with no extent, or the wrong shape, is a caller error rather than an empty crop."""
-    targets = _targets(_rbox(5.0, 5.0, 4.0, 2.0, 0.0), [0])
-    with pytest.raises(ValueError, match="positive extent"):
-        crop_targets(targets, torch.tensor([10, 0, 10, 5]), difficult=torch.tensor([False]))
-    with pytest.raises(ValueError, match=r"window must be \(4,\)"):
-        crop_targets(targets, torch.tensor([0, 0, 10]), difficult=torch.tensor([False]))
 
 
 def test_tiles_of_a_synthetic_obb_image_account_for_every_instance(obb_fixture_dir: Path) -> None:

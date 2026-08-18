@@ -254,31 +254,32 @@ def test_alpha_property_delegates_to_loss() -> None:
     assert module.loss.alpha == 0.8
 
 
-def test_pad_targets_pads_ragged_batch_with_mask() -> None:
-    """A ragged batch pads to N_max with a mask marking the real rows."""
-    first = Targets(boxes=torch.tensor([[0.0, 0.0, 4.0, 4.0], [1.0, 1.0, 5.0, 5.0]]), labels=torch.tensor([1, 2]))
-    second = Targets(boxes=torch.tensor([[2.0, 2.0, 6.0, 6.0]]), labels=torch.tensor([3]))
-    boxes, labels, mask = pad_targets([first, second])
-    assert boxes.shape == (2, 2, 4)
-    assert mask.tolist() == [[True, True], [True, False]]
-    assert labels.tolist() == [[1, 2], [3, 0]]
-    assert torch.equal(boxes[1, 1], torch.zeros(4))
+class TestPadTargets:
+    """Tests for ``pad_targets``."""
 
+    def test_pads_ragged_batch_with_mask(self) -> None:
+        """A ragged batch pads to N_max with a mask marking the real rows."""
+        first = Targets(boxes=torch.tensor([[0.0, 0.0, 4.0, 4.0], [1.0, 1.0, 5.0, 5.0]]), labels=torch.tensor([1, 2]))
+        second = Targets(boxes=torch.tensor([[2.0, 2.0, 6.0, 6.0]]), labels=torch.tensor([3]))
+        boxes, labels, mask = pad_targets([first, second])
+        assert boxes.shape == (2, 2, 4)
+        assert mask.tolist() == [[True, True], [True, False]]
+        assert labels.tolist() == [[1, 2], [3, 0]]
+        assert torch.equal(boxes[1, 1], torch.zeros(4))
 
-def test_pad_targets_handles_empty_image() -> None:
-    """An image with no instances contributes an all-False mask row."""
-    annotated = Targets(boxes=torch.tensor([[0.0, 0.0, 4.0, 4.0]]), labels=torch.tensor([1]))
-    boxes, _labels, mask = pad_targets([annotated, Targets.empty()])
-    assert boxes.shape == (2, 1, 4)
-    assert mask.tolist() == [[True], [False]]
+    def test_handles_empty_image(self) -> None:
+        """An image with no instances contributes an all-False mask row."""
+        annotated = Targets(boxes=torch.tensor([[0.0, 0.0, 4.0, 4.0]]), labels=torch.tensor([1]))
+        boxes, _labels, mask = pad_targets([annotated, Targets.empty()])
+        assert boxes.shape == (2, 1, 4)
+        assert mask.tolist() == [[True], [False]]
 
-
-def test_pad_targets_all_empty_batch_is_zero_width() -> None:
-    """A batch whose every image is empty yields N_max = 0 tensors."""
-    boxes, labels, mask = pad_targets([Targets.empty(), Targets.empty()])
-    assert boxes.shape == (2, 0, 4)
-    assert labels.shape == (2, 0)
-    assert mask.shape == (2, 0)
+    def test_all_empty_batch_is_zero_width(self) -> None:
+        """A batch whose every image is empty yields N_max = 0 tensors."""
+        boxes, labels, mask = pad_targets([Targets.empty(), Targets.empty()])
+        assert boxes.shape == (2, 0, 4)
+        assert labels.shape == (2, 0)
+        assert mask.shape == (2, 0)
 
 
 def test_invalid_task_raises() -> None:

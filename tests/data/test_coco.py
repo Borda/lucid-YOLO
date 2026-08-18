@@ -285,16 +285,40 @@ def test_pack_unpack_round_trip_is_byte_identical(targets: list[Targets]) -> Non
     _assert_targets_identical(unpack_targets(pack_targets(targets)), targets)
 
 
-def test_on_after_batch_transfer_leaves_unpacked_batch_untouched(detseg_fixture_dir: Path) -> None:
-    """An already-unpacked (list) batch passes through the hook defensively unchanged."""
-    datamodule = _datamodule(detseg_fixture_dir)
-    targets = _ragged_targets()
-    images, passed, masks = datamodule.on_after_batch_transfer((torch.zeros(2, 3, 8, 8), targets), 0)
-    assert images.shape == (2, 3, 8, 8)
-    assert passed is targets
-    # No transport means no loader-side rasterisation to report, which is the signal
-    # the step rasterises for itself.
-    assert masks is None
+class TestOnAfterBatchTransfer:
+    """Tests for ``DetectionDataModule.on_after_batch_transfer``."""
+
+    def test_leaves_unpacked_batch_untouched(self, detseg_fixture_dir: Path) -> None:
+        """An already-unpacked (list) batch passes through the hook defensively unchanged."""
+        datamodule = _datamodule(detseg_fixture_dir)
+        targets = _ragged_targets()
+        images, passed, masks = datamodule.on_after_batch_transfer((torch.zeros(2, 3, 8, 8), targets), 0)
+        assert images.shape == (2, 3, 8, 8)
+        assert passed is targets
+        # No transport means no loader-side rasterisation to report, which is the signal
+        # the step rasterises for itself.
+        assert masks is None
+
+    def test_dequantizes_uint8_images(self, detseg_fixture_dir: Path) -> None:
+        """The hook dequantizes a uint8 transport batch to float32 ``[0, 1]`` on the batch's device."""
+        datamodule = _datamodule(detseg_fixture_dir)
+        transport, packed = collate_detection([(torch.rand(3, 8, 8), target) for target in _ragged_targets()])
+        images, _targets, _ = datamodule.on_after_batch_transfer((transport, packed), 0)
+        assert images.dtype == torch.float32
+        assert images.device == transport.device
+        assert torch.all((images >= 0.0) & (images <= 1.0))
+
+    def test_matches_half_module_dtype(self, detseg_fixture_dir: Path) -> None:
+        """The hook restores images at the attached module's dtype, so a half module gets half inputs."""
+        module = _SingleParamModule().half()
+        trainer = Trainer(accelerator="cpu", logger=False, enable_progress_bar=False)
+        trainer.strategy.connect(module)
+        datamodule = _datamodule(detseg_fixture_dir)
+        datamodule.trainer = trainer
+        transport, packed = collate_detection([(torch.rand(3, 8, 8), target) for target in _ragged_targets()])
+        images, _targets, _ = datamodule.on_after_batch_transfer((transport, packed), 0)
+        assert images.dtype == torch.float16
+        assert torch.all((images >= 0.0) & (images <= 1.0))
 
 
 def _datamodule(
@@ -361,35 +385,12 @@ def test_datamodule_val_batch_letterboxed(detseg_fixture_dir: Path) -> None:
     assert all(isinstance(target, Targets) for target in targets)
 
 
-def test_on_after_batch_transfer_dequantizes_uint8_images(detseg_fixture_dir: Path) -> None:
-    """The hook dequantizes a uint8 transport batch to float32 ``[0, 1]`` on the batch's device."""
-    datamodule = _datamodule(detseg_fixture_dir)
-    transport, packed = collate_detection([(torch.rand(3, 8, 8), target) for target in _ragged_targets()])
-    images, _targets, _ = datamodule.on_after_batch_transfer((transport, packed), 0)
-    assert images.dtype == torch.float32
-    assert images.device == transport.device
-    assert torch.all((images >= 0.0) & (images <= 1.0))
-
-
 class _SingleParamModule(LightningModule):
     """Minimal LightningModule carrying one parameter, so ``.dtype`` follows ``.half()``."""
 
     def __init__(self) -> None:
         super().__init__()
         self.head = torch.nn.Linear(1, 1)
-
-
-def test_on_after_batch_transfer_matches_half_module_dtype(detseg_fixture_dir: Path) -> None:
-    """The hook restores images at the attached module's dtype, so a half module gets half inputs."""
-    module = _SingleParamModule().half()
-    trainer = Trainer(accelerator="cpu", logger=False, enable_progress_bar=False)
-    trainer.strategy.connect(module)
-    datamodule = _datamodule(detseg_fixture_dir)
-    datamodule.trainer = trainer
-    transport, packed = collate_detection([(torch.rand(3, 8, 8), target) for target in _ragged_targets()])
-    images, _targets, _ = datamodule.on_after_batch_transfer((transport, packed), 0)
-    assert images.dtype == torch.float16
-    assert torch.all((images >= 0.0) & (images <= 1.0))
 
 
 def test_unpack_batch_dtype_argument_controls_image_precision() -> None:
@@ -665,21 +666,22 @@ def _write_fake_coco_root(root: Path, train: int, val: int) -> None:
     _write_fake_split(root / "val2017", annotations / "instances_val2017.json", val)
 
 
-def test_check_data_passes_on_matching_counts(tmp_path: Path) -> None:
-    """A layout whose disk and annotation counts match the expected totals is OK."""
-    _write_fake_coco_root(tmp_path, train=2, val=1)
-    result = check_data.check_coco_root(tmp_path, expected_train=2, expected_val=1)
-    assert result.ok
+class TestCheckData:
+    """Tests for ``check_data.check_coco_root``."""
 
+    def test_passes_on_matching_counts(self, tmp_path: Path) -> None:
+        """A layout whose disk and annotation counts match the expected totals is OK."""
+        _write_fake_coco_root(tmp_path, train=2, val=1)
+        result = check_data.check_coco_root(tmp_path, expected_train=2, expected_val=1)
+        assert result.ok
 
-def test_check_data_fails_on_count_mismatch(tmp_path: Path) -> None:
-    """Real COCO totals against a tiny layout fail, and the CLI exits 1."""
-    _write_fake_coco_root(tmp_path, train=2, val=1)
-    result = check_data.check_coco_root(tmp_path)
-    assert not result.ok
-    assert data_cli.main(["check", "--data_root", str(tmp_path)]) == 1
+    def test_fails_on_count_mismatch(self, tmp_path: Path) -> None:
+        """Real COCO totals against a tiny layout fail, and the CLI exits 1."""
+        _write_fake_coco_root(tmp_path, train=2, val=1)
+        result = check_data.check_coco_root(tmp_path)
+        assert not result.ok
+        assert data_cli.main(["check", "--data_root", str(tmp_path)]) == 1
 
-
-def test_check_data_fails_on_missing_root(tmp_path: Path) -> None:
-    """A root without the expected directories is reported invalid."""
-    assert not check_data.check_coco_root(tmp_path / "absent").ok
+    def test_fails_on_missing_root(self, tmp_path: Path) -> None:
+        """A root without the expected directories is reported invalid."""
+        assert not check_data.check_coco_root(tmp_path / "absent").ok

@@ -119,6 +119,16 @@ repos:
         language: system
         pass_filenames: false
         files: ^(tests/.*/test_[^/]+\.py|scripts/_tests/test_[^/]+\.py)$
+      # A confirmed mechanical group (shared name prefix that also names a call
+      # target in the file, three or more members) must sit under a
+      # `class Test<Subject>:`, tests/eval/test_tile_merge.py's own established
+      # pattern -- not a heuristic guess: WP-128's own scope text.
+      - id: flat-test-group-audit
+        name: "🧩 flat test groups regrouped into classes"
+        entry: .venv/bin/python scripts/lint/audit_flat_test_groups.py
+        language: system
+        pass_filenames: false
+        files: ^(tests/.*/test_[^/]+\.py|scripts/_tests/test_[^/]+\.py)$
       # Docs-governance register: every doc a WP's DoD promised actually exists.
       - id: docs-present
         name: "📋 docs governance register presence"

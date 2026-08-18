@@ -96,207 +96,234 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     _write(repo_root / "AGENTS.md", "agents\n")
 
 
-def test_check_policy_docs_exist_flags_a_missing_file(tmp_path: Path) -> None:
-    """A required document absent from disk is reported by name."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    (tmp_path / "docs" / "DATASETS.md").unlink()
+class TestCheckPolicyDocsExist:
+    """Tests for ``audit.check_policy_docs_exist``."""
 
-    violations = audit.check_policy_docs_exist(tmp_path / "docs", tmp_path)
+    def test_flags_a_missing_file(self, tmp_path: Path) -> None:
+        """A required document absent from disk is reported by name."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        (tmp_path / "docs" / "DATASETS.md").unlink()
 
-    assert any("docs/DATASETS.md" in violation for violation in violations)
+        violations = audit.check_policy_docs_exist(tmp_path / "docs", tmp_path)
 
+        assert any("docs/DATASETS.md" in violation for violation in violations)
 
-def test_check_policy_docs_exist_is_clean_when_every_file_present(tmp_path: Path) -> None:
-    """Every required document present on disk reports no violation."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    assert audit.check_policy_docs_exist(tmp_path / "docs", tmp_path) == []
+    def test_is_clean_when_every_file_present(self, tmp_path: Path) -> None:
+        """Every required document present on disk reports no violation."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        assert audit.check_policy_docs_exist(tmp_path / "docs", tmp_path) == []
 
 
-def test_check_model_cards_are_required_flags_an_unlisted_card(tmp_path: Path) -> None:
-    """A card in ``model_cards/`` that isn't a required file is reported."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    _write(tmp_path / "docs" / "model_cards" / "extra.md", "extra\n")
+class TestCheckModelCardsAreRequired:
+    """Tests for ``audit.check_model_cards_are_required``."""
 
-    violations = audit.check_model_cards_are_required(tmp_path / "docs", tmp_path)
+    def test_flags_an_unlisted_card(self, tmp_path: Path) -> None:
+        """A card in ``model_cards/`` that isn't a required file is reported."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(tmp_path / "docs" / "model_cards" / "extra.md", "extra\n")
 
-    assert violations == ["model cards not in REQUIRED_FILES: ['extra.md']"]
+        violations = audit.check_model_cards_are_required(tmp_path / "docs", tmp_path)
 
+        assert violations == ["model cards not in REQUIRED_FILES: ['extra.md']"]
 
-def test_check_model_cards_are_required_is_clean_for_the_exact_set(tmp_path: Path) -> None:
-    """The exact required set of model cards, with nothing extra, reports no violation."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    assert audit.check_model_cards_are_required(tmp_path / "docs", tmp_path) == []
+    def test_is_clean_for_the_exact_set(self, tmp_path: Path) -> None:
+        """The exact required set of model cards, with nothing extra, reports no violation."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        assert audit.check_model_cards_are_required(tmp_path / "docs", tmp_path) == []
 
 
-def test_check_log_links_resolve_flags_an_undefined_anchor(tmp_path: Path) -> None:
-    """A roadmap link to a log anchor the log file never defines is reported."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    _write(tmp_path / "docs" / "ROADMAP.md", "See RESEARCH_LOG.md#missing-anchor for detail.\n")
+class TestCheckLogLinksResolve:
+    """Tests for ``audit.check_log_links_resolve``."""
 
-    violations = audit.check_log_links_resolve(tmp_path / "docs", tmp_path)
+    def test_flags_an_undefined_anchor(self, tmp_path: Path) -> None:
+        """A roadmap link to a log anchor the log file never defines is reported."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(tmp_path / "docs" / "ROADMAP.md", "See RESEARCH_LOG.md#missing-anchor for detail.\n")
 
-    assert any("missing-anchor" in violation for violation in violations)
+        violations = audit.check_log_links_resolve(tmp_path / "docs", tmp_path)
 
+        assert any("missing-anchor" in violation for violation in violations)
 
-def test_check_log_links_resolve_is_clean_when_every_anchor_is_defined(tmp_path: Path) -> None:
-    """A roadmap link to a defined anchor reports no violation."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    _write(
-        tmp_path / "docs" / "ROADMAP.md",
-        "129 numbered work packages.\nSee RESEARCH_LOG.md#the-anchor.\n"
-        + "".join(f"| {i:03d} | a | b | c | d | ✅ |\n" for i in range(1, 130)),
-    )
-    _write(tmp_path / "docs" / "RESEARCH_LOG.md", '<a id="the-anchor">note</a>\n')
+    def test_is_clean_when_every_anchor_is_defined(self, tmp_path: Path) -> None:
+        """A roadmap link to a defined anchor reports no violation."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(
+            tmp_path / "docs" / "ROADMAP.md",
+            "129 numbered work packages.\nSee RESEARCH_LOG.md#the-anchor.\n"
+            + "".join(f"| {i:03d} | a | b | c | d | ✅ |\n" for i in range(1, 130)),
+        )
+        _write(tmp_path / "docs" / "RESEARCH_LOG.md", '<a id="the-anchor">note</a>\n')
 
-    assert audit.check_log_links_resolve(tmp_path / "docs", tmp_path) == []
+        assert audit.check_log_links_resolve(tmp_path / "docs", tmp_path) == []
 
 
-def test_check_assumption_ids_contiguous_flags_a_gap(tmp_path: Path) -> None:
-    """A gap in the A1..AN sequence is reported with the actual ids found."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    _write(tmp_path / "docs" / "ASSUMPTIONS.md", "| A1 | ... |\n| A3 | ... |\n")
+class TestCheckAssumptionIdsContiguous:
+    """Tests for ``audit.check_assumption_ids_contiguous``."""
 
-    violations = audit.check_assumption_ids_contiguous(tmp_path / "docs", tmp_path)
+    def test_flags_a_gap(self, tmp_path: Path) -> None:
+        """A gap in the A1..AN sequence is reported with the actual ids found."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(tmp_path / "docs" / "ASSUMPTIONS.md", "| A1 | ... |\n| A3 | ... |\n")
 
-    assert "non-contiguous assumption ids: [1, 3]" in violations
+        violations = audit.check_assumption_ids_contiguous(tmp_path / "docs", tmp_path)
 
+        assert "non-contiguous assumption ids: [1, 3]" in violations
 
-def test_check_assumption_ids_contiguous_is_clean_for_a_full_register(tmp_path: Path) -> None:
-    """A contiguous register at or above the floor reports no violation."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    assert audit.check_assumption_ids_contiguous(tmp_path / "docs", tmp_path) == []
+    def test_is_clean_for_a_full_register(self, tmp_path: Path) -> None:
+        """A contiguous register at or above the floor reports no violation."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        assert audit.check_assumption_ids_contiguous(tmp_path / "docs", tmp_path) == []
 
 
-def test_check_assumption_rows_complete_flags_a_short_row(tmp_path: Path) -> None:
-    """A row with fewer than six columns is reported without crashing on the other checks."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    _write(tmp_path / "docs" / "ASSUMPTIONS.md", "| A1 | short |\n")
+class TestCheckAssumptionRowsComplete:
+    """Tests for ``audit.check_assumption_rows_complete``."""
 
-    violations = audit.check_assumption_rows_complete(tmp_path / "docs", tmp_path)
+    def test_flags_a_short_row(self, tmp_path: Path) -> None:
+        """A row with fewer than six columns is reported without crashing on the other checks."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(tmp_path / "docs" / "ASSUMPTIONS.md", "| A1 | short |\n")
 
-    assert violations == ["rows without exactly six columns: [('A1', 2)]"]
+        violations = audit.check_assumption_rows_complete(tmp_path / "docs", tmp_path)
 
+        assert violations == ["rows without exactly six columns: [('A1', 2)]"]
 
-def test_check_assumption_rows_complete_is_clean_for_full_rows(tmp_path: Path) -> None:
-    """Six-column rows with a valid status and a non-empty source report no violation."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    assert audit.check_assumption_rows_complete(tmp_path / "docs", tmp_path) == []
+    def test_is_clean_for_full_rows(self, tmp_path: Path) -> None:
+        """Six-column rows with a valid status and a non-empty source report no violation."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        assert audit.check_assumption_rows_complete(tmp_path / "docs", tmp_path) == []
 
 
-def test_check_roadmap_wp_ids_unique_and_complete_flags_the_floor(tmp_path: Path) -> None:
-    """A roadmap below the work-package floor is reported even when contiguous."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    _write(tmp_path / "docs" / "ROADMAP.md", "1 numbered work packages.\n| 001 | ... |\n")
+class TestCheckRoadmapWpIdsUniqueAndComplete:
+    """Tests for ``audit.check_roadmap_wp_ids_unique_and_complete``."""
 
-    violations = audit.check_roadmap_wp_ids_unique_and_complete(tmp_path / "docs", tmp_path)
+    def test_flags_the_floor(self, tmp_path: Path) -> None:
+        """A roadmap below the work-package floor is reported even when contiguous."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(tmp_path / "docs" / "ROADMAP.md", "1 numbered work packages.\n| 001 | ... |\n")
 
-    assert any("shrank below 129" in violation for violation in violations)
+        violations = audit.check_roadmap_wp_ids_unique_and_complete(tmp_path / "docs", tmp_path)
 
+        assert any("shrank below 129" in violation for violation in violations)
 
-def test_check_roadmap_wp_ids_unique_and_complete_is_clean_at_the_floor(tmp_path: Path) -> None:
-    """A contiguous roadmap at the floor count reports no violation."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    assert audit.check_roadmap_wp_ids_unique_and_complete(tmp_path / "docs", tmp_path) == []
+    def test_is_clean_at_the_floor(self, tmp_path: Path) -> None:
+        """A contiguous roadmap at the floor count reports no violation."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        assert audit.check_roadmap_wp_ids_unique_and_complete(tmp_path / "docs", tmp_path) == []
 
 
-def test_check_roadmap_rows_complete_flags_a_short_row(tmp_path: Path) -> None:
-    """A numbered roadmap row with fewer than six columns is reported."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    _write(tmp_path / "docs" / "ROADMAP.md", "| 001 | x |\n")
+class TestCheckRoadmapRowsComplete:
+    """Tests for ``audit.check_roadmap_rows_complete``."""
 
-    violations = audit.check_roadmap_rows_complete(tmp_path / "docs", tmp_path)
+    def test_flags_a_short_row(self, tmp_path: Path) -> None:
+        """A numbered roadmap row with fewer than six columns is reported."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(tmp_path / "docs" / "ROADMAP.md", "| 001 | x |\n")
 
-    assert violations == ["roadmap rows without exactly six columns: [('| 001 | x', 2)]"]
+        violations = audit.check_roadmap_rows_complete(tmp_path / "docs", tmp_path)
 
+        assert violations == ["roadmap rows without exactly six columns: [('| 001 | x', 2)]"]
 
-def test_check_roadmap_rows_complete_is_clean_for_full_rows(tmp_path: Path) -> None:
-    """Six-column numbered roadmap rows report no violation."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    assert audit.check_roadmap_rows_complete(tmp_path / "docs", tmp_path) == []
+    def test_is_clean_for_full_rows(self, tmp_path: Path) -> None:
+        """Six-column numbered roadmap rows report no violation."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        assert audit.check_roadmap_rows_complete(tmp_path / "docs", tmp_path) == []
 
 
-def test_check_roadmap_statuses_valid_flags_an_unrecognized_icon(tmp_path: Path) -> None:
-    """A status icon outside the recognized set is reported."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    text = (tmp_path / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
-    _write(
-        tmp_path / "docs" / "ROADMAP.md", text.replace("| 001 | a | b | c | d | ✅ |", "| 001 | a | b | c | d | ??? |")
-    )
+class TestCheckRoadmapStatusesValid:
+    """Tests for ``audit.check_roadmap_statuses_valid``."""
 
-    violations = audit.check_roadmap_statuses_valid(tmp_path / "docs", tmp_path)
+    def test_flags_an_unrecognized_icon(self, tmp_path: Path) -> None:
+        """A status icon outside the recognized set is reported."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        text = (tmp_path / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+        _write(
+            tmp_path / "docs" / "ROADMAP.md",
+            text.replace("| 001 | a | b | c | d | ✅ |", "| 001 | a | b | c | d | ??? |"),
+        )
 
-    assert any("invalid status values" in violation for violation in violations)
+        violations = audit.check_roadmap_statuses_valid(tmp_path / "docs", tmp_path)
 
+        assert any("invalid status values" in violation for violation in violations)
 
-def test_check_roadmap_statuses_valid_is_clean_for_recognized_icons(tmp_path: Path) -> None:
-    """Every row ending in a recognized status icon, at or above the row floor, is clean."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    assert audit.check_roadmap_statuses_valid(tmp_path / "docs", tmp_path) == []
+    def test_is_clean_for_recognized_icons(self, tmp_path: Path) -> None:
+        """Every row ending in a recognized status icon, at or above the row floor, is clean."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        assert audit.check_roadmap_statuses_valid(tmp_path / "docs", tmp_path) == []
 
 
-def test_check_roadmap_header_count_flags_a_mismatched_count(tmp_path: Path) -> None:
-    """A stated package count that disagrees with the numbered rows is reported."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    text = (tmp_path / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
-    _write(tmp_path / "docs" / "ROADMAP.md", text.replace("129 numbered work packages.", "5 numbered work packages."))
+class TestCheckRoadmapHeaderCount:
+    """Tests for ``audit.check_roadmap_header_count``."""
 
-    violations = audit.check_roadmap_header_count(tmp_path / "docs", tmp_path)
+    def test_flags_a_mismatched_count(self, tmp_path: Path) -> None:
+        """A stated package count that disagrees with the numbered rows is reported."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        text = (tmp_path / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+        _write(
+            tmp_path / "docs" / "ROADMAP.md", text.replace("129 numbered work packages.", "5 numbered work packages.")
+        )
 
-    assert violations == ["header states 5 numbered work packages but the table carries 129"]
+        violations = audit.check_roadmap_header_count(tmp_path / "docs", tmp_path)
 
+        assert violations == ["header states 5 numbered work packages but the table carries 129"]
 
-def test_check_roadmap_header_count_is_clean_when_counts_agree(tmp_path: Path) -> None:
-    """A stated package count matching the numbered rows reports no violation."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    assert audit.check_roadmap_header_count(tmp_path / "docs", tmp_path) == []
+    def test_is_clean_when_counts_agree(self, tmp_path: Path) -> None:
+        """A stated package count matching the numbered rows reports no violation."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        assert audit.check_roadmap_header_count(tmp_path / "docs", tmp_path) == []
 
 
-def test_check_provenance_ids_flags_a_missing_source_id(tmp_path: Path) -> None:
-    """A missing source id in the R1..R21 allowlist is reported."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    _write(tmp_path / "docs" / "PROVENANCE.md", "| R1 | source |\n")
+class TestCheckProvenanceIds:
+    """Tests for ``audit.check_provenance_ids``."""
 
-    violations = audit.check_provenance_ids(tmp_path / "docs", tmp_path)
+    def test_flags_a_missing_source_id(self, tmp_path: Path) -> None:
+        """A missing source id in the R1..R21 allowlist is reported."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(tmp_path / "docs" / "PROVENANCE.md", "| R1 | source |\n")
 
-    assert any("provenance missing source ids" in violation for violation in violations)
+        violations = audit.check_provenance_ids(tmp_path / "docs", tmp_path)
 
+        assert any("provenance missing source ids" in violation for violation in violations)
 
-def test_check_provenance_ids_is_clean_for_the_full_allowlist(tmp_path: Path) -> None:
-    """Every source id R1..R21 present reports no violation."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    assert audit.check_provenance_ids(tmp_path / "docs", tmp_path) == []
+    def test_is_clean_for_the_full_allowlist(self, tmp_path: Path) -> None:
+        """Every source id R1..R21 present reports no violation."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        assert audit.check_provenance_ids(tmp_path / "docs", tmp_path) == []
 
 
-def test_check_report_sections_flags_a_missing_heading(tmp_path: Path) -> None:
-    """A required report section heading missing from the file is reported."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    _write(tmp_path / "docs" / "REPRODUCTION_REPORT.md", "## 0.1.0 — Detection\n")
+class TestCheckReportSections:
+    """Tests for ``audit.check_report_sections``."""
 
-    violations = audit.check_report_sections(tmp_path / "docs", tmp_path)
+    def test_flags_a_missing_heading(self, tmp_path: Path) -> None:
+        """A required report section heading missing from the file is reported."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(tmp_path / "docs" / "REPRODUCTION_REPORT.md", "## 0.1.0 — Detection\n")
 
-    assert any("missing section headings" in violation for violation in violations)
+        violations = audit.check_report_sections(tmp_path / "docs", tmp_path)
 
+        assert any("missing section headings" in violation for violation in violations)
 
-def test_check_report_sections_is_clean_when_every_section_present(tmp_path: Path) -> None:
-    """Every required section heading present reports no violation."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    assert audit.check_report_sections(tmp_path / "docs", tmp_path) == []
+    def test_is_clean_when_every_section_present(self, tmp_path: Path) -> None:
+        """Every required section heading present reports no violation."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        assert audit.check_report_sections(tmp_path / "docs", tmp_path) == []
 
 
-def test_check_decisions_ids_flags_a_missing_adr(tmp_path: Path) -> None:
-    """A missing ADR section heading is reported even when ids are contiguous."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 18)))
+class TestCheckDecisionsIds:
+    """Tests for ``audit.check_decisions_ids``."""
 
-    violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
+    def test_flags_a_missing_adr(self, tmp_path: Path) -> None:
+        """A missing ADR section heading is reported even when ids are contiguous."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 18)))
 
-    assert any("missing ADR-001 section" in violation for violation in violations)
+        violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
 
+        assert any("missing ADR-001 section" in violation for violation in violations)
 
-def test_check_decisions_ids_is_clean_for_a_full_register(tmp_path: Path) -> None:
-    """A contiguous register at the floor with all four ADR sections reports no violation."""
-    _write_required_docs(tmp_path / "docs", tmp_path)
-    assert audit.check_decisions_ids(tmp_path / "docs", tmp_path) == []
+    def test_is_clean_for_a_full_register(self, tmp_path: Path) -> None:
+        """A contiguous register at the floor with all four ADR sections reports no violation."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        assert audit.check_decisions_ids(tmp_path / "docs", tmp_path) == []
 
 
 def test_find_violations_survives_a_missing_file(tmp_path: Path) -> None:

@@ -294,68 +294,6 @@ def test_objects_can_be_converted_without_a_file() -> None:
     assert targets.rboxes.tolist() == [[2.0, 1.0, 4.0, 2.0, 0.0]]
 
 
-def test_check_data_passes_on_a_dota_fixture_root(dota_fixture: _DotaFixture) -> None:
-    """The DOTA validator accepts a well-formed root when told that root's own counts."""
-    result = check_data.check_dota_root(
-        dota_fixture.root,
-        splits=(_SPLIT,),
-        expected_images=dota_fixture.images,
-        expected_instances=dota_fixture.instances,
-        expected_classes=dota_fixture.classes,
-    )
-
-    assert result.ok, result.problems
-
-
-def test_check_data_counts_difficult_instances_too(dota_fixture: _DotaFixture) -> None:
-    """Instance counting is what is on disk: difficult lines count toward the total (A39)."""
-    result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,))
-
-    assert dota_fixture.difficult > 0
-    assert result.splits[0].instances == dota_fixture.instances
-
-
-def test_check_data_reports_totals_it_was_not_given_without_failing(dota_fixture: _DotaFixture) -> None:
-    """An unstated total is a note, not a problem: a well-formed root passes on its layout alone.
-
-    The published 2,806 / 188,282 / 15 were the defaults until WP-097, which made
-    ``lucid-data check --dataset dota`` fail on every correct download: R18 sec. 4
-    withholds the testing ground truth, so the annotated root holds about two thirds
-    of the published images and can never sum to them.
-    """
-    result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,))
-
-    assert result.ok, result.problems
-    assert any(f"{dota_fixture.instances} instances" in note for note in result.notes)
-    assert str(check_data.DOTA_IMAGE_COUNT) not in check_data.format_report(result, dota_fixture.root)
-
-
-def test_check_data_fails_on_a_total_it_was_given(dota_fixture: _DotaFixture) -> None:
-    """A stated expectation is still enforced, and names both the wanted and the found count."""
-    result = check_data.check_dota_root(
-        dota_fixture.root,
-        splits=(_SPLIT,),
-        expected_images=check_data.DOTA_IMAGE_COUNT,
-    )
-
-    assert not result.ok
-    assert any(str(check_data.DOTA_IMAGE_COUNT) in problem for problem in result.problems)
-    assert (
-        data_cli.main(
-            [
-                "check",
-                "--data_root",
-                str(dota_fixture.root),
-                "--dataset",
-                "dota",
-                "--expected_images",
-                str(check_data.DOTA_IMAGE_COUNT),
-            ]
-        )
-        == 1
-    )
-
-
 def test_the_annotated_totals_are_the_published_ones_less_the_testing_third() -> None:
     """The measured train-plus-val counts sit where R18's split ratios put them.
 
@@ -375,58 +313,114 @@ def test_the_annotated_totals_are_the_published_ones_less_the_testing_third() ->
     assert 0.62 < instances < 0.71
 
 
-def test_check_data_rejects_a_dota_expectation_aimed_at_coco() -> None:
-    """A DOTA-only count passed with --dataset coco is rejected rather than ignored."""
-    with pytest.raises(ValueError, match="apply to --dataset dota"):
-        check_data.check_dataset(Path("/nonexistent"), dataset="coco", expected_images=1)
+class TestCheckData:
+    """Tests for ``check_data`` (``check_dota_root``/``check_dataset``/``check_coco_root``)."""
 
+    def test_passes_on_a_dota_fixture_root(self, dota_fixture: _DotaFixture) -> None:
+        """The DOTA validator accepts a well-formed root when told that root's own counts."""
+        result = check_data.check_dota_root(
+            dota_fixture.root,
+            splits=(_SPLIT,),
+            expected_images=dota_fixture.images,
+            expected_instances=dota_fixture.instances,
+            expected_classes=dota_fixture.classes,
+        )
 
-def test_check_data_reports_an_image_without_a_label_file(dota_fixture: _DotaFixture) -> None:
-    """Pairing is checked by stem in both directions."""
-    orphaned = sorted((dota_fixture.root / _SPLIT / "labelTxt").glob("*.txt"))[0]
-    orphaned.unlink()
+        assert result.ok, result.problems
 
-    result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,), expected_images=dota_fixture.images)
+    def test_counts_difficult_instances_too(self, dota_fixture: _DotaFixture) -> None:
+        """Instance counting is what is on disk: difficult lines count toward the total (A39)."""
+        result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,))
 
-    assert any("without a label file" in problem for problem in result.splits[0].problems)
+        assert dota_fixture.difficult > 0
+        assert result.splits[0].instances == dota_fixture.instances
 
+    def test_reports_totals_it_was_not_given_without_failing(self, dota_fixture: _DotaFixture) -> None:
+        """An unstated total is a note, not a problem: a well-formed root passes on its layout alone.
 
-def test_check_data_reports_a_label_file_without_an_image(dota_fixture: _DotaFixture) -> None:
-    """A label file whose image is absent is a problem, not a silently extra annotation."""
-    _write_labels(dota_fixture.root / _SPLIT / "labelTxt" / "P9999.txt", "0 0 2 0 2 1 0 1 plane 0\n")
+        The published 2,806 / 188,282 / 15 were the defaults until WP-097, which made
+        ``lucid-data check --dataset dota`` fail on every correct download: R18 sec. 4
+        withholds the testing ground truth, so the annotated root holds about two thirds
+        of the published images and can never sum to them.
+        """
+        result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,))
 
-    result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,))
+        assert result.ok, result.problems
+        assert any(f"{dota_fixture.instances} instances" in note for note in result.notes)
+        assert str(check_data.DOTA_IMAGE_COUNT) not in check_data.format_report(result, dota_fixture.root)
 
-    assert any("without an image" in problem for problem in result.splits[0].problems)
+    def test_fails_on_a_total_it_was_given(self, dota_fixture: _DotaFixture) -> None:
+        """A stated expectation is still enforced, and names both the wanted and the found count."""
+        result = check_data.check_dota_root(
+            dota_fixture.root,
+            splits=(_SPLIT,),
+            expected_images=check_data.DOTA_IMAGE_COUNT,
+        )
 
+        assert not result.ok
+        assert any(str(check_data.DOTA_IMAGE_COUNT) in problem for problem in result.problems)
+        assert (
+            data_cli.main(
+                [
+                    "check",
+                    "--data_root",
+                    str(dota_fixture.root),
+                    "--dataset",
+                    "dota",
+                    "--expected_images",
+                    str(check_data.DOTA_IMAGE_COUNT),
+                ]
+            )
+            == 1
+        )
 
-def test_check_data_reports_an_unparsable_label_file(dota_fixture: _DotaFixture) -> None:
-    """A malformed label file is reported as a problem rather than raising out of the check."""
-    broken = sorted((dota_fixture.root / _SPLIT / "labelTxt").glob("*.txt"))[0]
-    _write_labels(broken, "0 0 2 0 2 1 0 1 container-crane 0\n")
+    def test_rejects_a_dota_expectation_aimed_at_coco(self) -> None:
+        """A DOTA-only count passed with --dataset coco is rejected rather than ignored."""
+        with pytest.raises(ValueError, match="apply to --dataset dota"):
+            check_data.check_dataset(Path("/nonexistent"), dataset="coco", expected_images=1)
 
-    result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,))
+    def test_reports_an_image_without_a_label_file(self, dota_fixture: _DotaFixture) -> None:
+        """Pairing is checked by stem in both directions."""
+        orphaned = sorted((dota_fixture.root / _SPLIT / "labelTxt").glob("*.txt"))[0]
+        orphaned.unlink()
 
-    assert any("failed to parse" in problem for problem in result.splits[0].problems)
+        result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,), expected_images=dota_fixture.images)
 
+        assert any("without a label file" in problem for problem in result.splits[0].problems)
 
-def test_check_data_reports_missing_split_directories(tmp_path: Path) -> None:
-    """An empty root names both directories the split is expected to hold."""
-    result = check_data.check_dota_root(tmp_path, splits=(_SPLIT,))
+    def test_reports_a_label_file_without_an_image(self, dota_fixture: _DotaFixture) -> None:
+        """A label file whose image is absent is a problem, not a silently extra annotation."""
+        _write_labels(dota_fixture.root / _SPLIT / "labelTxt" / "P9999.txt", "0 0 2 0 2 1 0 1 plane 0\n")
 
-    assert not result.ok
-    assert any("images directory missing" in problem for problem in result.splits[0].problems)
-    assert any("labelTxt directory missing" in problem for problem in result.splits[0].problems)
+        result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,))
 
+        assert any("without an image" in problem for problem in result.splits[0].problems)
 
-def test_check_data_reaches_the_coco_branch_when_it_is_named(tmp_path: Path) -> None:
-    """--dataset coco still validates a COCO root; an unstated layout is probed, not assumed.
+    def test_reports_an_unparsable_label_file(self, dota_fixture: _DotaFixture) -> None:
+        """A malformed label file is reported as a problem rather than raising out of the check."""
+        broken = sorted((dota_fixture.root / _SPLIT / "labelTxt").glob("*.txt"))[0]
+        _write_labels(broken, "0 0 2 0 2 1 0 1 container-crane 0\n")
 
-    ``coco`` was the default until WP-099c made an unstated ``--dataset`` infer the layout
-    from the root (A63), which is the dispatch ``lucid-yolo fit`` itself makes. A root
-    satisfying no convention — this empty one, and every DOTA root, which no probe covers —
-    is reported and exits 1 either way, never a traceback.
-    """
-    assert data_cli.main(["check", "--data_root", str(tmp_path)]) == 1
-    assert data_cli.main(["check", "--data_root", str(tmp_path), "--dataset", "coco"]) == 1
-    assert not check_data.check_coco_root(tmp_path).ok
+        result = check_data.check_dota_root(dota_fixture.root, splits=(_SPLIT,))
+
+        assert any("failed to parse" in problem for problem in result.splits[0].problems)
+
+    def test_reports_missing_split_directories(self, tmp_path: Path) -> None:
+        """An empty root names both directories the split is expected to hold."""
+        result = check_data.check_dota_root(tmp_path, splits=(_SPLIT,))
+
+        assert not result.ok
+        assert any("images directory missing" in problem for problem in result.splits[0].problems)
+        assert any("labelTxt directory missing" in problem for problem in result.splits[0].problems)
+
+    def test_reaches_the_coco_branch_when_it_is_named(self, tmp_path: Path) -> None:
+        """--dataset coco still validates a COCO root; an unstated layout is probed, not assumed.
+
+        ``coco`` was the default until WP-099c made an unstated ``--dataset`` infer the layout
+        from the root (A63), which is the dispatch ``lucid-yolo fit`` itself makes. A root
+        satisfying no convention — this empty one, and every DOTA root, which no probe covers —
+        is reported and exits 1 either way, never a traceback.
+        """
+        assert data_cli.main(["check", "--data_root", str(tmp_path)]) == 1
+        assert data_cli.main(["check", "--data_root", str(tmp_path), "--dataset", "coco"]) == 1
+        assert not check_data.check_coco_root(tmp_path).ok

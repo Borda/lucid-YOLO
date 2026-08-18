@@ -377,62 +377,63 @@ def test_decode_is_continuous_across_the_half_turn_identification() -> None:
     assert torch.allclose(base_corners, shifted_corners, atol=1e-4)
 
 
-def test_rotated_topk_emits_the_oriented_detection_tuple() -> None:
-    """The rotated top-k returns (B, k, 7) rows of [cx, cy, w, h, theta, score, class].
+class TestRotatedTopk:
+    """Tests for ``o2o_rotated_topk``."""
 
-    The oriented analogue of the A9 tuple: the same trailing score and class
-    columns, preceded by the five-column long-edge box instead of four corners, so
-    an evaluator reads both layouts the same way apart from the geometry.
-    """
-    batch, num_anchors, num_classes, keep = 2, 40, _NUM_CLASSES, 5
-    scores = torch.randn(batch, num_anchors, num_classes)
-    rboxes = torch.rand(batch, num_anchors, 5)
+    def test_emits_the_oriented_detection_tuple(self) -> None:
+        """The rotated top-k returns (B, k, 7) rows of [cx, cy, w, h, theta, score, class].
 
-    detections = o2o_rotated_topk(scores, rboxes, k=keep)
+        The oriented analogue of the A9 tuple: the same trailing score and class
+        columns, preceded by the five-column long-edge box instead of four corners, so
+        an evaluator reads both layouts the same way apart from the geometry.
+        """
+        batch, num_anchors, num_classes, keep = 2, 40, _NUM_CLASSES, 5
+        scores = torch.randn(batch, num_anchors, num_classes)
+        rboxes = torch.rand(batch, num_anchors, 5)
 
-    assert detections.shape == (batch, keep, 7)
-    assert bool(((detections[..., 5] >= 0.0) & (detections[..., 5] <= 1.0)).all()), "scores must be sigmoids"
-    assert torch.equal(detections[..., 6], detections[..., 6].round()), "class column must be integral"
-    assert bool((detections[..., 5].diff(dim=1) <= 0.0).all()), "rows must be score-descending"
+        detections = o2o_rotated_topk(scores, rboxes, k=keep)
 
+        assert detections.shape == (batch, keep, 7)
+        assert bool(((detections[..., 5] >= 0.0) & (detections[..., 5] <= 1.0)).all()), "scores must be sigmoids"
+        assert torch.equal(detections[..., 6], detections[..., 6].round()), "class column must be integral"
+        assert bool((detections[..., 5].diff(dim=1) <= 0.0).all()), "rows must be score-descending"
 
-def test_rotated_topk_pairs_each_angle_with_its_own_anchor() -> None:
-    """The kept rows' full five-column boxes are the selected anchors' own rows.
+    def test_pairs_each_angle_with_its_own_anchor(self) -> None:
+        """The kept rows' full five-column boxes are the selected anchors' own rows.
 
-    The failure this guards is silent and specific: a second ranking computed for
-    the angle would produce a detection whose centre, extents, score, and class
-    are all correct while its heading belongs to a different object. Comparing
-    against the axis-aligned selection proves one ranking drives both, since
-    :func:`o2o_topk` and the rotated helper must agree anchor for anchor.
-    """
-    batch, num_anchors, keep = 2, 40, 6
-    scores = torch.randn(batch, num_anchors, _NUM_CLASSES)
-    rboxes = torch.rand(batch, num_anchors, 5) * 10.0
+        The failure this guards is silent and specific: a second ranking computed for
+        the angle would produce a detection whose centre, extents, score, and class
+        are all correct while its heading belongs to a different object. Comparing
+        against the axis-aligned selection proves one ranking drives both, since
+        :func:`o2o_topk` and the rotated helper must agree anchor for anchor.
+        """
+        batch, num_anchors, keep = 2, 40, 6
+        scores = torch.randn(batch, num_anchors, _NUM_CLASSES)
+        rboxes = torch.rand(batch, num_anchors, 5) * 10.0
 
-    detections = o2o_rotated_topk(scores, rboxes, k=keep)
-    axis_aligned = o2o_topk(scores, rboxes[..., :4], k=keep)
+        detections = o2o_rotated_topk(scores, rboxes, k=keep)
+        axis_aligned = o2o_topk(scores, rboxes[..., :4], k=keep)
 
-    assert torch.equal(detections[..., :4], axis_aligned[..., :4]), "selection diverged from the shared ranking"
-    assert torch.equal(detections[..., 5:], axis_aligned[..., 4:]), "score/class diverged from the shared ranking"
-    for image in range(batch):
-        for row in range(keep):
-            source = (rboxes[image, :, :4] == detections[image, row, :4]).all(dim=-1).nonzero()[0, 0]
-            assert float(detections[image, row, 4]) == float(rboxes[image, source, 4])
+        assert torch.equal(detections[..., :4], axis_aligned[..., :4]), "selection diverged from the shared ranking"
+        assert torch.equal(detections[..., 5:], axis_aligned[..., 4:]), "score/class diverged from the shared ranking"
+        for image in range(batch):
+            for row in range(keep):
+                source = (rboxes[image, :, :4] == detections[image, row, :4]).all(dim=-1).nonzero()[0, 0]
+                assert float(detections[image, row, 4]) == float(rboxes[image, source, 4])
 
+    def test_returns_every_anchor_when_fewer_than_k(self) -> None:
+        """With fewer anchors than ``k`` the helper returns them all rather than padding.
 
-def test_rotated_topk_returns_every_anchor_when_fewer_than_k() -> None:
-    """With fewer anchors than ``k`` the helper returns them all rather than padding.
+        Matches the axis-aligned helper's contract: fixed-size padding is the
+        decoder's job, not the selection's.
+        """
+        num_anchors = 3
+        scores = torch.randn(1, num_anchors, _NUM_CLASSES)
+        rboxes = torch.rand(1, num_anchors, 5)
 
-    Matches the axis-aligned helper's contract: fixed-size padding is the
-    decoder's job, not the selection's.
-    """
-    num_anchors = 3
-    scores = torch.randn(1, num_anchors, _NUM_CLASSES)
-    rboxes = torch.rand(1, num_anchors, 5)
+        detections = o2o_rotated_topk(scores, rboxes, k=300)
 
-    detections = o2o_rotated_topk(scores, rboxes, k=300)
-
-    assert detections.shape == (1, num_anchors, 7)
+        assert detections.shape == (1, num_anchors, 7)
 
 
 def test_oriented_detector_forward_emits_angles_on_both_branches() -> None:

@@ -165,44 +165,39 @@ def test_mkdocs_is_capped_below_the_unlicensed_major_passes_when_capped(tmp_path
     assert audit.check_mkdocs_is_capped_below_the_unlicensed_major(pyproject) == []
 
 
-def test_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed_flags_a_missing_audit(
-    tmp_path: Path,
-) -> None:
-    """A ``docs.yml`` that never runs the licence audit is reported."""
-    workflow = tmp_path / "docs.yml"
-    workflow.write_text("run: python -m mkdocs build --strict\n", encoding="utf-8")
+class TestCheckTheDocsWorkflowAuditsLicencesWhereTheDocsTreeIsInstalled:
+    """Tests for ``audit.check_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed``."""
 
-    assert audit.check_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed(workflow) == [
-        "the docs environment is never audited"
-    ]
+    def test_flags_a_missing_audit(self, tmp_path: Path) -> None:
+        """A ``docs.yml`` that never runs the licence audit is reported."""
+        workflow = tmp_path / "docs.yml"
+        workflow.write_text("run: python -m mkdocs build --strict\n", encoding="utf-8")
 
+        assert audit.check_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed(workflow) == [
+            "the docs environment is never audited"
+        ]
 
-def test_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed_flags_a_late_audit(
-    tmp_path: Path,
-) -> None:
-    """An audit that runs after the build, rather than before it, is reported."""
-    workflow = tmp_path / "docs.yml"
-    workflow.write_text(
-        "run: python -m mkdocs build --strict\nrun: python scripts/lint/audit_licenses.py\n",
-        encoding="utf-8",
-    )
+    def test_flags_a_late_audit(self, tmp_path: Path) -> None:
+        """An audit that runs after the build, rather than before it, is reported."""
+        workflow = tmp_path / "docs.yml"
+        workflow.write_text(
+            "run: python -m mkdocs build --strict\nrun: python scripts/lint/audit_licenses.py\n",
+            encoding="utf-8",
+        )
 
-    assert audit.check_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed(workflow) == [
-        "the licence audit does not run before the docs build"
-    ]
+        assert audit.check_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed(workflow) == [
+            "the licence audit does not run before the docs build"
+        ]
 
+    def test_passes_when_ordered(self, tmp_path: Path) -> None:
+        """An audit that runs before the build produces no violation."""
+        workflow = tmp_path / "docs.yml"
+        workflow.write_text(
+            "run: python scripts/lint/audit_licenses.py\nrun: python -m mkdocs build --strict\n",
+            encoding="utf-8",
+        )
 
-def test_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed_passes_when_ordered(
-    tmp_path: Path,
-) -> None:
-    """An audit that runs before the build produces no violation."""
-    workflow = tmp_path / "docs.yml"
-    workflow.write_text(
-        "run: python scripts/lint/audit_licenses.py\nrun: python -m mkdocs build --strict\n",
-        encoding="utf-8",
-    )
-
-    assert audit.check_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed(workflow) == []
+        assert audit.check_the_docs_workflow_audits_licences_where_the_docs_tree_is_installed(workflow) == []
 
 
 def test_the_live_docs_site_is_currently_clean() -> None:
