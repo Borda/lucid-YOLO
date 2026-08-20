@@ -52,3 +52,13 @@ def obb_fixture_dir() -> Iterator[Path]:
     """
     _GENERATED_CACHE.mkdir(parents=True, exist_ok=True)
     yield synthetic.generate_obb_fixtures(_GENERATED_CACHE)
+
+
+@pytest.fixture(scope="session")
+def keypoints_fixture_dir() -> Iterator[Path]:
+    """Yield the keypoints micro-dataset directory (12 images, WP-121b).
+
+    Generated once into ``tests/fixtures/_generated/keypoints`` and reused.
+    """
+    _GENERATED_CACHE.mkdir(parents=True, exist_ok=True)
+    yield synthetic.generate_keypoints_fixtures(_GENERATED_CACHE)

@@ -61,7 +61,11 @@ dev = [
   # declared here because a direct import is not a transitive dependency. Apache-2.0 OR
   # BSD-2-Clause, read from the installed distribution's own `License-Expression`.
   "packaging>=24.0",
-  "fuse-augmentations",
+  # Pinned to a commit rather than a PyPI version (A26/R21's original intent): the animal
+  # keypoints task and the shape/color category-scoping fix (WP-121b, WP-131) both landed
+  # after the last PyPI dev release and PyPI forbids re-uploading the 0.10.0.dev0 version
+  # string, so a bare version pin cannot reach them yet.
+  "fuse-augmentations @ git+https://github.com/Borda/fuse-augmentations@74af9855325adcd92399d1b95d8458a9d236f129",
   "matplotlib>=3.8",
   # WP-066's export gate only. The export itself is `torch.onnx.export`, already a
   # runtime dep, so nothing a consumer installs changes: `onnx` reads the emitted

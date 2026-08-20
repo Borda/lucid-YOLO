@@ -21,6 +21,7 @@ _SPLIT = "train"
 _ANNOTATION = "_annotations.coco.json"
 _MIN_POLYGON_COORDS = 6  # >= 3 (x, y) points for a non-degenerate filled polygon
 _OBB_CORNER_COORDS = 8  # exactly 4 (x, y) corner points for a rotated box
+_ANIMAL_KEYPOINT_COUNT = 16  # fuse-augmentations' fixed animal landmark schema (WP-121b)
 
 
 def _sha256(path: Path) -> str:
@@ -71,6 +72,49 @@ def test_obb_set_loads(obb_fixture_dir: Path) -> None:
         corners = ann.get("segmentation")
         assert corners, "OBB annotation is missing its rotated-box corners"
         assert len(corners[0]) == _OBB_CORNER_COORDS, "rotated box must have exactly 4 corner points"
+
+
+def test_keypoints_set_loads(keypoints_fixture_dir: Path) -> None:
+    """12 images exist, every annotation carries a fixed 16-point landmark table, low category count.
+
+    WP-121b's own fix (the reader no longer requires a segmentation ring for a
+    keypoints reading) is what makes this fixture usable at all; this pins the
+    small, overfit-friendly animal subset (:data:`synthetic.KEYPOINTS_ANIMAL_COUNT`)
+    the milestone run needs rather than fuse-augmentations' full animal vocabulary.
+    """
+    split_dir = keypoints_fixture_dir / _SPLIT
+    images = sorted(split_dir.glob("*.jpg"))
+    assert len(images) == synthetic.KEYPOINTS_NUM_IMAGES == 12
+
+    doc = json.loads((split_dir / _ANNOTATION).read_text(encoding="utf-8"))
+    assert len(doc["images"]) == 12
+    assert doc["annotations"], "expected at least one annotation"
+
+    for ann in doc["annotations"]:
+        keypoints = ann.get("keypoints")
+        assert keypoints and len(keypoints) == 3 * _ANIMAL_KEYPOINT_COUNT, "annotation is missing its landmark table"
+
+    category_ids = {ann["category_id"] for ann in doc["annotations"]}
+    assert len(category_ids) <= synthetic.KEYPOINTS_ANIMAL_COUNT, (
+        f"expected at most {synthetic.KEYPOINTS_ANIMAL_COUNT} distinct animal categories, got {sorted(category_ids)}"
+    )
+
+
+def test_keypoints_generation_is_deterministic(tmp_path: Path) -> None:
+    """Same seed -> byte-identical annotation JSON and identical image SHA-256 hashes (A26)."""
+    first = synthetic.generate_keypoints_fixtures(tmp_path / "run_a")
+    second = synthetic.generate_keypoints_fixtures(tmp_path / "run_b")
+
+    ann_first = (first / _SPLIT / _ANNOTATION).read_bytes()
+    ann_second = (second / _SPLIT / _ANNOTATION).read_bytes()
+    assert ann_first == ann_second, "annotation JSON is not byte-identical across seeded runs"
+
+    images_first = sorted((first / _SPLIT).glob("*.jpg"))
+    images_second = sorted((second / _SPLIT).glob("*.jpg"))
+    assert [p.name for p in images_first] == [p.name for p in images_second]
+    assert images_first, "expected generated images to compare"
+    for a, b in zip(images_first, images_second, strict=True):
+        assert _sha256(a) == _sha256(b), f"image bytes differ across seeded runs: {a.name}"
 
 
 def test_detseg_generation_is_deterministic(tmp_path: Path) -> None:
