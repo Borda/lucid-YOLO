@@ -35,6 +35,7 @@ from lucid_yolo.ptl.datamodule import (
     unpack_batch,
     unpack_targets,
 )
+from lucid_yolo.ptl.seg_targets import instance_mask_targets
 
 #: Image count of the detseg fixture split (tests/fixtures/synthetic.py).
 _FIXTURE_IMAGE_COUNT = 16
@@ -282,6 +283,68 @@ class TestKeypointParsing:
 
         with pytest.raises(ValueError, match=r"pose\.png.*K values \[1, 2\]"):
             CocoDetectionDataset(split, split / "instances.json", keypoints=True)
+
+
+@pytest.fixture
+def ringless_coco(tmp_path: Path) -> Path:
+    """Create one image and a two-instance COCO payload with no ``segmentation`` key at all.
+
+    Mirrors a bare ``Task.DETECTION`` export (fuse-augmentations never writes a
+    ``segmentation`` field for that task; WP-121b's own report caught this against
+    the fixed ``Task.KEYPOINTS`` export, which has the same shape of gap).
+    """
+    split = tmp_path / "val"
+    split.mkdir()
+    from torchvision.io import write_png  # noqa: PLC0415 - test-local, the reader does not need it
+
+    write_png(torch.zeros(3, 8, 8, dtype=torch.uint8), str(split / "plain.png"))
+    payload = {
+        "images": [{"id": 1, "file_name": "plain.png", "height": 8, "width": 8}],
+        "annotations": [
+            {"id": 1, "image_id": 1, "category_id": 1, "bbox": [1, 1, 2, 2]},
+            {"id": 2, "image_id": 1, "category_id": 1, "bbox": [4, 4, 2, 2]},
+        ],
+        "categories": [{"id": 1, "name": "square"}],
+    }
+    (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
+    return split
+
+
+class TestRinglessAnnotations:
+    """A missing ``segmentation`` ring is fatal only for an oriented reading (WP-121b)."""
+
+    def test_plain_reading_keeps_boxes_without_a_ring(self, ringless_coco: Path) -> None:
+        """Both ringless boxes survive and ``polygons`` comes back empty, not one-per-box.
+
+        The fixed-write bug (WP-121b) let a keypoints-only export silently parse to zero
+        instances; this pins the corrected contract for the plainer bare-detection case
+        the same gap applies to.
+        """
+        _, targets = CocoDetectionDataset(ringless_coco, ringless_coco / "instances.json")[0]
+
+        assert targets.boxes.shape == (2, 4)
+        assert targets.polygons == []
+
+    def test_oriented_reading_still_requires_a_ring(self, ringless_coco: Path) -> None:
+        """An oriented reading keeps skipping ringless annotations; it has no other rotated-box source.
+
+        Locks in that relaxing the plain/keypoints path did not loosen ``oriented=True``,
+        which derives both ``boxes`` and ``rboxes`` from the same quadrilateral ring.
+        """
+        _, targets = CocoDetectionDataset(ringless_coco, ringless_coco / "instances.json", oriented=True)[0]
+
+        assert targets.boxes.shape[0] == 0
+
+    def test_mask_targets_still_raises_without_rings(self, ringless_coco: Path) -> None:
+        """Rasterising masks off a ring-free image still raises, not silently returns empty masks.
+
+        `instance_mask_targets` is the guard the relaxed parser now depends on to keep a
+        detection-only image from training a segmentation head against nothing.
+        """
+        _, targets = CocoDetectionDataset(ringless_coco, ringless_coco / "instances.json")[0]
+
+        with pytest.raises(ValueError, match="detection-only annotation cannot supervise masks"):
+            instance_mask_targets(targets, image_size=(8, 8), grid_size=(4, 4))
 
 
 @pytest.mark.parametrize(

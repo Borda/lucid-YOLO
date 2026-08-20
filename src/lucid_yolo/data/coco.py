@@ -7,19 +7,23 @@ Phase 1 augmentation pipeline. It is deliberately a *thin* reader: image decodin
 goes through :func:`torchvision.io.read_image` (torchvision is a core dependency,
 blueprint sec. 5.9), boxes are converted from COCO ``xywh`` to the project's
 ``xyxy`` convention, category ids are remapped to a contiguous ``int64`` label
-space, and each annotation's first segmentation ring is parsed into a ``(P, 2)``
-float32 polygon so the box/polygon/rbox modalities of
+space, and each annotation's first segmentation ring — when present — is parsed
+into a ``(P, 2)`` float32 polygon so the box/polygon/rbox modalities of
 :class:`~lucid_yolo.data.targets.Targets` stay in lock-step.
 
 Crowd / RLE policy:
     COCO carries two kinds of ``segmentation``: a list of flat polygon rings
     (``[[x, y, x, y, ...], ...]``) for ordinary instances, and a run-length dict
-    for crowd regions. This reader keeps ordinary polygon instances only —
-    ``iscrowd=1`` annotations and any annotation whose ``segmentation`` is not a
-    usable polygon ring (an RLE dict, an empty list, or a ring with fewer than
-    three points) are **skipped**. That keeps every retained box paired with
-    exactly one ring, so :class:`~lucid_yolo.data.targets.Targets` sees a consistent
-    "one ring per box" set (or an empty set) rather than a mix.
+    for crowd regions. ``iscrowd=1`` annotations, and any ``segmentation`` value
+    that is *present but unusable* (an RLE dict, an empty list, or a ring with
+    fewer than three points), are always **skipped**, in every reading mode —
+    neither is ever a real countable instance. A ``segmentation`` key that is
+    **absent entirely** is different (WP-121b): it is fatal only for an oriented
+    reading, which has no other source for the rotated box; a plain or keypoints
+    reading keeps the instance, and :meth:`CocoDetectionDataset._build_targets`
+    collapses the whole image's ``polygons`` to ``[]`` the moment any one instance
+    lacks a ring — so :class:`~lucid_yolo.data.targets.Targets` still sees a
+    consistent "one ring per box" set or an empty set, never a mix.
 
 Oriented reading (``oriented=True``, WP-088):
     A COCO file written for an oriented task carries each object's rotated box as a
@@ -280,7 +284,7 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         """Assemble the :class:`~lucid_yolo.data.targets.Targets` for one image."""
         boxes: list[list[float]] = []
         labels: list[int] = []
-        polygons: list[Tensor] = []
+        polygons: list[Tensor | None] = []
         flags: list[bool] = []
         keypoint_coords: list[Tensor] = []
         keypoint_visibility: list[Tensor] = []
@@ -314,18 +318,21 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             keypoint_vis_tensor = torch.stack(keypoint_visibility, dim=0)
         if self._oriented:
             return _oriented_targets(
-                polygons,
+                cast("list[Tensor]", polygons),  # oriented mode never appends None (see _parse_annotation)
                 label_tensor,
                 record.file_name,
                 difficult_tensor,
                 keypoints=keypoints_tensor,
                 keypoint_vis=keypoint_vis_tensor,
             )
+        resolved_polygons: list[Tensor] = (
+            [] if any(ring is None for ring in polygons) else cast("list[Tensor]", polygons)
+        )
         if keypoints_tensor is not None and keypoint_vis_tensor is not None:
             return Targets(
                 boxes=torch.tensor(boxes, dtype=torch.float32),
                 labels=label_tensor,
-                polygons=polygons,
+                polygons=resolved_polygons,
                 difficult=difficult_tensor,
                 keypoints=keypoints_tensor,
                 keypoint_vis=keypoint_vis_tensor,
@@ -333,24 +340,34 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         return Targets(
             boxes=torch.tensor(boxes, dtype=torch.float32),
             labels=label_tensor,
-            polygons=polygons,
+            polygons=resolved_polygons,
             difficult=difficult_tensor,
         )
 
     def _parse_annotation(
         self, ann: dict[str, object], record: _ImageRecord
-    ) -> tuple[list[float], int, Tensor, bool] | None:
+    ) -> tuple[list[float], int, Tensor | None, bool] | None:
         """Parse one annotation into ``(xyxy_box, label, ring, difficult)`` or ``None`` to skip.
 
-        Crowd annotations and annotations without a usable polygon ring are
-        skipped (returning ``None``) per the module's crowd/RLE policy. The
+        Crowd annotations are always skipped (returning ``None``), and so is a
+        ``segmentation`` value that is *present but unusable* — an RLE dict, an
+        empty list, or a ring with fewer than three points — in every reading
+        mode: that is never a real countable instance (WP-014's original
+        crowd/RLE policy, unchanged). A ``segmentation`` key that is absent
+        entirely is different: it is fatal only for an oriented reading
+        (WP-121b), which has no other source for the rotated box; a plain or
+        keypoints reading keeps the instance with ``ring=None`` instead — see
+        :meth:`_build_targets`, which collapses the whole image's ``polygons`` to
+        ``[]`` when any instance lacks one, matching
+        :class:`~lucid_yolo.data.targets.Targets`'s 0-or-N contract. The
         ``difficult`` flag defaults to ``False``, which is what every file that
         does not carry R18's flag means (A51).
         """
         if int(cast("int", ann.get("iscrowd", 0))) == 1:
             return None
-        ring = _parse_ring(ann.get("segmentation"))
-        if ring is None:
+        raw_segmentation = ann.get("segmentation")
+        ring = _parse_ring(raw_segmentation)
+        if ring is None and (raw_segmentation is not None or self._oriented):
             return None
         box = _xywh_to_xyxy(ann["bbox"], record.height, record.width)  # type: ignore[arg-type]
         label = self.category_id_to_label[int(ann["category_id"])]  # type: ignore[call-overload]
