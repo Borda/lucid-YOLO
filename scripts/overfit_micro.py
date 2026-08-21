@@ -83,6 +83,10 @@ import torch
 import yaml
 from fuse_augmentations.data import generate_dataset  # type: ignore[import-untyped]
 from fuse_augmentations.data.config import SplitRatios  # type: ignore[import-untyped]
+from fuse_augmentations.data.symbols import (  # type: ignore[import-untyped]
+    SYMBOL_KEYPOINT_NAMES,
+    SymbolShape,
+)
 from pytorch_lightning import Trainer, seed_everything
 from torch import Tensor
 
@@ -92,6 +96,7 @@ from lucid_yolo.data.coco import CocoDetectionDataset
 from lucid_yolo.data.rasterize import rasterize_polygons
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode.topk_e2e import TopKDecoder
+from lucid_yolo.eval.coco_eval import evaluate_keypoints, keypoints_to_predictions
 from lucid_yolo.eval.dota_eval import (
     MAX_DETECTIONS,
     evaluate_rotated_map,
@@ -99,6 +104,7 @@ from lucid_yolo.eval.dota_eval import (
 )
 from lucid_yolo.eval.segment_decode import decode_instance_masks
 from lucid_yolo.models.heads.detect import DualHeadOutput, decode_ltrb, o2o_topk_with_indices
+from lucid_yolo.models.heads.keypoint import decode_keypoints
 from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.registry import scale_spec
 from lucid_yolo.ptl.callbacks import CloseMosaicCallback
@@ -143,6 +149,53 @@ _ROTATED_MAP50_FLOOR = 0.9
 
 #: Golden tolerance on the achieved rotated mAP50 (integer counts are pinned exactly).
 _ROTATED_MAP50_TOL = 0.05
+
+#: The keypoint gate's own slice (WP-132). Separate for the same reason the oriented slice
+#: is: this one is drawn from R21's ``SymbolShape`` family rather than the geometric shapes,
+#: because only a keypoint-bearing family carries landmark tables at all.
+_KP_SLICE_DIR = REPO_ROOT / ".cache" / "overfit_slice_kp"
+
+#: The keypoint golden, the fourth of the accelerator-only set.
+_KP_GOLDEN_PATH = REPO_ROOT / "goldens" / "gpu" / "overfit_micro_kp.json"
+
+#: Producer spec of the keypoint golden.
+_KP_PRODUCER_SPEC = "scripts.overfit_micro:overfit_micro_kp"
+
+#: Train OKS AP the keypoint overfit must clear (the WP-132 DoD). Far lower than the
+#: detection gate's 0.95 recall and the oriented gate's 0.9 mAP50, and the reason is the
+#: metric's scale rather than the model's quality -- so the number is set from a measurement
+#: of the metric, not from an intuition about the task. Feeding the ground truth back in as
+#: the prediction scores exactly 1.0, which fixes the ceiling; displacing every point of
+#: every instance by a uniform offset then walks it down: **+1 px -> 0.934, +3 px -> 0.269,
+#: +8 px -> 0.000**. On symbols a few dozen pixels across, scored at A67's sigma, OKS AP is a
+#: cliff and not a slope. The achieved 0.3357 therefore sits where a roughly 3 px landmark
+#: error sits -- a loop that composed and memorized, read through a very strict ruler -- and
+#: an unwired stem, whose points never leave the anchor centres, lands at 0. (The probe
+#: applies a *uniform* displacement, so it bounds the reading rather than proving it: the
+#: same AP is also consistent with a mixture of exact and badly-missed instances.)
+_KP_OKS_FLOOR = 0.30
+
+#: Golden tolerance on the achieved OKS AP (integer counts are pinned exactly).
+_KP_OKS_TOL = 0.05
+
+#: Uniform per-point OKS sigma for a synthetic symbol run (A67). R12's 17-value table
+#: measures *annotator* standard deviation on human anatomy, a quantity that does not exist
+#: for landmarks placed analytically from an outline's own centroid, so a per-point vector
+#: here would fabricate structure the data does not have. A uniform sigma is a monotone
+#: rescaling of OKS -- it moves every score together and changes no ordering -- so it fixes
+#: only where the floor above sits; R12's median is chosen so the resulting figure stays on a
+#: scale comparable to a real pose run rather than free-floating.
+SYMBOL_KEYPOINT_OKS_SIGMA = 0.072
+
+#: Point count ``K`` of R21's symbol schema, read from the package rather than restated, so
+#: the sigma vector below cannot silently disagree with the annotations it scores.
+_SYMBOL_KEYPOINT_COUNT = len(SYMBOL_KEYPOINT_NAMES)
+
+#: Symbols the keypoint slice draws. One shape, not the family's seven: the gate asks whether
+#: the keypoint loop composes, and a second category exercises the classifier rather than
+#: anything the point path owns. ``KITE`` is ``SymbolShape``'s declaration-order first, convex,
+#: and carries 5 of the schema's 7 slots -- so ``v=0`` points reach the loss natively (A66).
+_KP_SHAPES = (SymbolShape.KITE,)
 
 #: Number of images in the overfit slice (the "~100" of the WP name).
 _NUM_IMAGES = 100
@@ -285,7 +338,11 @@ def load_recipe(path: Path = _RECIPE_PATH) -> Recipe:
     )
 
 
-def generate_slice(slice_dir: Path = _SLICE_DIR, generator_task: str = "segmentation") -> Path:
+def generate_slice(
+    slice_dir: Path = _SLICE_DIR,
+    generator_task: str = "segmentation",
+    shapes: tuple[object, ...] | None = None,
+) -> Path:
     """Materialize the fixed ~100-image synthetic slice under ``slice_dir``.
 
     Uses ``fuse-augmentations`` with ``task="segmentation"`` so every annotation
@@ -299,7 +356,14 @@ def generate_slice(slice_dir: Path = _SLICE_DIR, generator_task: str = "segmenta
         slice_dir: Parent directory the ``train`` split is written into. Defaults to
             the gitignored ``.cache/overfit_slice``.
         generator_task: The ``fuse-augmentations`` task, ``"segmentation"`` (the
-            default, used by the detection and mask gates) or ``"obb"``.
+            default, used by the detection and mask gates), ``"obb"``, or
+            ``"keypoints"``.
+        shapes: The shape vocabulary drawn from, or ``None`` (the default) to leave
+            it at the generator's own ``DEFAULT_SHAPES``, the four geometric shapes
+            the detection, mask and oriented gates use. The keypoint gate passes
+            :data:`_KP_SHAPES` instead, because ``task="keypoints"`` is defined only
+            over a keypoint-bearing family: the geometric shapes carry no landmark
+            table at all, so no default could serve that gate.
 
     Returns:
         The ``train`` split directory (holds the images and ``_annotations.coco.json``).
@@ -322,6 +386,7 @@ def generate_slice(slice_dir: Path = _SLICE_DIR, generator_task: str = "segmenta
             split_ratios=SplitRatios(train=1.0, val=0.0, test=0.0),
             seed=_SLICE_SEED,
             img_size=128,
+            **({} if shapes is None else {"shapes": shapes}),
         )
     return split
 
@@ -333,7 +398,12 @@ def _num_classes(split: Path) -> int:
 
 
 def build_datamodule(
-    split: Path, recipe: Recipe, *, mask_targets: bool = False, rotated_targets: bool = False
+    split: Path,
+    recipe: Recipe,
+    *,
+    mask_targets: bool = False,
+    rotated_targets: bool = False,
+    keypoint_targets: bool = False,
 ) -> DetectionDataModule:
     """Build a datamodule pointing both splits at the single overfit slice.
 
@@ -346,6 +416,11 @@ def build_datamodule(
         rotated_targets: Read each annotation's four-corner ring as a rotated box, as
             an oriented training run does. Set for the ``obb`` gate, for the same
             reason: the gate is meant to cover the loader, not to bypass it.
+        keypoint_targets: Read each annotation's COCO ``keypoints`` field into the
+            target channel, as a pose training run does. Set for the ``kp`` gate,
+            again so the gate covers the loader path rather than bypassing it --
+            which matters more here than for the other two, since WP-132 found the
+            transform layer silently dropping this modality.
 
     Returns:
         A :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule` with ``num_workers=0``
@@ -369,10 +444,16 @@ def build_datamodule(
         seed=recipe.seed,
         mask_targets=mask_targets,
         rotated_targets=rotated_targets,
+        keypoint_targets=keypoint_targets,
     )
 
 
-def build_module(recipe: Recipe, num_classes: int, module_task: str = "detect") -> DetectionLitModule:
+def build_module(
+    recipe: Recipe,
+    num_classes: int,
+    module_task: str = "detect",
+    num_keypoints: int | None = None,
+) -> DetectionLitModule:
     """Build the ``n``-scale module from the recipe hyperparameters.
 
     Args:
@@ -382,6 +463,10 @@ def build_module(recipe: Recipe, num_classes: int, module_task: str = "detect") 
         module_task: The module's supervision task — ``"detect"`` (the WP-040
             gate) or ``"segment"`` (the WP-087 gate, which additionally builds and
             supervises the mask branches at the module's A38 default gains).
+        num_keypoints: Point count ``K``, required when ``module_task`` is
+            ``"keypoints"`` (the WP-132 gate) and ignored otherwise. No default,
+            deliberately: ``K`` belongs to the annotation schema of whatever slice
+            is being fitted, not to this builder.
 
     Returns:
         A :class:`~lucid_yolo.ptl.module.DetectionLitModule` at the recipe's scale.
@@ -400,6 +485,7 @@ def build_module(recipe: Recipe, num_classes: int, module_task: str = "detect") 
         max_channels=spec.max_channels,
         num_classes=num_classes,
         task=module_task,
+        num_keypoints=num_keypoints,
         lr=recipe.lr,
         # A8 schedule off (lrf >= 1, no warmup): the overfit golden memorizes at a
         # constant LR and its trajectory was frozen before WP-072 landed.
@@ -579,6 +665,79 @@ def evaluate_recall(module: DetectionLitModule, datamodule: DetectionDataModule)
                 instance_total += total
     recall = matched_total / instance_total if instance_total else 0.0
     return recall, instance_total
+
+
+def evaluate_oks(module: DetectionLitModule, datamodule: DetectionDataModule) -> tuple[float, int]:
+    """Score the trained keypoint module's train OKS AP over the val loader (WP-132).
+
+    Runs the module over the same 100 images the training loop saw, through the
+    **deployed** keypoint path:
+    :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` lifts the one-to-one
+    branch's raw offsets to input pixels, and
+    :func:`~lucid_yolo.models.heads.detect.o2o_topk_with_indices` ranks the boxes
+    while reporting the anchor each ranked detection came from -- which is what lets
+    the points be gathered by the anchor their own box was ranked by, the same
+    arrangement :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` uses for the
+    per-anchor angle. Scoring is WP-124's protocol
+    (:func:`~lucid_yolo.eval.coco_eval.evaluate_keypoints`) at A67's uniform sigma
+    rather than R12's human-anatomy table.
+
+    Scoring runs in letterbox coordinates for the same reason the oriented gate does:
+    OKS normalizes each distance by the instance's own ground-truth area, so an
+    isotropic scale applied to both sides cancels.
+
+    Args:
+        module: The trained ``task="keypoints"`` module.
+        datamodule: The datamodule whose val loader yields the letterboxed slice.
+
+    Returns:
+        An ``(oks_ap, total_instances)`` pair.
+
+    Examples:
+        >>> evaluate_oks(module, datamodule)  # doctest: +SKIP
+        (0.82, 214)
+    """
+    device = module.device
+    module.eval()
+    anchor_points, strides = _anchor_grid(device)
+    preds: list[dict[str, Tensor]] = []
+    ground_truth: list[dict[str, Tensor]] = []
+    with torch.no_grad():
+        for batch in datamodule.val_dataloader():
+            images, targets, _ = datamodule.on_after_batch_transfer(batch, 0)
+            head_out: DualHeadOutput = module(images.to(device))
+            assert head_out.o2o_keypoints is not None  # a "keypoints" module always builds the stems
+            points = decode_keypoints(head_out.o2o_keypoints, anchor_points, strides)
+            detections, anchor_index = o2o_topk_with_indices(head_out.o2o_cls, head_out.o2o_box, k=_MAX_DET)
+            gathered = torch.gather(
+                points, 1, anchor_index[..., None, None].expand(-1, -1, points.shape[2], points.shape[3])
+            )
+            # `keypoints_to_predictions` maps each contiguous label *back* to an original
+            # COCO id. Both sides of this comparison already live in the dataset's own
+            # contiguous space -- the ground truth below passes `target.labels` straight
+            # through -- so the map is the identity, built over the head's actual class
+            # width rather than assumed, since the slice's shape count is a constant one
+            # edit away from changing.
+            identity = {index: index for index in range(int(head_out.o2o_cls.shape[-1]))}
+            preds.extend(
+                keypoints_to_predictions(
+                    gathered.cpu(),
+                    detections[..., 4].cpu(),
+                    detections[..., 5].cpu().to(torch.long),
+                    identity,
+                )
+            )
+            ground_truth.extend(
+                {
+                    "keypoints": target.keypoints.cpu(),
+                    "visibility": target.keypoint_vis.cpu().to(torch.long),
+                    "labels": target.labels.cpu().to(torch.long),
+                }
+                for target in targets
+            )
+    instances = sum(int(entry["keypoints"].shape[0]) for entry in ground_truth)
+    sigmas = [SYMBOL_KEYPOINT_OKS_SIGMA] * _SYMBOL_KEYPOINT_COUNT
+    return evaluate_keypoints(preds, ground_truth, sigmas=sigmas)["AP_all"], instances
 
 
 def _binary_iou(predicted: Tensor, target: Tensor) -> float:
@@ -762,6 +921,9 @@ class TaskSpec:
         scorer: Callable measuring the trained module over the val loader.
         generator_task: The ``fuse-augmentations`` task the slice is generated with.
         slice_dir: Where that slice is cached; one directory per annotation shape.
+        shapes: Shape vocabulary the slice draws from, or ``None`` to leave the
+            generator at its geometric default. Only the keypoint gate overrides it,
+            since ``task="keypoints"`` is defined only over a keypoint-bearing family.
     """
 
     module_task: str
@@ -774,6 +936,7 @@ class TaskSpec:
     scorer: Callable[[DetectionLitModule, DetectionDataModule], tuple[float, int]]
     generator_task: str = "segmentation"
     slice_dir: Path = _SLICE_DIR
+    shapes: tuple[object, ...] | None = None
 
 
 #: The two wired gates, keyed by the ``--task`` value.
@@ -810,6 +973,19 @@ TASK_SPECS: dict[str, TaskSpec] = {
         generator_task="obb",
         slice_dir=_OBB_SLICE_DIR,
     ),
+    "kp": TaskSpec(
+        module_task="keypoints",
+        metric="train_oks_ap",
+        label="OKS AP",
+        floor=_KP_OKS_FLOOR,
+        tolerance=_KP_OKS_TOL,
+        golden_path=_KP_GOLDEN_PATH,
+        producer=_KP_PRODUCER_SPEC,
+        scorer=evaluate_oks,
+        generator_task="keypoints",
+        slice_dir=_KP_SLICE_DIR,
+        shapes=_KP_SHAPES,
+    ),
 }
 
 
@@ -817,12 +993,18 @@ def _train_and_score(recipe: Recipe, split: Path, deterministic: bool, spec: Tas
     """Build, train, and score one overfit run; return ``(score, instances, classes)``."""
     seed_everything(recipe.seed, workers=True)
     num_classes = _num_classes(split)
-    module = build_module(recipe, num_classes, module_task=spec.module_task)
+    module = build_module(
+        recipe,
+        num_classes,
+        module_task=spec.module_task,
+        num_keypoints=_SYMBOL_KEYPOINT_COUNT if spec.module_task == "keypoints" else None,
+    )
     datamodule = build_datamodule(
         split,
         recipe,
         mask_targets=spec.module_task == "segment",
         rotated_targets=spec.module_task == "obb",
+        keypoint_targets=spec.module_task == "keypoints",
     )
     _make_trainer(recipe, deterministic).fit(module, datamodule=datamodule)
     score, instances = spec.scorer(module, datamodule)
@@ -857,7 +1039,7 @@ def run_overfit(task: str = "det") -> dict[str, float]:
     """
     spec = TASK_SPECS[task]
     recipe = load_recipe()
-    split = generate_slice(spec.slice_dir, spec.generator_task)
+    split = generate_slice(spec.slice_dir, spec.generator_task, spec.shapes)
     try:
         score, instances, num_classes = _train_and_score(recipe, split, True, spec)
     except RuntimeError:
@@ -907,6 +1089,25 @@ def overfit_micro_obb() -> dict[str, float]:
         ['epochs', 'img_size', 'num_classes', 'num_images', 'num_instances', 'train_rotated_map50']
     """
     return run_overfit("obb")
+
+
+def overfit_micro_kp() -> dict[str, float]:
+    """Golden producer: the overfit-100 keypoint metrics (WP-132).
+
+    The pose counterpart of :func:`overfit_micro_det`, with the same
+    accelerator-only status. Its slice is the one gate slice not drawn from the
+    geometric shapes: ``task="keypoints"`` is defined only over a keypoint-bearing
+    family, so this one draws R21's ``SymbolShape`` instead (:data:`_KP_SHAPES`).
+
+    Returns:
+        The metric mapping from :func:`run_overfit`.
+
+    Examples:
+        >>> metrics = overfit_micro_kp()  # doctest: +SKIP
+        >>> sorted(metrics)  # doctest: +SKIP
+        ['epochs', 'img_size', 'num_classes', 'num_images', 'num_instances', 'train_oks_ap']
+    """
+    return run_overfit("kp")
 
 
 def overfit_micro_seg() -> dict[str, float]:
@@ -959,7 +1160,9 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(description="Overfit a fixed ~100-image slice and gate on a train metric.")
     parser.add_argument(
-        "--task", default="det", help="gate to run: 'det' (recall), 'seg' (mask IoU) or 'obb' (rotated mAP50)"
+        "--task",
+        default="det",
+        help="gate to run: 'det' (recall), 'seg' (mask IoU), 'obb' (rotated mAP50) or 'kp' (OKS AP)",
     )
     parser.add_argument("--freeze", action="store_true", help="write the task's goldens/gpu/ file on success")
     args = parser.parse_args(argv)

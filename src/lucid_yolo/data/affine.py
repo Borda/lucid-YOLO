@@ -33,6 +33,15 @@ Targets:
     keep mask is applied across boxes, labels and polygons through
     :meth:`~lucid_yolo.data.targets.Targets.filter`.
 
+Keypoints (WP-132):
+    Keypoints ride the same matrix as everything else and are the one modality that is
+    **not** clipped afterwards. This transform manufactures the case A70 decides — it
+    translates by up to 10% of the canvas and scales, so a point can land off-canvas while
+    its box still clears ``min_visibility`` — and A70's answer is to carry the point
+    through unchanged rather than clamp it to the edge or demote it to invisible. The
+    argument is in :meth:`RandomAffine._warp_keypoints`. Rows still drop with their
+    instance, since the keep mask runs on the shared axis.
+
 Rotated boxes (WP-058):
     A general affine does not map a rectangle to a rectangle — the sampled shear
     sends one to a parallelogram — so a rotated box cannot be warped by
@@ -427,7 +436,12 @@ class RandomAffine:
         rboxes, post_boxes = clip_rboxes_to_canvas(warped, float(height), float(width))
         keep = self._keep_mask(pre_boxes, post_boxes)
         full = Targets(
-            boxes=post_boxes, labels=targets.labels.clone(), rboxes=rboxes, difficult=targets.difficult.clone()
+            boxes=post_boxes,
+            labels=targets.labels.clone(),
+            rboxes=rboxes,
+            difficult=targets.difficult.clone(),
+            keypoints=self._warp_keypoints(targets.keypoints, matrix),
+            keypoint_vis=targets.keypoint_vis.clone(),
         )
         # One mask over both axes: WP-056's invariant is what makes `rkeep=keep` correct,
         # and `check_rotated_pairing` has already refused anything that breaks it.
@@ -445,6 +459,11 @@ class RandomAffine:
             labels=targets.labels.clone(),
             polygons=clipped_rings,
             difficult=targets.difficult.clone(),
+            # Warped from the raw affine output, never from `clipped_rings`: the ring clamp
+            # exists to keep a mask inside the canvas it is rasterised on, and A70 wants the
+            # opposite for a point. See `_warp_keypoints`.
+            keypoints=self._warp_keypoints(targets.keypoints, matrix),
+            keypoint_vis=targets.keypoint_vis.clone(),
         )
         return full.filter(keep)
 
@@ -453,7 +472,13 @@ class RandomAffine:
         pre_boxes = self._transform_box_corners(targets.boxes, matrix)
         post_boxes = self._clip_boxes(pre_boxes, height, width)
         keep = self._keep_mask(pre_boxes, post_boxes)
-        full = Targets(boxes=post_boxes, labels=targets.labels.clone(), difficult=targets.difficult.clone())
+        full = Targets(
+            boxes=post_boxes,
+            labels=targets.labels.clone(),
+            difficult=targets.difficult.clone(),
+            keypoints=self._warp_keypoints(targets.keypoints, matrix),
+            keypoint_vis=targets.keypoint_vis.clone(),
+        )
         return full.filter(keep)
 
     def _keep_mask(self, pre_boxes: Tensor, post_boxes: Tensor) -> Tensor:
@@ -490,6 +515,37 @@ class RandomAffine:
         """Apply the float64 ``matrix`` to float32 ``points``, restoring float32."""
         warped = apply_affine_to_points(points.to(matrix.dtype), matrix)
         return warped.to(points.dtype)
+
+    @staticmethod
+    def _warp_keypoints(keypoints: Tensor, matrix: Tensor) -> Tensor:
+        """Warp ``(N, K, 2)`` points through the affine and stop there — no clip (A70).
+
+        Every other modality on this path is clipped after the warp, so the omission
+        here is the whole content of the method. A70 settles what becomes of a point the
+        affine pushes off-canvas on an instance the affine *keeps*: it is carried through
+        unchanged, true coordinate and visibility both. Clamping it to the boundary would
+        invent a target — supervising the model toward a location the anatomy is
+        demonstrably not at — and zeroing its visibility would overload A66's "no
+        annotation exists" with a second, unrecoverable meaning. Neither is a safety
+        measure; both are wrong answers, so this warps and returns.
+
+        The rows themselves still filter with their boxes: the caller hands the result to
+        :meth:`~lucid_yolo.data.targets.Targets.filter`, which selects keypoints on the
+        shared instance axis, so a *dropped* instance takes its points with it. What A70
+        governs is only the kept ones.
+
+        A keypoint-free ``Targets`` carries the canonical ``(0, 0, 2)`` empty, which
+        round-trips through the reshape and returns the same empty — an exact no-op for
+        detect/segment/obb, which is what keeps the frozen goldens on this transform still.
+
+        Args:
+            keypoints: ``(N, K, 2)`` point coordinates on the source canvas.
+            matrix: The ``(3, 3)`` float64 forward affine.
+
+        Returns:
+            The warped points, shaped and typed as given, unclipped.
+        """
+        return RandomAffine._warp_points(keypoints.reshape(-1, _POINT_DIM), matrix).reshape(keypoints.shape)
 
     @staticmethod
     def _clip_boxes(boxes: Tensor, height: int, width: int) -> Tensor:

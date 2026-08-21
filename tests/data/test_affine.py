@@ -6,6 +6,11 @@ recovery of a seeded translation on both the image and the box centres, canvas
 clipping (partial clip and fully-outside drop with label alignment), visibility
 filtering, the rotated-box guard, and byte-for-byte determinism under a seeded
 generator.
+
+Keypoints (WP-132) get their own class, including A70's case: this transform
+manufactures it — translate and scale can push a point off-canvas while its box still
+survives the visibility filter — and A70 says such a point is carried through with its
+true coordinate and its visibility, neither clamped to the edge nor zeroed.
 """
 
 from __future__ import annotations
@@ -67,6 +72,139 @@ def _polygon_targets() -> Targets:
     boxes = boxes_from_polygons(rings)
     labels = torch.arange(len(rings), dtype=torch.int64)
     return Targets(boxes=boxes, labels=labels, polygons=rings)
+
+
+def _posed_targets(boxes: torch.Tensor, keypoints: torch.Tensor, visibility: torch.Tensor) -> Targets:
+    """Build keypoint-carrying targets whose points ride the box instance axis.
+
+    Examples:
+        >>> t = _posed_targets(
+        ...     torch.tensor([[1.0, 2.0, 3.0, 4.0]]),
+        ...     torch.tensor([[[1.0, 2.0]]]),
+        ...     torch.tensor([[2]]),
+        ... )
+        >>> t.keypoints.shape, t.keypoint_vis.shape
+        (torch.Size([1, 1, 2]), torch.Size([1, 1]))
+    """
+    return Targets(
+        boxes=boxes,
+        labels=torch.arange(boxes.shape[0], dtype=torch.int64),
+        keypoints=keypoints,
+        keypoint_vis=visibility,
+    )
+
+
+class TestKeypoints:
+    """Keypoints ride the affine's matrix, filter with their boxes, and are never clipped."""
+
+    def test_points_warp_by_the_sampled_translation(self) -> None:
+        """A translation-only warp moves each keypoint by exactly the sampled offset.
+
+        This is the contract that makes a keypoint target usable at all: the points must
+        land where the image content lands. A transform that carried them unwarped — or
+        dropped them, as this one did before WP-132 — supervises the model against the
+        pre-augmentation scene.
+        """
+        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=_generator())
+        points = torch.tensor([[[12.0, 14.0], [28.0, 32.0]]])
+        targets = _posed_targets(torch.tensor([[10.0, 12.0, 30.0, 34.0]]), points, torch.tensor([[2, 1]]))
+
+        _, out = affine(_image(), targets)
+
+        assert affine.last_params is not None
+        offset = torch.tensor([affine.last_params.translate_x, affine.last_params.translate_y])
+        assert torch.allclose(out.keypoints - points, offset.expand_as(points), atol=1e-4)
+
+    def test_visibility_survives_the_warp_unchanged(self) -> None:
+        """Visibility codes are carried across the warp verbatim, not recomputed.
+
+        The affine moves coordinates; it has no basis for revising whether a point was
+        annotated. Silently rewriting these values would corrupt the flag the OKS scorer
+        and the loss mask both read.
+        """
+        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=_generator())
+        visibility = torch.tensor([[2, 1]])
+        targets = _posed_targets(
+            torch.tensor([[10.0, 12.0, 30.0, 34.0]]), torch.tensor([[[12.0, 14.0], [28.0, 32.0]]]), visibility
+        )
+
+        _, out = affine(_image(), targets)
+
+        assert torch.equal(out.keypoint_vis, visibility)
+
+    def test_keypoint_free_targets_keep_the_canonical_empty(self) -> None:
+        """A detection-only warp returns the canonical empty keypoint pair, untouched.
+
+        Every golden in the repo sits on this path. If the keypoint carry-through were not
+        an exact no-op for point-free targets, detect/segment/obb results would move.
+        """
+        affine = RandomAffine(degrees=0.0, translate=0.1, scale=0.0, shear=0.0, generator=_generator())
+
+        _, out = affine(_image(), _polygon_targets())
+
+        assert out.keypoints.shape == (0, 0, 2)
+        assert out.keypoint_vis.shape == (0, 0)
+
+    def test_dropped_instance_takes_its_points_with_it(self) -> None:
+        """When the canvas filter drops an instance, the surviving keypoint rows stay aligned.
+
+        The points share the box instance axis, so a filter that removed a box without
+        removing its point set would silently re-pair every later instance with the wrong
+        landmarks — a misalignment no shape check downstream would catch.
+        """
+        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        targets = _posed_targets(
+            torch.tensor([[5.0, 5.0, 25.0, 25.0], [200.0, 200.0, 240.0, 240.0]]),
+            torch.tensor([[[6.0, 7.0]], [[210.0, 220.0]]]),
+            torch.tensor([[2], [2]]),
+        )
+
+        _, out = affine(_image(), targets)
+
+        assert out.boxes.shape[0] == 1
+        assert out.keypoints.tolist() == [[[6.0, 7.0]]]
+
+    def test_point_pushed_off_canvas_is_neither_clamped_nor_zeroed(self) -> None:
+        """A70: a point warped outside the canvas on a kept instance keeps coordinate and visibility.
+
+        The affine translates a box that stays comfortably inside the canvas while one of
+        its landmarks crosses the right edge. Clamping that landmark to the boundary would
+        supervise the model toward a location the object is not at, and demoting it to
+        ``v=0`` would collide with A66's "never annotated" meaning of that flag. Both are
+        rejected, so the transform must leave the true coordinate standing.
+        """
+        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        outside = torch.tensor([[[20.0, 20.0], [_CANVAS + 30.0, _CANVAS + 12.0]]])
+        targets = _posed_targets(torch.tensor([[10.0, 10.0, 40.0, 40.0]]), outside, torch.tensor([[2, 2]]))
+
+        _, out = affine(_image(), targets)
+
+        assert out.boxes.shape[0] == 1
+        assert torch.allclose(out.keypoints, outside, atol=1e-4)
+        assert out.keypoint_vis.tolist() == [[2, 2]]
+
+    def test_polygon_path_warps_points_from_the_unclamped_matrix(self) -> None:
+        """On the polygon path an off-canvas point is still unclamped, though rings are clamped.
+
+        The two modalities take deliberately opposite treatment on the same call: a ring is
+        clamped because it is rasterised onto the canvas, while A70 keeps a point where it
+        truly is. Warping points from the clipped rings would quietly re-impose the clamp
+        A70 rejects.
+        """
+        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        ring = torch.tensor([[10.0, 10.0], [40.0, 10.0], [40.0, 40.0], [10.0, 40.0]])
+        outside = torch.tensor([[[_CANVAS + 25.0, 20.0]]])
+        targets = Targets(
+            boxes=boxes_from_polygons([ring]),
+            labels=torch.tensor([0]),
+            polygons=[ring],
+            keypoints=outside,
+            keypoint_vis=torch.tensor([[2]]),
+        )
+
+        _, out = affine(_image(), targets)
+
+        assert torch.allclose(out.keypoints, outside, atol=1e-4)
 
 
 class TestBoxMaskConsistency:

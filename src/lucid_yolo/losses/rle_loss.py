@@ -49,8 +49,13 @@ coordinates at all and would not be a valid bijection over R^2. Each layer's
 ``(g_k, h_k)`` conditioner is R14's stated default: 3 fully-connected layers
 of 64 units, every one followed by a Leaky-ReLU (R14 sec. 4: "Lfc=3 and Nn=64
 by default... Each fully-connected layer is followed by a Leaky-RELU"),
-mapping the one conditioning scalar to the transformed coordinate's raw
-``(log_scale, shift)`` pair.
+mapping the one conditioning scalar to the transformed coordinate's
+``(log_scale, shift)`` pair. The log-scale leaves that conditioner through a
+**tanh times a learned scale**, which is RealNVP's own parameterization of
+``s`` and is given there as a stability measure ("To compute the scaling
+functions s, we use a hyperbolic tangent function multiplied by a learned
+scale", Dinh et al. sec. 4); A72 records what a raw linear log-scale cost when
+this loss was first composed into a training run.
 
 **sigma_hat (R14 sec. 3.3, resolving A65's deferred question):** "The
 deviation sigma_hat_i is predicted with a sigmoid function. Hence we have
@@ -125,18 +130,34 @@ class _CouplingConditioner(nn.Module):
             nn.Linear(_CONDITIONER_HIDDEN, 2),
             nn.LeakyReLU(),
         )
+        #: RealNVP's "learned scale" multiplying the tanh — see :meth:`forward`. One
+        #: scalar per layer, initialized to 1 so the layer starts able to express a
+        #: log-scale in ``(-1, 1)`` and grows the range only if the data pay for it.
+        self.scale = nn.Parameter(torch.ones(()))
 
     def forward(self, conditioning: Tensor) -> tuple[Tensor, Tensor]:
         """Map the conditioning scalar to a ``(log_scale, shift)`` pair.
+
+        The log-scale is emitted **through a tanh times a learned scale**, which is
+        RealNVP's own parameterization of ``s`` and is stated as a stability measure:
+        "To compute the scaling functions s, we use a hyperbolic tangent function
+        multiplied by a learned scale" (Dinh et al., sec. 4 — the same construction
+        R14 Appendix A Eq. 12 cites rather than restates). A raw linear log-scale is
+        not a simplification of that; it is a different layer, and A72 records what it
+        cost here — the stack multiplies ``exp(log_scale)`` six times, so an
+        unbounded log-scale compounds, and a measured residual of 27 reached the
+        latent as ``4e11`` and the loss as ``7e22`` before the run went non-finite.
 
         Args:
             conditioning: The fixed coordinate, shape ``(..., 1)``.
 
         Returns:
-            A ``(log_scale, shift)`` pair, each shape ``(...,)``.
+            A ``(log_scale, shift)`` pair, each shape ``(...,)``. Only the log-scale
+            is bounded: the shift is additive, compounds linearly rather than
+            multiplicatively, and is not what the paper stabilizes.
         """
         raw = self.net(conditioning)
-        return raw[..., 0], raw[..., 1]
+        return self.scale * torch.tanh(raw[..., 0]), raw[..., 1]
 
 
 class _AffineCoupling(nn.Module):
@@ -386,13 +407,21 @@ class RLELoss(nn.Module):
                 for the positive instances an assigner has already selected,
                 mirroring
                 :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s
-                already-gathered-positives convention.
+                already-gathered-positives convention. **In a normalized
+                frame, not input pixels** (A71): ``sigma_hat`` is bounded
+                into ``(0, 1)`` by R14's own sigmoid, so a residual it can
+                scale is one whose errors are ``O(1)``. Callers map both
+                point arguments through
+                :func:`~lucid_yolo.ptl.module.normalize_keypoints_to_box`
+                first; passing pixels drives the flow non-finite rather than
+                merely training badly.
             sigma_raw: Raw, unactivated per-axis uncertainty, shape
                 ``(N, K, 2)``
                 (:class:`~lucid_yolo.models.heads.detect.DualDetectionHead`'s
                 ``keypoint_sigma`` output, WP-122, A65). Passed through
                 :func:`torch.sigmoid` here, per R14 sec. 3.3.
-            mu_gt: Ground-truth point coordinates, shape ``(N, K, 2)``.
+            mu_gt: Ground-truth point coordinates, shape ``(N, K, 2)``, in
+                the same normalized frame as ``mu_hat`` (A71).
             visibility: COCO-style visibility, shape ``(N, K)`` int64
                 (WP-121's ``Targets.keypoint_vis``). Points with ``v == 0``
                 do not contribute (A66); ``v >= 1`` do, regardless of

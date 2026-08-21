@@ -287,7 +287,7 @@ class PackedTargets:
     image also carries a *list* of per-instance polygon rings — explodes into
     hundreds of tiny segments and exhausts the consumer's mmap budget
     (``vm.max_map_count``) at realistic worker counts. This container collapses the
-    whole ragged batch into a **fixed set of dense tensors** (eight, plus the
+    whole ragged batch into a **fixed set of dense tensors** (eleven, plus the
     optional mask stack a segmentation loader adds): the modality
     rows are concatenated along their instance/ring/point axes and paired with the
     per-image (and per-ring) counts needed to split them back apart. The tensor
@@ -312,6 +312,21 @@ class PackedTargets:
         rboxes_cat: ``(sum_M, 5)`` float32 long-edge rotated boxes, concatenated.
         rboxes_per_image: ``(B,)`` int64 rotated-box count per image; splits
             ``rboxes_cat``.
+        keypoints_cat: ``(sum_N, K, 2)`` float32 point coordinates, concatenated
+            (WP-132). Transported rather than left behind because the alternative is
+            the worst kind of dead flag: ``keypoint_targets=True`` would parse the
+            points in the reader and drop them at this boundary, and the run would
+            train on nothing while every shape downstream still looked right.
+        keypoint_vis_cat: ``(sum_N, K)`` int64 COCO visibilities aligned with
+            ``keypoints_cat``. Shipped rather than defaulted for the reason A48 gives
+            for ``difficult_cat``: A66 makes ``v == 0`` mean "no annotation exists",
+            so a visibility that arrives defaulted supervises the model towards
+            coordinates nobody ever placed.
+        keypoints_per_image: ``(B,)`` int64 point-set count per image; splits
+            ``keypoints_cat``/``keypoint_vis_cat``. A separate count from
+            ``boxes_per_image`` even though WP-120 pairs the two axes 1:1 when
+            keypoints are present at all, because a detection batch has ``N`` boxes
+            and *no* point sets — one count cannot say both.
         polygon_points_cat: ``(sum_P, 2)`` float32 polygon points of every ring of
             every image, concatenated.
         points_per_ring: ``(R,)`` int64 point count per ring; splits
@@ -347,10 +362,61 @@ class PackedTargets:
     boxes_per_image: Tensor
     rboxes_cat: Tensor
     rboxes_per_image: Tensor
+    keypoints_cat: Tensor
+    keypoint_vis_cat: Tensor
+    keypoints_per_image: Tensor
     polygon_points_cat: Tensor
     points_per_ring: Tensor
     rings_per_image: Tensor
     masks_cat: Tensor | None = None
+
+
+def _concat_keypoints(targets: list[Targets]) -> tuple[Tensor, Tensor]:
+    """Concatenate a batch's point sets and visibilities along the instance axis.
+
+    Split out of :func:`pack_targets` for one reason the other modalities do not
+    have: an instance-free image carries the canonical ``(0, 0, 2)`` empty, whose
+    point axis is ``0`` rather than the batch's ``K``, and ``torch.cat`` compares
+    every axis but the one it joins. The empties are therefore reshaped to the
+    batch's own ``K`` first — free at zero elements, and it keeps a mixed batch of
+    annotated and empty images packing at all. Two images that genuinely disagree
+    on ``K`` still raise from ``torch.cat``, which is right: no single head predicts
+    both.
+
+    Args:
+        targets: The per-image target list being packed.
+
+    Returns:
+        The ``(keypoints_cat, keypoint_vis_cat)`` pair of shapes ``(sum_N, K, 2)``
+        float32 and ``(sum_N, K)`` int64, with ``K = 0`` for a batch that annotates
+        no points at all.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> from lucid_yolo.data.targets import Targets
+        >>> posed = Targets(
+        ...     boxes=torch.zeros((1, 4)),
+        ...     labels=torch.tensor([0]),
+        ...     keypoints=torch.zeros((1, 3, 2)),
+        ...     keypoint_vis=torch.ones((1, 3), dtype=torch.int64),
+        ... )
+        >>> coords, visibility = _concat_keypoints([posed, Targets.empty()])
+        >>> coords.shape, visibility.shape
+        (torch.Size([1, 3, 2]), torch.Size([1, 3]))
+
+        ```
+    """
+    num_points = max((int(target.keypoints.shape[1]) for target in targets if target.keypoints.shape[0]), default=0)
+    coords = [
+        target.keypoints if target.keypoints.shape[0] else target.keypoints.new_zeros((0, num_points, _POINT_DIM))
+        for target in targets
+    ]
+    visibility = [
+        target.keypoint_vis if target.keypoints.shape[0] else target.keypoint_vis.new_zeros((0, num_points))
+        for target in targets
+    ]
+    return torch.cat(coords, dim=0), torch.cat(visibility, dim=0)
 
 
 def pack_targets(targets: list[Targets]) -> PackedTargets:
@@ -366,7 +432,7 @@ def pack_targets(targets: list[Targets]) -> PackedTargets:
             tensors must share one device.
 
     Returns:
-        A :class:`PackedTargets` holding the batch as eight dense tensors on the
+        A :class:`PackedTargets` holding the batch as eleven dense tensors on the
         inputs' device.
 
     Examples:
@@ -385,6 +451,7 @@ def pack_targets(targets: list[Targets]) -> PackedTargets:
     rboxes_cat = torch.cat([target.rboxes for target in targets], dim=0)
     rings = [ring for target in targets for ring in target.polygons]
     polygon_points_cat = torch.cat(rings, dim=0) if rings else boxes_cat.new_zeros((0, _POINT_DIM))
+    keypoints_cat, keypoint_vis_cat = _concat_keypoints(targets)
 
     def counts(values: list[int]) -> Tensor:
         return torch.tensor(values, dtype=torch.int64, device=boxes_cat.device)
@@ -396,6 +463,9 @@ def pack_targets(targets: list[Targets]) -> PackedTargets:
         boxes_per_image=counts([int(target.boxes.shape[0]) for target in targets]),
         rboxes_cat=rboxes_cat,
         rboxes_per_image=counts([int(target.rboxes.shape[0]) for target in targets]),
+        keypoints_cat=keypoints_cat,
+        keypoint_vis_cat=keypoint_vis_cat,
+        keypoints_per_image=counts([int(target.keypoints.shape[0]) for target in targets]),
         polygon_points_cat=polygon_points_cat,
         points_per_ring=counts([int(ring.shape[0]) for ring in rings]),
         rings_per_image=counts([len(target.polygons) for target in targets]),
@@ -431,6 +501,7 @@ def unpack_targets(packed: PackedTargets) -> list[Targets]:
     """
     boxes_per_image = [int(count) for count in packed.boxes_per_image.tolist()]
     rboxes_per_image = [int(count) for count in packed.rboxes_per_image.tolist()]
+    keypoints_per_image = [int(count) for count in packed.keypoints_per_image.tolist()]
     rings_per_image = [int(count) for count in packed.rings_per_image.tolist()]
     points_per_ring = [int(count) for count in packed.points_per_ring.tolist()]
 
@@ -438,6 +509,8 @@ def unpack_targets(packed: PackedTargets) -> list[Targets]:
     labels = torch.split(packed.labels_cat, boxes_per_image)
     difficult = torch.split(packed.difficult_cat, boxes_per_image)
     rboxes = torch.split(packed.rboxes_cat, rboxes_per_image)
+    keypoints = torch.split(packed.keypoints_cat, keypoints_per_image)
+    keypoint_vis = torch.split(packed.keypoint_vis_cat, keypoints_per_image)
     rings = list(torch.split(packed.polygon_points_cat, points_per_ring)) if points_per_ring else []
 
     targets: list[Targets] = []
@@ -445,6 +518,10 @@ def unpack_targets(packed: PackedTargets) -> list[Targets]:
     for index, ring_count in enumerate(rings_per_image):
         image_rings = rings[ring_cursor : ring_cursor + ring_count]
         ring_cursor += ring_count
+        # An image with no point sets is restored to the canonical (0, 0, 2) empty
+        # rather than to the (0, K, 2) slice the split hands back, so the roundtrip
+        # this function promises is tensor-for-tensor on a mixed batch too.
+        empty_points = keypoints_per_image[index] == 0
         targets.append(
             Targets(
                 boxes=boxes[index],
@@ -452,6 +529,8 @@ def unpack_targets(packed: PackedTargets) -> list[Targets]:
                 polygons=list(image_rings),
                 rboxes=rboxes[index],
                 difficult=difficult[index],
+                keypoints=packed.keypoints_cat.new_zeros((0, 0, _POINT_DIM)) if empty_points else keypoints[index],
+                keypoint_vis=packed.keypoint_vis_cat.new_zeros((0, 0)) if empty_points else keypoint_vis[index],
             )
         )
     return targets
@@ -685,7 +764,20 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
         self._mixup = Mixup(p=1.0, generator=self._generator)
         self._copy_paste = CopyPaste(p=1.0, generator=self._generator)
         self._hsv = HSVJitter(generator=self._generator)
-        self._flip = HorizontalFlip(p=_FLIP_PROB, generator=self._generator)
+        # The pairing comes from `base`'s own annotation schema, never from a constant
+        # here — A64's requirement, and the one this line previously broke by omission.
+        # `HorizontalFlip` is K-generic by design and cannot know which index mirrors
+        # which; supplying nothing does not mean "no swap needed", it means every sided
+        # point in a mirrored sample supervises the model toward its opposite number's
+        # location. That trains, converges to a left/right-confused head, and reports
+        # nothing, which is why the value is read from the dataset rather than defaulted.
+        # `None` still reaches the flip intact for a schema with no left/right symmetry,
+        # where mirroring coordinates alone is the correct answer.
+        self._flip = HorizontalFlip(
+            p=_FLIP_PROB,
+            generator=self._generator,
+            keypoint_flip_pairs=base.keypoint_flip_pairs,
+        )
 
     def __len__(self) -> int:
         """Return the number of base images."""
@@ -814,6 +906,26 @@ class DetectionDataModule(LightningDataModule):
             that format carries no per-instance rings at all, so the request is refused
             as soon as the layout is known rather than left to produce a segmentation run
             supervised by nothing.
+        keypoint_targets: Parse every annotation's COCO ``keypoints`` field
+            (:class:`~lucid_yolo.data.coco.CocoDetectionDataset`'s ``keypoints`` mode,
+            WP-121), so both loaders emit ``Targets`` whose ``keypoints`` and
+            ``keypoint_vis`` pair 1:1 with their ``boxes``. Off by default because it
+            requires a keypoints-annotated file; the CLI turns it on for
+            ``model.task="keypoints"``. Adds a ``(sum_N, K, 2)`` coordinate axis and a
+            ``(sum_N, K)`` visibility axis to the batch transport — small beside the
+            images. **Unavailable on a YOLO root**, which carries no keypoint fields.
+
+            Both loaders carry points the whole way (WP-132). The **validation** path is
+            letterbox-only and needed nothing but
+            :class:`~lucid_yolo.data.letterbox.Letterbox`; the **training** path also runs
+            the mosaic, the fused affine, mixup and the horizontal flip, and each of those
+            rebuilds its ``Targets``, so each had to be taught the point channels
+            explicitly. Unlike the letterbox they crop and filter, which is why they need
+            A70's rule for a point warped off the canvas — it is carried through with its
+            true coordinate rather than clamped or demoted, a case A66's ``v == 0`` ("no
+            annotation exists") does not answer. The flip needs more than a rule: it needs
+            this dataset's own left/right pairing, which is why the reader publishes
+            ``keypoint_flip_pairs`` (A64) rather than the transform assuming one.
         layout: Which reader ``data_root`` calls for — ``"coco"``, ``"yolo"``, or ``None``
             (the default) to infer it. Two things are unsayable without it, which is the
             whole of its justification: a root holding *both* conventions, which
@@ -851,11 +963,13 @@ class DetectionDataModule(LightningDataModule):
         persistent_workers: bool = False,
         mask_targets: bool = False,
         rotated_targets: bool = False,
+        keypoint_targets: bool = False,
         layout: str | None = None,
     ) -> None:
         super().__init__()
         self._mask_targets = bool(mask_targets)
         self._rotated_targets = bool(rotated_targets)
+        self._keypoint_targets = bool(keypoint_targets)
         self._batch_size = int(batch_size)
         self._img_size = int(img_size)
         self._prefetch_factor = int(prefetch_factor)
@@ -931,22 +1045,31 @@ class DetectionDataModule(LightningDataModule):
     def _check_layout_support(self, layout: DatasetLayout) -> None:
         """Reject a request the resolved layout's reader cannot serve.
 
-        The one such request today is segmentation supervision on a YOLO root. It is refused
-        rather than downgraded because the failure it replaces is silent in the worst way: the
-        rings the mask targets rasterise are simply never there (WP-099), so the run would
-        train a segmentation head on empty masks and report a plausible detection number.
+        Both such requests today are on a YOLO root: segmentation supervision, and keypoint
+        supervision. Each is refused rather than downgraded because the failure it replaces is
+        silent in the worst way — the rings the mask targets rasterise, and the point fields the
+        pose targets read, are simply never there (WP-099), so the run would train a head on
+        empty supervision and report a plausible detection number.
 
         Args:
             layout: The layout that will be read.
 
         Raises:
-            ValueError: If ``mask_targets`` was asked for on a YOLO root.
+            ValueError: If ``mask_targets`` or ``keypoint_targets`` was asked for on a YOLO root.
         """
-        if layout is DatasetLayout.YOLO and self._mask_targets:
+        if layout is not DatasetLayout.YOLO:
+            return
+        if self._mask_targets:
             raise ValueError(
                 "mask_targets=True is unavailable on a YOLO root: the format carries no "
                 "per-instance polygon rings, so there is nothing to rasterise masks from. "
                 "Train segmentation from a COCO-format root, or drop mask_targets"
+            )
+        if self._keypoint_targets:
+            raise ValueError(
+                "keypoint_targets=True is unavailable on a YOLO root: the format's label rows "
+                "carry a class and a box and no point fields at all, so there is nothing to "
+                "read keypoints from. Train pose from a COCO-format root, or drop keypoint_targets"
             )
 
     @property
@@ -1079,12 +1202,18 @@ class DetectionDataModule(LightningDataModule):
             The raw train reader and the letterbox-only val reader.
         """
         return (
-            CocoDetectionDataset(self._train_images_dir, self._train_ann_file, oriented=self._rotated_targets),
+            CocoDetectionDataset(
+                self._train_images_dir,
+                self._train_ann_file,
+                oriented=self._rotated_targets,
+                keypoints=self._keypoint_targets,
+            ),
             CocoDetectionDataset(
                 self._val_images_dir,
                 self._val_ann_file,
                 transforms=Letterbox(self._img_size),
                 oriented=self._rotated_targets,
+                keypoints=self._keypoint_targets,
             ),
         )
 

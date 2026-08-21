@@ -316,3 +316,58 @@ def test_toy_convergence_mu_moves_toward_ground_truth() -> None:
 
     assert last_loss < first_loss
     assert torch.allclose(mu_hat.detach(), mu_gt, atol=0.5)
+
+
+class TestCouplingScaleBound:
+    """A72: the coupling log-scale is a tanh times a learned scale, not the raw output.
+
+    RealNVP states this parameterization as a stability measure, and R14 cites RealNVP for
+    the coupling construction rather than restating it -- so the detail is easy to miss and
+    was, until this loss was first composed into a training run. The stack multiplies
+    ``exp(log_scale)`` once per layer, so an unbounded log-scale compounds: a measured
+    residual of 27 reached the latent as ``4e11`` and the loss as ``7e22``. These pin the
+    bound and, more importantly, the behaviour it exists for -- finiteness an order of
+    magnitude outside the residual range the equations are usually read at.
+    """
+
+    def test_the_log_scale_stays_inside_its_learned_bound(self) -> None:
+        """However extreme the conditioning value, ``|log_scale| <= scale``."""
+        layer = _AffineCoupling(transform_index=0)
+        bound = float(layer.conditioner.scale.detach().abs())
+
+        log_scale, _ = layer.conditioner(torch.tensor([[-1e6], [-10.0], [0.0], [10.0], [1e6]]))
+
+        assert torch.all(log_scale.abs() <= bound + _LAPLACE_ATOL)
+
+    def test_a_far_out_residual_still_yields_a_finite_loss_and_gradient(self) -> None:
+        """The regression this bound exists to prevent, stated as the property that failed.
+
+        A residual two orders of magnitude outside the ``O(1)`` range R14's equations are
+        read at is exactly what A70's off-canvas points produce, and it must produce a large
+        finite number rather than an overflow -- large is a likelihood doing its job,
+        non-finite is a run that ends.
+        """
+        mu_hat = torch.zeros(3, 5, 2, requires_grad=True)
+        sigma_raw = torch.zeros(3, 5, 2, requires_grad=True)
+        mu_gt = torch.full((3, 5, 2), 300.0)
+        visibility = torch.ones(3, 5, dtype=torch.int64)
+
+        loss = RLELoss()(mu_hat, sigma_raw, mu_gt, visibility)
+        loss.backward()
+
+        assert torch.isfinite(loss)
+        assert torch.isfinite(mu_hat.grad).all()
+        assert torch.isfinite(sigma_raw.grad).all()
+
+    def test_the_bound_is_learnable_rather_than_a_constant(self) -> None:
+        """RealNVP's scale is *learned*; a hard constant would be a different layer.
+
+        Pinning it as a parameter keeps the deviation honest: A72 claims to restore the
+        paper's parameterization, and a frozen constant would not be it.
+        """
+        layer = _AffineCoupling(transform_index=1)
+
+        names = {name for name, _ in layer.conditioner.named_parameters()}
+
+        assert "scale" in names
+        assert layer.conditioner.scale.requires_grad

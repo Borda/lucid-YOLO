@@ -49,6 +49,15 @@ Keypoint reading (``keypoints=True``, WP-121):
     same instance axis as boxes and labels. Visibility is carried through
     unchanged; its training-time meaning is left to ``docs/ASSUMPTIONS.md``.
 
+    The reader also publishes :attr:`CocoDetectionDataset.keypoint_flip_pairs`, the
+    left/right swap a horizontal mirror must apply, derived from the category's own
+    ``keypoints`` names. A64 requires exactly this: the pairing is anatomical, so it
+    belongs to whichever dataset supplies the K points and not to the mirror transform,
+    which is K-generic and could not know it. Naming the sides is how a COCO file states
+    the pairing, so reading the names is reading the schema — no per-dataset constant
+    lives here. A schema with no sided name yields ``None``, which the flip reads as
+    "mirror the coordinates, swap nothing".
+
 The ``difficult`` key (A51, A53, WP-094):
     An annotation may carry a ``difficult`` flag, which this reader forwards onto the
     A51 channel of :class:`~lucid_yolo.data.targets.Targets`. It is not part of the COCO
@@ -97,6 +106,11 @@ _QUAD_CORNERS = 4
 _KEYPOINT_STRIDE = 3
 #: Coordinate values retained from each COCO keypoint triplet.
 _KEYPOINT_COORDS = 2
+#: The two side affixes a keypoint name may carry, as prefix (``left_eye``) or suffix
+#: (``flank_left``). Pairing names on these is how A64's mirror permutation is read off
+#: the file's own schema instead of hard-coded per dataset.
+_LEFT = "left"
+_RIGHT = "right"
 #: 8-bit image scale factor mapping ``uint8`` pixels into ``[0, 1]`` float.
 _UINT8_MAX = 255.0
 
@@ -199,6 +213,9 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     Attributes:
         category_id_to_label: Mapping from COCO category id to contiguous label.
         label_to_category_id: The inverse mapping, label to COCO category id.
+        keypoint_flip_pairs: The ``(left_index, right_index)`` pairs a mirror must swap,
+            read off this file's own category ``keypoints`` names (A64), or ``None`` when
+            ``keypoints=False`` or the schema names no left/right pair.
 
     Examples:
         ```pycon
@@ -224,6 +241,11 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         with annotation_file.open(encoding="utf-8") as handle:
             payload = json.load(handle)
         self.category_id_to_label, self.label_to_category_id = _build_category_maps(payload["categories"])
+        # Derived only under `keypoints=True`. The pairing is strict — it raises on a
+        # half-named side — and a detection or segmentation run has no use for it, so
+        # deriving it unconditionally would let a schema flaw irrelevant to that run stop
+        # it. Gated, the strictness lands exactly on the runs that mirror points.
+        self.keypoint_flip_pairs = _build_keypoint_flip_pairs(payload["categories"]) if self._keypoints else None
         self._images = _build_image_records(payload["images"])
         # Targets are precomputed ONCE here and the raw annotation dicts dropped
         # (WP-073). Keeping the parsed JSON alive — millions of tiny Python
@@ -482,6 +504,133 @@ def _build_category_maps(categories: list[dict[str, object]]) -> tuple[dict[int,
     category_id_to_label = {cat_id: label for label, cat_id in enumerate(sorted_ids)}
     label_to_category_id = {label: cat_id for cat_id, label in category_id_to_label.items()}
     return category_id_to_label, label_to_category_id
+
+
+def _split_side(name: str) -> tuple[str, str] | None:
+    """Split a keypoint name into its ``(stem, side)``, or ``None`` if it names no side.
+
+    Both spellings in circulation are accepted, because both are in the files this
+    project actually reads: R12's human pose prefixes (``left_eye``), and R21's symbol
+    family suffixes (``flank_left``). Matching is case-insensitive; a name that carries
+    no side affix at all (``nose``, ``center``) lies on the mirror axis and returns
+    ``None``.
+
+    Args:
+        name: One entry of a category's ``keypoints`` name list.
+
+    Returns:
+        The ``(stem, side)`` pair with the affix removed, or ``None``.
+
+    Examples:
+        ```pycon
+        >>> _split_side("left_shoulder"), _split_side("flank_right"), _split_side("nose")
+        (('shoulder', 'left'), ('flank', 'right'), None)
+
+        ```
+    """
+    lowered = name.lower()
+    for side in (_LEFT, _RIGHT):
+        if lowered.startswith(f"{side}_"):
+            return lowered[len(side) + 1 :], side
+        if lowered.endswith(f"_{side}"):
+            return lowered[: -len(side) - 1], side
+    return None
+
+
+def _pairs_from_names(names: list[str]) -> list[tuple[int, int]] | None:
+    """Derive the mirror swap from one category's keypoint names (A64).
+
+    A64 requires the left/right pairing to come from whichever dataset supplies the K
+    points, never from a constant inside the flip transform: the pairing is anatomical,
+    not geometric, so only the annotation schema knows it. These names are that schema's
+    statement of it, and pairing them is reading it rather than assuming it.
+
+    Every mismatch raises instead of guessing. A name that says ``left`` with no ``right``
+    to match is a schema this function cannot read, and the failure mode of guessing is
+    the exact one A64 exists to prevent — a mirrored sample supervising ``flank_left``
+    toward the point ``flank_right`` occupies, which no shape check and no gate reports.
+
+    Args:
+        names: The category's ``keypoints`` names, in point-index order.
+
+    Returns:
+        Ascending ``(left_index, right_index)`` pairs, or ``None`` when the schema names
+        no sided point at all — a genuinely symmetric-free task, for which "mirror the
+        coordinates and swap nothing" is correct rather than merely a fallback.
+
+    Raises:
+        ValueError: If a name repeats, or a sided name has no counterpart.
+
+    Examples:
+        ```pycon
+        >>> _pairs_from_names(["center", "apex", "tail", "flank_left", "flank_right"])
+        [(3, 4)]
+        >>> _pairs_from_names(["a", "b"]) is None
+        True
+
+        ```
+    """
+    if len(set(names)) != len(names):
+        raise ValueError(f"category keypoint names must be unique to pair sides; got {names}")
+    sides: dict[str, dict[str, int]] = {}
+    for index, name in enumerate(names):
+        split = _split_side(name)
+        if split is None:
+            continue
+        stem, side = split
+        sides.setdefault(stem, {})[side] = index
+    pairs: list[tuple[int, int]] = []
+    for stem, found in sides.items():
+        if _LEFT not in found or _RIGHT not in found:
+            missing = _RIGHT if _LEFT in found else _LEFT
+            raise ValueError(
+                f"keypoint schema names one side of '{stem}' but not its {missing} counterpart: {names}. "
+                "A mirror cannot swap a pair that is only half declared"
+            )
+        pairs.append((found[_LEFT], found[_RIGHT]))
+    pairs.sort()
+    return pairs or None
+
+
+def _build_keypoint_flip_pairs(categories: list[dict[str, object]]) -> list[tuple[int, int]] | None:
+    """Read the mirror swap off the file's keypoint-bearing categories (A64).
+
+    Args:
+        categories: The COCO ``categories`` entries.
+
+    Returns:
+        The pairs :class:`~lucid_yolo.data.augment.HorizontalFlip` should swap, or ``None``
+        when no category declares keypoint names (nothing to read a pairing from, so
+        "mirror coordinates only" stands).
+
+    Raises:
+        ValueError: If two categories declare different keypoint name lists — one
+            permutation cannot serve two schemas, and picking either silently would
+            mis-mirror the other's instances.
+
+    Examples:
+        ```pycon
+        >>> _build_keypoint_flip_pairs([{"id": 1, "keypoints": ["base_left", "base_right"]}])
+        [(0, 1)]
+        >>> _build_keypoint_flip_pairs([{"id": 1}]) is None
+        True
+
+        ```
+    """
+    named: list[list[str]] = []
+    for category in categories:
+        raw = category.get("keypoints")
+        if isinstance(raw, list) and raw:
+            named.append([str(entry) for entry in raw])
+    if not named:
+        return None
+    for other in named[1:]:
+        if other != named[0]:
+            raise ValueError(
+                f"categories declare differing keypoint schemas ({named[0]} and {other}); "
+                "one flip permutation cannot serve both"
+            )
+    return _pairs_from_names(named[0])
 
 
 def _build_image_records(images: list[dict[str, object]]) -> list[_ImageRecord]:

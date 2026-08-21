@@ -78,6 +78,7 @@ def build_detection_stages(
     num_classes: int,
     num_coeffs: int | None = None,
     predict_angle: bool = False,
+    num_keypoints: int | None = None,
 ) -> tuple[DetectionBackbone, DetectionNeck, DualDetectionHead]:
     """Construct the three detection stages from raw compound-scaling numbers.
 
@@ -108,6 +109,12 @@ def build_detection_stages(
             those of the pre-segmentation head.
         predict_angle: Build the head's orientation stems (A20), the oriented
             path's opt-in. ``False`` (the default) leaves the head angle-free.
+        num_keypoints: Optional point count ``K`` enabling the head's keypoint
+            stems (WP-122), the pose path's opt-in. Unlike ``num_coeffs`` there is
+            no project-wide default to fall back on: ``K`` is a property of the
+            *dataset's* annotation schema (COCO person is 17, another pose set is
+            not), so a default here would be a silent claim about data this factory
+            has never seen. ``None`` (the default) leaves the head keypoint-free.
 
     Returns:
         The ``(backbone, neck, head)`` triple, already wired to each other's
@@ -121,10 +128,18 @@ def build_detection_stages(
         (4, True)
         >>> head.o2o.angle_stems is None  # and angle-free by default
         True
+        >>> head.o2o.keypoint_stems is None  # and keypoint-free by default
+        True
     """
     backbone = DetectionBackbone(depth=depth, width=width, max_channels=max_channels)
     neck = DetectionNeck(backbone.channels, depth=depth, width=width, max_channels=max_channels)
-    head = DualDetectionHead(neck.channels, num_classes=num_classes, num_coeffs=num_coeffs, predict_angle=predict_angle)
+    head = DualDetectionHead(
+        neck.channels,
+        num_classes=num_classes,
+        num_coeffs=num_coeffs,
+        predict_angle=predict_angle,
+        num_keypoints=num_keypoints,
+    )
     return backbone, neck, head
 
 

@@ -32,6 +32,13 @@ Targets:
     :meth:`~lucid_yolo.data.targets.Targets.concat`, which requires consistent
     polygon presence across all inputs.
 
+Keypoints (WP-132):
+    Points shift with their image and are the one modality left unclipped afterwards.
+    A70 governs what the quadrant crop does to a point on an instance it keeps: the point
+    is carried through unchanged rather than clamped to the edge or demoted to invisible.
+    The argument, and why "off-canvas" is the only place such a point can go, are in
+    :meth:`MosaicAssembly._shift_keypoints`.
+
 Rotated boxes (WP-058):
     Placement is a pure translation, which preserves the long-edge form exactly, so
     a rotated box is shifted rather than re-fitted
@@ -257,7 +264,12 @@ class MosaicAssembly:
         rboxes, post_boxes = clip_rboxes_to_canvas(shifted, float(canvas_size), float(canvas_size))
         keep = self._keep_mask(pre_boxes, post_boxes)
         full = Targets(
-            boxes=post_boxes, labels=targets.labels.clone(), rboxes=rboxes, difficult=targets.difficult.clone()
+            boxes=post_boxes,
+            labels=targets.labels.clone(),
+            rboxes=rboxes,
+            difficult=targets.difficult.clone(),
+            keypoints=self._shift_keypoints(targets.keypoints, off_x, off_y),
+            keypoint_vis=targets.keypoint_vis.clone(),
         )
         # WP-056's invariant, checked on the way in, is what makes one mask serve both axes.
         return full.filter(keep, rkeep=keep)
@@ -275,6 +287,10 @@ class MosaicAssembly:
             labels=targets.labels.clone(),
             polygons=clipped_rings,
             difficult=targets.difficult.clone(),
+            # Shifted from the raw offset, not from `clipped_rings`: the ring clamp keeps a
+            # mask on the canvas it is rasterised on; A70 wants a point left where it is.
+            keypoints=self._shift_keypoints(targets.keypoints, off_x, off_y),
+            keypoint_vis=targets.keypoint_vis.clone(),
         )
         return full.filter(keep)
 
@@ -284,8 +300,50 @@ class MosaicAssembly:
         pre_boxes = targets.boxes + shift
         post_boxes = pre_boxes.clamp(0.0, float(canvas_size))
         keep = self._keep_mask(pre_boxes, post_boxes)
-        full = Targets(boxes=post_boxes, labels=targets.labels.clone(), difficult=targets.difficult.clone())
+        full = Targets(
+            boxes=post_boxes,
+            labels=targets.labels.clone(),
+            difficult=targets.difficult.clone(),
+            keypoints=self._shift_keypoints(targets.keypoints, off_x, off_y),
+            keypoint_vis=targets.keypoint_vis.clone(),
+        )
         return full.filter(keep)
+
+    @staticmethod
+    def _shift_keypoints(keypoints: Tensor, off_x: int, off_y: int) -> Tensor:
+        """Translate ``(N, K, 2)`` points onto the canvas — no clamp, per A70.
+
+        Placement is the same pure translation the boxes get, so nothing here is
+        keypoint-specific except what is missing: the canvas clamp every other modality
+        takes. A70 decides that case — a point the quadrant crop pushes past the canvas
+        edge, on an instance the crop keeps, is carried through with its true coordinate
+        and its visibility intact, because clamping it to the edge would supervise the
+        model toward a location the object is not at and zeroing it would collide with
+        A66's "never annotated" meaning of ``v=0``.
+
+        For a point inside its own tile, off-canvas is the only direction it can go: each
+        image is anchored at the sampled centre and extends toward one canvas corner, so
+        leaving the quadrant means leaving the canvas — it cannot land inside a
+        neighbour's image and be read as a landmark of that scene. A point annotated
+        *outside* its tile to begin with has no such guarantee, but it is carried
+        unchanged either way, which is what A70 asks for.
+
+        Whole instances still drop normally: the caller filters on the shared axis, so a
+        box that fails ``min_visibility`` takes its points with it.
+
+        Args:
+            keypoints: ``(N, K, 2)`` point coordinates in image-local pixels.
+            off_x: Horizontal placement offset in canvas pixels.
+            off_y: Vertical placement offset in canvas pixels.
+
+        Returns:
+            The shifted points, shaped and typed as given. A keypoint-free ``Targets``
+            carries the canonical ``(0, 0, 2)`` empty and gets the same empty back, so
+            this is an exact no-op for detect/segment/obb.
+        """
+        if keypoints.shape[0] == 0:
+            return keypoints.clone()
+        return keypoints + torch.tensor([off_x, off_y], dtype=keypoints.dtype)
 
     def _keep_mask(self, pre_boxes: Tensor, post_boxes: Tensor) -> Tensor:
         """Boolean keep mask from clipped size and kept-area (visibility) thresholds."""

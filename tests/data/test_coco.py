@@ -285,6 +285,132 @@ class TestKeypointParsing:
             CocoDetectionDataset(split, split / "instances.json", keypoints=True)
 
 
+#: R21's seven-point symbol schema, whose sides are named as suffixes. Written out rather
+#: than imported from fuse-augmentations so this suite pins the *reading*, not the producer.
+_SYMBOL_NAMES = ["center", "apex", "tail", "flank_left", "flank_right", "base_left", "base_right"]
+#: R12's seventeen-point human pose schema, whose sides are named as prefixes.
+_POSE_NAMES = [
+    "nose",
+    "left_eye",
+    "right_eye",
+    "left_ear",
+    "right_ear",
+    "left_shoulder",
+    "right_shoulder",
+    "left_elbow",
+    "right_elbow",
+    "left_wrist",
+    "right_wrist",
+    "left_hip",
+    "right_hip",
+    "left_knee",
+    "right_knee",
+    "left_ankle",
+    "right_ankle",
+]
+
+
+def _dataset_with_category(
+    split: Path, payload: dict[str, object], category: dict[str, object]
+) -> CocoDetectionDataset:
+    """Write ``payload`` with ``category`` substituted and open it as a keypoint reader.
+
+    Examples:
+        >>> callable(_dataset_with_category)  # needs a live keypoint_coco fixture
+        True
+    """
+    payload["categories"] = [category]
+    (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
+    return CocoDetectionDataset(split, split / "instances.json", keypoints=True)
+
+
+class TestKeypointFlipPairs:
+    """The mirror permutation is read off the file's own category schema (A64)."""
+
+    @pytest.mark.parametrize(
+        ("names", "expected"),
+        [
+            pytest.param(_SYMBOL_NAMES, [(3, 4), (5, 6)], id="suffix-sided-symbol-schema"),
+            pytest.param(
+                _POSE_NAMES,
+                [(1, 2), (3, 4), (5, 6), (7, 8), (9, 10), (11, 12), (13, 14), (15, 16)],
+                id="prefix-sided-human-pose",
+            ),
+        ],
+    )
+    def test_sided_names_pair_by_stem(
+        self, keypoint_coco: tuple[Path, dict[str, object]], names: list[str], expected: list[tuple[int, int]]
+    ) -> None:
+        """Both naming conventions in circulation yield their schema's true left/right swap.
+
+        A64 makes the pairing the dataset's to state, and a COCO file states it by naming
+        the sides. The two schemas this project reads spell that differently — ``flank_left``
+        against ``left_eye`` — so a reader that understood only one would silently return no
+        pairs for the other, which is indistinguishable from a genuinely symmetric schema.
+        """
+        split, payload = keypoint_coco
+
+        dataset = _dataset_with_category(split, payload, {"id": 1, "name": "thing", "keypoints": names})
+
+        assert dataset.keypoint_flip_pairs == expected
+
+    def test_unsided_schema_yields_none(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
+        """A schema naming no left/right point pairs nothing, so the mirror only reflects x.
+
+        ``None`` is the correct answer here rather than a fallback: with no sided landmark
+        there is no identity to swap, and A64 keeps that meaning of ``None`` intact.
+        """
+        split, payload = keypoint_coco
+
+        dataset = _dataset_with_category(split, payload, {"id": 1, "name": "thing", "keypoints": ["tip", "tail"]})
+
+        assert dataset.keypoint_flip_pairs is None
+
+    def test_detection_reader_derives_nothing(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
+        """A reader opened without ``keypoints=True`` publishes no pairing even from a named schema.
+
+        The pairing is only meaningful to a run that mirrors points. Deriving it regardless
+        would let a schema flaw irrelevant to a detection run stop that run at construction.
+        """
+        split, payload = keypoint_coco
+        payload["categories"] = [{"id": 1, "name": "thing", "keypoints": _SYMBOL_NAMES}]
+        (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        dataset = CocoDetectionDataset(split, split / "instances.json")
+
+        assert dataset.keypoint_flip_pairs is None
+
+    def test_half_declared_pair_raises(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
+        """A name declaring one side with no counterpart is rejected instead of ignored.
+
+        Dropping the unmatched name would mirror that landmark's coordinate while leaving
+        its identity in place — the exact silent left/right corruption A64 exists to
+        prevent, which trains and reports nothing.
+        """
+        split, payload = keypoint_coco
+        payload["categories"] = [{"id": 1, "name": "thing", "keypoints": ["nose", "left_eye"]}]
+        (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="right counterpart"):
+            CocoDetectionDataset(split, split / "instances.json", keypoints=True)
+
+    def test_conflicting_category_schemas_raise(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
+        """Two categories declaring different keypoint schemas are rejected, not silently reconciled.
+
+        One permutation is applied to the whole image, so picking either schema's pairing
+        would mis-mirror every instance of the other category.
+        """
+        split, payload = keypoint_coco
+        payload["categories"] = [
+            {"id": 1, "name": "thing", "keypoints": _SYMBOL_NAMES},
+            {"id": 2, "name": "other", "keypoints": _POSE_NAMES},
+        ]
+        (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="differing keypoint schemas"):
+            CocoDetectionDataset(split, split / "instances.json", keypoints=True)
+
+
 @pytest.fixture
 def ringless_coco(tmp_path: Path) -> Path:
     """Create one image and a two-instance COCO payload with no ``segmentation`` key at all.
@@ -443,11 +569,12 @@ def test_collate_batch_is_a_small_constant_segment_count() -> None:
     _images, packed = collate_detection([(torch.zeros(3, 8, 8), target) for target in _ragged_targets()])
     packed_tensors = sum(isinstance(getattr(packed, field.name), torch.Tensor) for field in dataclasses.fields(packed))
     segment_count = 1 + packed_tensors  # the stacked images tensor plus the packed target tensors
-    # 10 since WP-088 added the R18 difficult flags to the transport (was 9). The number
-    # is pinned only to catch a *ragged* modality creeping back in: what matters is that
-    # it does not move with the instance count, which the bound below states.
-    assert segment_count == 10
-    assert segment_count < 12
+    # 13 since WP-132 added the keypoint coordinates, visibilities and per-image count
+    # (was 10, itself up from 9 when WP-088 added the R18 difficult flags). The number is
+    # pinned only to catch a *ragged* modality creeping back in: what matters is that it
+    # does not move with the instance count, which the bound below states.
+    assert segment_count == 13
+    assert segment_count < 15
 
 
 @pytest.mark.parametrize(

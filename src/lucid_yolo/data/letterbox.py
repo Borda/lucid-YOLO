@@ -14,11 +14,12 @@ to original-image coordinates without loss.
 :class:`Letterbox` conforms to
 :class:`~lucid_yolo.data.transforms.GeometricTransform`: one call warps the image
 and every modality carried by :class:`~lucid_yolo.data.targets.Targets` (boxes,
-polygons, rotated boxes) through the *same* affine, routed via
-:func:`~lucid_yolo.data.transforms.apply_affine_to_points` so the three paths share
+polygons, rotated boxes, keypoints) through the *same* affine, routed via
+:func:`~lucid_yolo.data.transforms.apply_affine_to_points` so the four paths share
 one source of geometric truth. Rotated boxes need only their centres warped as
 points, their ``w``/``h`` scaled by ``r`` and ``theta`` left unchanged, since the
-transform carries no rotation or shear.
+transform carries no rotation or shear. Keypoints are plain points and need less
+than that: no extent to scale, no angle to fix (WP-132).
 
 Inverse API:
     :meth:`Letterbox.inverse_map` is stateless in the image content — given a
@@ -44,6 +45,10 @@ __all__ = ["Letterbox"]
 
 #: Default pad colour: mid-grey ``114/255`` per the YOLO-lineage convention (A10).
 _DEFAULT_PAD_VALUE = 114.0 / 255.0
+
+#: Coordinate count of a plane point ``(x, y)`` — the width every modality flattens to
+#: before the shared affine maps it.
+_POINT_DIM = 2
 
 
 def _as_hw(target_size: int | tuple[int, int]) -> tuple[int, int]:
@@ -129,9 +134,11 @@ class Letterbox:
 
     The image is scaled by ``r = min(target_h / H, target_w / W)`` (a single
     ratio for both axes), resized with antialiased bilinear interpolation and
-    padded symmetrically to the target canvas with ``pad_value``. Boxes, polygons
-    and rotated-box centres are warped through the same scale-plus-translation
-    affine; rotated-box ``w``/``h`` scale by ``r`` and ``theta`` is unchanged.
+    padded symmetrically to the target canvas with ``pad_value``. Boxes, polygons,
+    rotated-box centres and keypoints are warped through the same
+    scale-plus-translation affine; rotated-box ``w``/``h`` scale by ``r`` and
+    ``theta`` is unchanged, and keypoint visibilities carry over untouched (a
+    letterbox never crops, so no annotated point leaves the canvas).
 
     Args:
         target_size: Target canvas as a single ``int`` (square) or an explicit
@@ -259,10 +266,10 @@ class Letterbox:
         """Warp ``targets`` through the letterbox affine for a source size, no image.
 
         Applies the same forward affine :meth:`__call__` applies to the geometry —
-        boxes and polygons mapped point-wise, rotated-box centres warped with
-        extents scaled and angle fixed — but touches no image. It lets a fused warp
-        letterbox its targets after another transform has already produced them at
-        the source canvas.
+        boxes, polygons and keypoints mapped point-wise, rotated-box centres warped
+        with extents scaled and angle fixed — but touches no image. It lets a fused
+        warp letterbox its targets after another transform has already produced them
+        at the source canvas.
 
         Args:
             targets: Geometry at the source canvas to map into the letterboxed
@@ -308,16 +315,47 @@ class Letterbox:
         boxes = self._warp(targets.boxes.reshape(-1, 2), matrix).reshape(-1, 4)
         polygons = [self._warp(ring, matrix) for ring in targets.polygons]
         rboxes = self._warp_rboxes(targets.rboxes, matrix, geom.r)
+        keypoints = self._warp_keypoints(targets.keypoints, matrix)
         # The instance axis is untouched by a letterbox, so the R18 difficult flags carry
-        # over row for row. This is the one geometric transform on the *evaluation* path,
-        # which is exactly where A48 needs the flag to survive (WP-088).
+        # over row for row, and so do the keypoint visibilities (WP-132). A letterbox
+        # resizes and pads: it never crops and never pushes content off the canvas, so no
+        # annotated point can stop being annotated here. Deciding what visibility a point
+        # warped *out of frame* should take is a real question, but it belongs to the
+        # transforms that crop — the mosaic, the fused affine, mixup — not to this one.
+        # This is also the one geometric transform on the *evaluation* path, which is
+        # exactly where A48 needs the difficult flag to survive (WP-088).
         return Targets(
             boxes=boxes,
             labels=targets.labels.clone(),
             polygons=polygons,
             rboxes=rboxes,
             difficult=targets.difficult.clone(),
+            keypoints=keypoints,
+            keypoint_vis=targets.keypoint_vis.clone(),
         )
+
+    def _warp_keypoints(self, keypoints: Tensor, matrix: Tensor) -> Tensor:
+        """Warp ``(N, K, 2)`` points through the affine, preserving the point axis.
+
+        The points are flattened to a plain ``(N * K, 2)`` point list, mapped by the
+        *same* matrix the box corners are mapped by, and folded back — so a keypoint
+        and a box corner that coincide on the source canvas still coincide on the
+        letterboxed one. Nothing keypoint-specific enters: there is no separate
+        scaling rule, because a letterbox is one isotropic scale plus a translation
+        and a point has no extent for that scale to act on differently.
+
+        A keypoint-free ``Targets`` carries the canonical ``(0, 0, 2)`` empty, which
+        round-trips through the reshape unchanged and yields the same empty back, so
+        this is an exact no-op for every task that has no points.
+
+        Args:
+            keypoints: ``(N, K, 2)`` point coordinates on the source canvas.
+            matrix: The ``(3, 3)`` forward affine, in ``float64``.
+
+        Returns:
+            The points in letterboxed-canvas coordinates, shaped and typed as given.
+        """
+        return self._warp(keypoints.reshape(-1, _POINT_DIM), matrix).reshape(keypoints.shape)
 
     def _warp_rboxes(self, rboxes: Tensor, matrix: Tensor, r: float) -> Tensor:
         """Warp rotated boxes: centres as points, ``w``/``h`` scaled by ``r``, ``theta`` fixed."""

@@ -16,16 +16,16 @@
   },
   "values": {
     "detseg_num_images": 16.0,
-    "detseg_num_annotations": 93.0,
+    "detseg_num_annotations": 90.0,
     "detseg_num_categories": 4.0,
-    "detseg_segmentation_points": 964.0,
-    "detseg_bbox_area_sum": 66380.64,
-    "detseg_bbox_coord_sum": 13707.788,
+    "detseg_segmentation_points": 895.0,
+    "detseg_bbox_area_sum": 55131.455,
+    "detseg_bbox_coord_sum": 14004.904,
     "obb_num_images": 8.0,
-    "obb_num_annotations": 44.0,
+    "obb_num_annotations": 61.0,
     "obb_num_categories": 4.0,
-    "obb_segmentation_points": 176.0,
-    "obb_bbox_area_sum": 30484.874,
-    "obb_bbox_coord_sum": 6763.337
+    "obb_segmentation_points": 244.0,
+    "obb_bbox_area_sum": 32131.459,
+    "obb_bbox_coord_sum": 9248.329
   }
 }

@@ -6,6 +6,10 @@ canvas, that instances are lost only to clipping (kept count bounded by the inpu
 count when nothing is clipped), seeded quadrant placement of a distinctive pixel,
 box/polygon consistency, grey fill in uncovered regions, the wrong-count and
 rotated-box guards, and byte-for-byte determinism under a seeded generator.
+
+Keypoints (WP-132) get their own class: points shift by their image's placement offset,
+drop with their instance, and — A70 — keep coordinate and visibility when the quadrant
+crop carries them off the canvas, rather than being clamped to the edge or zeroed.
 """
 
 from __future__ import annotations
@@ -92,6 +96,106 @@ def _items(targets_factory: Callable[[], Targets]) -> list[tuple[torch.Tensor, T
         torch.Size([3, 32, 32])
     """
     return [(_image(), targets_factory()) for _ in range(_MOSAIC_COUNT)]
+
+
+#: A box centred in the tile. Every quadrant placement keeps it above ``min_box_size`` and
+#: ``min_visibility`` for any sampled centre, so all four instances always survive and the
+#: concat order stays image 0, 1, 2, 3 — which is what lets a test index a known row.
+_CENTRED_BOX = torch.tensor([[12.0, 12.0, 20.0, 20.0]])
+#: A point whose tile-local coordinate is far enough left and above the tile that image 0's
+#: placement (offset ``cx - 32``, ``cy - 32``, with the centre sampled from ``[16, 48]``)
+#: puts it off the canvas for every possible centre.
+_OFF_TILE_POINT = -40.0
+
+
+def _posed_targets() -> Targets:
+    """Build one centred box carrying two points: one at the tile centre, one far outside it.
+
+    Examples:
+        >>> _posed_targets().keypoints.shape
+        torch.Size([1, 2, 2])
+    """
+    return Targets(
+        boxes=_CENTRED_BOX.clone(),
+        labels=torch.tensor([0]),
+        keypoints=torch.tensor([[[16.0, 16.0], [_OFF_TILE_POINT, _OFF_TILE_POINT]]]),
+        keypoint_vis=torch.tensor([[2, 1]]),
+    )
+
+
+class TestKeypoints:
+    """Points shift with their image, filter with their boxes, and are never clamped."""
+
+    def test_points_shift_by_the_placement_offset(self) -> None:
+        """Each image's points move onto the canvas by exactly that image's placement offset.
+
+        Placement is a pure translation, so a point must land at ``local + offset`` — the
+        same offset its box takes. Anything else puts the landmark somewhere other than the
+        pixels it describes, which the merged canvas gives no way to detect later.
+        """
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+        items = _items(_posed_targets)
+
+        _, out = mosaic(items)
+
+        assert mosaic.last_center is not None
+        cx, cy = mosaic.last_center
+        assert out.boxes.shape[0] == _MOSAIC_COUNT
+        assert out.keypoints[0, 0].tolist() == [16.0 + cx - _TILE, 16.0 + cy - _TILE]
+
+    def test_keypoint_free_targets_keep_the_canonical_empty(self) -> None:
+        """A detection-only mosaic returns the canonical empty keypoint pair, untouched.
+
+        Mosaic is on the train path of every task, and the frozen goldens run through it
+        with no points at all. The carry-through has to be an exact no-op for them.
+        """
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+
+        _, out = mosaic(_items(_one_box_targets))
+
+        assert out.keypoints.shape == (0, 0, 2)
+        assert out.keypoint_vis.shape == (0, 0)
+
+    def test_dropped_instance_takes_its_points_with_it(self) -> None:
+        """An instance clipped away by its quadrant removes its keypoint rows too.
+
+        Points share the box instance axis. A drop that removed the box alone would shift
+        every later instance onto its neighbour's landmarks — a silent misalignment, since
+        the counts would still agree.
+        """
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+        vanishing = Targets(
+            boxes=torch.tensor([[8.0, 8.0, 16.0, 16.0], [-60.0, -60.0, -50.0, -50.0]]),
+            labels=torch.tensor([0, 1]),
+            keypoints=torch.tensor([[[10.0, 10.0]], [[-55.0, -55.0]]]),
+            keypoint_vis=torch.tensor([[2], [2]]),
+        )
+
+        _, out = mosaic([(_image(), vanishing.clone()) for _ in range(_MOSAIC_COUNT)])
+
+        assert out.boxes.shape[0] == out.keypoints.shape[0]
+        assert out.keypoints.shape[0] == _MOSAIC_COUNT
+
+    def test_point_pushed_off_canvas_is_neither_clamped_nor_zeroed(self) -> None:
+        """A70: a point placed outside the canvas on a kept instance keeps coordinate and visibility.
+
+        Image 0 is anchored with its bottom-right corner at the sampled centre, so its
+        left and top edges are what the canvas crops. The second point sits far enough
+        outside the tile that this placement always carries it past ``x = 0``, while its box
+        stays comfortably inside. Clamping the point to the edge would invent a target and
+        zeroing its visibility would overload A66's "never annotated" flag, so it must
+        survive exactly as given.
+        """
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+
+        _, out = mosaic(_items(_posed_targets))
+
+        assert mosaic.last_center is not None
+        cx, cy = mosaic.last_center
+        expected = [_OFF_TILE_POINT + cx - _TILE, _OFF_TILE_POINT + cy - _TILE]
+        assert expected[0] < 0.0
+        assert out.keypoints[0, 1].tolist() == expected
+        assert out.keypoint_vis[0].tolist() == [2, 1]
 
 
 class TestCanvasGeometry:

@@ -619,7 +619,15 @@ def test_an_oriented_train_pipeline_suppresses_copy_paste() -> None:
 
 
 class _FakeBase:
-    """Minimal stand-in for the base dataset: the pipeline only needs a length at build time."""
+    """Minimal stand-in for the base dataset: a length and the mirror pairing it declares.
+
+    Both readers publish ``keypoint_flip_pairs`` because A64 makes the left/right swap the
+    dataset's statement to make, and the pipeline reads it when it builds the flip. An
+    oriented base declares ``None``, which is what a rotated-box dataset has to say: it
+    carries no landmark table for a swap to act on.
+    """
+
+    keypoint_flip_pairs: list[tuple[int, int]] | None = None
 
     def __len__(self) -> int:
         """Return a nominal image count."""

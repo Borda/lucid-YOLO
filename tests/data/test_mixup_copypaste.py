@@ -8,6 +8,11 @@ crafted square-polygon instance lands its pixels and its box/label/polygon on th
 destination, that polygon-less source instances are skipped, ``p=0`` identity, the
 rotated-box guard, and seeded determinism — plus a direct rasteriser pixel-count
 case.
+
+Keypoints (WP-132) get a class per assembly. Neither displaces geometry, so no point is
+ever warped and A70 does not arise here; what is pinned instead is that points survive
+both merges, that a paste selects point rows by the same index as its boxes, and that
+mixed point presence is rejected rather than silently half-annotated.
 """
 
 from __future__ import annotations
@@ -83,6 +88,131 @@ def _boxes_only(count: int) -> Targets:
     """
     boxes = torch.tensor([[0.0, 0.0, 2.0, 2.0]]).repeat(count, 1)
     return Targets(boxes=boxes, labels=torch.zeros(count, dtype=torch.int64))
+
+
+def _posed_polygon_source(label: int, x0: float, points: list[list[float]], visibility: list[int]) -> Targets:
+    """Return a polygon-carrying instance that also carries a K-point set.
+
+    Examples:
+        >>> _posed_polygon_source(5, 1.0, [[2.0, 2.0]], [2]).keypoints.shape
+        torch.Size([1, 1, 2])
+    """
+    ring = _square_ring(x0, 1.0, x0 + 4.0, 5.0)
+    return Targets(
+        boxes=torch.tensor([[x0, 1.0, x0 + 4.0, 5.0]]),
+        labels=torch.tensor([label]),
+        polygons=[ring],
+        keypoints=torch.tensor([points]),
+        keypoint_vis=torch.tensor([visibility]),
+    )
+
+
+class TestMixupKeypoints:
+    """Mixup moves no geometry, so both inputs' points concatenate untouched."""
+
+    def test_both_point_sets_survive_the_blend(self) -> None:
+        """Blending concatenates both images' keypoints at their original coordinates.
+
+        Mixup blends pixels and merges label sets; it displaces nothing, so a point must
+        arrive on the far side with the coordinate it went in with. Both images' scenes are
+        genuinely present in the blended pixels, so both point sets remain true.
+        """
+        mixup = Mixup(p=1.0, generator=_generator())
+        first = _posed_polygon_source(1, 1.0, [[2.0, 2.0]], [2])
+        second = _posed_polygon_source(2, 1.0, [[3.0, 4.0]], [1])
+
+        _, out = mixup([(torch.ones(3, _SIDE, _SIDE), first), (torch.zeros(3, _SIDE, _SIDE), second)])
+
+        assert out.keypoints.tolist() == [[[2.0, 2.0]], [[3.0, 4.0]]]
+        assert out.keypoint_vis.tolist() == [[2], [1]]
+
+    def test_keypoint_free_blend_keeps_the_canonical_empty(self) -> None:
+        """A detection-only blend returns the canonical empty keypoint pair.
+
+        Mixup fires on the train path of every task at the scale-aware probability, so the
+        point-free case has to stay byte-identical for the frozen goldens.
+        """
+        mixup = Mixup(p=1.0, generator=_generator())
+        pair = [(torch.ones(3, _SIDE, _SIDE), _boxes_only(1)), (torch.zeros(3, _SIDE, _SIDE), _boxes_only(1))]
+
+        _, out = mixup(pair)
+
+        assert out.keypoints.shape == (0, 0, 2)
+        assert out.keypoint_vis.shape == (0, 0)
+
+
+class TestCopyPasteKeypoints:
+    """A pasted instance brings its points across with its box, selected by the same index."""
+
+    def test_pasted_instance_carries_its_points(self) -> None:
+        """The pasted source instance's keypoints and visibility are appended to the destination.
+
+        A paste transplants an instance between images without moving it inside one — the
+        masked pixels land at the coordinates they already occupied — so the landmark
+        coordinates transfer verbatim. Dropping them would leave the pasted box supervised
+        for detection but blank for pose.
+        """
+        copy_paste = CopyPaste(p=1.0, generator=_generator())
+        destination = _posed_polygon_source(9, 1.0, [[2.0, 2.0]], [2])
+        source = _posed_polygon_source(5, 1.0, [[3.0, 3.0]], [1])
+
+        _, out = copy_paste([(torch.zeros(3, _SIDE, _SIDE), destination), (torch.ones(3, _SIDE, _SIDE), source)])
+
+        assert out.labels.tolist() == [9, 5]
+        assert out.keypoints.tolist() == [[[2.0, 2.0]], [[3.0, 3.0]]]
+        assert out.keypoint_vis.tolist() == [[2], [1]]
+
+    def test_points_follow_the_selection_not_the_source_order(self) -> None:
+        """Only the selected instances' point rows are appended, aligned with their boxes.
+
+        The paste draw runs per candidate, so the pasted subset is generally not the whole
+        source. Selecting points by anything other than the boxes' own index would pair a
+        pasted box with a landmark set belonging to an instance that was never pasted.
+        """
+        copy_paste = CopyPaste(p=1.0, max_paste=1, generator=_generator())
+        source = Targets(
+            boxes=torch.tensor([[1.0, 1.0, 3.0, 3.0], [4.0, 4.0, 6.0, 6.0]]),
+            labels=torch.tensor([5, 6]),
+            polygons=[_square_ring(1.0, 1.0, 3.0, 3.0), _square_ring(4.0, 4.0, 6.0, 6.0)],
+            keypoints=torch.tensor([[[2.0, 2.0]], [[5.0, 5.0]]]),
+            keypoint_vis=torch.tensor([[2], [1]]),
+        )
+        destination = (torch.zeros(3, _SIDE, _SIDE), Targets.empty())
+
+        _, out = copy_paste([destination, (torch.ones(3, _SIDE, _SIDE), source)])
+
+        assert copy_paste.last_pasted == 1
+        assert out.labels.tolist() == [5]
+        assert out.keypoints.tolist() == [[[2.0, 2.0]]]
+
+    def test_keypoint_free_paste_keeps_the_canonical_empty(self) -> None:
+        """A segmentation paste with no points returns the canonical empty keypoint pair.
+
+        Copy-paste needs polygon rings, which is the segmentation path — the one that
+        brings no landmarks. That combination is the common case and must stay a no-op.
+        """
+        copy_paste = CopyPaste(p=1.0, generator=_generator())
+        pair = [(torch.zeros(3, _SIDE, _SIDE), Targets.empty()), (torch.ones(3, _SIDE, _SIDE), _polygon_source())]
+
+        _, out = copy_paste(pair)
+
+        assert out.boxes.shape[0] == 1
+        assert out.keypoints.shape == (0, 0, 2)
+        assert out.keypoint_vis.shape == (0, 0)
+
+    def test_mixed_point_presence_is_rejected(self) -> None:
+        """Pasting a point-carrying instance onto point-free targets raises rather than merging.
+
+        The merged set would claim landmarks for some instances and none for others, which
+        the container cannot represent and no consumer could interpret. Rejecting mirrors
+        the rule ``Targets.concat`` already applies to polygons.
+        """
+        copy_paste = CopyPaste(p=1.0, generator=_generator())
+        destination = _polygon_source(label=9)
+        source = _posed_polygon_source(5, 1.0, [[3.0, 3.0]], [1])
+
+        with pytest.raises(ValueError, match="keypoints count"):
+            copy_paste([(torch.zeros(3, _SIDE, _SIDE), destination), (torch.ones(3, _SIDE, _SIDE), source)])
 
 
 class TestMixupBlend:

@@ -12,7 +12,13 @@ from lucid_yolo.ptl.datamodule import (
     unpack_batch,
     unpack_targets,
 )
-from lucid_yolo.ptl.module import DetectionLitModule, pad_rboxes, pad_targets
+from lucid_yolo.ptl.module import (
+    DetectionLitModule,
+    normalize_keypoints_to_box,
+    pad_keypoints,
+    pad_rboxes,
+    pad_targets,
+)
 
 __all__ = [
     "CloseMosaicCallback",
@@ -21,7 +27,9 @@ __all__ = [
     "EMACallback",
     "PackedTargets",
     "collate_detection",
+    "normalize_keypoints_to_box",
     "pack_targets",
+    "pad_keypoints",
     "pad_rboxes",
     "pad_targets",
     "unpack_batch",

@@ -283,6 +283,12 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
 
     Attributes:
         names: The class names, in index order.
+        keypoint_flip_pairs: Always ``None``. Declared so both readers answer the
+            question A64 makes the *dataset's* to answer, rather than leaving the caller
+            to ask only the reader it expects to have points. The answer here is not a
+            placeholder: the YOLO label row carries no keypoint fields to name sides
+            with, which is the same reason ``keypoint_targets=True`` is refused on a
+            YOLO root.
 
     Examples:
         ```pycon
@@ -309,6 +315,7 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         self._transforms = transforms
         self._oriented = bool(oriented)
         self._allow_missing_labels = bool(allow_missing_labels)
+        self.keypoint_flip_pairs: list[tuple[int, int]] | None = None
         self._images = sorted(
             path for path in images_dir.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
         )

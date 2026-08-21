@@ -24,6 +24,41 @@ _OBB_CORNER_COORDS = 8  # exactly 4 (x, y) corner points for a rotated box
 _ANIMAL_KEYPOINT_COUNT = 16  # fuse-augmentations' fixed animal landmark schema (WP-121b)
 
 
+def _assert_category_ids_resolve(doc: dict[str, object]) -> None:
+    """Assert every annotation's ``category_id`` is declared in the document's own ``categories``.
+
+    A COCO document whose annotations reference undeclared category ids is not a
+    weaker dataset, it is an unreadable one -- ``CocoDetectionDataset`` builds a
+    ``category_id -> label`` map from ``categories`` and raises ``KeyError`` on the
+    first annotation that misses it. This is checked on **every** fixture set rather
+    than only the ones that have broken, because the two that pass do so by
+    coincidence: the geometric shapes are first in fuse-augmentations' shape
+    vocabulary, so their narrowed category ids happen to equal their global ones,
+    and any shape family that is not a prefix of that vocabulary breaks the tie.
+    WP-131 shipped an animals fixture with exactly this defect (declared ids
+    ``1, 2``, annotations carrying ``5, 6``) because its own check counted distinct
+    ids without resolving them -- a count is satisfied by any two numbers.
+
+    Args:
+        doc: The parsed COCO annotation document.
+
+    Raises:
+        AssertionError: If any annotation references an undeclared category id.
+
+    Examples:
+        >>> _assert_category_ids_resolve(
+        ...     {"categories": [{"id": 1}], "annotations": [{"category_id": 1}]}
+        ... )
+    """
+    declared = {int(category["id"]) for category in doc["categories"]}  # type: ignore[index,union-attr]
+    used = {int(ann["category_id"]) for ann in doc["annotations"]}  # type: ignore[index,union-attr]
+    unresolved = used - declared
+    assert not unresolved, (
+        f"annotations reference category ids absent from the document's own categories: "
+        f"{sorted(unresolved)} not in {sorted(declared)}"
+    )
+
+
 def _sha256(path: Path) -> str:
     """Return the hex SHA-256 digest of a file's bytes.
 
@@ -48,6 +83,7 @@ def test_detseg_set_loads(detseg_fixture_dir: Path) -> None:
     doc = json.loads((split_dir / _ANNOTATION).read_text(encoding="utf-8"))
     assert len(doc["images"]) == 16
     assert doc["annotations"], "expected at least one annotation"
+    _assert_category_ids_resolve(doc)
 
     for ann in doc["annotations"]:
         assert len(ann["bbox"]) == 4, "annotation is missing an axis-aligned bbox"
@@ -67,6 +103,7 @@ def test_obb_set_loads(obb_fixture_dir: Path) -> None:
     doc = json.loads((split_dir / _ANNOTATION).read_text(encoding="utf-8"))
     assert len(doc["images"]) == 8
     assert doc["annotations"], "expected at least one annotation"
+    _assert_category_ids_resolve(doc)
 
     for ann in doc["annotations"]:
         corners = ann.get("segmentation")
@@ -98,6 +135,10 @@ def test_keypoints_set_loads(keypoints_fixture_dir: Path) -> None:
     assert len(category_ids) <= synthetic.KEYPOINTS_ANIMAL_COUNT, (
         f"expected at most {synthetic.KEYPOINTS_ANIMAL_COUNT} distinct animal categories, got {sorted(category_ids)}"
     )
+    # The count above is necessary and nowhere near sufficient: it is satisfied by any two
+    # numbers, which is exactly how WP-131 shipped a fixture whose annotations named
+    # categories the document never declared.
+    _assert_category_ids_resolve(doc)
 
 
 def test_keypoints_generation_is_deterministic(tmp_path: Path) -> None:

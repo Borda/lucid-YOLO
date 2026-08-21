@@ -307,6 +307,8 @@ def test_task_extra_loss_is_inert_zero_for_detection() -> None:
         targets=targets,
         gt_boxes=gt_boxes,
         gt_rboxes=None,
+        gt_keypoints=None,
+        gt_keypoint_vis=None,
         anchor_points=anchor_points,
         strides=strides,
         image_size=(_IMG_SIZE, _IMG_SIZE),

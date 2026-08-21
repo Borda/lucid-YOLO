@@ -323,13 +323,59 @@ class CopyPaste:
 
     @staticmethod
     def _merge(targets_a: Targets, targets_b: Targets, selected: list[int]) -> Targets:
-        """Append the selected source instances' box/label/polygon to ``a``'s targets."""
+        """Append the selected source instances' box/label/polygon/keypoints to ``a``'s targets."""
         index = torch.tensor(selected, dtype=torch.int64)
         boxes = torch.cat([targets_a.boxes, targets_b.boxes[index]], dim=0)
         labels = torch.cat([targets_a.labels, targets_b.labels[index]], dim=0)
         polygons = [ring.clone() for ring in targets_a.polygons]
         polygons.extend(targets_b.polygons[i].clone() for i in selected)
-        return Targets(boxes=boxes, labels=labels, polygons=polygons)
+        keypoints, keypoint_vis = CopyPaste._merge_keypoints(targets_a, targets_b, index)
+        return Targets(boxes=boxes, labels=labels, polygons=polygons, keypoints=keypoints, keypoint_vis=keypoint_vis)
+
+    @staticmethod
+    def _merge_keypoints(targets_a: Targets, targets_b: Targets, index: Tensor) -> tuple[Tensor, Tensor]:
+        """Carry the pasted instances' points across with their boxes (WP-132).
+
+        A paste moves an instance between images without moving it *within* one — the
+        masked pixels land at the same coordinates they occupied in the source — so the
+        points need no warp, only selection by the same ``index`` the boxes take. That is
+        also why A70 never arises here: nothing is displaced, so nothing can be pushed
+        off-canvas.
+
+        Presence must agree, exactly as it must for polygons: a merged set that mixed
+        point-carrying and point-free instances is not representable, and
+        :class:`~lucid_yolo.data.targets.Targets` rejects it on construction rather than
+        letting the caller discover a half-annotated batch later. The rule is the one
+        :meth:`~lucid_yolo.data.targets.Targets.concat` already states for this container.
+
+        Args:
+            targets_a: The destination targets.
+            targets_b: The source targets the pastes were selected from.
+            index: ``(P,)`` int64 indices of the pasted source instances.
+
+        Returns:
+            The merged ``(keypoints, keypoint_vis)`` pair, or the canonical empties when
+            neither side carries points — the no-op every polygon-based segmentation run
+            takes, since copy-paste needs rings and those tasks bring no landmarks.
+
+        Raises:
+            ValueError: If both sides carry points but disagree on ``K``.
+        """
+        source_points = targets_b.keypoints.shape[0] > 0
+        if not source_points:
+            return targets_a.keypoints.clone(), targets_a.keypoint_vis.clone()
+        pasted, pasted_vis = targets_b.keypoints[index], targets_b.keypoint_vis[index]
+        if targets_a.keypoints.shape[0] == 0:
+            return pasted.clone(), pasted_vis.clone()
+        if targets_a.keypoints.shape[1] != pasted.shape[1]:
+            raise ValueError(
+                f"cannot paste instances with differing keypoint counts: {targets_a.keypoints.shape[1]} "
+                f"and {pasted.shape[1]}"
+            )
+        return (
+            torch.cat([targets_a.keypoints, pasted], dim=0),
+            torch.cat([targets_a.keypoint_vis, pasted_vis], dim=0),
+        )
 
 
 def _check_pair(items: list[tuple[Tensor, Targets]]) -> None:

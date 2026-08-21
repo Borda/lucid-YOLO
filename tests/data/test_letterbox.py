@@ -4,7 +4,9 @@
 Covers the sub-pixel forward/inverse round trip across boxes and polygons,
 aspect preservation and symmetric padding of the resized canvas, box/polygon
 consistency after warping, rotated-box handling (centre warp, ``w``/``h`` scale,
-``theta`` fixed) and byte-for-byte determinism.
+``theta`` fixed), keypoint handling (WP-132 — points on the same affine as the
+box corners, visibilities carried, an exact no-op when absent) and byte-for-byte
+determinism.
 """
 
 from __future__ import annotations
@@ -167,6 +169,95 @@ class TestRotatedBoxes:
         assert torch.allclose(out_targets.rboxes[:, :2], expected_centers, atol=1e-4)
         assert torch.allclose(out_targets.rboxes[:, 2:4], rboxes[:, 2:4] * _EXPECTED_R, atol=1e-4)
         assert torch.equal(out_targets.rboxes[:, 4], rboxes[:, 4])
+
+
+class TestKeypoints:
+    """Keypoints ride the same affine as the box corners, and cost nothing when absent."""
+
+    def test_a_keypoint_lands_where_the_box_corner_it_sits_on_lands(self) -> None:
+        """Points placed on a box's own corners warp onto that box's warped corners.
+
+        The decisive statement that the two modalities share one geometry rather than two
+        that happen to agree on this fixture: the keypoints are *defined* as the box's
+        corners on the source canvas, so any difference in scale, in pad offset, or in the
+        order the axes are read shows up as a mismatch after the warp. A separate
+        keypoint path that applied ``r`` without the padding translation — the obvious way
+        to get this wrong — passes every shape and dtype check and fails here.
+        """
+        box = torch.tensor([[100.0, 200.0, 340.0, 460.0]])
+        corners = torch.tensor([[[100.0, 200.0], [340.0, 460.0]]])
+        targets = Targets(
+            boxes=box,
+            labels=torch.zeros(1, dtype=torch.int64),
+            keypoints=corners,
+            keypoint_vis=torch.tensor([[2, 1]]),
+        )
+
+        _, out_targets = Letterbox(_TARGET)(_image(), targets)
+
+        warped_corners = out_targets.boxes.reshape(1, 2, 2)
+        assert torch.allclose(out_targets.keypoints, warped_corners, atol=1e-4)
+
+    def test_visibility_carries_over_row_for_row(self) -> None:
+        """The visibility values survive the warp unchanged, in their original order.
+
+        A letterbox resizes and pads; it never crops, so no annotated point can stop being
+        annotated. Re-deriving visibility here — or dropping it, which is what a fresh
+        ``Targets`` without the channel would do — would silently demote real annotations
+        to A66's "no annotation exists" and delete supervision the loss then never sees.
+        """
+        visibility = torch.tensor([[2, 0, 1]])
+        targets = Targets(
+            boxes=torch.tensor([[10.0, 20.0, 200.0, 300.0]]),
+            labels=torch.zeros(1, dtype=torch.int64),
+            keypoints=torch.tensor([[[20.0, 40.0], [150.0, 90.0], [180.0, 280.0]]]),
+            keypoint_vis=visibility,
+        )
+
+        _, out_targets = Letterbox(_TARGET)(_image(), targets)
+
+        assert torch.equal(out_targets.keypoint_vis, visibility)
+
+    def test_keypoint_free_targets_come_back_keypoint_free(self) -> None:
+        """A ``Targets`` with no points warps to the canonical empty point channels.
+
+        The no-op guard for every task that has no keypoints — detection, segmentation and
+        the oriented path all run this same transform, and this is the one geometric
+        transform on the *evaluation* path. Anything that materialised a ``(0, K, 2)``
+        placeholder here, or changed a dtype, would move ``goldens/data_checksums.json``
+        and break checkpoints and frozen metrics for three tasks that never asked for
+        points.
+        """
+        targets = _targets_with_polygons()
+        reference = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64))
+
+        _, out_targets = Letterbox(_TARGET)(_image(), targets)
+
+        assert out_targets.keypoints.shape == reference.keypoints.shape
+        assert out_targets.keypoints.dtype == reference.keypoints.dtype
+        assert out_targets.keypoint_vis.shape == reference.keypoint_vis.shape
+        assert out_targets.keypoint_vis.dtype == reference.keypoint_vis.dtype
+
+    def test_warp_targets_without_an_image_maps_points_identically(self) -> None:
+        """``warp_targets`` moves keypoints exactly as ``__call__`` does.
+
+        The fused-warp entry point shares ``_warp_targets`` with the imaged call, and the
+        pose pipeline reaches the letterbox through it. A modality wired into only one of
+        the two would work in the val loader and silently vanish in the fused path.
+        """
+        targets = Targets(
+            boxes=torch.tensor([[10.0, 20.0, 200.0, 300.0]]),
+            labels=torch.zeros(1, dtype=torch.int64),
+            keypoints=torch.tensor([[[20.0, 40.0], [180.0, 280.0]]]),
+            keypoint_vis=torch.tensor([[2, 2]]),
+        )
+        letterbox = Letterbox(_TARGET)
+
+        _, call_targets = letterbox(_image(), targets.clone())
+        warped = letterbox.warp_targets(targets.clone(), orig_h=_ORIG_H, orig_w=_ORIG_W)
+
+        assert torch.equal(warped.keypoints, call_targets.keypoints)
+        assert torch.equal(warped.keypoint_vis, call_targets.keypoint_vis)
 
 
 class TestForwardAffine:

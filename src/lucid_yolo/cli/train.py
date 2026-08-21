@@ -192,6 +192,11 @@ class DetectionCLI(LightningCLI):
         # either raise on the first non-quadrilateral ring or hand an obb run empty
         # `rboxes` — which trains the plain detection objective and reports nothing wrong.
         parser.link_arguments("model.task", "data.rotated_targets", compute_fn=lambda task: task == "obb")
+        # And the pose counterpart (WP-132). Same argument a third time: a loader that
+        # did not read the point fields would hand a keypoints run boxes alone, which
+        # `pad_keypoints` refuses rather than trains on — loud, but loud at the first
+        # step of a configured run instead of at the line that configured it.
+        parser.link_arguments("model.task", "data.keypoint_targets", compute_fn=lambda task: task == "keypoints")
 
     def _add_trainer_default_callback(self, callback: Callback) -> None:
         """Append ``callback`` to ``trainer_defaults["callbacks"]`` without replacing it.
