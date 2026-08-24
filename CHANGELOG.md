@@ -2,6 +2,26 @@
 
 All notable changes to lucid-yolo are documented here, following the Keep a Changelog convention; versioning is a perpetual 0.x release train — no 1.0 is ever planned, promised, or tagged — per ADR-002 (docs/DECISIONS.md).
 
+## [Unreleased]
+
+Opened by the dev-version bump to `0.5.0.dev0` after the 0.4.0 release commit; closes when a commit sets `__version__` to a plain `0.5.0`.
+
+### Added
+
+- The fourth task, keypoints, end to end: `Targets` gains `keypoints`/`keypoint_vis` and `HorizontalFlip` a caller-supplied left/right flip-pair swap (WP-120); `CocoDetectionDataset` parses COCO's flat `keypoints` field opt-in (WP-121); `DualDetectionHead` gains a third stem emitting raw point offsets and raw R14 per-axis sigma, plus anchor-relative decode (WP-122); `RLELoss`, the only loss module in this repo carrying trainable weights — a hand-written 6-layer RealNVP flow (R14 Eq. 12) over the standardized residual, summed with a fixed unit Laplace NLL (WP-123); OKS evaluation via `faster_coco_eval.COCOeval_faster(iouType="keypoints", ...)`, since installed `torchmetrics==1.9.0` ships no keypoint `iou_type` (WP-124); and the training path composing all of it, surfacing two numerical faults no component test could see alone — the RLE residual needs the assigned box's own frame (A71), and the RealNVP coupling's raw `exp(log_scale)` diverges without RealNVP's own tanh-bounded, learned-scale form (A72). `goldens/gpu/overfit_micro_kp.json` frozen at train OKS AP 0.335667, floor set from a measured oracle/jitter probe rather than an assumed figure (WP-132).
+- A MkDocs Material site over `docs/`, `dev`-group only — nothing in `make gate` builds it, so a contributor who never runs `mkdocs build` never installs the toolchain.
+- A fourth surface on the licence audit: an undeclared licence is now a finding per dependency tier, not a silent pass.
+
+### Changed
+
+- Checkpoint filenames carry `{task}_{variant}` ahead of Lightning's own `{epoch}-{step}` suffix, unless a config already places its own (WP-127).
+- The export path collapses to one exportable decode path rather than a per-task branch.
+- `mkdocs` capped below its next, unlicensed major.
+
+### Fixed
+
+- `CocoDetectionDataset` required a usable `segmentation` ring in every reading mode, not only `oriented=True` — a keypoints-only or plain-detect COCO export with no ring at all silently parsed to zero instances. A ring absent entirely is now fatal only for `oriented=True`; a present-but-unusable one still excludes that instance, unchanged (WP-121b).
+
 ## [0.4.0] - 2026-08-15
 
 ### Added
