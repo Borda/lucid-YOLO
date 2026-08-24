@@ -42,13 +42,20 @@ bbox statistics under their bare names and prefixes the mask ones with
 before, and the presence of a ``segm_`` key is exactly the statement "this
 checkpoint has a mask branch".
 
-Keypoints (WP-124) add two one-shot functions without introducing a streaming
-model evaluator before the pose decode pipeline exists. :func:`keypoints_to_predictions`
+Keypoints (WP-124) add two one-shot functions. :func:`keypoints_to_predictions`
 filters a fixed-size ``(B, N, K, 2)`` batch and maps contiguous labels back to COCO
 category ids; :func:`evaluate_keypoints` turns those tensors and WP-121's ground
 truth tensors into an in-memory COCO document, then reports the backend's ten
 standard OKS statistics. The citable COCO 17-point sigma table is fixed by
 :data:`COCO_KEYPOINT_OKS_SIGMAS` rather than inherited from a dependency default.
+
+WP-134 puts both behind :class:`DualPathEvaluator` — a keypoint checkpoint is now
+scored by the same one-pass, two-path machinery the other three tasks use — and
+makes the OKS ground truth canonical. ``area``, ``iscrowd``, ``num_keypoints`` and
+``bbox`` are read from the annotation when the target dict carries them instead of
+being rebuilt from visible-point extent, because those supplied values are what
+COCO's protocol normalizes, buckets and ignores on. The reconstruction survives as
+the fallback for ground truth that has no such metadata.
 
 The ground truth is supplied as torchmetrics target dicts
 (``{image_id: {"boxes": ..., "labels": ...}}`` in original image coordinates,
@@ -86,6 +93,7 @@ from lucid_yolo.assign.grid import HEAD_STRIDES, anchor_grid
 from lucid_yolo.decode.common import BOX_CORNERS, LABEL_COLUMN, SCORE_COLUMN, to_letterboxed_original
 from lucid_yolo.eval.segment_decode import decode_instance_masks, masks_to_original
 from lucid_yolo.models.build import SegmentOutput
+from lucid_yolo.models.heads.keypoint import decode_keypoints
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -128,6 +136,12 @@ _METRIC_KEYS: tuple[str, ...] = (
 #: statistics deliberately keep their bare names, so a detection-only report and
 #: the bbox half of a segmentation report are read the same way.
 _SEGM_PREFIX = "segm_"
+
+#: Name prefix of the ten OKS statistics in a keypoint report. Same argument as
+#: :data:`_SEGM_PREFIX`: the box statistics keep their bare names, so a keypoint
+#: report is a superset of a detection one, and the presence of an ``oks_`` key is
+#: exactly the statement "this checkpoint has a keypoint branch".
+_OKS_PREFIX = "oks_"
 
 #: Number of interpolated recall points in the COCO protocol: 0.00 to 1.00 by 0.01 (R12).
 _RECALL_POINTS = 101
@@ -210,6 +224,7 @@ def detections_to_predictions(
     label_to_category: Mapping[int, int],
     score_floor: float = 0.0,
     masks: Sequence[Tensor] | None = None,
+    keypoints: Tensor | None = None,
 ) -> list[dict[str, Tensor]]:
     """Convert a fixed-size A9 detection batch into torchmetrics prediction dicts.
 
@@ -242,12 +257,20 @@ def detections_to_predictions(
             on its own original grid (A10) — which is why this is a sequence and
             not one stacked tensor. ``None`` (the default) yields detection-only
             prediction dicts with no ``masks`` key at all.
+        keypoints: Optional per-detection point coordinates of shape
+            ``(B, N, K, 2)``, row-aligned with ``detections`` and already in
+            original image coordinates. One tensor rather than a sequence because
+            ``K`` is the same for every image, unlike a mask's ``(H, W)``. Filtered
+            by the same score mask, for the same reason the masks are: a keypoint
+            set paired with the neighbouring detection's score reports a
+            plausible pose at a correct box.
 
     Returns:
         A length-``B`` list of prediction dicts, each with ``boxes`` (``(M, 4)``
         ``xyxy``), ``scores`` (``(M,)``) and ``labels`` (``(M,)`` long, category
         ids) — the per-image shape :class:`MeanAveragePrecision` consumes — plus
-        ``masks`` (``(M, H, W)`` bool) when ``masks`` is given.
+        ``masks`` (``(M, H, W)`` bool) when ``masks`` is given and ``keypoints``
+        (``(M, K, 2)``) when ``keypoints`` is given.
 
     Examples:
         >>> import torch
@@ -264,13 +287,19 @@ def detections_to_predictions(
         >>> masked = detections_to_predictions(dets, {1: 42}, masks=[stack])
         >>> tuple(masked[0]["masks"].shape)  # the padding row's mask went with it
         (1, 4, 4)
+        >>> points = torch.zeros(1, 2, 3, 2)  # one point set per detection row
+        >>> posed = detections_to_predictions(dets, {1: 42}, keypoints=points)
+        >>> tuple(posed[0]["keypoints"].shape)  # the padding row's points went with it
+        (1, 3, 2)
     """
     dense = detections.detach().to(device="cpu", dtype=torch.float32)
-    if masks is None:
-        return [_image_to_prediction(image, label_to_category, score_floor) for image in dense]
+    image_masks: Sequence[Tensor | None] = [None] * dense.shape[0] if masks is None else list(masks)
+    image_points: Sequence[Tensor | None] = (
+        [None] * dense.shape[0] if keypoints is None else list(keypoints.detach().to(device="cpu"))
+    )
     return [
-        _image_to_prediction(image, label_to_category, score_floor, image_masks)
-        for image, image_masks in zip(dense, masks, strict=True)
+        _image_to_prediction(image, label_to_category, score_floor, one_masks, one_points)
+        for image, one_masks, one_points in zip(dense, image_masks, image_points, strict=True)
     ]
 
 
@@ -341,6 +370,7 @@ def _image_to_prediction(
     label_to_category: Mapping[int, int],
     score_floor: float,
     masks: Tensor | None = None,
+    keypoints: Tensor | None = None,
 ) -> dict[str, Tensor]:
     """Convert one image's ``(N, 6)`` detections into a prediction dict (padding dropped)."""
     keep = detections[:, SCORE_COLUMN] > score_floor
@@ -356,6 +386,8 @@ def _image_to_prediction(
     }
     if masks is not None:
         prediction["masks"] = masks.detach().cpu()[keep].to(torch.bool)
+    if keypoints is not None:
+        prediction["keypoints"] = keypoints.detach().cpu()[keep].to(torch.float32)
     return prediction
 
 
@@ -399,10 +431,124 @@ def evaluate_bbox(
     return _named_stats(_compute_metric(preds, targets, "bbox"), combined=False)
 
 
+def _visible_extent(points: Tensor, visible: Tensor) -> tuple[list[float], float]:
+    """Reconstruct an instance's ``xywh`` box and area from its visible points alone.
+
+    The fallback for ground truth carrying no annotation metadata — a synthetic
+    fixture, or the WP-124 one-shot callers. It is **not** what COCO scores: OKS
+    normalizes by the annotation's own ``area``, which counts the whole segmented
+    person and not the hull of the labeled joints, and the medium/large bucket
+    boundary is drawn on that same figure. :func:`_instance_metadata` prefers the
+    supplied fields wherever they exist and reaches here only when they do not.
+    """
+    if not bool(visible.any()):
+        return [0.0, 0.0, 1.0, 1.0], 1.0
+    visible_points = points[visible]
+    minimum = visible_points.amin(dim=0)
+    extent = visible_points.amax(dim=0) - minimum
+    width, height = float(extent[0]), float(extent[1])
+    return [float(minimum[0]), float(minimum[1]), width, height], max(width * height, 1.0)
+
+
+def _instance_metadata(
+    target: Mapping[str, Tensor],
+    index: int,
+    points: Tensor,
+    visible: Tensor,
+) -> dict[str, object]:
+    """Return one ground-truth instance's COCO ``area``/``iscrowd``/``num_keypoints``/``bbox``.
+
+    Each field is taken from the annotation when the target carries it and
+    reconstructed only when it does not, because the backend's keypoint path reads
+    all four as supplied values: ``area`` normalizes OKS and selects the
+    medium/large bucket, ``iscrowd`` and a zero ``num_keypoints`` both mark an
+    instance ignored. Recomputing them from visible-point extent — which is what
+    this function's fallback does, and what WP-124 did unconditionally — scores a
+    different protocol under the same name.
+    """
+    boxes = target.get("boxes")
+    areas = target.get("area")
+    crowds = target.get("iscrowd")
+    counts = target.get("num_keypoints")
+    reconstructed_bbox, reconstructed_area = _visible_extent(points, visible)
+    if boxes is not None:
+        x_min, y_min, x_max, y_max = (float(value) for value in boxes[index])
+        reconstructed_bbox = [x_min, y_min, x_max - x_min, y_max - y_min]
+    return {
+        "bbox": reconstructed_bbox,
+        "area": float(areas[index]) if areas is not None else reconstructed_area,
+        "iscrowd": int(crowds[index]) if crowds is not None else 0,
+        "num_keypoints": int(counts[index]) if counts is not None else int(visible.sum()),
+    }
+
+
+def _keypoint_annotations(
+    targets: list[dict[str, Tensor]],
+    image_ids: Sequence[int],
+) -> tuple[list[dict[str, object]], set[int]]:
+    """Build the COCO ground-truth annotation records and the category ids they use."""
+    annotations: list[dict[str, object]] = []
+    category_ids: set[int] = set()
+    annotation_id = 1
+    for image_id, target in zip(image_ids, targets, strict=True):
+        points = target["keypoints"].detach().to(device="cpu", dtype=torch.float32)
+        visibility = target["visibility"].detach().to(device="cpu", dtype=torch.long)
+        labels = target["labels"].detach().to(device="cpu", dtype=torch.long)
+        for index, (instance_points, instance_visibility, instance_label) in enumerate(
+            zip(points, visibility, labels, strict=True)
+        ):
+            visible = instance_visibility > 0
+            category_id = int(instance_label)
+            category_ids.add(category_id)
+            flat = torch.cat(
+                (instance_points, instance_visibility.to(torch.float32).unsqueeze(-1)),
+                dim=-1,
+            ).reshape(-1)
+            annotations.append(
+                {
+                    "id": annotation_id,
+                    "image_id": int(image_id),
+                    "category_id": category_id,
+                    "keypoints": flat.tolist(),
+                    **_instance_metadata(target, index, instance_points, visible),
+                }
+            )
+            annotation_id += 1
+    return annotations, category_ids
+
+
+def _keypoint_results(
+    preds: list[dict[str, Tensor]],
+    image_ids: Sequence[int],
+) -> tuple[list[dict[str, object]], set[int]]:
+    """Build the COCO detection records for predicted keypoints, visibility fixed at 2."""
+    results: list[dict[str, object]] = []
+    category_ids: set[int] = set()
+    for image_id, prediction in zip(image_ids, preds, strict=True):
+        points = prediction["keypoints"].detach().to(device="cpu", dtype=torch.float32)
+        scores = prediction["scores"].detach().to(device="cpu", dtype=torch.float32)
+        labels = prediction["labels"].detach().to(device="cpu", dtype=torch.long)
+        for instance_points, instance_score, instance_label in zip(points, scores, labels, strict=True):
+            category_id = int(instance_label)
+            category_ids.add(category_id)
+            visibility = torch.full((instance_points.shape[0], 1), 2.0, dtype=instance_points.dtype)
+            flat = torch.cat((instance_points, visibility), dim=-1).reshape(-1)
+            results.append(
+                {
+                    "image_id": int(image_id),
+                    "category_id": category_id,
+                    "keypoints": flat.tolist(),
+                    "score": float(instance_score),
+                }
+            )
+    return results, category_ids
+
+
 def evaluate_keypoints(
     preds: list[dict[str, Tensor]],
     targets: list[dict[str, Tensor]],
     sigmas: Sequence[float] = COCO_KEYPOINT_OKS_SIGMAS,
+    image_ids: Sequence[int] | None = None,
 ) -> dict[str, float]:
     """Score keypoint predictions with COCO's object keypoint similarity protocol.
 
@@ -410,11 +556,22 @@ def evaluate_keypoints(
     :class:`faster_coco_eval.COCOeval_faster`, then runs its native keypoint path.
     Ground-truth ``visibility`` follows WP-121's tensor convention directly:
     ``v == 0`` points are unlabeled and excluded from OKS, while ``v > 0`` points
-    define both the match distances and each instance's tight bounding-box area.
-    Predicted visibility is the COCO placeholder ``2`` because OKS reads only the
-    predicted coordinates and ground-truth visibility. An empty prediction input
-    yields all ten statistics at ``0.0`` rather than entering a degenerate backend
-    path.
+    define the match distances. Predicted visibility is the COCO placeholder ``2``
+    because OKS reads only the predicted coordinates and ground-truth visibility.
+    An empty prediction input yields all ten statistics at ``0.0`` rather than
+    entering a degenerate backend path.
+
+    The remaining four ground-truth fields — ``area``, ``iscrowd``,
+    ``num_keypoints`` and ``bbox`` — are taken from the annotation whenever the
+    target dict carries them (WP-134), and reconstructed from visible-point extent
+    only when it does not. That distinction is the protocol, not bookkeeping:
+    ``area`` is what OKS divides by and what draws the medium/large boundary, and
+    it counts the whole segmented person rather than the hull of the labeled
+    joints; ``iscrowd`` and ``num_keypoints == 0`` are the two flags the backend
+    ignores an instance on. Ground truth loaded by
+    :func:`~lucid_yolo.eval.annotations.load_eval_annotations` with
+    ``with_keypoints=True`` carries all four; the WP-124 one-shot shape carries
+    none and keeps the reconstruction it always had.
 
     Args:
         preds: Per-image prediction dicts with ``keypoints`` (``(M, K, 2)``),
@@ -422,9 +579,14 @@ def evaluate_keypoints(
             ids), as produced by :func:`keypoints_to_predictions`.
         targets: Position-aligned ground-truth dicts with ``keypoints``
             (``(M, K, 2)``), ``visibility`` (``(M, K)`` int64), and ``labels``
-            (``(M,)`` original COCO category ids).
+            (``(M,)`` original COCO category ids), optionally also ``boxes``
+            (``xyxy``), ``area``, ``iscrowd`` and ``num_keypoints``.
         sigmas: Per-keypoint OKS sigmas in the tensors' point order. Defaults to
             :data:`COCO_KEYPOINT_OKS_SIGMAS`, COCO's 17-point person convention.
+        image_ids: The COCO image id of each position, so the evaluated image set
+            is the real one. Defaults to ``range(len(preds))``. An image scored
+            with no prediction still belongs here — dropping it would drop its
+            ground truth from the document and raise every statistic.
 
     Returns:
         A ten-entry dict containing ``AP_all``, ``AP_50``, ``AP_75``, the medium
@@ -442,83 +604,19 @@ def evaluate_keypoints(
     """
     if not preds:
         return dict.fromkeys(_KEYPOINT_METRIC_KEYS, 0.0)
-
-    images = [{"id": image_id} for image_id in range(len(preds))]
-    annotations: list[dict[str, object]] = []
-    results: list[dict[str, object]] = []
-    category_ids: set[int] = set()
-    annotation_id = 1
-
-    for image_id, (prediction, target) in enumerate(zip(preds, targets, strict=True)):
-        target_keypoints = target["keypoints"].detach().to(device="cpu", dtype=torch.float32)
-        target_visibility = target["visibility"].detach().to(device="cpu", dtype=torch.long)
-        target_labels = target["labels"].detach().to(device="cpu", dtype=torch.long)
-        for instance_keypoints, instance_visibility, instance_label in zip(
-            target_keypoints, target_visibility, target_labels, strict=True
-        ):
-            visible = instance_visibility > 0
-            if bool(visible.any()):
-                visible_points = instance_keypoints[visible]
-                minimum = visible_points.amin(dim=0)
-                extent = visible_points.amax(dim=0) - minimum
-                width, height = float(extent[0]), float(extent[1])
-                x_min, y_min = float(minimum[0]), float(minimum[1])
-                area = max(width * height, 1.0)
-                bbox = [x_min, y_min, width, height]
-            else:
-                area = 1.0
-                bbox = [0.0, 0.0, 1.0, 1.0]
-
-            category_id = int(instance_label)
-            category_ids.add(category_id)
-            flat_keypoints = torch.cat(
-                (instance_keypoints, instance_visibility.to(torch.float32).unsqueeze(-1)),
-                dim=-1,
-            ).reshape(-1)
-            annotations.append(
-                {
-                    "id": annotation_id,
-                    "image_id": image_id,
-                    "category_id": category_id,
-                    "keypoints": flat_keypoints.tolist(),
-                    "num_keypoints": int(visible.sum()),
-                    "iscrowd": 0,
-                    "area": area,
-                    "bbox": bbox,
-                }
-            )
-            annotation_id += 1
-
-        prediction_keypoints = prediction["keypoints"].detach().to(device="cpu", dtype=torch.float32)
-        prediction_scores = prediction["scores"].detach().to(device="cpu", dtype=torch.float32)
-        prediction_labels = prediction["labels"].detach().to(device="cpu", dtype=torch.long)
-        for instance_keypoints, instance_score, instance_label in zip(
-            prediction_keypoints, prediction_scores, prediction_labels, strict=True
-        ):
-            category_id = int(instance_label)
-            category_ids.add(category_id)
-            visibility = torch.full(
-                (instance_keypoints.shape[0], 1),
-                2.0,
-                dtype=instance_keypoints.dtype,
-            )
-            flat_keypoints = torch.cat((instance_keypoints, visibility), dim=-1).reshape(-1)
-            results.append(
-                {
-                    "image_id": image_id,
-                    "category_id": category_id,
-                    "keypoints": flat_keypoints.tolist(),
-                    "score": float(instance_score),
-                }
-            )
-
+    ids = list(range(len(preds))) if image_ids is None else [int(image_id) for image_id in image_ids]
+    annotations, target_categories = _keypoint_annotations(targets, ids)
+    results, prediction_categories = _keypoint_results(preds, ids)
     if not results:
         return dict.fromkeys(_KEYPOINT_METRIC_KEYS, 0.0)
 
     annotation_dict = {
-        "images": images,
+        "images": [{"id": image_id} for image_id in ids],
         "annotations": annotations,
-        "categories": [{"id": category_id, "name": str(category_id)} for category_id in sorted(category_ids)],
+        "categories": [
+            {"id": category_id, "name": str(category_id)}
+            for category_id in sorted(target_categories | prediction_categories)
+        ],
     }
     with contextlib.redirect_stdout(io.StringIO()):
         coco_ground_truth = COCO(annotation_dict)
@@ -745,6 +843,45 @@ class _StreamingScorer:
         return _named_stats(computed, self._combined)
 
 
+class _KeypointScorer:
+    """One decode path's OKS statistics, accumulated whole and scored once.
+
+    The opposite choice from :class:`_StreamingScorer`, and for the opposite
+    reason. Masks force streaming because a split's worth of them is measured in
+    hundreds of gigabytes; a split's worth of points is measured in megabytes
+    (val2017's person annotations are ~11k instances of 17 ``(x, y)`` pairs), and
+    COCO's keypoint protocol is a single matching over the whole document anyway —
+    :class:`faster_coco_eval.COCOeval_faster` has no incremental update.
+
+    Every scored image is recorded, including the ones that produced no
+    prediction: their ground truth belongs in the document, and omitting it would
+    silently delete the recall those images cost.
+    """
+
+    def __init__(self) -> None:
+        self._preds: list[dict[str, Tensor]] = []
+        self._targets: list[dict[str, Tensor]] = []
+        self._image_ids: list[int] = []
+
+    def update(
+        self,
+        preds: list[dict[str, Tensor]],
+        targets: list[dict[str, Tensor]],
+        image_ids: Sequence[int],
+    ) -> None:
+        """Record one batch's predictions, ground truth and COCO image ids."""
+        self._preds.extend(preds)
+        self._targets.extend(targets)
+        self._image_ids.extend(int(image_id) for image_id in image_ids)
+
+    def compute(self, sigmas: Sequence[float]) -> dict[str, float]:
+        """Return the ten ``oks_``-prefixed statistics, or nothing if no image was scored."""
+        if not self._preds:
+            return {}
+        stats = evaluate_keypoints(self._preds, self._targets, sigmas, image_ids=self._image_ids)
+        return {_OKS_PREFIX + key: value for key, value in stats.items()}
+
+
 class _IndexingDecoder(Protocol):
     """A decoder that reports the source anchor of every detection it emits.
 
@@ -823,6 +960,36 @@ def _gather_coefficients(coefficients: Tensor, anchor_index: Tensor) -> Tensor:
     return gathered * real.unsqueeze(-1).to(gathered.dtype)
 
 
+def _gather_keypoints(keypoints: Tensor, anchor_index: Tensor) -> Tensor:
+    """Select each detection's decoded point set by its own source anchor index.
+
+    :func:`_gather_coefficients` with a ``(K, 2)`` trailing shape instead of a flat
+    coefficient vector, and the same padding contract: rows carrying
+    :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX` are clamped to a valid
+    gather position and then zeroed, so a padding row yields the origin rather
+    than the last anchor's pose. Those rows carry score 0 and are dropped by
+    :func:`detections_to_predictions` regardless.
+
+    The input must already be **decoded** — absolute canvas pixels from
+    :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints`, which needs the
+    whole ``(B, A, K, 2)`` dense tensor and the whole anchor grid and offers no
+    per-detection indexing. Decoding after the gather would have to reconstruct
+    each kept row's anchor and stride by hand, which is this index's job.
+
+    Args:
+        keypoints: Decoded dense point coordinates of shape ``(B, A, K, 2)``.
+        anchor_index: Source anchor index per detection, shape ``(B, N)``.
+
+    Returns:
+        Point coordinates of shape ``(B, N, K, 2)``, padding rows all zero.
+    """
+    real = anchor_index >= 0
+    trailing = keypoints.shape[-2:]
+    index = anchor_index.clamp(min=0)[..., None, None].expand(-1, -1, *trailing)
+    gathered = keypoints.gather(1, index)
+    return gathered * real[..., None, None].to(gathered.dtype)
+
+
 class DualPathEvaluator:
     """Evaluate both decode paths from one checkpoint in a single loader pass.
 
@@ -856,6 +1023,22 @@ class DualPathEvaluator:
     - a detection-only model takes exactly the path it took before — the plain
       decoder call, :func:`evaluate_bbox`, no ``masks`` key anywhere.
 
+    Given a **keypoint** model — one whose head output carries point offsets — the
+    same three properties hold with ``o2o_keypoints``/``o2m_keypoints`` in place of
+    the coefficients, and the report gains the ten ``oks_``-prefixed statistics of
+    :func:`evaluate_keypoints` beside its box ones. Two differences from the mask
+    case, both forced by what the pieces are:
+    :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` reads the whole
+    dense anchor axis and offers no per-detection indexing, so this path decodes
+    the batch and *then* gathers rather than the other way round; and OKS is one
+    matching over one document with no incremental update, so the points are
+    accumulated for the split and scored once (:class:`_KeypointScorer`) where the
+    boxes stream. The ground truth must then carry ``keypoints``, ``visibility``
+    and — for the canonical protocol rather than a reconstruction of it —
+    ``num_keypoints``, ``area`` and ``iscrowd``, which
+    :func:`~lucid_yolo.eval.annotations.load_eval_annotations` supplies under
+    ``with_keypoints=True``.
+
     The ``dataloader`` passed to :meth:`evaluate` yields
     ``(images, image_ids, orig_sizes)`` batches, where ``images`` is a letterboxed
     ``(B, 3, H, W)`` tensor (``H``/``W`` divisible by 32), ``image_ids`` are the
@@ -885,6 +1068,10 @@ class DualPathEvaluator:
             whose geometry (its ``allow_upscale`` setting) inverts the resize.
         strides: The head's per-level input strides. Defaults to
             :data:`~lucid_yolo.assign.grid.HEAD_STRIDES`.
+        keypoint_sigmas: Per-point OKS sigmas, used only when the model has a
+            keypoint branch, and then required to have one entry per predicted
+            point. Defaults to :data:`COCO_KEYPOINT_OKS_SIGMAS`, which is COCO's
+            17-point person table and therefore wrong for any other ``K``.
 
     Examples:
         >>> evaluator = DualPathEvaluator(  # doctest: +SKIP
@@ -903,6 +1090,7 @@ class DualPathEvaluator:
         label_to_category: Mapping[int, int],
         letterbox: Letterbox,
         strides: tuple[int, int, int] = HEAD_STRIDES,
+        keypoint_sigmas: Sequence[float] = COCO_KEYPOINT_OKS_SIGMAS,
     ) -> None:
         self._model = model
         self._e2e_decoder = e2e_decoder
@@ -910,6 +1098,7 @@ class DualPathEvaluator:
         self._label_to_category = dict(label_to_category)
         self._letterbox = letterbox
         self._strides = strides
+        self._keypoint_sigmas = tuple(keypoint_sigmas)
 
     def evaluate(
         self,
@@ -944,13 +1133,20 @@ class DualPathEvaluator:
         """
         self._model.to(device).eval()
         e2e_scorer, nms_scorer = _StreamingScorer(), _StreamingScorer()
+        e2e_oks, nms_oks = _KeypointScorer(), _KeypointScorer()
         with torch.no_grad():
             for images, image_ids, orig_sizes in dataloader:
                 e2e_batch, nms_batch = self._predict_batch(images.to(device), device, orig_sizes)
                 gt_batch = [targets[int(image_id)] for image_id in image_ids]
                 e2e_scorer.update(e2e_batch, gt_batch)
                 nms_scorer.update(nms_batch, gt_batch)
-        return {"e2e": e2e_scorer.compute(), "nms": nms_scorer.compute()}
+                if e2e_batch and "keypoints" in e2e_batch[0]:
+                    e2e_oks.update(e2e_batch, gt_batch, image_ids)
+                    nms_oks.update(nms_batch, gt_batch, image_ids)
+        return {
+            "e2e": e2e_scorer.compute() | e2e_oks.compute(self._keypoint_sigmas),
+            "nms": nms_scorer.compute() | nms_oks.compute(self._keypoint_sigmas),
+        }
 
     def _predict_batch(
         self,
@@ -968,8 +1164,22 @@ class DualPathEvaluator:
             orig_sizes=orig_sizes,
             prototypes=prototypes,
         )
-        e2e = self._decode_path(self._e2e_decoder, head_out.o2o_cls, head_out.o2o_box, head_out.o2o_coeff, geometry)
-        nms = self._decode_path(self._nms_decoder, head_out.o2m_cls, head_out.o2m_box, head_out.o2m_coeff, geometry)
+        e2e = self._decode_path(
+            self._e2e_decoder,
+            head_out.o2o_cls,
+            head_out.o2o_box,
+            head_out.o2o_coeff,
+            head_out.o2o_keypoints,
+            geometry,
+        )
+        nms = self._decode_path(
+            self._nms_decoder,
+            head_out.o2m_cls,
+            head_out.o2m_box,
+            head_out.o2m_coeff,
+            head_out.o2m_keypoints,
+            geometry,
+        )
         return e2e, nms
 
     def _decode_path(
@@ -978,10 +1188,20 @@ class DualPathEvaluator:
         cls_logits: Tensor,
         raw_ltrb: Tensor,
         coefficients: Tensor | None,
+        keypoints: Tensor | None,
         geometry: _BatchGeometry,
     ) -> list[dict[str, Tensor]]:
-        """Decode one path into prediction dicts, with masks when the model has them."""
-        if geometry.prototypes is None or coefficients is None:
+        """Decode one path into prediction dicts, with masks or keypoints when the model has them.
+
+        The per-anchor fields are read from **this** path's own branch — the E2E
+        path gets ``o2o_coeff``/``o2o_keypoints`` and the dense path
+        ``o2m_coeff``/``o2m_keypoints`` — and gathered by the anchor indices this
+        path's own decoder reports. Crossing the two produces a plausible report
+        in which every box is right and every pose belongs to the other branch's
+        ranking.
+        """
+        segmenting = geometry.prototypes is not None and coefficients is not None
+        if not segmenting and keypoints is None:
             detections = decoder(cls_logits, raw_ltrb, geometry.anchor_points, geometry.strides)
             mapped = self._to_original(detections, geometry.canvas, geometry.orig_sizes)
             return detections_to_predictions(mapped, self._label_to_category)
@@ -989,9 +1209,27 @@ class DualPathEvaluator:
         detections, anchor_index = indexing.decode_with_indices(
             cls_logits, raw_ltrb, geometry.anchor_points, geometry.strides
         )
-        masks = self._path_masks(detections, anchor_index, coefficients, geometry)
+        masks = (
+            self._path_masks(detections, anchor_index, coefficients, geometry)
+            if geometry.prototypes is not None and coefficients is not None
+            else None
+        )
+        points = None if keypoints is None else self._path_keypoints(keypoints, anchor_index, geometry)
         mapped = self._to_original(detections, geometry.canvas, geometry.orig_sizes)
-        return detections_to_predictions(mapped, self._label_to_category, masks=masks)
+        return detections_to_predictions(mapped, self._label_to_category, masks=masks, keypoints=points)
+
+    def _path_keypoints(self, keypoints: Tensor, anchor_index: Tensor, geometry: _BatchGeometry) -> Tensor:
+        """Decode this path's dense point offsets, gather each detection's set, and land it in original coordinates.
+
+        Decode first, gather second.
+        :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` composes the raw
+        offsets with the whole anchor grid and has no per-detection indexing, so
+        the order is forced: the dense ``(B, A, K, 2)`` tensor is decoded for the
+        batch, and only then does :func:`_gather_keypoints` take each kept row.
+        """
+        dense = decode_keypoints(keypoints, geometry.anchor_points, geometry.strides)
+        gathered = _gather_keypoints(dense, anchor_index)
+        return self._points_to_original(gathered, geometry.canvas, geometry.orig_sizes)
 
     def _path_masks(
         self,
@@ -1027,6 +1265,33 @@ class DualPathEvaluator:
             original = (int(orig_size[0]), int(orig_size[1]))
             masks.append(masks_to_original(canvas_masks[0].cpu(), self._letterbox, original))
         return masks
+
+    def _points_to_original(
+        self,
+        points: Tensor,
+        letterboxed_size: tuple[int, int],
+        orig_sizes: Sequence[tuple[int, int]],
+    ) -> Tensor:
+        """Un-letterbox each image's ``(N, K, 2)`` point sets back to its original coordinates (A10).
+
+        The same inverse the boxes take, applied to bare ``(x, y)`` pairs:
+        :meth:`~lucid_yolo.data.letterbox.Letterbox.inverse_map` is already
+        point-shaped, and :func:`~lucid_yolo.decode.common.to_letterboxed_original`
+        is that call plus the score and class columns a point set does not have.
+        Reaching for the box function here would carry those two columns onto
+        coordinates; writing a second affine would be a second definition of what
+        a letterbox is.
+        """
+        canvas = (int(letterboxed_size[0]), int(letterboxed_size[1]))
+        mapped = [
+            self._letterbox.inverse_map(
+                image_points.reshape(-1, 2).cpu(),
+                (int(size[0]), int(size[1])),
+                canvas,
+            ).reshape(image_points.shape)
+            for image_points, size in zip(points, orig_sizes, strict=True)
+        ]
+        return torch.stack(mapped)
 
     def _to_original(
         self,

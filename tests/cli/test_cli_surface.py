@@ -53,6 +53,12 @@ def _declared_scripts() -> dict[str, str]:
     return scripts
 
 
+#: Point count given to a ``keypoints`` checkpoint. ``num_keypoints`` has no default for
+#: that task -- ``K`` belongs to whichever schema supplies the points -- so the stub must
+#: name one, and COCO's person schema is the one ``pose_eval`` scores against.
+_COCO_PERSON_POINTS = 17
+
+
 def _write_checkpoint(task: str, path: Path) -> Path:
     """Save a tiny checkpoint of ``task`` that :func:`load_eval_module` can read.
 
@@ -63,7 +69,8 @@ def _write_checkpoint(task: str, path: Path) -> Path:
         ...     out.is_file()
         True
     """
-    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=2, task=task)
+    points = _COCO_PERSON_POINTS if task == "keypoints" else None
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=2, task=task, num_keypoints=points)
     torch.save(
         {
             "state_dict": module.state_dict(),
@@ -115,6 +122,7 @@ def test_build_tiles_rejects_an_unknown_source(tmp_path: Path) -> None:
     [
         pytest.param("detect", "detect_eval", 640, 32, id="detect"),
         pytest.param("obb", "rotated_eval", 1024, 8, id="obb"),
+        pytest.param("keypoints", "pose_eval", 640, 32, id="keypoints"),
     ],
 )
 def test_eval_dispatches_on_the_checkpoints_own_task(
@@ -141,6 +149,7 @@ def test_eval_dispatches_on_the_checkpoints_own_task(
 
     monkeypatch.setattr(eval_cli.detect_eval, "run", _record("detect_eval"))
     monkeypatch.setattr(eval_cli.rotated_eval, "run", _record("rotated_eval"))
+    monkeypatch.setattr(eval_cli.pose_eval, "run", _record("pose_eval"))
     checkpoint = _write_checkpoint(task, tmp_path / f"{task}.ckpt")
 
     code = eval_cli.main(["--checkpoint", str(checkpoint), "--data_root", str(tmp_path), "--ema", "false"])

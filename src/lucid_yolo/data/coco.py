@@ -94,7 +94,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-__all__ = ["CocoDetectionDataset", "build_scale_policy"]
+__all__ = ["CocoDetectionDataset", "build_scale_policy", "parse_coco_keypoints"]
 
 #: Points ``(x, y)`` per polygon vertex; a flat ring must be a multiple of this.
 _POINT_STRIDE = 2
@@ -316,7 +316,7 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
                 continue
             box, label, ring, difficult = parsed
             if self._keypoints:
-                coords, visibility = _parse_keypoints(ann["keypoints"], record.file_name)
+                coords, visibility = parse_coco_keypoints(ann["keypoints"], record.file_name)
                 keypoint_coords.append(coords)
                 keypoint_visibility.append(visibility)
             boxes.append(box)
@@ -397,8 +397,15 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         return box, label, ring, difficult
 
 
-def _parse_keypoints(keypoints: object, file_name: str) -> tuple[Tensor, Tensor]:
+def parse_coco_keypoints(keypoints: object, file_name: str) -> tuple[Tensor, Tensor]:
     """Split a flat COCO keypoint list into coordinates and visibility.
+
+    Public because the evaluation reader
+    (:func:`~lucid_yolo.eval.annotations.annotations_to_target`) parses the same
+    field off the same file format. One parser rather than two: a second copy
+    would be free to disagree about the triplet stride or the visibility dtype,
+    and a training run and its own acceptance score would then read different
+    ground truth from one annotation file.
 
     Args:
         keypoints: Flat ``[x, y, v, ...]`` annotation value.
@@ -412,7 +419,7 @@ def _parse_keypoints(keypoints: object, file_name: str) -> tuple[Tensor, Tensor]
             positive multiple of three.
 
     Examples:
-        >>> coords, visibility = _parse_keypoints([1.5, 2.0, 2, 3.5, 4.0, 0], "pose.jpg")
+        >>> coords, visibility = parse_coco_keypoints([1.5, 2.0, 2, 3.5, 4.0, 0], "pose.jpg")
         >>> coords.tolist(), visibility.tolist()
         ([[1.5, 2.0], [3.5, 4.0]], [2, 0])
     """

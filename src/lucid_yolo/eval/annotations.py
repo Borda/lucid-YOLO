@@ -19,6 +19,14 @@ W)`` bool ``masks`` tensor at the original image size, aligned row-for-row with
 ``boxes``. The default stays detection-only, so the existing callers neither
 change shape nor pay the segmentation-decode cost.
 
+Instance **keypoints** (WP-134) are opt-in the same way: ``with_keypoints=True``
+adds ``keypoints`` ``(M, K, 2)``, ``visibility`` ``(M, K)`` and ``num_keypoints``
+``(M,)`` to every target, parsed from the annotation's own flat COCO
+``keypoints`` field by :func:`~lucid_yolo.data.coco.parse_coco_keypoints` — the
+parser the training reader uses, not a second one. ``num_keypoints`` is read from
+the field COCO supplies rather than recounted from ``visibility``, because it is
+that supplied value the OKS protocol ignores an instance on.
+
 With masks on, the returned ground truth is **lazy** (:class:`LazyTargets`): a
 mapping that decodes an image's masks when that image is looked up and keeps
 nothing afterwards. Eager decoding is not an option at COCO scale -- val2017's
@@ -47,6 +55,7 @@ from faster_coco_eval import mask as coco_mask
 from torch import Tensor  # runtime import: LazyTargets' base class subscripts it
 from torchvision.io import ImageReadMode, read_image
 
+from lucid_yolo.data.coco import parse_coco_keypoints
 from lucid_yolo.data.targets import Targets
 
 if TYPE_CHECKING:
@@ -60,6 +69,9 @@ _UINT8_MAX = 255.0
 
 #: Element count of a well-formed COCO ``bbox`` (``[x, y, width, height]``).
 _XYWH_LEN = 4
+
+#: Coordinate count of a keypoint ``(x, y)``.
+_POINT_DIM = 2
 
 
 @dataclass(frozen=True)
@@ -84,7 +96,7 @@ class EvalImage:
     width: int
 
 
-def empty_target(image_size: tuple[int, int] | None = None) -> dict[str, Tensor]:
+def empty_target(image_size: tuple[int, int] | None = None, with_keypoints: bool = False) -> dict[str, Tensor]:
     """Return the ground-truth mapping of an image carrying no usable annotation.
 
     Args:
@@ -93,11 +105,16 @@ def empty_target(image_size: tuple[int, int] | None = None) -> dict[str, Tensor]
             annotation-free image still satisfies the segm metric's requirement that
             **every** target dict hold a ``masks`` key. ``None`` (the default) keeps
             the detection-only shape.
+        with_keypoints: When ``True``, the target additionally carries empty
+            ``keypoints``, ``visibility`` and ``num_keypoints`` entries. The point
+            count is ``0`` rather than the dataset's ``K``: no instance is present to
+            have points, and nothing iterates the point axis of an empty instance axis.
 
     Returns:
         A target dict whose ``boxes``, ``labels``, ``iscrowd`` and ``area`` entries are
         all empty, with the dtypes torchmetrics expects, plus ``masks`` when
-        ``image_size`` is given.
+        ``image_size`` is given and the three keypoint entries when ``with_keypoints``
+        is set.
 
     Examples:
         >>> target = empty_target()
@@ -107,6 +124,8 @@ def empty_target(image_size: tuple[int, int] | None = None) -> dict[str, Tensor]
         ['area', 'boxes', 'iscrowd', 'labels', 'masks']
         >>> tuple(empty_target(image_size=(6, 8))["masks"].shape)
         (0, 6, 8)
+        >>> tuple(empty_target(with_keypoints=True)["keypoints"].shape)
+        (0, 0, 2)
     """
     target = {
         "boxes": torch.zeros((0, 4), dtype=torch.float32),
@@ -116,12 +135,17 @@ def empty_target(image_size: tuple[int, int] | None = None) -> dict[str, Tensor]
     }
     if image_size is not None:
         target["masks"] = torch.zeros((0, *image_size), dtype=torch.bool)
+    if with_keypoints:
+        target["keypoints"] = torch.zeros((0, 0, _POINT_DIM), dtype=torch.float32)
+        target["visibility"] = torch.zeros((0, 0), dtype=torch.long)
+        target["num_keypoints"] = torch.zeros((0,), dtype=torch.long)
     return target
 
 
 def annotations_to_target(
     annotations: Sequence[dict[str, object]],
     image_size: tuple[int, int] | None = None,
+    with_keypoints: bool = False,
 ) -> dict[str, Tensor]:
     """Convert one image's COCO annotations into a torchmetrics target mapping.
 
@@ -143,10 +167,16 @@ def annotations_to_target(
         image_size: Original image ``(height, width)``. When given, masks are decoded
             and the target carries a ``(M, height, width)`` bool ``masks`` entry.
             ``None`` (the default) is detection-only and pays no decode cost.
+        with_keypoints: When ``True``, each surviving annotation's flat COCO
+            ``keypoints`` field is parsed into ``keypoints`` ``(M, K, 2)`` and
+            ``visibility`` ``(M, K)``, and its supplied ``num_keypoints`` count is
+            carried as ``num_keypoints`` ``(M,)``. Governed by the **same** ``bbox``
+            filter as the boxes, for the reason the masks are.
 
     Returns:
         A target dict with ``boxes`` (``xyxy``), ``labels`` (category ids), ``iscrowd``
-        and ``area`` — plus ``masks`` when ``image_size`` is given;
+        and ``area`` — plus ``masks`` when ``image_size`` is given and the three
+        keypoint entries when ``with_keypoints`` is set;
         :func:`empty_target` when nothing survives filtering.
 
     Examples:
@@ -159,12 +189,19 @@ def annotations_to_target(
         >>> masked = annotations_to_target([polygon], image_size=(8, 8))
         >>> tuple(masked["masks"].shape), int(masked["masks"].sum())
         ((1, 8, 8), 12)
+        >>> posed = {"bbox": [1.0, 2.0, 3.0, 4.0], "category_id": 1, "keypoints": [1, 2, 2, 3, 4, 0]}
+        >>> target = annotations_to_target([posed], with_keypoints=True)
+        >>> target["visibility"].tolist(), target["num_keypoints"].tolist()
+        ([[2, 0]], [1])
     """
     boxes: list[list[float]] = []
     labels: list[int] = []
     iscrowd: list[int] = []
     area: list[float] = []
     masks: list[Tensor] = []
+    points: list[Tensor] = []
+    visibility: list[Tensor] = []
+    num_keypoints: list[int] = []
     for annotation in annotations:
         raw_bbox = annotation["bbox"]
         if not isinstance(raw_bbox, list):
@@ -179,8 +216,16 @@ def annotations_to_target(
         area.append(float(cast("float", annotation.get("area", width * height))))
         if image_size is not None:
             masks.append(annotation_mask(annotation.get("segmentation"), image_size))
+        if with_keypoints:
+            # `.get` rather than `[...]`: an annotation file with no keypoints at all --
+            # `instances_val2017.json` handed to the pose protocol -- then fails with the
+            # parser's own message about the field, not a bare KeyError.
+            coords, visible = parse_coco_keypoints(annotation.get("keypoints"), str(annotation.get("image_id", "?")))
+            points.append(coords)
+            visibility.append(visible)
+            num_keypoints.append(int(cast("int", annotation.get("num_keypoints", int(visible.gt(0).sum())))))
     if not boxes:
-        return empty_target(image_size)
+        return empty_target(image_size, with_keypoints=with_keypoints)
     target = {
         "boxes": torch.tensor(boxes, dtype=torch.float32),
         "labels": torch.tensor(labels, dtype=torch.long),
@@ -189,6 +234,10 @@ def annotations_to_target(
     }
     if image_size is not None:
         target["masks"] = torch.stack(masks)
+    if with_keypoints:
+        target["keypoints"] = torch.stack(points)
+        target["visibility"] = torch.stack(visibility)
+        target["num_keypoints"] = torch.tensor(num_keypoints, dtype=torch.long)
     return target
 
 
@@ -287,6 +336,7 @@ class LazyTargets(Mapping[int, dict[str, Tensor]]):
 def load_eval_annotations(
     ann_file: Path,
     with_masks: bool = False,
+    with_keypoints: bool = False,
 ) -> tuple[list[EvalImage], Mapping[int, dict[str, Tensor]], dict[int, int]]:
     """Parse a COCO instances file into eval images, target dicts, and the label map.
 
@@ -304,6 +354,12 @@ def load_eval_annotations(
             ``(height, width)`` — the ground truth the segm half of the metric scores
             against. Defaults to ``False``: detection-only callers keep the target
             shape they have and skip the segmentation decode entirely.
+        with_keypoints: When ``True``, every target additionally carries the
+            ``keypoints``, ``visibility`` and ``num_keypoints`` entries
+            :func:`annotations_to_target` parses — the ground truth the OKS protocol
+            scores against, read off a ``person_keypoints`` file. Stays eager rather
+            than lazy: a whole split's points are a few megabytes, where its masks are
+            gigabytes, so the argument for :class:`LazyTargets` does not carry over.
 
     Returns:
         A triple of the image records sorted by ascending image id, the per-image-id
@@ -338,9 +394,11 @@ def load_eval_annotations(
     if with_masks:
         sizes = {image.image_id: (image.height, image.width) for image in images}
         return images, LazyTargets(grouped, sizes), label_to_category
-    targets: dict[int, dict[str, Tensor]] = {image.image_id: empty_target() for image in images}
+    targets: dict[int, dict[str, Tensor]] = {
+        image.image_id: empty_target(with_keypoints=with_keypoints) for image in images
+    }
     for image_id, image_annotations in grouped.items():
-        targets[image_id] = annotations_to_target(image_annotations)
+        targets[image_id] = annotations_to_target(image_annotations, with_keypoints=with_keypoints)
     return images, targets, label_to_category
 
 

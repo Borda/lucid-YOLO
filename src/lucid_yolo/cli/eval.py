@@ -10,7 +10,9 @@ Which protocol runs is read from the checkpoint's ``task``: ``detect`` and ``seg
 take :mod:`lucid_yolo.eval.detect_eval` (dual-path COCO, with the twelve ``segm_``
 statistics when the checkpoint has a mask branch), ``obb`` takes
 :mod:`lucid_yolo.eval.rotated_eval` (rotated mAP, reported per tile **and** per whole
-source image once the tiles are merged, WP-107). That is the rule the
+source image once the tiles are merged, WP-107), and ``keypoints`` takes
+:mod:`lucid_yolo.eval.pose_eval` (box AP against the person-keypoints ground truth plus
+the ten ``oks_`` statistics, WP-134). That is the rule the
 detection evaluator already applied to masks — "driven by the checkpoint's own task, not
 by a flag the caller has to remember" — one level up: a caller who names the wrong task
 gets a wrong report, and a caller who names none cannot.
@@ -34,7 +36,7 @@ from typing import TYPE_CHECKING
 
 from jsonargparse import auto_cli
 
-from lucid_yolo.eval import detect_eval, rotated_eval
+from lucid_yolo.eval import detect_eval, pose_eval, rotated_eval
 from lucid_yolo.eval.checkpoint import load_eval_module
 
 if TYPE_CHECKING:
@@ -44,10 +46,10 @@ __all__ = ["DEFAULT_BATCH_SIZE", "DEFAULT_IMG_SIZE", "evaluate", "main"]
 
 #: Letterbox side used when ``img_size`` is not given, per checkpoint task. The oriented
 #: tier trains on 1024 px crops (R18 sec. 4); COCO runs at 640 (R1 sec. 4.4).
-DEFAULT_IMG_SIZE = {"obb": 1024, "detect": 640, "segment": 640}
+DEFAULT_IMG_SIZE = {"obb": 1024, "detect": 640, "segment": 640, "keypoints": 640}
 #: Batch size used when ``batch_size`` is not given. A 1024 px tile is 2.5x the pixels of
 #: a 640 px image, so the oriented default is smaller for the same memory.
-DEFAULT_BATCH_SIZE = {"obb": 8, "detect": 32, "segment": 32}
+DEFAULT_BATCH_SIZE = {"obb": 8, "detect": 32, "segment": 32, "keypoints": 32}
 
 
 def evaluate(
@@ -99,6 +101,17 @@ def evaluate(
             data_root=data_root,
             split=split,
             variant=variant,
+            img_size=resolved_img_size,
+            batch_size=resolved_batch_size,
+            device_name=device,
+            limit=limit,
+            output=output,
+        )
+    if task == "keypoints":
+        return pose_eval.run(
+            module,
+            info,
+            data_root=data_root,
             img_size=resolved_img_size,
             batch_size=resolved_batch_size,
             device_name=device,

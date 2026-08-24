@@ -109,6 +109,84 @@ def test_valid_annotations_survive_alongside_degenerate_ones() -> None:
     assert target["labels"].tolist() == [9]
 
 
+def test_keypoint_load_carries_the_annotations_own_metadata(tmp_path: Path) -> None:
+    """A ``with_keypoints`` load hands the OKS scorer the file's fields, not a recount of them.
+
+    Every one of the four is chosen here to disagree with what a reconstruction from
+    the points would produce: the declared ``num_keypoints`` is 1 against two visible
+    joints, ``area`` is 500 against a 2x2 point extent, ``iscrowd`` is set on an
+    instance nothing else marks. If any is recomputed instead of read, this asserts
+    the recomputed value and fails.
+    """
+    payload = _payload()
+    payload["annotations"] = [
+        {
+            "image_id": 1,
+            "bbox": [1.0, 2.0, 3.0, 4.0],
+            "category_id": 3,
+            "iscrowd": 1,
+            "area": 500.0,
+            "num_keypoints": 1,
+            "keypoints": [1.0, 2.0, 2, 3.0, 4.0, 1, 0.0, 0.0, 0],
+        }
+    ]
+    ann_file = tmp_path / "person_keypoints.json"
+    ann_file.write_text(json.dumps(payload))
+
+    _, targets, _ = load_eval_annotations(ann_file, with_keypoints=True)
+
+    target = targets[1]
+    assert target["keypoints"].tolist() == [[[1.0, 2.0], [3.0, 4.0], [0.0, 0.0]]]
+    assert target["visibility"].tolist() == [[2, 1, 0]]
+    assert target["num_keypoints"].tolist() == [1]
+    assert target["area"].tolist() == [500.0]
+    assert target["iscrowd"].tolist() == [1]
+
+
+def test_keypoint_load_gives_an_unannotated_image_empty_point_tensors(tmp_path: Path) -> None:
+    """An image with no annotation still carries the three keypoint keys, all empty.
+
+    Every image the evaluator scores must produce a target dict of one shape: the
+    OKS document is built by iterating the instance axis, and a missing key on the
+    unannotated images would fail there rather than at the boundary that dropped it.
+    Image 2 of this payload carries no annotation at all, which is the majority case
+    on a person-keypoints split, where most images hold no person.
+    """
+    payload = _payload()
+    payload["annotations"] = [
+        {
+            "image_id": 1,
+            "bbox": [1.0, 2.0, 3.0, 4.0],
+            "category_id": 3,
+            "keypoints": [1.0, 2.0, 2, 3.0, 4.0, 1, 0.0, 0.0, 0],
+        }
+    ]
+    ann_file = tmp_path / "person_keypoints.json"
+    ann_file.write_text(json.dumps(payload))
+
+    _, targets, _ = load_eval_annotations(ann_file, with_keypoints=True)
+
+    unannotated = targets[2]
+    assert unannotated["keypoints"].shape == (0, 0, 2)
+    assert unannotated["visibility"].shape == (0, 0)
+    assert unannotated["num_keypoints"].shape == (0,)
+
+
+def test_keypoint_load_refuses_an_annotation_file_with_no_points(tmp_path: Path) -> None:
+    """A plain ``instances`` file loaded for the pose protocol fails, naming the field.
+
+    The two COCO files differ only in which annotations they carry, so pointing the
+    keypoint protocol at the detection one is an easy mistake. It must not resolve
+    into an evaluation of zero poses against a full split, which would report a
+    perfectly formatted OKS of 0.
+    """
+    ann_file = tmp_path / "instances.json"
+    ann_file.write_text(json.dumps(_payload()))
+
+    with pytest.raises(ValueError, match="keypoints length"):
+        load_eval_annotations(ann_file, with_keypoints=True)
+
+
 def test_load_sorts_images_by_id(tmp_path: Path) -> None:
     """Images are returned in ascending id order regardless of their order in the file."""
     ann_file = tmp_path / "instances.json"
