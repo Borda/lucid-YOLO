@@ -96,7 +96,7 @@ from lucid_yolo.data.coco import CocoDetectionDataset
 from lucid_yolo.data.rasterize import rasterize_polygons
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode.topk_e2e import TopKDecoder
-from lucid_yolo.eval.coco_eval import evaluate_keypoints, keypoints_to_predictions
+from lucid_yolo.eval.coco_eval import SYMBOL_KEYPOINT_OKS_SIGMA, evaluate_keypoints, keypoints_to_predictions
 from lucid_yolo.eval.dota_eval import (
     MAX_DETECTIONS,
     evaluate_rotated_map,
@@ -177,15 +177,6 @@ _KP_OKS_FLOOR = 0.30
 
 #: Golden tolerance on the achieved OKS AP (integer counts are pinned exactly).
 _KP_OKS_TOL = 0.05
-
-#: Uniform per-point OKS sigma for a synthetic symbol run (A67). R12's 17-value table
-#: measures *annotator* standard deviation on human anatomy, a quantity that does not exist
-#: for landmarks placed analytically from an outline's own centroid, so a per-point vector
-#: here would fabricate structure the data does not have. A uniform sigma is a monotone
-#: rescaling of OKS -- it moves every score together and changes no ordering -- so it fixes
-#: only where the floor above sits; R12's median is chosen so the resulting figure stays on a
-#: scale comparable to a real pose run rather than free-floating.
-SYMBOL_KEYPOINT_OKS_SIGMA = 0.072
 
 #: Point count ``K`` of R21's symbol schema, read from the package rather than restated, so
 #: the sigma vector below cannot silently disagree with the annotations it scores.

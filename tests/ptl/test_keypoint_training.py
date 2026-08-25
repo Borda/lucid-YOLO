@@ -46,9 +46,11 @@ from torch import Tensor, nn
 
 from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.eval.coco_eval import COCO_KEYPOINT_OKS_SIGMAS, SYMBOL_KEYPOINT_OKS_SIGMA
 from lucid_yolo.losses.keypoint_nll_loss import LaplaceNLLLoss
 from lucid_yolo.losses.rle_loss import RLELoss
 from lucid_yolo.ptl import DetectionLitModule, normalize_keypoints_to_box, pad_keypoints
+from lucid_yolo.ptl import module as ptl_module
 from lucid_yolo.ptl.datamodule import DetectionDataModule, collate_detection, unpack_targets
 from lucid_yolo.ptl.module import _StepContext
 
@@ -868,3 +870,94 @@ class TestBoxFrameNormalization:
 
         assert residuals, "the keypoint term never reached the loss"
         assert float(torch.cat([r.reshape(-1) for r in residuals]).median()) < 10.0
+
+
+class TestKeypointValidation:
+    """``val/oks_mAP`` (WP-137): the epoch-level keypoint metric det/seg/obb already had.
+
+    Phase 12 wired keypoints into training (WP-132) and into the standalone
+    ``lucid-eval`` report (WP-134), but never into the training loop's own
+    per-epoch validation — a ``task="keypoints"`` module logged ``val/mAP``
+    for its box branch alone, the same number a plain detection module logs,
+    with no signal at all for the branch the task exists to train. These tests
+    aim at that wiring, the same target this file's own docstring states for
+    every other class here: the components (:func:`~lucid_yolo.eval.coco_eval.evaluate_keypoints`,
+    :func:`~lucid_yolo.eval.coco_eval.gather_keypoints`) are already covered where
+    they live.
+    """
+
+    def test_validation_step_accumulates_and_logs_val_oks_map(self) -> None:
+        """One validation step feeds both buffers; epoch end logs and clears them.
+
+        Mirrors :attr:`DetectionLitModule._val_rotated_preds`'s own accumulate-then-
+        score-once shape (WP-088): OKS is one whole-document matching, not a
+        per-batch running average, so there is nothing to update incrementally.
+        """
+        module = _tiny_module()
+        module.eval()
+        images, targets = _posed_batch()
+
+        with torch.no_grad():
+            module.validation_step((images, targets), 0)
+
+        assert len(module._val_keypoint_preds) == len(targets)
+        assert len(module._val_keypoint_targets) == len(targets)
+
+        module.on_validation_epoch_end()
+
+        assert "val/oks_mAP" in module.log.values
+        assert math.isfinite(module.log.values["val/oks_mAP"])
+        assert module._val_keypoint_preds == []
+        assert module._val_keypoint_targets == []
+
+    def test_val_map_stays_beside_val_oks_map_not_replaced_by_it(self) -> None:
+        """A keypoints module logs both ``val/mAP`` and ``val/oks_mAP``, unlike ``"obb"``.
+
+        The box branch of a keypoints module is a real, orthogonal detector (the
+        person category), so its mAP answers a different question than OKS does —
+        the ``"segment"`` relationship to ``val/mAP``, not ``"obb"``'s WP-102
+        replacement of it.
+        """
+        module = _tiny_module()
+        module.eval()
+        images, targets = _posed_batch()
+
+        with torch.no_grad():
+            module.validation_step((images, targets), 0)
+        module.on_validation_epoch_end()
+
+        assert "val/mAP" in module.log.values
+        assert "val/oks_mAP" in module.log.values
+
+    def test_sigma_choice_matches_coco_schema_only_at_seventeen_points(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """17 points draws COCO's own table; any other count draws A67's uniform sigma.
+
+        ``num_keypoints == 17`` is the only count that could mean COCO's human
+        schema; every other count is this project's own dataset (WP-121b's
+        animal fixtures, R21's symbol schema), for which no per-point table has
+        ever been measured (A67) — the same choice ``scripts/overfit_micro.py``
+        already makes for its own 7-point fixture, now read from one place.
+        """
+        captured: dict[str, object] = {}
+
+        def _record_sigmas(preds: object, targets: object, sigmas: object = None, **kwargs: object) -> dict[str, float]:
+            del preds, targets, kwargs
+            captured["sigmas"] = sigmas
+            return {"AP_all": 0.0}
+
+        monkeypatch.setattr(ptl_module, "evaluate_keypoints", _record_sigmas)
+        module = _tiny_module()  # built at _NUM_KEYPOINTS == 3
+        module._val_keypoint_preds = [{}]
+        module._val_keypoint_targets = [{}]
+
+        module._log_oks_map()
+
+        assert tuple(captured["sigmas"]) == (SYMBOL_KEYPOINT_OKS_SIGMA,) * _NUM_KEYPOINTS
+
+        module._num_keypoints = len(COCO_KEYPOINT_OKS_SIGMAS)
+        module._val_keypoint_preds = [{}]
+        module._val_keypoint_targets = [{}]
+
+        module._log_oks_map()
+
+        assert tuple(captured["sigmas"]) == COCO_KEYPOINT_OKS_SIGMAS

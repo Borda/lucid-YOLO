@@ -174,6 +174,12 @@ from torchmetrics.detection import MeanAveragePrecision
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.decode.common import BOX_CORNERS, SCORE_COLUMN
 from lucid_yolo.decode.topk_e2e import TopKDecoder
+from lucid_yolo.eval.coco_eval import (
+    COCO_KEYPOINT_OKS_SIGMAS,
+    SYMBOL_KEYPOINT_OKS_SIGMA,
+    evaluate_keypoints,
+    gather_keypoints,
+)
 from lucid_yolo.eval.dota_eval import MAX_DETECTIONS, evaluate_rotated_map, rotated_detections_to_predictions
 from lucid_yolo.eval.segment_decode import decode_instance_masks
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
@@ -740,6 +746,7 @@ class DetectionLitModule(LightningModule):
             )
         self.save_hyperparameters()
         self._task = task
+        self._num_keypoints = num_keypoints
         self._mask_gain: float = mask_gain
         self._semantic_gain: float = semantic_gain
         self._angle_gain: float = angle_gain
@@ -840,6 +847,20 @@ class DetectionLitModule(LightningModule):
         #: lists hold CPU tensors and are cleared at every epoch end.
         self._val_rotated_preds: list[dict[str, Tensor]] = []
         self._val_rotated_targets: list[dict[str, Tensor]] = []
+
+        #: Epoch OKS accumulators, for ``"keypoints"`` only (WP-137). Plain lists
+        #: for the same reason :attr:`_val_rotated_preds` is one and not a
+        #: :class:`~torchmetrics.Metric`: torchmetrics carries no keypoint/OKS
+        #: support at all (confirmed empty grep of its detection module — no
+        #: "keypoint"/"kpt"/"oks" symbol anywhere, WP-137), so there is no
+        #: per-batch running average to update into; :func:`evaluate_keypoints`
+        #: is COCO's single whole-document matching, scored once per epoch.
+        #: ``val/mAP`` stays computed alongside this (unlike ``"obb"``): the
+        #: person-category box is a real, orthogonal branch on a keypoints
+        #: module, the same "additionally" relationship ``val/segm_mAP`` has to
+        #: ``val/mAP`` rather than ``"obb"``'s "instead of" one.
+        self._val_keypoint_preds: list[dict[str, Tensor]] = []
+        self._val_keypoint_targets: list[dict[str, Tensor]] = []
 
         #: Per-image-size cache of ``(anchor_points, stride_per_anchor)`` on CPU.
         self._anchor_cache: dict[tuple[int, int], tuple[Tensor, Tensor]] = {}
@@ -1020,6 +1041,13 @@ class DetectionLitModule(LightningModule):
         whose orientations were right log the identical curve, and the acceptance
         number would otherwise first appear hours after the run.
 
+        A ``"keypoints"`` module additionally decodes the kept detections' points
+        and accumulates ``val/oks_mAP`` (:meth:`_update_val_keypoints`, WP-137),
+        the same "beside ``val/mAP``" relationship ``"segment"`` has: the box
+        branch and the point branch answer different questions, and a run whose
+        boxes are fine but whose points have not yet wired up should not read as
+        healthy on the one number that was already there.
+
         Args:
             batch: The datamodule batch ``(images, list[Targets], masks)``; the
                 two-element ``(images, list[Targets])`` form rasterises in the step.
@@ -1052,6 +1080,8 @@ class DetectionLitModule(LightningModule):
             self._update_val_segm(seg_out, detections, anchor_indices, targets, masks, image_size)
         if self._task == "obb":
             self._update_val_rotated(head_out, targets, anchor_points, strides)
+        if self._task == "keypoints":
+            self._update_val_keypoints(head_out, detections, anchor_indices, targets, anchor_points, strides)
         return loss
 
     def _update_val_rotated(
@@ -1098,6 +1128,69 @@ class DetectionLitModule(LightningModule):
             }
             for target in targets
         )
+
+    def _update_val_keypoints(
+        self,
+        head_out: DualHeadOutput,
+        detections: Tensor,
+        anchor_indices: Tensor,
+        targets: list[Targets],
+        anchor_points: Tensor,
+        strides: Tensor,
+    ) -> None:
+        """Accumulate one batch's decoded keypoints and ground truth for the epoch OKS.
+
+        The decode is the **deployed** one, the same shape :meth:`_update_val_rotated`
+        and :meth:`_update_val_segm` already use: :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints`
+        composes the one-to-one branch's dense point offsets, and
+        :func:`~lucid_yolo.eval.coco_eval.gather_keypoints` takes each kept
+        detection's own set by the anchor index the *same* top-k selection
+        already returned — never a second ranking computed here, which could
+        pair one anchor's points with another's box.
+
+        Scoring stays in **letterbox** coordinates, exactly as ``val/mAP`` does
+        (WP-077): a letterbox is one isotropic scale plus a translation, and OKS
+        normalizes by the ground-truth box's own area, which that same scaling
+        leaves proportionate. Un-letterboxing first would cost a second geometry
+        pass to answer a question this ratio already answers unscaled.
+
+        No category remap is needed here (unlike
+        :func:`~lucid_yolo.eval.coco_eval.keypoints_to_predictions`): predictions
+        and targets both already live in this module's own contiguous label
+        space, the same one :attr:`_val_map` scores boxes in.
+
+        Args:
+            head_out: This batch's dense dual-head output.
+            detections: The ``(B, k, 6)`` decoded A9 batch already computed for
+                ``val/mAP``, on the model's device.
+            anchor_indices: The ``(B, k)`` source anchor of each detection row,
+                from the same decode.
+            targets: The batch's per-image ground truth, carrying ``keypoints``,
+                ``keypoint_vis`` and ``labels``.
+            anchor_points: ``(A, 2)`` anchor centres in input pixels.
+            strides: ``(A,)`` per-anchor level stride.
+        """
+        raw_points = head_out.o2o_keypoints
+        assert raw_points is not None  # a "keypoints" module always builds the point stem
+        dense_points = decode_keypoints(raw_points, anchor_points, strides)
+        gathered_points = gather_keypoints(dense_points, anchor_indices).cpu()
+        cpu_detections = detections.cpu()
+        for index, target in enumerate(targets):
+            keep = cpu_detections[index, :, SCORE_COLUMN] > 0.0
+            self._val_keypoint_preds.append(
+                {
+                    "keypoints": gathered_points[index, keep],
+                    "scores": cpu_detections[index, keep, SCORE_COLUMN],
+                    "labels": cpu_detections[index, keep, _LABEL_COLUMN].long(),
+                }
+            )
+            self._val_keypoint_targets.append(
+                {
+                    "keypoints": target.keypoints.detach().cpu(),
+                    "visibility": target.keypoint_vis.detach().cpu(),
+                    "labels": target.labels.detach().cpu().to(torch.long),
+                }
+            )
 
     def _update_val_segm(
         self,
@@ -1182,6 +1275,11 @@ class DetectionLitModule(LightningModule):
         accumulator costs a CPU pass over every detection of every batch to say so.
         The rotated metric is the one an oriented run is asking for; carrying a
         second one that answers a different question is not a free comparison.
+
+        A ``"keypoints"`` run additionally logs ``val/oks_mAP`` (WP-137,
+        :meth:`_log_oks_map`), beside ``val/mAP`` rather than instead of it, for
+        the same reason ``val/segm_mAP`` sits beside ``val/mAP`` and not the
+        other way ``val/rotated_mAP`` does.
         """
         if self.task != "obb":
             computed = self._val_map.compute()
@@ -1193,6 +1291,8 @@ class DetectionLitModule(LightningModule):
             self._val_segm_seen = False
         if self._val_rotated_preds:
             self._log_rotated_map()
+        if self._val_keypoint_preds:
+            self._log_oks_map()
 
     def _log_rotated_map(self) -> None:
         """Score the epoch's accumulated oriented detections and clear the buffers.
@@ -1209,6 +1309,31 @@ class DetectionLitModule(LightningModule):
         self.log("val/rotated_mAP", torch.tensor(stats["map"], dtype=torch.float32))
         self._val_rotated_preds.clear()
         self._val_rotated_targets.clear()
+
+    def _log_oks_map(self) -> None:
+        """Score the epoch's accumulated keypoints and clear the buffers.
+
+        The sigma vector is picked by point count, not stated at construction:
+        :data:`~lucid_yolo.eval.coco_eval.COCO_KEYPOINT_OKS_SIGMAS` only when
+        ``num_keypoints == 17`` matches COCO's own human schema exactly, and
+        :data:`~lucid_yolo.eval.coco_eval.SYMBOL_KEYPOINT_OKS_SIGMA` (A67's
+        uniform sigma) for every other count — the same choice
+        ``scripts/overfit_micro.py``'s synthetic gate already makes for its own
+        7-point symbol schema, now shared from one place (WP-137) rather than
+        reimplemented per caller. The buffers are cleared unconditionally, the
+        same reason :meth:`_log_rotated_map` does: a metric that silently
+        carried last epoch's detections into this one would improve
+        monotonically for reasons that have nothing to do with the model.
+        """
+        sigmas = (
+            COCO_KEYPOINT_OKS_SIGMAS
+            if self._num_keypoints == len(COCO_KEYPOINT_OKS_SIGMAS)
+            else (SYMBOL_KEYPOINT_OKS_SIGMA,) * (self._num_keypoints or 0)
+        )
+        stats = evaluate_keypoints(self._val_keypoint_preds, self._val_keypoint_targets, sigmas=sigmas)
+        self.log("val/oks_mAP", torch.tensor(stats["AP_all"], dtype=torch.float32), prog_bar=True)
+        self._val_keypoint_preds.clear()
+        self._val_keypoint_targets.clear()
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         """Return MuSGD, paired with the A8 warmup + linear-decay LR schedule.

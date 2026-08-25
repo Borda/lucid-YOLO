@@ -105,12 +105,14 @@ if TYPE_CHECKING:
 
 __all__ = [
     "COCO_KEYPOINT_OKS_SIGMAS",
+    "SYMBOL_KEYPOINT_OKS_SIGMA",
     "DualPathEvaluator",
     "detections_to_predictions",
     "evaluate_bbox",
     "evaluate_bbox_and_segm",
     "evaluate_keypoints",
     "evaluate_segm",
+    "gather_keypoints",
     "keypoints_to_predictions",
 ]
 
@@ -202,6 +204,16 @@ COCO_KEYPOINT_OKS_SIGMAS: tuple[float, ...] = (
     0.089,
     0.089,
 )
+
+#: A uniform per-point OKS sigma for a keypoint schema that is not COCO's
+#: 17-point human table (A67), at R12's own median sigma value. Not a
+#: simplification: a non-uniform vector encodes which landmarks *human
+#: annotators* localize less reliably, and for an analytically-placed or
+#: otherwise non-human schema that structure has never been measured, so any
+#: per-point vector this project invented would fabricate it. Uniform is a
+#: monotone rescaling of OKS, so it sets only where a floor sits and never
+#: which run wins (WP-137).
+SYMBOL_KEYPOINT_OKS_SIGMA = 0.072
 
 #: The ten scalar statistics in COCO's keypoint protocol. Unlike bbox/segm,
 #: keypoints have medium and large area buckets only, with no small bucket.
@@ -960,7 +972,7 @@ def _gather_coefficients(coefficients: Tensor, anchor_index: Tensor) -> Tensor:
     return gathered * real.unsqueeze(-1).to(gathered.dtype)
 
 
-def _gather_keypoints(keypoints: Tensor, anchor_index: Tensor) -> Tensor:
+def gather_keypoints(keypoints: Tensor, anchor_index: Tensor) -> Tensor:
     """Select each detection's decoded point set by its own source anchor index.
 
     :func:`_gather_coefficients` with a ``(K, 2)`` trailing shape instead of a flat
@@ -969,6 +981,12 @@ def _gather_keypoints(keypoints: Tensor, anchor_index: Tensor) -> Tensor:
     gather position and then zeroed, so a padding row yields the origin rather
     than the last anchor's pose. Those rows carry score 0 and are dropped by
     :func:`detections_to_predictions` regardless.
+
+    Public (WP-137) because :class:`~lucid_yolo.ptl.module.DetectionLitModule`'s
+    own epoch-level ``val/oks_mAP`` needs the identical gather on the identical
+    contract — a second, hand-copied version of this padding rule is exactly the
+    drift this project's own duplication guard exists to catch (WP-109's
+    3-strides lesson, ``docs/ENGINEERING_LOG.md``).
 
     The input must already be **decoded** — absolute canvas pixels from
     :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints`, which needs the
@@ -1225,10 +1243,10 @@ class DualPathEvaluator:
         :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` composes the raw
         offsets with the whole anchor grid and has no per-detection indexing, so
         the order is forced: the dense ``(B, A, K, 2)`` tensor is decoded for the
-        batch, and only then does :func:`_gather_keypoints` take each kept row.
+        batch, and only then does :func:`gather_keypoints` take each kept row.
         """
         dense = decode_keypoints(keypoints, geometry.anchor_points, geometry.strides)
-        gathered = _gather_keypoints(dense, anchor_index)
+        gathered = gather_keypoints(dense, anchor_index)
         return self._points_to_original(gathered, geometry.canvas, geometry.orig_sizes)
 
     def _path_masks(
