@@ -9,14 +9,16 @@ Reads the CSV a run's :class:`~pytorch_lightning.loggers.CSVLogger` wrote
 2. **loss** — train and validation totals on one axis;
 3. **o2o components** — the one-to-one branch's classification, CIoU and L1 terms,
    which is where a mis-scaled term shows up as a flat line (the WP-078 signature);
-4. **segmentation terms** — the pre-gain instance-mask and auxiliary semantic terms
-   (WP-087, A38), which only a ``task: segment`` run logs.
+4. **segmentation, oriented or keypoint terms** — a ``task: segment`` run's pre-gain
+   instance-mask and auxiliary semantic terms (WP-087, A38); an ``obb`` run's rotated
+   ProbIoU, retargeted L1 and angle terms (WP-088); a ``keypoints`` run's RLE term or
+   its Laplace-NLL control (WP-123, WP-135) — whichever the CSV's own columns name.
 
 Panels are skipped when the run predates the column they need, so the script also
 works on the older runs whose CSVs carry no ``val/mAP``. The fourth panel follows
-the same rule from the other side: a detection run's CSV has no ``mask`` or
-``semantic`` column, so it renders the three panels it always did, at the width it
-always did.
+the same rule from the other side: a detection run's CSV has none of the mask,
+oriented or keypoint columns, so it renders the three panels it always did, at the
+width it always did.
 
 The output is deterministic: SVG ids are salted with a fixed value and the
 ``Date`` metadata is suppressed, so regenerating an unchanged run reproduces the
@@ -85,6 +87,16 @@ _SEG_SERIES = (
 #: pair (A49, A50, WP-088). Validation only, matching panel 3 — both splits would put six
 #: curves on one axis to say what three already say.
 _OBB_SERIES = (("rbox", "rotated ProbIoU"), ("rl1", "L1 (stride units)"), ("angle", "angle"))
+
+#: Panel 4 series for a keypoints run: the single term ``keypoint_loss`` selects
+#: between (WP-135) — RLE's flow-plus-Laplace NLL by default, or the Laplace-NLL
+#: control with the flow term removed. Both write the same ``keypoint`` column, so
+#: the panel cannot and does not distinguish which loss a given run trained under;
+#: that distinction lives in the run's own ``config.yaml``, not its metrics.
+_KEYPOINT_SERIES = (
+    ("train/keypoint", "keypoint (train)", "#7f7f7f"),
+    ("val/keypoint", "keypoint (validation)", "#1f77b4"),
+)
 
 #: Panel 1 series when a run logs no ``val/mAP``: the oriented metric that replaces it
 #: (WP-102). mAP50 leads because the oriented DoD is stated at IoU 0.50.
@@ -341,12 +353,36 @@ def _panel_oriented(axis: Axes, path: Path) -> None:
     axis.legend(frameon=False, fontsize=9)
 
 
+def _has_keypoint(path: Path) -> bool:
+    """Report whether the run logged the keypoint loss term."""
+    return any(load_series(path, column)[0] for column, _, _ in _KEYPOINT_SERIES)
+
+
+def _panel_keypoint(axis: Axes, path: Path) -> None:
+    """Draw the epoch-mean keypoint loss term, whichever of WP-135's two arms trained it.
+
+    A single series each split, unlike the segmentation and oriented panels' three:
+    the module logs one aggregate ``keypoint`` value regardless of which loss produced
+    it (RLE's flow-plus-Laplace NLL, or the Laplace-NLL control alone). The axis is
+    linear rather than log, since RLE's negative log-likelihood is signed — a run's
+    ``keypoint`` value crosses zero as the flow's density concentrates, which a log
+    axis cannot represent at all.
+    """
+    for column, label, color in _KEYPOINT_SERIES:
+        epochs, values = load_series(path, column)
+        if epochs:
+            axis.plot(*epoch_means(epochs, values), label=label, color=color, linewidth=1.4)
+    axis.set_title("keypoint loss (epoch mean)")
+    axis.set_ylabel("term value")
+    axis.legend(frameon=False, fontsize=9)
+
+
 def plot_run(metrics: Path, output: Path, title: str, close_mosaic: int | None = None) -> Path:
     """Render one run's figure and write it as SVG.
 
-    A segmentation run gets a fourth panel for its mask terms; a detection run,
-    whose CSV has no such column, gets the three panels and the exact geometry it
-    got before that panel existed.
+    A segmentation, oriented or keypoints run gets a fourth panel for the terms
+    unique to its task; a detection run, whose CSV has none of those columns, gets
+    the three panels and the exact geometry it got before that panel existed.
 
     Args:
         metrics: Path to the run's ``metrics.csv``.
@@ -369,7 +405,8 @@ def plot_run(metrics: Path, output: Path, title: str, close_mosaic: int | None =
     """
     segmented = _has_segmentation(metrics)
     oriented = _has_oriented(metrics)
-    panels = 4 if segmented or oriented else 3
+    keypoint = _has_keypoint(metrics)
+    panels = 4 if segmented or oriented or keypoint else 3
     figure, axes = plt.subplots(1, panels, figsize=_figure_size(panels))
     has_map = _panel_map(axes[0], metrics, close_mosaic)
     if not has_map:
@@ -381,6 +418,8 @@ def plot_run(metrics: Path, output: Path, title: str, close_mosaic: int | None =
         _panel_segmentation(axes[3], metrics)
     elif oriented:
         _panel_oriented(axes[3], metrics)
+    elif keypoint:
+        _panel_keypoint(axes[3], metrics)
     for axis in axes:
         if axis.axison:
             axis.set_xlabel("epoch")

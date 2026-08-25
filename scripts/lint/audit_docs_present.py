@@ -59,10 +59,12 @@ _REQUIRED_DOCS_RELATIVE = (
     "model_cards/detection.md",
     "model_cards/segmentation.md",
     "model_cards/obb.md",
+    "model_cards/keypoints.md",
 )
 
 #: Section titles ``REPRODUCTION_REPORT.md`` must carry, in the order D10 appends them: the
-#: three per-release tiers plus the WP-065 consolidation. Copied from the file itself, not
+#: four per-release tiers plus the WP-065 consolidation, which stays third in append order
+#: since D10 forbids reordering a heading once appended. Copied from the file itself, not
 #: retyped -- each uses an em dash, and a hyphen-typed copy would silently never match.
 #: Stored without the ``##`` marker and without the leading emoji (WP-113): the heading's
 #: decoration is presentation, and pinning it here would make a purely visual edit fail a
@@ -72,6 +74,7 @@ _REPORT_SECTIONS = (
     "0.2.0 — Instance segmentation",
     "0.3.0 — Oriented detection",
     "Consolidated note — detection, segmentation, oriented detection",
+    "0.5.0 — Keypoint detection",
 )
 
 

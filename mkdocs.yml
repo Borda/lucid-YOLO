@@ -114,6 +114,7 @@ nav:
       - Model card — detection: model_cards/detection.md
       - Model card — instance segmentation: model_cards/segmentation.md
       - Model card — oriented detection: model_cards/obb.md
+      - Model card — keypoints: model_cards/keypoints.md
   - Clean-room record:
       - Provenance log: PROVENANCE.md
       - Assumption register: ASSUMPTIONS.md

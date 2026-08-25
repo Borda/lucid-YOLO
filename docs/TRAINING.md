@@ -55,6 +55,26 @@ lucid-eval --checkpoint <checkpoint> --data_root /content/coco2017 --output seg_
 
 `lucid-eval` reads the task off the checkpoint and scores masks when the checkpoint has them, so the same command serves both COCO tiers. `--masks false` scores boxes only from a segmentation checkpoint.
 
+## 🕺 Keypoints — COCO 2017 `person_keypoints`
+
+The same COCO tree again, read through its other annotation file. `num_keypoints` is required and has no default — the point count is a property of the annotation schema, not something a model can pick.
+
+```bash
+lucid-yolo fit --config pose_nano_smoke.yaml \
+  --data.data_root /content/coco2017 \
+  --data.batch_size 128 --data.num_workers 32 --data.prefetch_factor 1 \
+  --model.lr 0.02 --trainer.max_epochs 50 --trainer.precision bf16-mixed \
+  --trainer.default_root_dir /content/drive/MyDrive/lucid_runs
+
+lucid-eval --checkpoint <checkpoint> --data_root /content/coco2017 --output pose_report.json
+```
+
+The config states `train_ann_file`/`val_ann_file` explicitly: `lucid_yolo.data.layout` resolves only the `instances_` spelling, and `person_keypoints_{split}2017.json` sits beside it in the same annotations archive under a different name. `lucid-eval` dispatches on the checkpoint's own task here as it does for the other three, reading the single-category person file and reporting OKS beside box AP — a keypoints checkpoint scored through the detection protocol reports roughly one eightieth of its true figure, since that protocol averages over 80 categories of which 79 have no prediction.
+
+**The task is `K`-generic; the 17-point COCO schema is one instantiation.** `num_keypoints: 17` selects R12's own sigma table for OKS. Any other `K` is trainable, but `lucid-eval`'s pose protocol refuses it rather than scoring it against a schema it does not share — the ground truth, point ordering and sigmas are all the person schema's.
+
+Swap `keypoint_loss` to run the flow-free control instead: `pose_nano_smoke_laplace_nll.yaml` is the same file with that one line changed, and is what the accepted tier paired its RLE arm against.
+
 ## 🔄 Oriented detection — DOTA-v1.0 tiles
 
 DOTA is provisioned by hand and then tiled; both steps are docs/DATASETS.md. Training reads the tiles, never the original tree.
@@ -103,6 +123,9 @@ Each tier has a minutes-long overfit gate that must pass before a launch that co
 python scripts/overfit_micro.py --task detect     # one-to-one train recall >= 0.95
 python scripts/overfit_micro.py --task segment    # train mask IoU >= 0.7
 python scripts/overfit_micro.py --task obb        # train rotated mAP50 >= 0.9
+python scripts/overfit_micro.py --task keypoints  # train OKS AP >= 0.30
 ```
 
 A tier that cannot overfit a handful of images will not converge on the full set, and finding that out after the first epoch of a fifty-epoch run costs the run.
+
+The keypoint floor looks low beside the other three and is not measuring less. Its slice is the only one not drawn from the geometric shapes — `task: keypoints` needs a keypoint-bearing family, so it draws a 7-point synthetic symbol schema, and OKS at that schema's uniform sigma is a cliff on objects a few dozen pixels across: feeding the ground truth back as the prediction scores exactly 1.0, and displacing every point by 3 px scores 0.269. The floor was set from that measured slope rather than guessed.

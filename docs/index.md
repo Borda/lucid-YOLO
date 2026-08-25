@@ -14,21 +14,24 @@ Three habits keep that claim auditable rather than asserted.
 
 What is claimed is a faithful reproduction of the *method*, not of the paper's exact numbers ([decision record, D2](DECISIONS.md)). Each of the three models has been trained once, at the smallest of five scales, on a deliberately short schedule — a smoke tier, in this project's vocabulary, sized to prove the mechanism works rather than to compete with a published leaderboard. No trained weights are published ([decision record, D14](DECISIONS.md)); the source, the frozen golden metrics, and the report below are the release artifacts.
 
-## 🧠 The three tasks
+## 🧠 The four tasks
 
-Each task is the previous one plus a head, not a new model: all three share one backbone, one neck, one DFL-free dual detection head, one NMS-free deploy path, and one optimizer ([reproduction report, *One trunk, three heads*](REPRODUCTION_REPORT.md)).
+Each task is the previous one plus a head, not a new model: all four share one backbone, one neck, one DFL-free dual detection head, one NMS-free deploy path, and one optimizer ([reproduction report, *One trunk, three heads*](REPRODUCTION_REPORT.md) — written when there were three, and the argument is unchanged by the fourth).
 
 | Task | What it adds to the trunk | Data | Size at `n` scale | Card |
 | -- | -- | -- | -- | -- |
 | Detection | the trunk itself — dual head, direct `ltrb` boxes, no distribution bins | COCO 2017, 640 px | 2.4 M params, 5.4 GFLOPs | [detection](model_cards/detection.md) |
 | Instance segmentation | prototype–coefficient masks and a training-only auxiliary semantic branch | COCO 2017, 640 px | 2.72 M params, 9.00 GFLOPs | [segmentation](model_cards/segmentation.md) |
 | Oriented detection | per-branch angle stems, a rotated IoU term, a retargeted L1 | DOTA-v1.0 tiles, 1024 px | 2.56 M params, 14.68 GFLOPs | [oriented](model_cards/obb.md) |
+| Keypoints | a `K`-generic point stem, and a normalizing-flow residual likelihood (RLE) as its loss | COCO 2017 `person_keypoints`, 640 px | 2.38 M params, 5.51 GFLOPs | [keypoints](model_cards/keypoints.md) |
 
-Parameter and FLOP counts are from the *What was reproduced* subsection of each release section of the [reproduction report](REPRODUCTION_REPORT.md). For detection and segmentation they are gated against the paper's own published tables — all five scales within ±2% params and ±5% FLOPs for detection, ±3% and ±5% for segmentation. For oriented detection the paper publishes no such table, so the gate holds the numbers against this project's own frozen goldens: it catches drift, and corroborates nothing.
+**The fourth task is keypoints, not pose.** `K` is a constructor argument the way the class count is; nothing in the head, the loss or the decode path knows what a point means. Human pose is the instantiation the shipped checkpoint trained on (`K = 17`, COCO's `person` schema) and the one the OKS metric's sigma table is defined for — the wiring gate runs a 7-point synthetic symbol schema instead.
+
+Parameter and FLOP counts are from the *What was reproduced* subsection of each release section of the [reproduction report](REPRODUCTION_REPORT.md). For detection and segmentation they are gated against the paper's own published tables — all five scales within ±2% params and ±5% FLOPs for detection, ±3% and ±5% for segmentation. For oriented detection the paper publishes no such table, so the gate holds the numbers against this project's own frozen goldens: it catches drift, and corroborates nothing. For keypoints there is no gate at all: the source paper (R14) states a loss and an evaluation protocol, never an architecture, so there is nothing to hold a number against.
 
 ## 📊 What was reproduced, in numbers
 
-Every figure below is quoted from [`REPRODUCTION_REPORT.md`](REPRODUCTION_REPORT.md), with the section it comes from named beside it. All three runs are `n` scale, roughly 50 epochs, seed 0, single seed throughout.
+Every figure below is quoted from [`REPRODUCTION_REPORT.md`](REPRODUCTION_REPORT.md), with the section it comes from named beside it. All four runs are `n` scale, roughly 50 epochs, seed 0, single seed throughout.
 
 | Result | Value | Source section |
 | -- | -- | -- |
@@ -40,6 +43,8 @@ Every figure below is quoted from [`REPRODUCTION_REPORT.md`](REPRODUCTION_REPORT
 | Cost of dropping NMS, segmentation | 1.27 box AP, 0.81 segm AP | `0.2.0 — Instance segmentation` → *The Seg-smoke run* |
 | Oriented detection, DOTA-v1.0 val, EMA weights, **per tile** | **0.2914** rotated mAP50-95, 0.5242 rotated mAP50 | `0.3.0 — Oriented detection` → *The OBB-smoke run* |
 | Cost of dropping NMS, oriented detection | not measured | `Consolidated note` → *One trunk, three heads* |
+| Keypoints, COCO val2017, EMA weights, NMS-free end-to-end path | **0.2738** OKS AP, 0.5030 box mAP50-95 | `0.5.0 — Keypoint detection` → *The Pose-smoke run* |
+| RLE's learned flow against its own flow-free control | 0.2738 vs **0.2527** OKS AP — same direction as the source paper's 70.5-vs-67.4 | `0.5.0 — Keypoint detection` → *Acceptance* |
 
 Four readings the report insists on, and this page repeats rather than smooths over.
 

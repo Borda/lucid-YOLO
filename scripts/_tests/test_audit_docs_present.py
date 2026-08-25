@@ -86,13 +86,15 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     _write(
         docs_dir / "REPRODUCTION_REPORT.md",
         "## 0.1.0 — Detection\n## 0.2.0 — Instance segmentation\n"
-        "## 0.3.0 — Oriented detection\n## Consolidated note — detection, segmentation, oriented detection\n",
+        "## 0.3.0 — Oriented detection\n## Consolidated note — detection, segmentation, oriented detection\n"
+        "## 0.5.0 — Keypoint detection\n",
     )
     _write(docs_dir / "RESEARCH_LOG.md", "no anchors here\n")
     _write(docs_dir / "ENGINEERING_LOG.md", "no anchors here\n")
     _write(docs_dir / "model_cards" / "detection.md", "detection\n")
     _write(docs_dir / "model_cards" / "segmentation.md", "segmentation\n")
     _write(docs_dir / "model_cards" / "obb.md", "obb\n")
+    _write(docs_dir / "model_cards" / "keypoints.md", "keypoints\n")
     _write(repo_root / "AGENTS.md", "agents\n")
 
 

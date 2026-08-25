@@ -50,15 +50,18 @@ The interesting part is the **one-to-one branch**. A classical detector predicts
 
 The cost is accuracy, and this project measures it rather than assuming it (see below).
 
-Three tasks, one trunk:
+Four tasks, one trunk:
 
 | Task | What the head adds | Output row |
 | -- | -- | -- |
 | **Detection** | nothing — the base case | `[x1, y1, x2, y2, score, class]` |
 | **Instance segmentation** | mask coefficients per detection, plus a shared prototype bank the coefficients combine | the detection row, plus a mask cropped to its own box |
 | **Oriented detection** | one angle per detection, and boxes that turn | `[cx, cy, w, h, theta, score, class]` — a rotated rectangle, not an upright one |
+| **Keypoints** | `K` points per detection, and a normalizing flow that learns what a plausible error looks like instead of assuming it | the detection row, plus `K` `(x, y)` points |
 
-Every module names the equation it implements and the assumption it rests on. `docs/ASSUMPTIONS.md` is the list of every place where the papers did not determine an answer and this project had to choose one — 63 of them, each with what was chosen, why, and what would falsify it.
+The fourth is **keypoints, not pose**: `K` is a constructor argument the way the class count is, and nothing in the head, the loss or the decode path knows what a point means. Human pose is the instantiation the shipped checkpoint trained on; the wiring gate runs a 7-point synthetic symbol schema instead. It is also the one task not drawn from the YOLO26 paper, which addresses no keypoint task at all — the loss and evaluation protocol come from RLE (arXiv:2107.11291), composed onto the same trunk.
+
+Every module names the equation it implements and the assumption it rests on. `docs/ASSUMPTIONS.md` is the list of every place where the papers did not determine an answer and this project had to choose one — 73 of them, each with what was chosen, why, and what would falsify it.
 
 <a id="what-was-reproduced"></a>
 
@@ -98,15 +101,26 @@ The ratio is bounded above by construction — every mask starts from a box this
 | EMA | **0.2914** | 0.5242 |
 | raw | 0.2867 | 0.5140 |
 
-**Read this one carefully: it is per tile.** Aerial images are cut into overlapping 1024 px tiles, and an object crossing a seam is counted in each tile that saw it, so this figure is comparable to nothing published. The whole-image merge exists in the codebase; no run has been re-scored through it yet, and that is roadmap 111 rather than a footnote that quietly ages.
+**Read this one carefully: it is per tile.** Aerial images are cut into overlapping 1024 px tiles, and an object crossing a seam is counted in each tile that saw it, so this figure is comparable to nothing published. The same checkpoint re-scored through the whole-image merge (roadmap 111) reports **0.3146** / 0.5484 — every figure rises rather than falls, and the report explains why that is the cap-lifting rather than the merge.
 
 ![Oriented training curves](docs/figures/obb_smoke_training.svg)
 
+### Keypoints — COCO 2017 val, `person_keypoints`
+
+| decode path | OKS AP | OKS AP50 | box mAP50-95 |
+| -- | -- | -- | -- |
+| end-to-end (no NMS) | **0.2738** | 0.6094 | 0.5030 |
+| NMS | 0.2688 | 0.6066 | 0.5119 |
+
+**The claim this tier exists to test is not the OKS number.** RLE's argument is that a *learned* residual density earns the accuracy, rather than the reparameterization and bounded per-point scale it ships alongside — and one figure cannot separate those. So this tier ran twice, on configs differing in exactly one line, and the control is the paper's own published flow-free ablation: **0.2738 against 0.2527** end-to-end OKS AP, the same direction as the source paper's own 70.5-vs-67.4. The absolute figures are far below either, and were never the criterion.
+
+![Keypoint training curves](docs/figures/pose_smoke_training.svg)
+
 ### What is gated rather than claimed
 
-- **Architecture fidelity**: parameter and FLOP counts for all five scales are held within ±2% params and ±5% FLOPs of the paper's table (n: 2.4M/5.4G through x: 55.7M/193.9G), as a test, on every commit.
-- **Regression**: 20 frozen golden metric files, one set per released minor, re-verified beside the 7 live ones on every run of `make gate` — a later release may never silently regress an earlier one's numbers.
-- **The suite**: 1826 tests, all offline, no network, no dataset, no GPU required.
+- **Architecture fidelity**: parameter and FLOP counts for all five scales are held within ±2% params and ±5% FLOPs of the paper's table (n: 2.4M/5.4G through x: 55.7M/193.9G), as a test, on every commit. Detection and segmentation only — the paper publishes no table for oriented detection, and none of the papers describes a keypoint architecture at all, so those two are held against this project's own frozen goldens or not gated.
+- **Regression**: 14 frozen golden metric files, one set per released minor, re-verified beside the 7 live ones on every run of `make gate` — a later release may never silently regress an earlier one's numbers.
+- **The suite**: 2447 tests, all offline, no network, no dataset, no GPU required.
 
 Full write-ups with the exact commands as run, the failures along the way, and what each tier does *not* claim: **docs/REPRODUCTION_REPORT.md**. Per-task model cards, including intended use and limitations: **docs/model_cards/**.
 
