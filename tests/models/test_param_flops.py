@@ -8,10 +8,14 @@ clean-room block/head assumptions (A3/A4/A9) that the papers leave underspecifie
 — it is the blueprint's Phase-2 escalation site. A second test asserts the frozen
 ``goldens/params_flops_det.json`` regression lock still reproduces.
 
-The module has since grown the two sibling gates, each with its own published
-table, protocol, tolerance, and frozen golden: segmentation against R1 Table S9
-(640 px, 80 classes) and oriented detection against R1 Table S11 (**1024** px,
-**15** classes). The protocol constants are deliberately not shared between them.
+The module has since grown three siblings, and they are not all the same kind of
+gate. Two hold a published table, each with its own protocol, tolerance, and
+frozen golden: segmentation against R1 Table S9 (640 px, 80 classes) and oriented
+detection against R1 Table S11 (**1024** px, **15** classes). The protocol
+constants are deliberately not shared between them. The fourth, keypoints, has a
+frozen golden and **no** published table to gate against, because R14 states a
+loss and an evaluation protocol and no architecture at all — see the comment
+above :func:`test_kp_params_flops_golden`.
 
 Params count the full checkpoint (both dual-head branches); GFLOPs exclude the
 training-only one-to-many branch — the R6/YOLOv10 reporting convention (see
@@ -200,6 +204,27 @@ def test_obb_vs_tableS11(variant: str, published_params_m: float, published_gflo
 def test_obb_params_flops_golden() -> None:
     """The frozen goldens/params_flops_obb.json regression lock still reproduces."""
     result = check_golden(DEFAULT_GOLDENS_DIR / "params_flops_obb.json")
+
+    assert result.passed, result.error or next(
+        f"{c.metric}: expected {c.expected}, got {c.actual}" for c in result.comparisons if not c.passed
+    )
+
+
+# The keypoint task has a golden and no published-table gate, which is the one
+# structural difference from its three siblings above. Detection has R1 Table 7,
+# segmentation Table S9, oriented detection Table S11; R14 (RLE) specifies a loss
+# and an OKS evaluation protocol and **no architecture**, so there is no size table
+# in the literature to hold this model to. That absence is the finding, and it is
+# recorded here rather than papered over: no ``_TABLE_*`` constant belongs in this
+# section, and inventing one — from a sibling table, from a third-party pose model,
+# or from this project's own measurements — would fabricate a published claim.
+#
+# What remains is a pure regression lock, at detection's own protocol (640 px, 80
+# classes) so that the keypoint golden minus the detection golden is exactly what
+# the point stems cost. It catches an architecture change; it certifies no parity.
+def test_kp_params_flops_golden() -> None:
+    """The frozen goldens/params_flops_kp.json regression lock still reproduces."""
+    result = check_golden(DEFAULT_GOLDENS_DIR / "params_flops_kp.json")
 
     assert result.passed, result.error or next(
         f"{c.metric}: expected {c.expected}, got {c.actual}" for c in result.comparisons if not c.passed

@@ -52,11 +52,13 @@ from lucid_yolo.models.registry import scale_spec
 
 __all__ = [
     "Detector",
+    "KeypointDetector",
     "OrientedDetector",
     "SegmentOutput",
     "Segmenter",
     "build_detection_stages",
     "build_detector",
+    "build_keypoint_detector",
     "build_obb_detector",
     "build_segmentation_stages",
     "build_segmenter",
@@ -450,6 +452,176 @@ def build_obb_detector(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) ->
     return OrientedDetector(variant, num_classes)
 
 
+class KeypointDetector(nn.Module):
+    """Composite YOLO26 keypoint detector: the detector plus the R14 point branch.
+
+    Structurally :class:`Detector` with ``num_keypoints=K``: identical backbone,
+    neck, and dual head for a given variant, with a third per-level stem on
+    **each** head branch emitting ``K`` raw ``(x, y)`` coordinate offsets and ``K``
+    raw per-axis sigma values. Coordinates are unbounded offsets composed against
+    the anchor centre and stride by
+    :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` (A70), not by the
+    model; sigma stays raw (A65) because the RLE flow (R14 Eq. 12) is what
+    interprets it.
+
+    The point stems sit on the head's two branches rather than in a fourth
+    top-level module, which is what makes the one-to-many point stems training-only
+    in the same sense the one-to-many box and class stems already are: they are
+    dropped by :meth:`deploy` with the branch that owns them, rather than needing
+    a rule of their own. This mirrors :class:`OrientedDetector`'s angle stems.
+
+    The task is generic in ``K``: nothing here knows what a point *means*, so
+    human pose is one instantiation rather than the subject.
+
+    Args:
+        variant: Scale name (``"n"``/``"s"``/``"m"``/``"l"``/``"x"``) resolved
+            through :func:`~lucid_yolo.models.registry.scale_spec`.
+        num_classes: Number of object classes the head predicts. Defaults to 80
+            for signature consistency with :class:`Detector`; COCO's
+            ``person_keypoints`` path passes 1.
+        num_keypoints: Point count ``K`` both head branches predict. Keyword-only
+            and required, with no default: unlike ``num_classes`` there is nothing
+            project-wide to fall back on, because ``K`` is a property of the
+            *dataset's* annotation schema (COCO person is 17, another pose set is
+            not). A default here would be a silent claim about data this model has
+            never seen — the same refusal
+            :class:`~lucid_yolo.ptl.module.DetectionLitModule` makes for
+            ``task="keypoints"``.
+
+    Examples:
+        >>> import torch
+        >>> model = KeypointDetector("n", num_classes=4, num_keypoints=3).eval()
+        >>> with torch.no_grad():
+        ...     out = model(torch.zeros(1, 3, 128, 128))
+        >>> out.o2o_cls.shape, out.o2o_keypoints.shape
+        (torch.Size([1, 336, 4]), torch.Size([1, 336, 3, 2]))
+        >>> out.o2o_keypoint_sigma.shape  # raw per-axis uncertainty (A65)
+        torch.Size([1, 336, 3, 2])
+    """
+
+    def __init__(self, variant: str, num_classes: int = _DEFAULT_NUM_CLASSES, *, num_keypoints: int) -> None:
+        super().__init__()
+        spec = scale_spec(variant)
+        self.variant = variant
+        self.num_classes = num_classes
+        self.num_keypoints = num_keypoints
+        self.backbone, self.neck, self.head = build_detection_stages(
+            spec.depth, spec.width, spec.max_channels, num_classes, num_keypoints=num_keypoints
+        )
+
+    def forward(self, image: Tensor) -> DualHeadOutput:
+        """Run the backbone, neck, and dual head with the point branch active.
+
+        Args:
+            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
+                ``W`` divisible by 32.
+
+        Returns:
+            The head's :class:`~lucid_yolo.models.heads.DualHeadOutput`, whose
+            keypoint and keypoint-sigma fields are populated for both branches.
+        """
+        output: DualHeadOutput = self.head(self.neck(self.backbone(image)))
+        return output
+
+    def deploy(self) -> nn.Module:
+        """Return the NMS-free inference model: backbone -> neck -> one-to-one head.
+
+        The one-to-many branch is training-only (R6) and never runs at E2E
+        inference, so the deployed model executes a single detection branch —
+        including only that branch's point stems. This is the module the keypoint
+        golden's GFLOPs are measured on, at detection's 640-pixel protocol. The
+        returned module **shares** this detector's parameters (no copy).
+
+        Returns:
+            A :class:`torch.nn.Module` whose forward maps an image batch to the
+            one-to-one branch's ``(cls_logits, ltrb, keypoints)`` tensor triple.
+
+        Examples:
+            >>> import torch
+            >>> deployed = KeypointDetector("n", num_classes=4, num_keypoints=3).deploy().eval()
+            >>> with torch.no_grad():
+            ...     cls, box, keypoints = deployed(torch.zeros(1, 3, 128, 128))
+            >>> cls.shape, box.shape, keypoints.shape
+            (torch.Size([1, 336, 4]), torch.Size([1, 336, 4]), torch.Size([1, 336, 3, 2]))
+        """
+        return _DeployedKeypointDetector(self)
+
+
+class _DeployedKeypointDetector(nn.Module):
+    """Single-branch inference view of a :class:`KeypointDetector`.
+
+    Runs the backbone, neck, and only the one-to-one head branch, returning that
+    branch's dense ``(cls, box, keypoints)`` tensors. Holds references to the
+    parent's submodules, so it shares parameters and adds none of its own; the
+    one-to-many branch — its box, class, and point stems alike — is not an
+    attribute here at all, which is what makes its removal checkable by parameter
+    identity rather than by trusting a flag.
+
+    Sigma is **not** returned. It is consumed by the R14 loss during training and
+    by nothing on the inference path: the decode
+    (:func:`~lucid_yolo.models.heads.keypoint.decode_keypoints`, and
+    :func:`~lucid_yolo.eval.coco_eval.gather_keypoints` after it) composes the
+    coordinate offsets alone. Its cost is still counted, because one stem emits
+    coordinates and sigma from the same convolution — omitting it from the return
+    tuple drops a tensor, not a computation.
+
+    Args:
+        detector: The full keypoint detector to expose an inference view of.
+    """
+
+    def __init__(self, detector: KeypointDetector) -> None:
+        super().__init__()
+        self.backbone = detector.backbone
+        self.neck = detector.neck
+        self.o2o = detector.head.o2o
+
+    def forward(self, image: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        """Run the backbone, neck, and one-to-one branch over an image batch.
+
+        Args:
+            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
+                ``W`` divisible by 32.
+
+        Returns:
+            The one-to-one branch's ``(cls, box, keypoints)`` triple: dense class
+            logits ``(N, A, num_classes)``, raw ltrb distances ``(N, A, 4)``, and
+            raw point-coordinate offsets ``(N, A, K, 2)``.
+        """
+        cls, box, _, _, keypoints, _ = self.o2o(self.neck(self.backbone(image)))
+        assert keypoints is not None  # a KeypointDetector always builds the point stems
+        return cls, box, keypoints
+
+
+def build_keypoint_detector(
+    variant: str, num_classes: int = _DEFAULT_NUM_CLASSES, *, num_keypoints: int
+) -> KeypointDetector:
+    """Build a :class:`KeypointDetector` for a named scale variant.
+
+    Args:
+        variant: Scale name (``"n"``/``"s"``/``"m"``/``"l"``/``"x"``).
+        num_classes: Number of object classes. Defaults to 80 to match
+            :func:`build_detector`; the COCO ``person_keypoints`` path passes 1.
+        num_keypoints: Point count ``K``, keyword-only and required — the point
+            count is a property of the annotation schema, not something a model
+            may pick (see :class:`KeypointDetector`).
+
+    Returns:
+        The assembled :class:`KeypointDetector` module.
+
+    Raises:
+        KeyError: If ``variant`` is not one of the five published names.
+        TypeError: If ``num_keypoints`` is omitted.
+
+    Examples:
+        >>> model = build_keypoint_detector("s", num_classes=1, num_keypoints=17)
+        >>> model.variant, model.num_classes, model.num_keypoints
+        ('s', 1, 17)
+        >>> model.head.o2o.keypoint_stems is None
+        False
+    """
+    return KeypointDetector(variant, num_classes, num_keypoints=num_keypoints)
+
+
 @dataclass(frozen=True)
 class SegmentOutput:
     """Dense predictions of the segmentation model's three branches.
@@ -716,7 +888,8 @@ class _TupleOutputAdapter(nn.Module):
             :class:`SegmentOutput`, otherwise unchanged. Optional fields that are
             ``None`` are dropped: the coefficient tensors are absent unless the
             head was built with ``num_coeffs``, the angle tensors unless it was
-            built with ``predict_angle``, and the auxiliary semantic logits
+            built with ``predict_angle``, the keypoint and keypoint-sigma tensors
+            unless it was built with ``num_keypoints``, and the auxiliary semantic logits
             are always ``None`` here because FLOP counting runs in eval mode
             (A17). Dropping them is safe for a FLOP tally, which reads the traced
             graph rather than the returned values.
@@ -728,10 +901,14 @@ class _TupleOutputAdapter(nn.Module):
                 output.o2m_box,
                 output.o2m_coeff,
                 output.o2m_angle,
+                output.o2m_keypoints,
+                output.o2m_keypoint_sigma,
                 output.o2o_cls,
                 output.o2o_box,
                 output.o2o_coeff,
                 output.o2o_angle,
+                output.o2o_keypoints,
+                output.o2o_keypoint_sigma,
             )
         if isinstance(output, SegmentOutput):
             detect = output.detect

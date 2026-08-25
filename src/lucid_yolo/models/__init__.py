@@ -15,10 +15,12 @@ from lucid_yolo.models.blocks import (
 )
 from lucid_yolo.models.build import (
     Detector,
+    KeypointDetector,
     OrientedDetector,
     Segmenter,
     SegmentOutput,
     build_detector,
+    build_keypoint_detector,
     build_obb_detector,
     build_segmenter,
     count_flops,
@@ -55,6 +57,7 @@ __all__ = [
     "Detector",
     "DualDetectionHead",
     "DualHeadOutput",
+    "KeypointDetector",
     "OrientedDetector",
     "PSABlock",
     "ProtoFusion",
@@ -66,6 +69,7 @@ __all__ = [
     "SpatialAttention",
     "assemble_masks",
     "build_detector",
+    "build_keypoint_detector",
     "build_obb_detector",
     "build_segmenter",
     "count_flops",

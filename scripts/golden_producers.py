@@ -56,6 +56,7 @@ from lucid_yolo.assign import (
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.models.build import (
     build_detector,
+    build_keypoint_detector,
     build_obb_detector,
     build_segmenter,
     count_flops,
@@ -886,5 +887,67 @@ def obb_params_flops() -> dict[str, float]:
         model = build_obb_detector(variant, _OBB_NUM_CLASSES)
         metrics[f"{variant}_params"] = float(count_params(model))
         gflops = count_flops(model.deploy(), img_size=_OBB_IMG_SIZE)
+        metrics[f"{variant}_gflops"] = round(gflops, _DET_GFLOP_DECIMALS)
+    return metrics
+
+
+#: Point count ``K`` the keypoint golden is measured at. 17 is COCO's human-pose
+#: schema (R12), taken here as one concrete instantiation of a task that is generic
+#: in ``K`` — the head, the loss, and the decode know nothing about what a point
+#: means. It is a measurement choice, not an architectural claim.
+#:
+#: The shipped nano checkpoint in ``docs/model_cards/keypoints.md`` is measured at
+#: ``num_classes=1`` (COCO's ``person`` category alone), so its parameter and GFLOP
+#: figures are deliberately **not** these: this golden inherits detection's 80-class
+#: protocol instead (see :func:`kp_params_flops`).
+_KP_NUM_KEYPOINTS = 17
+
+
+def kp_params_flops() -> dict[str, float]:
+    """Frozen per-variant parameter and GFLOP metrics for the keypoint model (WP-139).
+
+    The keypoint counterpart of :func:`det_params_flops`, measured under the same
+    A29 convention — parameters of the full model
+    (:func:`~lucid_yolo.models.build.count_params` on
+    :func:`~lucid_yolo.models.build.build_keypoint_detector`), conventional GFLOPs
+    of the deployed NMS-free inference model
+    (:meth:`~lucid_yolo.models.build.KeypointDetector.deploy`). The deployed view
+    carries only the one-to-one branch, so the one-to-many point stems are excluded
+    from the FLOP tally along with the rest of that branch, while the parameter
+    count is the whole checkpoint.
+
+    **This golden holds nothing published.** R14 (RLE) specifies a loss and an
+    evaluation protocol and no architecture at all, so — unlike detection (R1
+    Table 7), segmentation (Table S9) and oriented detection (Table S11) — there is
+    no published size table to hold this against. The golden is therefore a pure
+    regression lock, and it deliberately inherits **detection's** protocol
+    (640-pixel input, 80 classes) rather than inventing one, so
+    ``params_flops_kp.json`` minus ``params_flops_det.json`` is exactly what the
+    point stem costs.
+
+    Every value is produced by building and measuring the live modules — never
+    hand-written — so the golden re-derives from the actual architecture. Param
+    counts are exact integers; GFLOPs come from fvcore's deterministic MAC trace
+    and are pinned with a small golden tolerance.
+
+    Returns:
+        A mapping of ten metrics: ``<variant>_params`` (exact) and
+        ``<variant>_gflops`` (tolerance-pinned) for each variant ``n``…``x``.
+
+    Examples:
+        ```pycon
+        >>> metrics = kp_params_flops()
+        >>> metrics["n_params"]
+        2548204.0
+        >>> metrics["x_gflops"] > metrics["n_gflops"]
+        True
+
+        ```
+    """
+    metrics: dict[str, float] = {}
+    for variant in _DET_VARIANTS:
+        model = build_keypoint_detector(variant, _DET_NUM_CLASSES, num_keypoints=_KP_NUM_KEYPOINTS)
+        metrics[f"{variant}_params"] = float(count_params(model))
+        gflops = count_flops(model.deploy(), img_size=_DET_IMG_SIZE)
         metrics[f"{variant}_gflops"] = round(gflops, _DET_GFLOP_DECIMALS)
     return metrics
