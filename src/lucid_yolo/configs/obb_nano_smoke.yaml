@@ -2,7 +2,7 @@
 # OBB-smoke tier (blueprint sec. 10 tier A): ~50 DOTA epochs, oriented boxes. `variant`
 # below is this file's default scale, not a claim about the run -- `--variant`
 # overrides it.
-# The det_smoke.yaml recipe with `task: obb`. The classification objective and the
+# The det_nano_smoke.yaml recipe with `task: obb`. The classification objective and the
 # assignment are unchanged; the two box terms are the rotated ones (WP-088) and the
 # R1 Eq. 15 angle term rides on top -- see the DetectionLitModule docstring for the
 # per-term table. `box_gain`/`l1_gain` name the IoU and L1 *slots*, which under this

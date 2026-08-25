@@ -2,7 +2,7 @@
 # Seg-smoke tier (blueprint sec. 10 tier A): ~50 COCO epochs, instance masks. `variant`
 # below is this file's default scale, not a claim about the run -- `--variant`
 # overrides it.
-# The det_smoke.yaml recipe with `task: segment` -- the detection objective is
+# The det_nano_smoke.yaml recipe with `task: segment` -- the detection objective is
 # unchanged, and the two WP-087 mask terms (A38) ride on top of it. Acceptance:
 # stable training and a segm mAP that tracks the box mAP; the fast wiring gate is
 # `scripts/overfit_micro.py --task segment` (train mask IoU >= 0.7), which runs in

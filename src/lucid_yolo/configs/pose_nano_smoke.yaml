@@ -2,7 +2,7 @@
 # Pose-smoke tier (roadmap WP-125, blueprint sec. 10 tier A pattern extended to the
 # fourth task): ~50 COCO human-pose epochs. `variant` below is this file's default
 # scale, not a claim about the run -- `--variant` overrides it.
-# The det_smoke.yaml recipe with `task: keypoints`. Structurally the `segment` shape,
+# The det_nano_smoke.yaml recipe with `task: keypoints`. Structurally the `segment` shape,
 # not the `obb` one: nothing is replaced, the R14 residual log-likelihood term rides
 # on top of the unchanged detection objective at `keypoint_gain` (DetectionLitModule
 # docstring, WP-132). Acceptance is WP-125's own: RLE's mechanism claim (direction of

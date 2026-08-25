@@ -1,6 +1,6 @@
 # 🏋️ Launching a training run
 
-Three tiers, one command. `lucid-yolo fit --config <name>.yaml` resolves the name against the configs packaged inside the wheel, so a run needs no checkout — `det_smoke.yaml`, `seg_smoke.yaml` and `obb_smoke.yaml` are all installed with the package.
+Three tiers, one command. `lucid-yolo fit --config <name>.yaml` resolves the name against the configs packaged inside the wheel, so a run needs no checkout — `det_nano_smoke.yaml`, `seg_nano_smoke.yaml` and `obb_nano_smoke.yaml` are all installed with the package.
 
 What the configs carry is run-level configuration only: schedule, optimizer and loss gains, and placeholder data paths. Topology is named by `variant` and lives in the registry, never in a config file (ADR-001). Every value below that overrides a config is an override *of a placeholder or of a batch-size-dependent value*, not a correction.
 
@@ -28,7 +28,7 @@ Then `--trainer.default_root_dir /content/drive/MyDrive/lucid_runs` on every com
 lucid-data download --data_root /content/coco2017 --splits '[train,val]' --verify true
 lucid-data check    --data_root /content/coco2017
 
-lucid-yolo fit --config det_smoke.yaml \
+lucid-yolo fit --config det_nano_smoke.yaml \
   --data.data_root /content/coco2017 \
   --data.batch_size 128 --data.num_workers 32 --data.prefetch_factor 1 \
   --model.lr 0.02 --trainer.max_epochs 50 --trainer.precision 16-mixed \
@@ -44,7 +44,7 @@ lucid-eval --checkpoint <checkpoint> --data_root /content/coco2017 --output det_
 The detection recipe with `task: segment`; the same data root serves both, so a tree already provisioned above needs nothing further.
 
 ```bash
-lucid-yolo fit --config seg_smoke.yaml \
+lucid-yolo fit --config seg_nano_smoke.yaml \
   --data.data_root /content/coco2017 \
   --data.batch_size 128 --data.num_workers 32 --data.prefetch_factor 2 \
   --model.lr 0.02 --trainer.max_epochs 50 --trainer.precision bf16-mixed \
@@ -63,7 +63,7 @@ DOTA is provisioned by hand and then tiled; both steps are docs/DATASETS.md. Tra
 lucid-data check       --data_root /content/dota --dataset dota
 lucid-data build-tiles --root /content/dota --out /content/dota_tiles --splits train,val --overlap 512 --workers 8
 
-lucid-yolo fit --config obb_smoke.yaml \
+lucid-yolo fit --config obb_nano_smoke.yaml \
   --data.data_root /content/dota_tiles \
   --data.batch_size 16 --data.num_workers 8 \
   --trainer.max_epochs 50 --trainer.precision bf16-mixed \
@@ -75,9 +75,25 @@ lucid-eval --checkpoint <checkpoint> --data_root /content/dota_tiles --split val
 Two differences from the COCO tiers, forced by the data rather than chosen:
 
 - **Worker counts are memory, not just parallelism, at 1024 px.** A batch of 64 stacked 1024 px images is 805 MB, and every worker holds `prefetch_factor` of them in shared memory — so `--data.num_workers 32` queues about 51 GB per loader, and the validation pool spawns while the training one is still resident. A count named for training is bounded to what fits before validation inherits it, with a warning naming the number (WP-103); `--data.val_num_workers` overrides that bound outright when the machine has the room.
-- **Batch 16 at `img_size: 1024`**, against 128 at 640 for COCO. The tile side is R18's own crop size, and 16 is the placeholder `obb_smoke.yaml` ships — "tune to accelerator memory". No oriented tier run has measured a batch that fits, so it is a starting point rather than a figure: at 2.56x the pixels per image it is a third of the COCO batch's pixel budget, not a match for it. `--model.lr` stays at the config's 0.01 for the same reason — the 0.02 above is the batch-128 linear scaling, and it does not carry over to a batch nobody has settled yet.
+- **Batch 16 at `img_size: 1024`**, against 128 at 640 for COCO. The tile side is R18's own crop size, and 16 is the placeholder `obb_nano_smoke.yaml` ships — "tune to accelerator memory". No oriented tier run has measured a batch that fits, so it is a starting point rather than a figure: at 2.56x the pixels per image it is a third of the COCO batch's pixel budget, not a match for it. `--model.lr` stays at the config's 0.01 for the same reason — the 0.02 above is the batch-128 linear scaling, and it does not carry over to a batch nobody has settled yet.
 
 `lucid-eval` picks the rotated protocol from the checkpoint's own task, and with it the 1024 px letterbox and batch 8; an explicit `--img_size` or `--batch_size` still wins.
+
+## 📁 A YOLO-format root instead of COCO's
+
+Every tier above works unchanged against a YOLO-format root — no dedicated config, just three overrides on `det_nano_smoke.yaml`:
+
+```bash
+lucid-data check --data_root /path/to/yolo_dataset   # validates the tree, prints the class count
+
+lucid-yolo fit --config det_nano_smoke.yaml \
+  --data.data_root /path/to/yolo_dataset --data.layout yolo \
+  --model.num_classes <len(names) in the root's own data.yaml>
+```
+
+`--data.layout yolo` is stated rather than left to be probed: `detect_layout` resolves a bare YOLO root on its own, but stating it also covers a root that happens to satisfy both conventions (COCO and YOLO — the probe refuses to break that tie, A63) and skips the probe entirely, so a missing path is named by the reader that actually needed it, not the probe. `--model.num_classes` must equal `len(names)` in the root's own `data.yaml` — a label row's class index is 0-based into that list and is never remapped (WP-099), so a mismatched count trains against the wrong label space silently. `lucid-data check --data_root ...` prints both numbers so they can be compared before a launch, not after one.
+
+**Not available on this layout: `--model.task segment`.** A YOLO label row carries five or nine normalized numbers and never a polygon ring, so there is nothing to rasterize a mask from — `DetectionDataModule` refuses `mask_targets=True` on a YOLO root rather than training a segmentation head against empty masks (WP-099b). Full format/layout mechanics: docs/DATASETS.md.
 
 ## 🔌 Before any of them: the wiring gate
 

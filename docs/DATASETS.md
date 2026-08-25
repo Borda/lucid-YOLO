@@ -84,7 +84,7 @@ lucid-data build-tiles --root <dota_root> --out <tiles_root> --splits train,val 
 
 Tiles are PNG by default, matching the lossless source. `--suffix .jpg --quality 92` trades that for decode speed, and the trade is worth weighing: the loader decodes every tile once per epoch and mosaic pulls four source tiles per training sample, so a 64-image step at 1024 px is around 250 decodes and PNG is where a run starves before the GPU does. Annotations are unaffected by the choice.
 
-The tiles are a build artifact and are never committed. The output is a COCO container with quadrilateral rings, in the layout `obb_smoke.yaml` names, so training and evaluation read it through the same dataset class as COCO.
+The tiles are a build artifact and are never committed. The output is a COCO container with quadrilateral rings, in the layout `obb_nano_smoke.yaml` names, so training and evaluation read it through the same dataset class as COCO.
 
 Overlap is a real choice, not a default to accept unread. Pixels are amplified by `(patch / (patch - overlap))²`: 512 px of overlap is R18's own crop stride and costs 4.0x, while the 200 px of A21 costs about 1.55x. Larger overlap means fewer objects severed by a tile edge and a longer epoch.
 

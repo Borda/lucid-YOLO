@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Pose-smoke ablation arm (roadmap WP-135, for WP-125's acceptance). This is
-# `pose_smoke.yaml` with one line changed: `keypoint_loss: laplace_nll` under `model:`.
+# `pose_nano_smoke.yaml` with one line changed: `keypoint_loss: laplace_nll` under `model:`.
 # Everything else -- seed, variant, epochs, callbacks, every gain, the data placeholders
 # -- is byte-identical on purpose, because the pair is a controlled comparison and any
 # second difference would make the result unattributable.
@@ -11,7 +11,7 @@
 # reparameterization and the visibility masking. R14 published the pair at 67.4 AP for
 # this arm against 70.5 AP for full RLE on COCO, so the expected direction is known --
 # what this pair measures is whether it reproduces here, at this scale, on this recipe.
-# Run this exactly as `pose_smoke.yaml` is run, on the same data, and compare the two
+# Run this exactly as `pose_nano_smoke.yaml` is run, on the same data, and compare the two
 # `lucid-eval` keypoint reports' `e2e` rows. The fast wiring gate is unchanged:
 # `scripts/overfit_micro.py --task kp` must pass before any COCO launch. ADR-001
 # boundary: this file carries only run-level configuration -- topology is named by
@@ -47,7 +47,7 @@ model:
   box_gain: 7.5 # blueprint sec. 5.7 (R1 Tables S2/S5): pretrain-style box gain
   cls_gain: 0.5 # blueprint sec. 5.7: cls gain
   l1_gain: 6.0 # blueprint sec. 5.7: L1 gain (the legacy dfl field scales L1)
-  keypoint_gain: 1.0 # A68: un-tuned -- held at pose_smoke.yaml's value, or the arms differ twice
+  keypoint_gain: 1.0 # A68: un-tuned -- held at pose_nano_smoke.yaml's value, or the arms differ twice
   alpha_init: 0.8 # blueprint sec. 5.7 (R1 Eq. 2-3): ProgLoss ramp start, weights (0.8, 0.2)
   alpha_final: 0.1 # blueprint sec. 5.7: ProgLoss ramp end, weights (0.1, 0.9)
 

@@ -5,7 +5,7 @@ WP-057 built the tiling geometry and WP-056 the label parsing, and both delibera
 write nothing: "the tiles themselves are a **build artifact** (AGENTS.md sec. 3), so
 nothing here writes to disk on its own." This script is the caller that decides where
 they land. Until it existed, :func:`~lucid_yolo.data.tiling.tile_image_targets` had no
-production consumer at all and ``obb_smoke.yaml``'s ``data_root`` was a placeholder
+production consumer at all and ``obb_nano_smoke.yaml``'s ``data_root`` was a placeholder
 pointing at a directory nothing could produce.
 
 What it emits:

@@ -171,7 +171,7 @@ class TestDetectionCLICheckpointInjection:
 
     def test_injects_a_checkpoint_naming_the_configs_task_and_variant(self) -> None:
         """The det-smoke config (``task: detect``, default ``variant: n``) gets a matching filename."""
-        cli = self._build_cli("--config", str(packaged_config("det_smoke")))
+        cli = self._build_cli("--config", str(packaged_config("det_nano_smoke")))
         checkpoints = [callback for callback in cli.trainer.callbacks if isinstance(callback, ModelCheckpoint)]
         assert len(checkpoints) == 1
         assert checkpoints[0].filename == _checkpoint_filename("detect", "n")
@@ -194,7 +194,7 @@ class TestDetectionCLICheckpointInjection:
             ),
             encoding="utf-8",
         )
-        cli = self._build_cli("--config", str(packaged_config("det_smoke")), "--config", str(override))
+        cli = self._build_cli("--config", str(packaged_config("det_nano_smoke")), "--config", str(override))
         checkpoints = [callback for callback in cli.trainer.callbacks if isinstance(callback, ModelCheckpoint)]
         assert len(checkpoints) == 1
         assert checkpoints[0].filename == "custom"

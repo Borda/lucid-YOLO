@@ -129,7 +129,7 @@ lucid-data download --data_root /data/coco --splits '[train,val]' --verify true
 lucid-data check    --data_root /data/coco
 
 # 2. train — one config per tier, packaged inside the wheel
-lucid-yolo fit --config det_smoke.yaml --data.data_root /data/coco
+lucid-yolo fit --config det_nano_smoke.yaml --data.data_root /data/coco
 
 # 3. score a checkpoint on the protocol its own task names
 lucid-eval --checkpoint runs/det.ckpt --data_root /data/coco --output report.json
@@ -138,7 +138,7 @@ lucid-eval --checkpoint runs/det.ckpt --data_root /data/coco --output report.jso
 lucid-predict --checkpoint runs/det.ckpt --image street.jpg
 ```
 
-Swap `det_smoke.yaml` for `seg_smoke.yaml` or `obb_smoke.yaml` and the same four commands train and score the other two tasks. docs/TRAINING.md carries the full recipe per tier, including the batch-size scaling and the one setting that matters most on a hosted runtime.
+Swap `det_nano_smoke.yaml` for `seg_nano_smoke.yaml` or `obb_nano_smoke.yaml` and the same four commands train and score the other two tasks. docs/TRAINING.md carries the full recipe per tier, including the batch-size scaling and the one setting that matters most on a hosted runtime.
 
 **Releases publish no trained weights** (a deliberate policy — see docs/DECISIONS.md, D14), so every command above takes a checkpoint you trained.
 

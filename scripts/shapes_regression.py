@@ -60,7 +60,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: Packaged n-scale detector recipe; it remains the single source of truth for
 #: optimizer, loss, and LR-schedule hyperparameters shared with the Det-smoke run.
-_RECIPE_PATH = Path(lucid_yolo.__file__).resolve().parent / "configs" / "det_smoke.yaml"
+_RECIPE_PATH = Path(lucid_yolo.__file__).resolve().parent / "configs" / "det_nano_smoke.yaml"
 
 #: The frozen accelerator golden, isolated from the default offline golden harness.
 _GOLDEN_PATH = REPO_ROOT / "goldens" / "gpu" / "shapes_regression_det.json"
@@ -187,7 +187,7 @@ def load_recipe(path: Path = _RECIPE_PATH) -> Recipe:
     duplicating the stable detector recipe.
 
     Args:
-        path: Recipe YAML path. Defaults to the packaged ``det_smoke.yaml``.
+        path: Recipe YAML path. Defaults to the packaged ``det_nano_smoke.yaml``.
 
     Returns:
         The parsed regression :class:`Recipe`.

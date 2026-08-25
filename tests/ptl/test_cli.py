@@ -45,7 +45,7 @@ def _build_cli(*args: str) -> DetectionCLI:
     launching ``fit``.
 
     Examples:
-        >>> cli = _build_cli("--config", str(packaged_config("det_smoke")))
+        >>> cli = _build_cli("--config", str(packaged_config("det_nano_smoke")))
         >>> isinstance(cli.model, DetectionLitModule)
         True
     """
@@ -69,7 +69,7 @@ def _build_cli(*args: str) -> DetectionCLI:
 )
 def test_progress_bar_choice_selects_callback(flags: tuple[str, ...], expected: str | None) -> None:
     """--progress_bar picks the bar flavour; the default is the notebook-safe tqdm bar."""
-    cli = _build_cli("--config", str(packaged_config("det_smoke")), *flags)
+    cli = _build_cli("--config", str(packaged_config("det_nano_smoke")), *flags)
     bar = cli.trainer.progress_bar_callback
     assert (None if bar is None else type(bar).__name__) == expected
 
@@ -78,7 +78,7 @@ def test_default_loggers_are_tensorboard_plus_csv(tmp_path: Path) -> None:
     """An unset trainer.logger yields TensorBoard + CSV sharing one version directory."""
     cli = _build_cli(
         "--config",
-        str(packaged_config("det_smoke")),
+        str(packaged_config("det_nano_smoke")),
         "--trainer.default_root_dir",
         str(tmp_path),
     )
@@ -91,7 +91,7 @@ def test_logger_false_disables_default_loggers(tmp_path: Path) -> None:
     """An explicit trainer.logger=false wins over the TensorBoard + CSV default."""
     cli = _build_cli(
         "--config",
-        str(packaged_config("det_smoke")),
+        str(packaged_config("det_nano_smoke")),
         "--trainer.default_root_dir",
         str(tmp_path),
         "--trainer.logger=false",
@@ -115,7 +115,7 @@ def _config_cli(path: Path, *extra: str) -> DetectionCLI:
     """Build the CLI from a config file plus any extra override args.
 
     Examples:
-        >>> cli = _config_cli(packaged_config("det_smoke"))
+        >>> cli = _config_cli(packaged_config("det_nano_smoke"))
         >>> isinstance(cli.model, DetectionLitModule)
         True
     """
@@ -126,11 +126,11 @@ def test_configs_dir_is_non_empty() -> None:
     """Every shipped config is discovered (guards against an empty glob)."""
     names = {path.name for path in _CONFIG_PATHS}
     assert {
-        "det_smoke.yaml",
-        "det_ablations.yaml",
-        "overfit_100.yaml",
-        "seg_smoke.yaml",
-        "obb_smoke.yaml",
+        "det_nano_smoke.yaml",
+        "det_small_ablations.yaml",
+        "det_nano_overfit_100.yaml",
+        "seg_nano_smoke.yaml",
+        "obb_nano_smoke.yaml",
     } <= names
 
 
@@ -144,7 +144,7 @@ def test_config_dry_parses(config_path: Path) -> None:
 
 def test_smoke_tier_resolves_variant_n_multipliers_and_gains() -> None:
     """Det-smoke (``variant: n``) expands to the n-row multipliers and reference gains."""
-    cli = _config_cli(_CONFIGS_DIR / "det_smoke.yaml")
+    cli = _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml")
     spec = scale_spec("n")
     assert cli.model.hparams.depth == spec.depth
     assert cli.model.hparams.width == spec.width
@@ -162,7 +162,7 @@ def test_smoke_tier_resolves_variant_n_multipliers_and_gains() -> None:
 
 def test_variant_s_resolves_registry_multipliers() -> None:
     """Det-ablations (``variant: s``) expands to the s-row multipliers and s-policy."""
-    cli = _config_cli(_CONFIGS_DIR / "det_ablations.yaml")
+    cli = _config_cli(_CONFIGS_DIR / "det_small_ablations.yaml")
     spec = scale_spec("s")
     assert cli.model.hparams.depth == spec.depth
     assert cli.model.hparams.width == spec.width
@@ -189,19 +189,19 @@ def test_yaml_roundtrip(config_path: Path) -> None:
 def test_unknown_topology_key_is_rejected() -> None:
     """A topology-like key the module does not accept aborts parsing (ADR-001)."""
     with pytest.raises(SystemExit):
-        _config_cli(_CONFIGS_DIR / "det_smoke.yaml", "--model.layers=5")
+        _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", "--model.layers=5")
 
 
 def test_direct_multiplier_override_is_rejected() -> None:
     """A link-computed multiplier cannot be set directly; ``variant`` is the seam."""
     with pytest.raises(SystemExit):
-        _config_cli(_CONFIGS_DIR / "det_smoke.yaml", "--model.depth=0.9")
+        _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", "--model.depth=0.9")
 
 
 def test_packaged_config_resolves_name_with_and_without_suffix() -> None:
     """packaged_config maps bare names onto the installed configs tree."""
-    with_suffix = packaged_config("det_smoke.yaml")
-    without_suffix = packaged_config("det_smoke")
+    with_suffix = packaged_config("det_nano_smoke.yaml")
+    without_suffix = packaged_config("det_nano_smoke")
     assert with_suffix == without_suffix
     assert with_suffix.is_file()
     assert with_suffix.parent == _CONFIGS_DIR
@@ -210,21 +210,21 @@ def test_packaged_config_resolves_name_with_and_without_suffix() -> None:
 @pytest.mark.parametrize(
     ("argv", "expected_value"),
     [
-        pytest.param(["fit", "--config", "det_smoke.yaml"], None, id="separate-token"),
-        pytest.param(["fit", "--config", "det_smoke"], None, id="bare-name"),
-        pytest.param(["fit", "--config=det_smoke"], None, id="equals-form"),
+        pytest.param(["fit", "--config", "det_nano_smoke.yaml"], None, id="separate-token"),
+        pytest.param(["fit", "--config", "det_nano_smoke"], None, id="bare-name"),
+        pytest.param(["fit", "--config=det_nano_smoke"], None, id="equals-form"),
     ],
 )
 def test_resolve_config_args_rewrites_packaged_names(argv, expected_value) -> None:
     """A --config value naming a packaged config is rewritten onto its real path."""
     del expected_value
     resolved = " ".join(_resolve_config_args(argv))
-    assert str(packaged_config("det_smoke")) in resolved
+    assert str(packaged_config("det_nano_smoke")) in resolved
 
 
 def test_resolve_config_args_leaves_existing_and_unknown_paths_alone(tmp_path) -> None:
     """Existing local paths and unknown names pass through untouched."""
-    local = tmp_path / "det_smoke.yaml"
+    local = tmp_path / "det_nano_smoke.yaml"
     local.write_text("variant: n\n", encoding="utf-8")
     assert _resolve_config_args(["fit", "--config", str(local)]) == ["fit", "--config", str(local)]
     assert _resolve_config_args(["fit", "--config", "no_such_config"]) == ["fit", "--config", "no_such_config"]
@@ -243,8 +243,8 @@ def test_fit_without_config_defaults_to_packaged_recipe(capsys) -> None:
 @pytest.mark.parametrize(
     ("config_name", "expected"),
     [
-        pytest.param("seg_smoke.yaml", True, id="segment-rasterises-in-the-loader"),
-        pytest.param("det_smoke.yaml", False, id="detect-does-not"),
+        pytest.param("seg_nano_smoke.yaml", True, id="segment-rasterises-in-the-loader"),
+        pytest.param("det_nano_smoke.yaml", False, id="detect-does-not"),
     ],
 )
 def test_mask_targets_follows_the_model_task(config_name: str, expected: bool) -> None:
@@ -263,8 +263,8 @@ def test_mask_targets_follows_the_model_task(config_name: str, expected: bool) -
 @pytest.mark.parametrize(
     ("config_name", "expected"),
     [
-        pytest.param("obb_smoke.yaml", True, id="obb-reads-rotated-targets"),
-        pytest.param("det_smoke.yaml", False, id="detect-does-not"),
+        pytest.param("obb_nano_smoke.yaml", True, id="obb-reads-rotated-targets"),
+        pytest.param("det_nano_smoke.yaml", False, id="detect-does-not"),
     ],
 )
 def test_rotated_targets_follows_the_model_task(config_name: str, expected: bool) -> None:
