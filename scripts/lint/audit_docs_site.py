@@ -40,7 +40,11 @@ class _NavLoader(yaml.SafeLoader):
     """
 
 
-_NavLoader.add_multi_constructor(  # type: ignore[no-untyped-call]  # yaml-stubs leaves this untyped
+# ``unused-ignore`` rides along with ``no-untyped-call`` on purpose: whether this call
+# is typed depends on the resolved ``types-PyYAML``, which the lockfile does not pin, so
+# the ignore is load-bearing on one version and dead on the next. Listing both codes
+# keeps the line correct under either without pinning the stub package for one comment.
+_NavLoader.add_multi_constructor(  # type: ignore[no-untyped-call, unused-ignore]
     "tag:yaml.org,2002:python/name:",
     lambda loader, suffix, node: suffix,
 )
