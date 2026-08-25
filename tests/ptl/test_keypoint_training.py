@@ -37,6 +37,7 @@ here is generic over, and three points exercise it as well as seventeen.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import pytest
@@ -45,6 +46,7 @@ from torch import Tensor, nn
 
 from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.losses.keypoint_nll_loss import LaplaceNLLLoss
 from lucid_yolo.losses.rle_loss import RLELoss
 from lucid_yolo.ptl import DetectionLitModule, normalize_keypoints_to_box, pad_keypoints
 from lucid_yolo.ptl.datamodule import DetectionDataModule, collate_detection, unpack_targets
@@ -88,13 +90,19 @@ class _LogRecorder:
         self.values[name] = float(value.detach())
 
 
-def _tiny_module(task: str = "keypoints", **overrides: float) -> DetectionLitModule:
+def _tiny_module(task: str = "keypoints", keypoint_loss: str = "rle", **overrides: float) -> DetectionLitModule:
     """Build an n-scale module with a low channel cap for fast CPU tests.
+
+    ``keypoint_loss`` is spelled out rather than left to ``overrides`` because it is
+    the one non-numeric knob here, and its default repeats the module's own so every
+    caller predating WP-135 builds exactly what it did before.
 
     Examples:
         >>> module = _tiny_module()
         >>> module.task
         'keypoints'
+        >>> type(_tiny_module(keypoint_loss="laplace_nll").rle_loss).__name__
+        'LaplaceNLLLoss'
     """
     gains: dict[str, float] = {
         "box_gain": _BOX_GAIN,
@@ -111,6 +119,7 @@ def _tiny_module(task: str = "keypoints", **overrides: float) -> DetectionLitMod
         num_classes=_NUM_CLASSES,
         task=task,
         num_keypoints=_NUM_KEYPOINTS if task == "keypoints" else None,
+        keypoint_loss=keypoint_loss,
         **gains,
     )
     module.log = _LogRecorder()  # type: ignore[method-assign]
@@ -250,6 +259,96 @@ class TestHeadConstruction:
 
         assert keys == list(detection.state_dict())
         assert any(".keypoint_stems." in key for key in posed.state_dict())
+
+
+class TestKeypointLossSelection:
+    """WP-135's ``keypoint_loss`` switch: which objective fills the slot, and what it costs.
+
+    R14 Table 7's "Laplace, learnable variance" row, wired as the second arm WP-125's
+    mechanism claim needs. What these pin is that the switch is genuinely *additive* --
+    the default reproduces the objective every existing config and checkpoint was built
+    with -- and that the ablation arm actually trains, since an arm that quietly failed
+    to would read as evidence for the flow rather than as a broken control.
+    """
+
+    def test_defaults_to_the_rle_objective(self) -> None:
+        """A keypoints module built without ``keypoint_loss`` gets ``RLELoss``, as before WP-135.
+
+        The non-breaking half of an additive change, asserted rather than assumed: every
+        shipped config, every accepted figure and every checkpoint on disk was produced
+        under R14's full loss, and a default that had shifted would silently retrain a
+        different objective under the same recipe name.
+        """
+        assert isinstance(_tiny_module().rle_loss, RLELoss)
+
+    def test_selects_the_flow_free_ablation_when_asked(self) -> None:
+        """``keypoint_loss="laplace_nll"`` puts a ``LaplaceNLLLoss`` in the slot instead.
+
+        The attribute keeps its ``rle_loss`` spelling under either objective because it
+        prefixes the loss's own state-dict keys and renaming it would stop every
+        pre-WP-135 keypoints checkpoint loading; the *type* is what changed.
+        """
+        module = _tiny_module(keypoint_loss="laplace_nll")
+
+        assert isinstance(module.rle_loss, LaplaceNLLLoss)
+        assert not isinstance(module.rle_loss, RLELoss)
+
+    def test_an_unknown_objective_is_refused_at_construction(self) -> None:
+        """A misspelled ``keypoint_loss`` raises, naming both arms, rather than falling back.
+
+        The failure a silent fallback buys is the worst one this WP could ship: an
+        ablation run that reports itself as the ablation while training the very
+        objective it was supposed to control for, producing a comparison whose two arms
+        are the same arm.
+        """
+        with pytest.raises(ValueError, match="keypoint_loss must be one of"):
+            DetectionLitModule(
+                depth=0.34,
+                width=0.25,
+                max_channels=256,
+                num_classes=_NUM_CLASSES,
+                task="keypoints",
+                num_keypoints=_NUM_KEYPOINTS,
+                keypoint_loss="laplace",
+            )
+
+    def test_the_ablation_adds_no_parameters_to_the_model(self) -> None:
+        """An ablation module's state dict is a detection module's plus the point stems only.
+
+        The structural difference between the two arms, stated where the model can see
+        it: RLE contributes flow tensors an optimizer must pick up and a checkpoint must
+        carry, the ablation contributes none at all. It also means an ablation module
+        draws no RNG for its loss, so its weights are bit-for-bit a same-seed detection
+        module's -- the construction-order caveat the module docstring states for the
+        flow does not apply to this arm.
+        """
+        ablation = _tiny_module(keypoint_loss="laplace_nll")
+        detection = _tiny_module(task="detect")
+
+        assert not any(key.startswith("rle_loss.") for key in ablation.state_dict())
+        assert [key for key in ablation.state_dict() if ".keypoint_stems." not in key] == list(detection.state_dict())
+
+    def test_one_step_of_the_ablation_arm_trains_the_point_stems(self) -> None:
+        """A ``laplace_nll`` step yields a finite scalar loss and gradient on both point stems.
+
+        The RLE path's own wiring test asserts gradient on the stems *and* on the flow;
+        this arm has no flow, so the stems are the whole of what the term has to move. A
+        term that computed and discarded them would leave the ablation run flat while
+        still logging an entirely ordinary loss curve -- and a flat arm reads as a large
+        effect for the flow.
+        """
+        module = _tiny_module(keypoint_loss="laplace_nll")
+        recorder = _LogRecorder()
+        module.log = recorder  # type: ignore[method-assign]
+
+        loss = module.training_step(_posed_batch(), 0)
+        loss.backward()
+
+        assert bool(torch.isfinite(loss))
+        assert loss.ndim == 0
+        assert _has_gradient(module.head.o2o.keypoint_stems)
+        assert _has_gradient(module.head.o2m.keypoint_stems)
+        assert math.isfinite(recorder.values["train/keypoint"])
 
 
 class TestTrainingStep:

@@ -83,7 +83,8 @@ Task conditioning:
     per-class union by :func:`~lucid_yolo.losses.semantic_loss.semantic_aux_loss`.
 
     ``"keypoints"`` (WP-132) adds ``keypoint_gain * rle`` — R14's residual
-    log-likelihood over the head's point predictions. Structurally it is the
+    log-likelihood over the head's point predictions, or whichever objective
+    ``keypoint_loss`` put in that slot (WP-135). Structurally it is the
     ``"segment"`` shape rather than the ``"obb"`` one: nothing is replaced, every
     detection term keeps its gain, and the pose term rides on top. That follows
     from what the two tasks *are*. An oriented box is the same object the
@@ -103,6 +104,16 @@ Task conditioning:
     would perturb every parameter that already existed. This is the same
     construction-order rule :class:`~lucid_yolo.models.heads.detect._DetectionBranch`
     states for its own optional stems, applied one level up.
+
+    Which keypoint objective fills that slot is the ``keypoint_loss`` argument
+    (WP-135). Its default, ``"rle"``, is the term just described and is what every
+    existing config and checkpoint carries; ``"laplace_nll"`` substitutes
+    :class:`~lucid_yolo.losses.keypoint_nll_loss.LaplaceNLLLoss`, R14 Table 7's
+    flow-free control, which shares the call signature exactly so the step's own
+    call site is unchanged. It is an experimental arm for WP-125's mechanism
+    claim rather than a tuning choice, and it holds no parameters at all — so an
+    ablation module's weights are bit-for-bit a same-seed detection module's,
+    where a RLE module's diverge from the flow's first ``Linear``.
 
     ``num_keypoints`` is required for this task and has no default, because ``K``
     is a property of the dataset's annotation schema rather than of the method:
@@ -166,6 +177,7 @@ from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.eval.dota_eval import MAX_DETECTIONS, evaluate_rotated_map, rotated_detections_to_predictions
 from lucid_yolo.eval.segment_decode import decode_instance_masks
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
+from lucid_yolo.losses.keypoint_nll_loss import LaplaceNLLLoss
 from lucid_yolo.losses.mask_loss import instance_mask_loss
 from lucid_yolo.losses.oriented_loss import (
     DEFAULT_ROTATED_IOU_FORM,
@@ -201,6 +213,20 @@ _STRIDES: tuple[int, int, int] = (8, 16, 32)
 #: swaps the two box terms for the WP-088 rotated ones and adds the angle term,
 #: and ``"keypoints"`` adds the WP-132 residual log-likelihood term.
 _TASKS: tuple[str, ...] = ("detect", "segment", "obb", "keypoints")
+
+#: Keypoint objectives a ``"keypoints"`` run may select between, each mapped to the
+#: class that implements it (WP-135). ``"rle"`` is R14's full residual
+#: log-likelihood and the default every existing config, checkpoint and accepted
+#: result was produced with; ``"laplace_nll"`` is R14 Table 7's own flow-free
+#: control, present so WP-125 can state a direction of effect rather than a bare
+#: number. Keyed by plain strings for the reason ``_TASKS`` and
+#: ``ROTATED_IOU_FORMS`` are: the value arrives from YAML. One mapping rather than a
+#: name tuple beside a constructor branch, so the accepted set and the thing each
+#: name builds cannot drift apart.
+_KEYPOINT_LOSSES: dict[str, type[RLELoss] | type[LaplaceNLLLoss]] = {
+    "rle": RLELoss,
+    "laplace_nll": LaplaceNLLLoss,
+}
 
 #: Column count of an ``xyxy`` axis-aligned box.
 _BOX_DIM = 4
@@ -638,11 +664,27 @@ class DetectionLitModule(LightningModule):
             module's ``keypoint_gain=0`` bit-exactness test as its validation: at
             zero the term must leave the detection objective untouched, whatever
             scale it takes at one.
+        keypoint_loss: Which keypoint objective ``task="keypoints"`` supervises with,
+            ignored otherwise. Defaults to ``"rle"``, R14's full residual
+            log-likelihood (:class:`~lucid_yolo.losses.rle_loss.RLELoss`) — every
+            config, checkpoint and accepted figure this project has produced was
+            produced under it, and the default is what keeps that true. The
+            alternative, ``"laplace_nll"``
+            (:class:`~lucid_yolo.losses.keypoint_nll_loss.LaplaceNLLLoss`), drops the
+            normalizing flow and keeps everything else, which is R14 Table 7's own
+            published ablation: the two rows are "RLE" at ``70.5`` AP and "Laplace,
+            learnable variance" at ``67.4`` AP on COCO. It exists for WP-125, whose
+            acceptance is RLE's *mechanism* claim rather than an absolute pose
+            number — a claim of that shape needs a paired run differing only in the
+            mechanism, and one figure on its own cannot settle it. The switch is
+            therefore an experimental control, not a tuning knob: a production pose
+            run has no reason to leave the default.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
             ``"keypoints"``, if ``rotated_iou_form`` is not a known rotated-IoU form,
-            or if ``task="keypoints"`` was asked for without a ``num_keypoints``.
+            if ``keypoint_loss`` is not a known keypoint objective, or if
+            ``task="keypoints"`` was asked for without a ``num_keypoints``.
 
     Examples:
         >>> import torch
@@ -682,12 +724,15 @@ class DetectionLitModule(LightningModule):
         angle_gain: float = 0.25,
         rotated_iou_form: str = DEFAULT_ROTATED_IOU_FORM,
         keypoint_gain: float = 1.0,
+        keypoint_loss: str = "rle",
     ) -> None:
         super().__init__()
         if task not in _TASKS:
             raise ValueError(f"task must be one of {_TASKS}, got {task!r}")
         if rotated_iou_form not in ROTATED_IOU_FORMS:
             raise ValueError(f"rotated_iou_form must be one of {sorted(ROTATED_IOU_FORMS)}, got {rotated_iou_form!r}")
+        if keypoint_loss not in _KEYPOINT_LOSSES:
+            raise ValueError(f"keypoint_loss must be one of {tuple(_KEYPOINT_LOSSES)}, got {keypoint_loss!r}")
         if task == "keypoints" and num_keypoints is None:
             raise ValueError(
                 "task='keypoints' needs an explicit num_keypoints: the point count is a property of the "
@@ -699,6 +744,7 @@ class DetectionLitModule(LightningModule):
         self._semantic_gain: float = semantic_gain
         self._angle_gain: float = angle_gain
         self._keypoint_gain: float = keypoint_gain
+        self._keypoint_loss: str = keypoint_loss
         self._rotated_iou_form: str = rotated_iou_form
         #: Under ``"obb"`` the two box gains move out of the dual detection loss and
         #: onto the rotated terms; the dual loss is then constructed with zeros in
@@ -737,12 +783,22 @@ class DetectionLitModule(LightningModule):
             self.proto_fusion, self.protonet, self.semantic = build_segmentation_stages(
                 self.neck.channels, num_classes, DEFAULT_NUM_COEFFS
             )
-        #: R14's flow, and the only loss in the project holding parameters — hence a
-        #: submodule rather than a call. Constructed **after** the stages above so its
-        #: ``Linear`` layers draw their RNG last and leave every already-existing
-        #: parameter with the value a same-seed detection module gives it; ``None``
-        #: for any other task, whose state dict must stay exactly what it was.
-        self.rle_loss: RLELoss | None = RLELoss() if task == "keypoints" else None
+        #: The keypoint objective, held as a submodule because R14's flow is the only
+        #: loss in the project carrying parameters — hence a submodule rather than a
+        #: call. Constructed **after** the stages above so those ``Linear`` layers draw
+        #: their RNG last and leave every already-existing parameter with the value a
+        #: same-seed detection module gives it; ``None`` for any other task, whose
+        #: state dict must stay exactly what it was. WP-135's ``LaplaceNLLLoss``
+        #: alternative has no parameters and draws no RNG at all, so the ordering is
+        #: moot for it and kept only because one construction site serves both.
+        #:
+        #: The attribute keeps the name ``rle_loss`` under either objective: it is an
+        #: ``nn.Module`` attribute, so it prefixes this loss's state-dict keys, and
+        #: renaming it would stop every keypoints checkpoint produced before WP-135
+        #: loading — the same key-stability rule the stages above are kept flat for.
+        self.rle_loss: RLELoss | LaplaceNLLLoss | None = (
+            _KEYPOINT_LOSSES[keypoint_loss]() if task == "keypoints" else None
+        )
         oriented = task == "obb"
         self.loss = DualBranchLoss(
             box_gain=0.0 if oriented else box_gain,

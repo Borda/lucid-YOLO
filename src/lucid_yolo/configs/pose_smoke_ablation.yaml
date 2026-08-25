@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: Apache-2.0
+# Pose-smoke ablation arm (roadmap WP-135, for WP-125's acceptance). This is
+# `pose_smoke.yaml` with one line changed: `keypoint_loss: laplace_nll` under `model:`.
+# Everything else -- seed, variant, epochs, callbacks, every gain, the data placeholders
+# -- is byte-identical on purpose, because the pair is a controlled comparison and any
+# second difference would make the result unattributable.
+# WP-125 accepts on RLE's *mechanism* claim (direction of effect vs. a non-flow baseline),
+# not on R1 Table 9's absolute mAP=63.0, and a single run cannot state a direction. This
+# file is the other run: R14 Table 7's own "Laplace, learnable variance" row, which drops
+# the normalizing flow and keeps the learned per-point scale, the sigmoid sigma, the
+# reparameterization and the visibility masking. R14 published the pair at 67.4 AP for
+# this arm against 70.5 AP for full RLE on COCO, so the expected direction is known --
+# what this pair measures is whether it reproduces here, at this scale, on this recipe.
+# Run this exactly as `pose_smoke.yaml` is run, on the same data, and compare the two
+# `lucid-eval` keypoint reports' `e2e` rows. The fast wiring gate is unchanged:
+# `scripts/overfit_micro.py --task kp` must pass before any COCO launch. ADR-001
+# boundary: this file carries only run-level configuration -- topology is named by
+# `variant` only and lives in lucid_yolo/models/registry.py, never here.
+seed_everything: 0
+
+# Registry row, not a topology (ADR-001). Expands via scale_spec() onto the
+# module's depth/width/max_channels and the datamodule augmentation policy.
+variant: n
+
+trainer:
+  max_epochs: 50 # blueprint sec. 10 tier A: ~50 epochs, mirroring Det-smoke
+  # determinism: CLI default (default_determinism) — strict on CPU/CUDA, warn_only on MPS
+  gradient_clip_val: 10.0 # A31: bounds the violent opening steps of the from-scratch recipe
+  callbacks:
+    # Disable mosaic for the final epochs (blueprint sec. 5.9, R1 Table S3: close_mosaic 8-10).
+    - class_path: lucid_yolo.ptl.callbacks.CloseMosaicCallback
+      init_args:
+        close_mosaic: 10
+    # EMA weights, used for eval (blueprint D4).
+    - class_path: lucid_yolo.ptl.callbacks.EMACallback
+
+model:
+  task: keypoints # builds the point stem and adds the R14 residual term (WP-122, WP-132)
+  keypoint_loss: laplace_nll # THE ablated variable (WP-135) -- R14 Table 7's flow-free row
+  num_classes: 1 # COCO person_keypoints (R12): one category, "person"
+  num_keypoints: 17 # R12's human-pose schema; required, no default (module docstring)
+  lr: 0.01 # blueprint sec. 5.8 (R1 Tables S2/S5): lr0
+  lrf: 0.01 # A8: linear decay to lr0*lrf over the run (WP-072)
+  warmup_epochs: 3 # A8/A31: opening linear LR warmup, generic from-scratch practice
+  momentum: 0.95 # blueprint sec. 5.8: momentum ~0.94-0.95
+  weight_decay: 0.0005 # blueprint sec. 5.8: weight_decay 5e-4
+  box_gain: 7.5 # blueprint sec. 5.7 (R1 Tables S2/S5): pretrain-style box gain
+  cls_gain: 0.5 # blueprint sec. 5.7: cls gain
+  l1_gain: 6.0 # blueprint sec. 5.7: L1 gain (the legacy dfl field scales L1)
+  keypoint_gain: 1.0 # A68: un-tuned -- held at pose_smoke.yaml's value, or the arms differ twice
+  alpha_init: 0.8 # blueprint sec. 5.7 (R1 Eq. 2-3): ProgLoss ramp start, weights (0.8, 0.2)
+  alpha_final: 0.1 # blueprint sec. 5.7: ProgLoss ramp end, weights (0.1, 0.9)
+
+data:
+  data_root: /path/to/coco # PLACEHOLDER -- COCO 2017 root (AGENTS.md sec. 3; never downloaded)
+  # `person_keypoints_{split}2017.json` sits beside `instances_{split}2017.json` in
+  # the same annotations archive, but lucid_yolo.data.layout only ever resolves the
+  # `instances_` spelling -- these two overrides are required for this task, not
+  # optional, unlike every other tier's data block:
+  train_ann_file: /path/to/coco/annotations/person_keypoints_train2017.json # PLACEHOLDER
+  val_ann_file: /path/to/coco/annotations/person_keypoints_val2017.json # PLACEHOLDER
+  batch_size: 16 # PLACEHOLDER -- tune to accelerator memory
+  # num_workers: auto (min(batch_size, cpu count)); set 0 for byte-identical deterministic epochs

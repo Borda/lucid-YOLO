@@ -29,7 +29,7 @@ Reference *implementations* (R25–R28) are admitted under D13/ADR-004 on two st
 | R10 | Zheng, Z. et al., *Distance-IoU Loss*, arXiv:1911.08287 (AAAI 2020) | CIoU definition (A1) |
 | R11 | Hidayatullah, P. et al., *YOLOv8 to YOLO11: A Comprehensive Architecture In-depth Comparative Review*, arXiv:2501.13400 (2025) | C3k2/C2PSA/SPPF internals in the YOLO11 lineage (A3) |
 | R13 | Zhou, Y. et al., *MMRotate*, arXiv:2204.13317 (ACM MM 2022) | Long-edge angle convention; rotated-box tooling conventions (A21, A23) |
-| R14 | Li, J. et al., *Human Pose Regression with Residual Log-Likelihood Estimation*, arXiv:2107.11291 (ICCV 2021) | RLE (future pose milestone only) |
+| R14 | Li, J. et al., *Human Pose Regression with Residual Log-Likelihood Estimation*, arXiv:2107.11291 (ICCV 2021) | RLE keypoint loss (Eq. 8, sec. 3.2–3.3, Appendix A Eq. 12) and its Table 7 flow-free ablation baseline (A65, A66) |
 | R16 | Bolya, D. et al., *YOLACT: Real-time Instance Segmentation*, arXiv:1904.02689 (ICCV 2019) | Prototype–coefficient mask formulation; protonet, K, coefficient, mask-loss conventions (A14–A18) |
 | R17 | Llerena, J. M. et al., *Gaussian Bounding Boxes and Probabilistic IoU*, arXiv:2106.06072 (2021) | ProbIoU rotated loss (A19) |
 | R20 | Redmon, J. et al., *You Only Look Once: Unified, Real-Time Object Detection*, arXiv:1506.02640 (CVPR 2016) | Origin of the YOLO family term; MIT-licensed Darknet lineage (naming attribution) |
