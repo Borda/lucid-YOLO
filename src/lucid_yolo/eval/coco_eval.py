@@ -82,11 +82,14 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
 
+import numpy as np
 import torch
 from faster_coco_eval import COCO, COCOeval_faster
+from faster_coco_eval.core import mask as fce_mask
 from torchmetrics.detection import MeanAveragePrecision
 
 from lucid_yolo.assign.grid import HEAD_STRIDES, anchor_grid
@@ -96,7 +99,7 @@ from lucid_yolo.models.build import SegmentOutput
 from lucid_yolo.models.heads.keypoint import decode_keypoints
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Iterator, Mapping, Sequence
 
     from torch import Tensor, nn
 
@@ -855,6 +858,290 @@ class _StreamingScorer:
         return _named_stats(computed, self._combined)
 
 
+def hotcoco_available() -> tuple[bool, str | None]:
+    """Probe whether ``hotcoco`` is installed and its compiled extension actually works (WP-138).
+
+    ``hotcoco`` ships ``cp39-abi3`` wheels for its supported platforms and falls
+    back to a source build needing a Rust toolchain everywhere else (musllinux,
+    most notably — no wheel is published for it at all). A caller with no Rust
+    toolchain either never finished ``pip install`` (an import failure this
+    catches) or, rarer, has a partially-broken compiled extension that imports
+    but cannot construct anything (an import alone would not catch that, so
+    this also builds an empty document — the cheapest real exercise of the
+    extension). Either way the answer this project needs is "does it work
+    *here*", not "is the package present", so both are checked.
+
+    Returns:
+        ``(True, None)`` when hotcoco is usable. ``(False, reason)`` otherwise,
+        ``reason`` a short, printable explanation — never raised, since a
+        missing Rust toolchain is an expected environment shape (rf-detr PR
+        1402's own "Not measured"/"musllinux" note), not a defect.
+
+    Examples:
+        >>> available, reason = hotcoco_available()
+        >>> isinstance(available, bool)
+        True
+    """
+    try:
+        import hotcoco  # noqa: PLC0415 - optional dependency, probed lazily rather than required at import
+
+        hotcoco.COCO({"images": [], "annotations": [], "categories": []})
+    except Exception as error:
+        return False, f"{type(error).__name__}: {error}"
+    return True, None
+
+
+def _encode_mask_rle(mask: Tensor) -> dict[str, object]:
+    """RLE-encode one boolean mask for a hotcoco annotation/result record.
+
+    Two of rf-detr PR 1402's five documented hotcoco compatibility traps live
+    here, both silent-wrong-number failures rather than errors: ``mask.encode``
+    accepts ``uint8`` only and raises a confusing ``TypeError`` on a boolean
+    array, and its ``counts`` field comes back as ``bytes`` — hotcoco's own COCO
+    constructor decodes only the ``str`` form, silently reading a bytes payload
+    back as an **empty** mask (verified directly: a bytes-``counts`` round trip
+    through this project's own installed ``hotcoco`` scored a 9-pixel mask as
+    0 pixels, no exception). Centralized here so both traps are fixed in
+    exactly one place rather than at every call site that builds a record.
+    """
+    dense = mask.detach().cpu().numpy().astype("uint8")
+    rle = fce_mask.encode(np.asfortranarray(dense))
+    return {"size": list(rle["size"]), "counts": rle["counts"].decode("utf-8")}
+
+
+@contextlib.contextmanager
+def _redirect_native_output() -> Iterator[None]:
+    """Silence hotcoco's own stdout/stderr writes for the scope of one evaluator call.
+
+    ``contextlib.redirect_stdout`` only reroutes Python's ``sys.stdout`` object;
+    hotcoco writes from Rust directly to file descriptor 1 (its summary table)
+    and 2 (one warning per evaluator parameter that differs from COCO's
+    defaults — this project overrides ``recThrs`` and ``maxDets``, so every call
+    would otherwise warn). Verified directly: wrapping a hotcoco ``summarize()``
+    call in ``contextlib.redirect_stdout`` left the summary table on the real
+    terminal and an empty capture buffer — rf-detr PR 1402's own finding,
+    reproduced here rather than taken on faith. Descriptor-level ``os.dup2``
+    is the only redirect that reaches it, scoped tightly around the evaluator
+    calls alone so a genuine failure (hotcoco raises a Python exception on
+    error, never merely writes to descriptor 2) still surfaces normally.
+    """
+    saved_fds = [os.dup(fd) for fd in (1, 2)]
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, 1)
+        os.dup2(devnull, 2)
+        yield
+    finally:
+        for fd, saved in zip((1, 2), saved_fds, strict=True):
+            os.dup2(saved, fd)
+            os.close(saved)
+        os.close(devnull)
+
+
+#: COCO's own canonical detection-count thresholds (R12), stated explicitly rather
+#: than left to hotcoco's own default — the same reasoning as :data:`_RECALL_GRID`:
+#: verified equal to hotcoco's default today, but a citable, version-independent
+#: number this project's report does not silently move if that default ever changes.
+_HOTCOCO_MAX_DETS: tuple[int, int, int] = (1, 10, 100)
+
+
+def _hotcoco_stats(preds: list[dict[str, object]], gt: Mapping[str, object], iou_type: str) -> dict[str, float]:
+    """Run one hotcoco ``COCOeval`` pass and return its ten canonical keys, named ``get_results()`` style.
+
+    Reads :meth:`~hotcoco.COCOeval.get_results` rather than the positional
+    ``stats`` array (both exist; the array is index-order-dependent and this
+    project's own conventions refuse a silent-reorder risk when a named
+    alternative is available — the same choice :func:`_named_stats` already
+    makes for the torchmetrics path). ``recThrs``/``maxDets`` are get-mutate-
+    reassign, not in-place: hotcoco's ``params`` is copy-on-read, so
+    ``ev.params.recThrs = ...`` alone is a silent no-op (rf-detr PR 1402's
+    first documented trap, reproduced directly against this project's own
+    installed hotcoco before trusting it).
+    """
+    # Local names distinct from the module-level faster_coco_eval COCO/COCOeval_faster
+    # import above: same identifiers, different package, and mypy resolves a shadowed
+    # name against the outer scope's stub rather than this optional dependency's.
+    from hotcoco import COCO as HotcocoCOCO  # noqa: PLC0415 - optional dependency, gated on availability
+    from hotcoco import COCOeval as HotcocoEval  # noqa: PLC0415 - optional dependency, gated on availability
+
+    with _redirect_native_output():
+        ground_truth = HotcocoCOCO(dict(gt))
+        predictions = ground_truth.loadRes(preds)
+        evaluator = HotcocoEval(ground_truth, predictions, iou_type=iou_type)
+        params = evaluator.params
+        params.rec_thrs = list(_RECALL_GRID)
+        params.max_dets = list(_HOTCOCO_MAX_DETS)
+        evaluator.params = params
+        evaluator.evaluate()
+        evaluator.accumulate()
+        evaluator.summarize()
+        results = evaluator.get_results()
+    return {
+        "map": results["AP"],
+        "map_50": results["AP50"],
+        "map_75": results["AP75"],
+        "map_small": results["APs"],
+        "map_medium": results["APm"],
+        "map_large": results["APl"],
+        "mar_1": results["AR1"],
+        "mar_10": results["AR10"],
+        "mar_100": results["AR100"],
+        "mar_small": results["ARs"],
+        "mar_medium": results["ARm"],
+        "mar_large": results["ARl"],
+    }
+
+
+class _HotcocoStreamingScorer:
+    """:class:`_StreamingScorer`'s hotcoco-backed twin (WP-138), same interface, same memory shape.
+
+    hotcoco offers no incremental ``update()`` of its own — its ``COCOeval`` scores
+    one whole document at once. That is not the same claim as "the whole document
+    must be dense in memory": :meth:`update` RLE-encodes every mask the moment its
+    batch arrives (:func:`_encode_mask_rle`), exactly where
+    :class:`_StreamingScorer`'s own docstring says ``MeanAveragePrecision.update``
+    already does it, so the dense tensors are equally free the moment each batch is
+    scored either way. Only the small, already-encoded records accumulate across an
+    epoch; the full document is assembled from them, and handed to hotcoco, only in
+    :meth:`compute`.
+
+    A combined bbox+segm model runs **two** independent hotcoco passes rather than
+    one tuple-``iou_type`` call, because hotcoco's own ``dataset`` is copy-on-read
+    (rf-detr PR 1402's second documented trap): an annotation's ``area`` field
+    cannot be swapped in place between a box-area pass and a mask-area pass on one
+    loaded document the way torchmetrics' internal combined path does, so this
+    scorer builds two separate ground-truth/result documents instead — one with
+    box area, one with RLE mask area — sharing the same underlying detections.
+    """
+
+    def __init__(self) -> None:
+        self._combined = False
+        self._images: list[dict[str, object]] = []
+        self._box_annotations: list[dict[str, object]] = []
+        self._box_results: list[dict[str, object]] = []
+        self._segm_annotations: list[dict[str, object]] = []
+        self._segm_results: list[dict[str, object]] = []
+        self._categories: set[int] = set()
+        self._image_id = 0
+        self._annotation_id = 1
+
+    def update(self, preds: list[dict[str, Tensor]], targets: list[dict[str, Tensor]]) -> None:
+        """Encode one batch's boxes (and masks, if present) into small COCO-format records."""
+        if not preds:
+            return
+        if self._image_id == 0:
+            self._combined = "masks" in preds[0]
+        for prediction, target in zip(preds, targets, strict=True):
+            image_id = self._image_id
+            self._image_id += 1
+            height, width = _image_extent(prediction, target)
+            self._images.append({"id": image_id, "height": height, "width": width})
+            self._accumulate_boxes(image_id, prediction, target)
+            if self._combined:
+                self._accumulate_masks(image_id, prediction, target)
+
+    def _accumulate_boxes(self, image_id: int, prediction: dict[str, Tensor], target: dict[str, Tensor]) -> None:
+        """Add this image's box ground truth and detections to the box-pass records."""
+        for box, label in zip(target["boxes"].tolist(), target["labels"].tolist(), strict=True):
+            x1, y1, x2, y2 = box
+            self._categories.add(int(label))
+            self._box_annotations.append(
+                {
+                    "id": self._annotation_id,
+                    "image_id": image_id,
+                    "category_id": int(label),
+                    "bbox": [x1, y1, x2 - x1, y2 - y1],
+                    "area": max((x2 - x1) * (y2 - y1), 1.0),
+                    "iscrowd": 0,
+                }
+            )
+            self._annotation_id += 1
+        for box, score, label in zip(
+            prediction["boxes"].tolist(), prediction["scores"].tolist(), prediction["labels"].tolist(), strict=True
+        ):
+            x1, y1, x2, y2 = box
+            self._categories.add(int(label))
+            self._box_results.append(
+                {
+                    "image_id": image_id,
+                    "category_id": int(label),
+                    "bbox": [x1, y1, x2 - x1, y2 - y1],
+                    "score": score,
+                }
+            )
+
+    def _accumulate_masks(self, image_id: int, prediction: dict[str, Tensor], target: dict[str, Tensor]) -> None:
+        """Add this image's RLE-encoded mask ground truth and detections to the segm-pass records."""
+        for mask, label in zip(target["masks"], target["labels"].tolist(), strict=True):
+            rle = _encode_mask_rle(mask)
+            # fce_mask.area accepts either RLE counts form (verified directly); no
+            # second encode needed to get an area figure out of the same record
+            # already built for the annotation itself.
+            self._segm_annotations.append(
+                {
+                    "id": self._annotation_id,
+                    "image_id": image_id,
+                    "category_id": int(label),
+                    "segmentation": rle,
+                    "area": float(fce_mask.area(rle)),
+                    "iscrowd": 0,
+                }
+            )
+            self._annotation_id += 1
+        for mask, score, label in zip(
+            prediction["masks"], prediction["scores"].tolist(), prediction["labels"].tolist(), strict=True
+        ):
+            self._segm_results.append(
+                {
+                    "image_id": image_id,
+                    "category_id": int(label),
+                    "segmentation": _encode_mask_rle(mask),
+                    "score": score,
+                }
+            )
+
+    def compute(self) -> dict[str, float]:
+        """Score the accumulated document(s) with hotcoco, or an all-zero dict if nothing was scored."""
+        if not self._images:
+            keys = [*_METRIC_KEYS] if not self._combined else [*_METRIC_KEYS, *(_SEGM_PREFIX + k for k in _METRIC_KEYS)]
+            return dict.fromkeys(keys, 0.0)
+        categories = [{"id": category, "name": str(category)} for category in sorted(self._categories)]
+        box_gt = {"images": self._images, "annotations": self._box_annotations, "categories": categories}
+        box_stats = _hotcoco_stats(self._box_results, box_gt, "bbox")
+        if not self._combined:
+            return box_stats
+        segm_gt = {"images": self._images, "annotations": self._segm_annotations, "categories": categories}
+        segm_stats = _hotcoco_stats(self._segm_results, segm_gt, "segm")
+        return {**box_stats, **{_SEGM_PREFIX + key: value for key, value in segm_stats.items()}}
+
+
+def _image_extent(prediction: dict[str, Tensor], target: dict[str, Tensor]) -> tuple[int, int]:
+    """Return one image's ``(height, width)``, the field hotcoco's ``COCO`` requires and torchmetrics never tracks.
+
+    Read from whichever side has a mask (its own dense shape is exact); boxes
+    alone carry no canvas size, so the furthest box/mask corner across both
+    prediction and target is the only bound this project has to build from —
+    exact for a synthetic/test fixture sized to its own content, a slight
+    underestimate only when every detection sits well inside the image margin,
+    which never changes which detections match (IoU and OKS are corner-relative,
+    not canvas-relative) and only ever affects the recorded ``height``/``width``
+    metadata field itself.
+    """
+    if "masks" in target and target["masks"].numel():
+        return int(target["masks"].shape[-2]), int(target["masks"].shape[-1])
+    if "masks" in prediction and prediction["masks"].numel():
+        return int(prediction["masks"].shape[-2]), int(prediction["masks"].shape[-1])
+    corners = [
+        tensor["boxes"].reshape(-1, 4)[:, 2:]
+        for tensor in (prediction, target)
+        if tensor.get("boxes") is not None and tensor["boxes"].numel()
+    ]
+    if not corners:
+        return 1, 1
+    furthest = torch.cat(corners).amax(dim=0)
+    return max(1, int(furthest[1].ceil())), max(1, int(furthest[0].ceil()))
+
+
 class _KeypointScorer:
     """One decode path's OKS statistics, accumulated whole and scored once.
 
@@ -1109,7 +1396,10 @@ class DualPathEvaluator:
         letterbox: Letterbox,
         strides: tuple[int, int, int] = HEAD_STRIDES,
         keypoint_sigmas: Sequence[float] = COCO_KEYPOINT_OKS_SIGMAS,
+        backend: str = "faster_coco_eval",
     ) -> None:
+        if backend not in ("faster_coco_eval", "hotcoco"):
+            raise ValueError(f"backend must be one of ('faster_coco_eval', 'hotcoco'), got {backend!r}")
         self._model = model
         self._e2e_decoder = e2e_decoder
         self._nms_decoder = nms_decoder
@@ -1117,6 +1407,13 @@ class DualPathEvaluator:
         self._letterbox = letterbox
         self._strides = strides
         self._keypoint_sigmas = tuple(keypoint_sigmas)
+        #: Box/mask scoring engine, kept conservative by default (WP-138) so every
+        #: existing caller and test means exactly what it meant before this WP —
+        #: a CLI caller opts in explicitly (``lucid-eval --eval_backend hotcoco``).
+        #: OKS keypoint scoring is untouched either way: it stays hand-driven
+        #: ``faster_coco_eval`` (A73), the same choice rf-detr PR 1402 itself made
+        #: ("Keypoint evaluation uses its own OKS path and is untouched").
+        self._backend = backend
 
     def evaluate(
         self,
@@ -1150,7 +1447,8 @@ class DualPathEvaluator:
             and hundreds of gigabytes (see :class:`_StreamingScorer`).
         """
         self._model.to(device).eval()
-        e2e_scorer, nms_scorer = _StreamingScorer(), _StreamingScorer()
+        new_scorer = _HotcocoStreamingScorer if self._backend == "hotcoco" else _StreamingScorer
+        e2e_scorer, nms_scorer = new_scorer(), new_scorer()
         e2e_oks, nms_oks = _KeypointScorer(), _KeypointScorer()
         with torch.no_grad():
             for images, image_ids, orig_sizes in dataloader:

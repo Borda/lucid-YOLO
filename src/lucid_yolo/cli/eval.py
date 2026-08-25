@@ -38,6 +38,7 @@ from jsonargparse import auto_cli
 
 from lucid_yolo.eval import detect_eval, pose_eval, rotated_eval
 from lucid_yolo.eval.checkpoint import load_eval_module
+from lucid_yolo.eval.coco_eval import hotcoco_available
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -52,6 +53,44 @@ DEFAULT_IMG_SIZE = {"obb": 1024, "detect": 640, "segment": 640, "keypoints": 640
 DEFAULT_BATCH_SIZE = {"obb": 8, "detect": 32, "segment": 32, "keypoints": 32}
 
 
+def _resolve_eval_backend(requested: str) -> tuple[str, str | None]:
+    """Resolve the box/segm scoring engine, per WP-138's own "safe to default" call.
+
+    hotcoco ships prebuilt wheels for this project's real target platforms
+    (macOS/Linux/Windows, cp39-abi3), which is why ``"auto"`` — the default —
+    picks it without hedging. The fallback exists for what rf-detr PR 1402
+    documented rather than what is expected here: no musllinux wheel, so an
+    Alpine-style deploy falls back to a source build that needs a Rust
+    toolchain this project has no way to guarantee. An explicit
+    ``eval_backend="hotcoco"`` is a stated requirement, not a preference, and
+    raises rather than silently substituting an engine the caller did not ask
+    for — the same "explicit override wins, and is trusted" shape
+    ``--data.layout`` already has (A63).
+
+    Args:
+        requested: ``"auto"``, ``"hotcoco"`` or ``"faster_coco_eval"``.
+
+    Returns:
+        ``(engine, fallback_reason)`` — ``fallback_reason`` is ``None`` unless
+        ``"auto"`` fell back, in which case it is hotcoco's own probe failure,
+        recorded in the report rather than only printed.
+
+    Examples:
+        >>> _resolve_eval_backend("faster_coco_eval")
+        ('faster_coco_eval', None)
+    """
+    if requested == "faster_coco_eval":
+        return "faster_coco_eval", None
+    available, reason = hotcoco_available()
+    if requested == "hotcoco":
+        if not available:
+            raise RuntimeError(f"eval_backend='hotcoco' was requested explicitly but is not usable here: {reason}")
+        return "hotcoco", None
+    if requested != "auto":
+        raise ValueError(f"eval_backend must be one of ('auto', 'hotcoco', 'faster_coco_eval'), got {requested!r}")
+    return ("hotcoco", None) if available else ("faster_coco_eval", reason)
+
+
 def evaluate(
     checkpoint: Path,
     data_root: Path,
@@ -64,6 +103,7 @@ def evaluate(
     device: str = "auto",
     limit: int = 0,
     output: Path | None = None,
+    eval_backend: str = "auto",
 ) -> int:
     """Score a checkpoint on the acceptance protocol its task defines.
 
@@ -80,6 +120,15 @@ def evaluate(
         device: ``auto``, ``cpu``, ``mps`` or ``cuda``.
         limit: Score only the first N images or tiles; ``0`` scores all.
         output: Write the JSON report here.
+        eval_backend: bbox/segm scoring engine (WP-138) — ``"auto"`` (default)
+            prefers ``hotcoco``, falling back to ``faster_coco_eval`` only if
+            hotcoco is not usable *here* (see :func:`_resolve_eval_backend`);
+            ``"hotcoco"`` or ``"faster_coco_eval"`` states one explicitly and
+            raises rather than substituting if it is not available. ``obb``
+            ignores this — WP-063's rotated mAP is not a COCOeval protocol at
+            all — and the ten OKS keypoint statistics stay on hand-driven
+            ``faster_coco_eval`` regardless (A73); this only ever selects the
+            box (and, for a segmentation checkpoint, mask) engine.
 
     Returns:
         The protocol's exit code.
@@ -107,6 +156,12 @@ def evaluate(
             limit=limit,
             output=output,
         )
+    resolved_backend, fallback_reason = _resolve_eval_backend(eval_backend)
+    if fallback_reason is not None:
+        info["eval_backend_fallback_reason"] = fallback_reason
+        print(
+            f"eval_backend='hotcoco' requested by default but unusable here, using faster_coco_eval: {fallback_reason}"
+        )
     if task == "keypoints":
         return pose_eval.run(
             module,
@@ -117,6 +172,7 @@ def evaluate(
             device_name=device,
             limit=limit,
             output=output,
+            eval_backend=resolved_backend,
         )
     return detect_eval.run(
         module,
@@ -128,6 +184,7 @@ def evaluate(
         device_name=device,
         limit=limit,
         output=output,
+        eval_backend=resolved_backend,
     )
 
 

@@ -116,6 +116,7 @@ def run(
     device_name: str,
     limit: int,
     output: Path | None,
+    eval_backend: str = "faster_coco_eval",
 ) -> int:
     """Run the dual-path COCO evaluation for an already-loaded checkpoint.
 
@@ -129,6 +130,9 @@ def run(
         device_name: Device string, or ``auto``.
         limit: Score only the first N images; ``0`` scores all.
         output: Optional path for the JSON report.
+        eval_backend: The already-resolved bbox/segm scoring engine (WP-138),
+            ``"faster_coco_eval"`` or ``"hotcoco"`` — resolved once by
+            :func:`lucid_yolo.cli.eval.evaluate`, not re-probed here.
 
     Returns:
         ``0``; a failure here raises rather than returning a code.
@@ -143,13 +147,16 @@ def run(
     # caller's: --masks false can decline them, but nothing opts a detector *into* them.
     segmentation = module.task == "segment" and masks
     info["masks"] = segmentation
+    info["eval_backend"] = eval_backend
     images, targets, label_to_category = load_eval_annotations(ann_file, with_masks=segmentation)
     if limit:
         images = images[:limit]
     device = pick_device(device_name)
     letterbox = Letterbox(img_size)
     model: nn.Module = _SegmentationForward(module) if segmentation else module
-    evaluator = DualPathEvaluator(model, TopKDecoder(), NMSDecoder(), label_to_category, letterbox)
+    evaluator = DualPathEvaluator(
+        model, TopKDecoder(), NMSDecoder(), label_to_category, letterbox, backend=eval_backend
+    )
 
     print(
         f"eval: {len(images)} images, device={device.type}, ema={info.get('ema')}, "

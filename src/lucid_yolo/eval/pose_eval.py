@@ -87,6 +87,7 @@ def run(
     device_name: str,
     limit: int,
     output: Path | None,
+    eval_backend: str = "faster_coco_eval",
 ) -> int:
     """Run the dual-path keypoint evaluation for an already-loaded checkpoint.
 
@@ -99,6 +100,11 @@ def run(
         device_name: Device string, or ``auto``.
         limit: Score only the first N images; ``0`` scores all.
         output: Optional path for the JSON report.
+        eval_backend: The already-resolved **box-branch** scoring engine (WP-138),
+            ``"faster_coco_eval"`` or ``"hotcoco"``. The ten ``oks_`` keypoint
+            statistics are unaffected either way — they stay on hand-driven
+            ``faster_coco_eval`` (A73), the box branch's own protocol, not this
+            report's.
 
     Returns:
         ``0`` on success; ``1`` when the checkpoint's point count is not COCO's.
@@ -127,6 +133,7 @@ def run(
     if limit:
         images = images[:limit]
     info["keypoints"] = num_keypoints
+    info["eval_backend"] = eval_backend
     device = pick_device(device_name)
     letterbox = Letterbox(img_size)
     evaluator = DualPathEvaluator(
@@ -136,6 +143,7 @@ def run(
         label_to_category,
         letterbox,
         keypoint_sigmas=COCO_KEYPOINT_OKS_SIGMAS,
+        backend=eval_backend,
     )
 
     print(

@@ -629,3 +629,164 @@ class TestRecallGridBoundary:
 
         with pytest.raises(RuntimeError, match="rec_thresholds"):
             evaluate_bbox([pred], [target])
+
+
+def _synthetic_bbox_case(num_images: int = 6, seed: int = 0) -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
+    """Build a small, informative bbox case: several images, a few classes, some jitter.
+
+    Neither trivially perfect nor trivially empty — some predictions match their
+    ground truth closely, some are offset, some ranked wrong — so the two engines
+    being compared actually exercise matching, ranking and the recall grid rather
+    than only the degenerate all-1.0/all-0.0 corners.
+
+    Examples:
+        >>> preds, targets = _synthetic_bbox_case(num_images=2)
+        >>> len(preds), len(targets)
+        (2, 2)
+        >>> sorted(preds[0])
+        ['boxes', 'labels', 'scores']
+    """
+    generator = torch.Generator().manual_seed(seed)
+    preds: list[dict[str, Tensor]] = []
+    targets: list[dict[str, Tensor]] = []
+    for image_index in range(num_images):
+        count = 2 + image_index % 3
+        top_left = torch.rand(count, 2, generator=generator) * 400.0
+        size = torch.rand(count, 2, generator=generator) * 80.0 + 20.0
+        gt_boxes = torch.cat([top_left, top_left + size], dim=1)
+        jitter = (torch.rand(count, 4, generator=generator) - 0.5) * 6.0
+        pred_boxes = gt_boxes + jitter
+        labels = torch.randint(0, 4, (count,), generator=generator)
+        scores = torch.rand(count, generator=generator) * 0.5 + 0.5
+        targets.append({"boxes": gt_boxes, "labels": labels})
+        preds.append({"boxes": pred_boxes, "scores": scores, "labels": labels})
+    return preds, targets
+
+
+def _synthetic_segm_case(num_images: int = 4, seed: int = 0) -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
+    """The bbox case's twin with masks: same boxes, plus a dense patch per instance, plus jitter.
+
+    Examples:
+        >>> preds, targets = _synthetic_segm_case(num_images=2)
+        >>> len(preds), len(targets)
+        (2, 2)
+        >>> sorted(preds[0])
+        ['boxes', 'labels', 'masks', 'scores']
+    """
+    canvas = 96
+    generator = torch.Generator().manual_seed(seed)
+    preds: list[dict[str, Tensor]] = []
+    targets: list[dict[str, Tensor]] = []
+    for image_index in range(num_images):
+        count = 2 + image_index % 3
+        origins = (torch.rand(count, 2, generator=generator) * (canvas - 24)).to(torch.long)
+        labels = torch.randint(0, 3, (count,), generator=generator)
+        scores = torch.rand(count, generator=generator) * 0.5 + 0.5
+        gt_masks = torch.zeros(count, canvas, canvas, dtype=torch.bool)
+        pred_masks = torch.zeros(count, canvas, canvas, dtype=torch.bool)
+        boxes = torch.zeros(count, 4)
+        for instance, (y0, x0) in enumerate(origins.tolist()):
+            gt_masks[instance, y0 : y0 + 20, x0 : x0 + 20] = True
+            dy, dx = (
+                int(torch.randint(-2, 3, (1,), generator=generator)),
+                int(torch.randint(-2, 3, (1,), generator=generator)),
+            )
+            py0, px0 = max(0, y0 + dy), max(0, x0 + dx)
+            pred_masks[instance, py0 : py0 + 20, px0 : px0 + 20] = True
+            boxes[instance] = torch.tensor([x0, y0, x0 + 20.0, y0 + 20.0])
+        targets.append({"boxes": boxes, "labels": labels, "masks": gt_masks})
+        preds.append({"boxes": boxes, "scores": scores, "labels": labels, "masks": pred_masks})
+    return preds, targets
+
+
+@pytest.mark.skipif(not coco_eval.hotcoco_available()[0], reason="hotcoco not installed or not usable here")
+class TestHotcocoParity:
+    """Hotcoco's streaming scorer must report exactly what faster_coco_eval's does (WP-138).
+
+    hotcoco is opt-in (``DualPathEvaluator(..., backend="hotcoco")``), never the
+    silent default of the library path — a caller who does not ask for it gets
+    exactly the ``faster_coco_eval`` report this project has always produced. The
+    contract this class exists to pin is narrower and stricter: given the
+    *identical* accumulated predictions and targets, the two engines must not
+    merely agree in spirit, they must report the same numbers under the same
+    key names, because a report's ``eval_backend`` field is metadata about how
+    it was computed, not part of what it means.
+    """
+
+    def test_bbox_only_matches_faster_coco_eval(self) -> None:
+        """Every one of the 12 bbox statistics matches exactly, on a mixed-quality case."""
+        preds, targets = _synthetic_bbox_case()
+
+        faster = coco_eval._StreamingScorer()
+        faster.update(preds, targets)
+        hotcoco_scorer = coco_eval._HotcocoStreamingScorer()
+        hotcoco_scorer.update(preds, targets)
+
+        faster_stats = faster.compute()
+        hotcoco_stats = hotcoco_scorer.compute()
+        assert set(hotcoco_stats) == set(_METRIC_KEYS)
+        for key in _METRIC_KEYS:
+            assert hotcoco_stats[key] == pytest.approx(faster_stats[key], abs=1e-6), key
+
+    def test_bbox_and_segm_matches_faster_coco_eval(self) -> None:
+        """All 24 bbox+segm statistics match exactly, including the ``segm_``-prefixed half."""
+        preds, targets = _synthetic_segm_case()
+
+        faster = coco_eval._StreamingScorer()
+        faster.update(preds, targets)
+        hotcoco_scorer = coco_eval._HotcocoStreamingScorer()
+        hotcoco_scorer.update(preds, targets)
+
+        faster_stats = faster.compute()
+        hotcoco_stats = hotcoco_scorer.compute()
+        expected_keys = {*_METRIC_KEYS, *(coco_eval._SEGM_PREFIX + key for key in _METRIC_KEYS)}
+        assert set(hotcoco_stats) == expected_keys
+        for key in expected_keys:
+            assert hotcoco_stats[key] == pytest.approx(faster_stats[key], abs=1e-6), key
+
+    def test_empty_preds_is_zeroed_like_the_faster_coco_eval_path(self) -> None:
+        """No batch ever fed the scorer -> the same all-zero dict :func:`evaluate_bbox` returns."""
+        scorer = coco_eval._HotcocoStreamingScorer()
+
+        assert scorer.compute() == dict.fromkeys(_METRIC_KEYS, 0.0)
+
+    def test_dual_path_report_matches_across_backends(self, detseg_fixture_dir: Path) -> None:
+        """The same checkpoint, same batches, scored end to end by each backend: identical report.
+
+        The unit-level parity tests above feed one hand-built batch straight to
+        each scorer; this drives the whole :class:`DualPathEvaluator` — the real
+        decode, the real letterbox, several batches — the same shape
+        :func:`test_dual_path_report` already exercises, to catch anything that
+        only surfaces once real decoded detections (not a hand-built fixture)
+        reach the RLE/height-width/params machinery above.
+        """
+        torch.manual_seed(0)
+        split_dir = detseg_fixture_dir / _SPLIT
+        dataset = CocoDetectionDataset(split_dir, split_dir / _ANNOTATION)
+        letterbox = Letterbox(_CANVAS)
+        model = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=_NUM_CLASSES)
+        targets = _targets_by_image(_load_fixture_doc(detseg_fixture_dir))
+
+        faster_evaluator = DualPathEvaluator(
+            model, TopKDecoder(), NMSDecoder(), dataset.label_to_category_id, letterbox
+        )
+        faster_report = faster_evaluator.evaluate(
+            _eval_batch(detseg_fixture_dir, letterbox, _NUM_IMAGES), targets, torch.device("cpu")
+        )
+        hotcoco_evaluator = DualPathEvaluator(
+            model, TopKDecoder(), NMSDecoder(), dataset.label_to_category_id, letterbox, backend="hotcoco"
+        )
+        hotcoco_report = hotcoco_evaluator.evaluate(
+            _eval_batch(detseg_fixture_dir, letterbox, _NUM_IMAGES), targets, torch.device("cpu")
+        )
+
+        for path in ("e2e", "nms"):
+            for key in _METRIC_KEYS:
+                assert hotcoco_report[path][key] == pytest.approx(faster_report[path][key], abs=1e-6), (path, key)
+
+    def test_an_unknown_backend_is_refused_at_construction(self) -> None:
+        """A misspelled ``backend`` raises, naming both arms, rather than silently defaulting."""
+        module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=2).eval()
+
+        with pytest.raises(ValueError, match="backend must be one of"):
+            DualPathEvaluator(module, TopKDecoder(), NMSDecoder(), {0: 1}, Letterbox(64), backend="pycocotools")

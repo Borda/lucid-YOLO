@@ -30,6 +30,17 @@ dependencies = [
   "torchvision>=0.19",
   "torchmetrics>=1.9",
   "faster-coco-eval>=1.7",
+  # `lucid-eval`'s bbox/segm scoring engine by default (WP-138) -- faster-coco-eval
+  # stays required too: keypoints' OKS scoring, module.py's training-loop val/mAP,
+  # and lucid-eval's own explicit --eval_backend faster_coco_eval rollback all use
+  # it directly, and this project never asks a caller to install a second package
+  # just to get the report it already had. Tight ceiling deliberate, not
+  # conventional: three of the five known hotcoco/torchmetrics compatibility traps
+  # (docs/ASSUMPTIONS.md A73) fail silently rather than raising, so each pre-1.0
+  # minor needs re-verifying against tests/eval/test_coco_eval.py::TestHotcocoParity
+  # before it is allowed in -- the same reasoning rf-detr PR 1402 states for its
+  # own identical ceiling.
+  "hotcoco>=0.5,<0.6",
   "fvcore>=0.1.5",
   "pyyaml>=6.0",
   # Declared directly for the same reason as jsonargparse: Lightning brings it for the
