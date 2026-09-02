@@ -9,6 +9,11 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 - The `[HUMAN]` roadmap tag is now `[PRINCIPAL]`, project-wide. It never meant a person rather than a machine; it meant the party who drives the project rather than the party who executes it, which is the split every use of it actually turns on. Anatomical uses of "human" are untouched, as are the pre-existing uses of "operator" meaning whoever runs the command -- the principal decides, the operator executes (WP-140b).
 - D18: the one-WP-one-commit contract is a reproduction instrument and ends when the reproduction does. Once the report carries all four accepted tiers and the repository is public, a change altering no shipped behaviour, no public symbol, no golden and no documented assumption lands as an ordinary gated commit; the gate itself never relaxes, and adding a new task restarts the full procedure. Contributor admission is built as three layers, because a signature records a claim and never detects the code it is claiming about (WP-140b).
 
+### Fixed
+
+- R21's registered commit is `fedde0c1`, the one `pyproject.toml` has installed since WP-132; the row had named `0a0cc640`, one upstream commit behind, since that bump (WP-146). No gate reads the register, and both hashes name real commits of the right repository, so the disagreement survived eight work packages and a release. `LetterShape`'s effect on the synthetic fixtures is recorded as measured rather than argued — both generator-derived goldens produce identical values at either commit, so WP-132's re-freeze is attributable entirely to `0a0cc640`'s triangle and centroid changes and no golden moves here.
+- `tests/fixtures/synthetic.py` claimed its emitted COCO `categories` list names every animal the generator ships; it names the four geometric shapes actually drawn, and did at every pin this project has used (WP-146).
+
 ### Added
 
 - Phase 13 (WP-141…153, release 0.6.0) and Phase 14 (WP-154…166, release 0.7.0): contributor admission, the augmentation regression guard, the keypoint ONNX export and `predict_keypoints` that 0.5.0's own entry named as owed, and then the augmentation stack moving to `fuse-augmentations`. Two phases rather than one so the guard is published before anything it guards is allowed to move (WP-140b).

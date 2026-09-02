@@ -11,12 +11,13 @@ helper is idempotent and skips regeneration when its annotation file already
 exists.
 
 The detection/segmentation and oriented-box sets pass an explicit geometric-only
-``shapes=DEFAULT_SHAPES`` rather than relying on the vocabulary default: fuse-
-augmentations' ``class_names(class_mode)`` spans the *whole* ``Shape`` union
-(geometric plus animal) regardless of ``SyntheticConfig.shapes`` by design, so
-their emitted COCO ``categories`` list still names every animal fuse-augmentations
-ships even though none is ever drawn here — being explicit keeps that fact
-visible in this file rather than left to a default the reader has to go look up.
+``shapes=DEFAULT_SHAPES`` rather than relying on the vocabulary default, and the
+emitted COCO ``categories`` list names those four shapes and nothing else --
+``square``, ``rectangle``, ``triangle``, ``circle``. Being explicit is what keeps
+that scoping visible in this file rather than left to a default the reader has to
+go look up: R21's vocabulary has grown from two shape families to four across the
+pins this project has used, and a fixture that named the whole union would have
+moved its own category count every time upstream added a family (WP-146).
 The keypoints set draws from a small, fixed animal subset instead (not every
 animal fuse-augmentations ships) specifically to keep per-image class diversity
 low for an overfit-style milestone run — more animals means a wider category
