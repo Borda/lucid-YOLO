@@ -14,7 +14,7 @@ answer with a **static** shape, because a traced or exported graph has none of t
 former's dynamic control flow. Two independent compositions of the same decode is
 the WP-053a defect class: nothing forced the export path to keep computing what the
 checkpoint computes as either side changed. This module is their one shared home
-(roadmap row 112); the three classes here reproduce
+(roadmap row 112); the task classes here reproduce
 :func:`~lucid_yolo.predict.predict_image`, :func:`~lucid_yolo.predict.predict_segmentation`,
 and :func:`~lucid_yolo.predict.predict_oriented`'s ``"e2e"`` compositions call for
 call, so an exported graph and a single-image prediction can be shown to agree
@@ -58,13 +58,21 @@ from torch import nn
 from lucid_yolo.assign.grid import anchor_grid
 from lucid_yolo.decode.common import BOX_CORNERS
 from lucid_yolo.decode.topk_e2e import TopKDecoder
+from lucid_yolo.eval.coco_eval import gather_keypoints
 from lucid_yolo.eval.segment_decode import decode_instance_masks
+from lucid_yolo.models.heads.keypoint import decode_keypoints
 from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 
 if TYPE_CHECKING:
     from torch import Tensor
 
-__all__ = ["DetectExportGraph", "E2EExportGraph", "OrientedExportGraph", "SegmentExportGraph"]
+__all__ = [
+    "DetectExportGraph",
+    "E2EExportGraph",
+    "KeypointExportGraph",
+    "OrientedExportGraph",
+    "SegmentExportGraph",
+]
 
 
 class E2EExportGraph(nn.Module):
@@ -232,3 +240,60 @@ class OrientedExportGraph(E2EExportGraph):
         cls, box, angle = self.deployed(image)
         rboxes = decode_rboxes(box, angle, self.anchor_points, self.strides)
         return o2o_rotated_topk(cls, rboxes)
+
+
+class KeypointExportGraph(E2EExportGraph):
+    """Keypoint E2E export graph: the A9 tuple beside each detection's point set.
+
+    The fourth task's graph, and the last of the four to exist -- 0.5.0 shipped a
+    keypoint model that trains, validates and evaluates but had no exported view at
+    all, so it was the only released task whose model could not leave PyTorch
+    (WP-151).
+
+    The composition follows :class:`SegmentExportGraph` rather than
+    :class:`DetectExportGraph`, for the reason segmentation has it: the point stem
+    is dense over anchors, so the decode needs the *source anchor* of each detection
+    row, which is what
+    :meth:`~lucid_yolo.decode.topk_e2e.TopKDecoder.decode_with_indices` returns and
+    plain :meth:`~lucid_yolo.decode.topk_e2e.TopKDecoder.forward` discards. The
+    ordering is the one WP-062's angle branch established and
+    :class:`~lucid_yolo.ptl.module.DetectionLitModule` already uses for its own
+    ``val/oks_mAP``: decode the whole dense tensor first, gather second.
+    :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` needs the entire
+    anchor grid and offers no per-detection indexing, so gathering first would mean
+    reconstructing each kept row's anchor and stride by hand.
+
+    Padding rows are handled by
+    :func:`~lucid_yolo.eval.coco_eval.gather_keypoints`, which clamps a padding
+    index to a valid position and then zeroes that row, so a padding row yields the
+    origin rather than the last anchor's pose. That is a weaker requirement than
+    :class:`SegmentExportGraph`'s, which raises on one: a fixed-shape graph cannot
+    drop rows, and this task's gather is defined on them.
+
+    Examples:
+        >>> import torch
+        >>> from lucid_yolo.models.build import KeypointDetector
+        >>> deployed = KeypointDetector("n", num_classes=4, num_keypoints=3).eval().deploy().eval()
+        >>> graph = KeypointExportGraph(deployed, canvas=(128, 128)).eval()
+        >>> with torch.no_grad():
+        ...     detections, keypoints = graph(torch.zeros(1, 3, 128, 128))
+        >>> detections.shape, keypoints.shape  # (B, k, 6) beside (B, k, K, 2)
+        (torch.Size([1, 300, 6]), torch.Size([1, 300, 3, 2]))
+    """
+
+    def forward(self, image: Tensor) -> tuple[Tensor, Tensor]:
+        """Decode an image batch into fixed-size A9 detections and their point sets.
+
+        Args:
+            image: Input image batch of shape ``(B, 3, H, W)`` matching the
+                ``canvas`` this graph was built for.
+
+        Returns:
+            A pair of the ``(B, k, 6)`` A9 detections and their ``(B, k, K, 2)``
+            point coordinates in letterboxed-canvas pixels, row-aligned. Padding
+            rows carry the origin and score zero.
+        """
+        cls, box, raw_points = self.deployed(image)
+        detections, anchor_index = self.decoder.decode_with_indices(cls, box, self.anchor_points, self.strides)
+        dense_points = decode_keypoints(raw_points, self.anchor_points, self.strides)
+        return detections, gather_keypoints(dense_points, anchor_index)

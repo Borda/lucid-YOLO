@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""ONNX export gate for the three end-to-end deploy paths (WP-066).
+"""ONNX export gate for the four end-to-end deploy paths (WP-066, WP-151).
 
-Two claims are under test, and the second is the one that needs the machinery.
+Two claims are under test, and the second is the one that needs the machinery. The
+keypoint path joined the other three at WP-151: 0.5.0 released a task whose model
+could not leave PyTorch, so it was the one released task with no graph to gate.
 
 **The graph carries no suppression.** R1's architectural claim for the one-to-one
 branch is that it deploys *without* NMS, and the exported graph is where that claim
@@ -75,9 +77,17 @@ from torch import Tensor, nn
 from lucid_yolo.assign.grid import anchor_grid
 from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.eval.checkpoint import load_eval_module
+from lucid_yolo.eval.coco_eval import gather_keypoints
 from lucid_yolo.eval.segment_decode import decode_instance_masks
-from lucid_yolo.export import DetectExportGraph, E2EExportGraph, OrientedExportGraph, SegmentExportGraph
-from lucid_yolo.models.build import Detector, OrientedDetector, Segmenter
+from lucid_yolo.export import (
+    DetectExportGraph,
+    E2EExportGraph,
+    KeypointExportGraph,
+    OrientedExportGraph,
+    SegmentExportGraph,
+)
+from lucid_yolo.models.build import Detector, KeypointDetector, OrientedDetector, Segmenter
+from lucid_yolo.models.heads.keypoint import decode_keypoints
 from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.registry import scale_spec
 from lucid_yolo.ptl.module import DetectionLitModule
@@ -93,13 +103,19 @@ _DET_CAP = 300
 
 _NUM_CLASSES = 4
 _VARIANT = "n"
-_TASKS = ("detect", "segment", "obb")
+_TASKS = ("detect", "segment", "obb", "keypoints")
+
+#: Point count K the keypoint task is exported at. Deliberately not COCO's 17: K is a
+#: constructor argument, and a gate that only ever ran at 17 would not catch a shape
+#: baked to that number (A64).
+_NUM_KEYPOINTS = 3
 
 #: Deployable model class per task; each exposes the ``deploy()`` view under test.
-_MODELS: dict[str, type[Detector] | type[Segmenter] | type[OrientedDetector]] = {
+_MODELS: dict[str, type[Detector] | type[Segmenter] | type[OrientedDetector] | type[KeypointDetector]] = {
     "detect": Detector,
     "segment": Segmenter,
     "obb": OrientedDetector,
+    "keypoints": KeypointDetector,
 }
 
 #: Standard deviation the classification logits are rescaled to, so the top-k ranking is
@@ -128,11 +144,12 @@ class _Exported:
     """One task's exported graph beside the eager result it must reproduce.
 
     Attributes:
-        task: One of ``"detect"``, ``"segment"``, ``"obb"``.
+        task: One of ``"detect"``, ``"segment"``, ``"obb"``, ``"keypoints"``.
         path: The written ``.onnx`` file.
         image: The input the graph was exported and compared on.
         reference: Eager outputs of the checkpoint-loaded module, decoded through the
-            E2E path — the detection tuple first, instance masks second for ``segment``.
+            E2E path — the detection tuple first, then instance masks for ``segment``
+            or gathered point sets for ``keypoints``.
     """
 
     task: str
@@ -148,6 +165,7 @@ _GRAPHS: dict[str, type[E2EExportGraph]] = {
     "detect": DetectExportGraph,
     "segment": SegmentExportGraph,
     "obb": OrientedExportGraph,
+    "keypoints": KeypointExportGraph,
 }
 
 
@@ -206,7 +224,7 @@ def _checkpoint_module(task: str, tmp: Path) -> DetectionLitModule:
     """Write a Lightning checkpoint for ``task`` and load it back the way an operator does.
 
     Args:
-        task: One of ``"detect"``, ``"segment"``, ``"obb"``.
+        task: One of ``"detect"``, ``"segment"``, ``"obb"``, ``"keypoints"``.
         tmp: Directory the ``.ckpt`` is written into.
 
     Returns:
@@ -233,6 +251,7 @@ def _checkpoint_module(task: str, tmp: Path) -> DetectionLitModule:
             max_channels=spec.max_channels,
             num_classes=_NUM_CLASSES,
             task=task,
+            num_keypoints=_NUM_KEYPOINTS if task == "keypoints" else None,
         )
     )
     path = tmp / f"{task}.ckpt"
@@ -261,7 +280,7 @@ def _deployed(module: DetectionLitModule, task: str) -> nn.Module:
 
     Args:
         module: The checkpoint-loaded module.
-        task: One of ``"detect"``, ``"segment"``, ``"obb"``.
+        task: One of ``"detect"``, ``"segment"``, ``"obb"``, ``"keypoints"``.
 
     Returns:
         The eval-mode ``deploy()`` view, sharing the checkpoint's weights.
@@ -277,7 +296,11 @@ def _deployed(module: DetectionLitModule, task: str) -> nn.Module:
         >>> deployed.training
         False
     """
-    model = _MODELS[task](_VARIANT, num_classes=_NUM_CLASSES)
+    model = (
+        KeypointDetector(_VARIANT, num_classes=_NUM_CLASSES, num_keypoints=_NUM_KEYPOINTS)
+        if task == "keypoints"
+        else _MODELS[task](_VARIANT, num_classes=_NUM_CLASSES)
+    )
     missing, _ = model.load_state_dict(module.state_dict(), strict=False)
     assert not missing, f"deployed {task} model has parameters the checkpoint did not supply: {missing}"
     return model.eval().deploy().eval()
@@ -288,11 +311,12 @@ def _eager_reference(module: DetectionLitModule, task: str, image: Tensor) -> li
 
     Args:
         module: The checkpoint-loaded module.
-        task: One of ``"detect"``, ``"segment"``, ``"obb"``.
+        task: One of ``"detect"``, ``"segment"``, ``"obb"``, ``"keypoints"``.
         image: Input batch of shape ``(1, 3, 128, 128)``.
 
     Returns:
-        The decoded detection tuple, followed by instance masks for ``"segment"``.
+        The decoded detection tuple, followed by instance masks for ``"segment"`` or
+        gathered point sets for ``"keypoints"``.
 
     Examples:
         >>> import tempfile
@@ -320,6 +344,14 @@ def _eager_reference(module: DetectionLitModule, task: str, image: Tensor) -> li
             masks = decode_instance_masks(segmented.prototypes, gathered, detections[..., :4], image_size=_CANVAS)
             return [detections, masks]
         head_out = module(image)
+        if task == "keypoints":
+            raw_points = head_out.o2o_keypoints
+            assert raw_points is not None  # a keypoints module always builds the point stems
+            detections, anchor_index = TopKDecoder().decode_with_indices(
+                head_out.o2o_cls, head_out.o2o_box, points, strides
+            )
+            dense_points = decode_keypoints(raw_points, points, strides)
+            return [detections, gather_keypoints(dense_points, anchor_index)]
         if task == "obb":
             angle = head_out.o2o_angle
             assert angle is not None  # an oriented module always builds the angle stems
@@ -474,6 +506,8 @@ def test_e2e_graph_ops(exported: _Exported) -> None:
     assert _static_shape(model.graph.output[0]) == (1, _DET_CAP, columns)
     if exported.task == "segment":
         assert _static_shape(model.graph.output[1]) == (1, _DET_CAP, *_CANVAS)
+    if exported.task == "keypoints":
+        assert _static_shape(model.graph.output[1]) == (1, _DET_CAP, _NUM_KEYPOINTS, 2)
 
 
 def test_e2e_export_matches_checkpoint(exported: _Exported) -> None:
@@ -529,4 +563,18 @@ def test_e2e_export_matches_checkpoint(exported: _Exported) -> None:
             masks_candidate,
             masks_reference,
             err_msg="segment: exported instance masks differ from the checkpoint's",
+        )
+
+    if exported.task == "keypoints":
+        points_reference = exported.reference[1].numpy()[0][order_reference]
+        points_candidate = produced[1][0][order_candidate]
+        # A gather at the wrong anchor still returns finite, in-canvas coordinates, so
+        # the comparison needs the point sets to actually differ from one another --
+        # otherwise every permutation of them matches and the parity claim is vacuous.
+        assert np.ptp(points_reference) > 1.0, "every decoded point set is identical; the comparison proves nothing"
+        np.testing.assert_allclose(
+            points_candidate,
+            points_reference,
+            atol=_BOX_ATOL,
+            err_msg="keypoints: exported point coordinates differ from the checkpoint's",
         )
