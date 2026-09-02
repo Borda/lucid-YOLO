@@ -36,7 +36,7 @@ _WP_FLOOR = 129
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
 #: stays contiguous. Raise it when adding a decision; never lower it.
-_DECISION_FLOOR = 17
+_DECISION_FLOOR = 19
 
 #: Lowest assumption count ASSUMPTIONS.md is allowed to hold, for the same ratchet
 #: reason as the two floors above.
@@ -467,7 +467,7 @@ def check_report_sections(docs_dir: Path, repo_root: Path) -> list[str]:
 
 
 def check_decisions_ids(docs_dir: Path, repo_root: Path) -> list[str]:
-    """DECISIONS.md numbers its decisions contiguously from D1, never shrinks, and keeps the four ADRs.
+    """DECISIONS.md numbers its decisions contiguously from D1, never shrinks, and keeps every ADR.
 
     Two properties, deliberately kept separate. Contiguity catches a duplicated or
     skipped id, and it holds however many decisions the register grows to -- a
@@ -485,7 +485,7 @@ def check_decisions_ids(docs_dir: Path, repo_root: Path) -> list[str]:
         ...     docs = Path(tmp)
         ...     _ = (docs / "DECISIONS.md").write_text("| D1 | ... |\\n", encoding="utf-8")
         ...     violations = check_decisions_ids(docs, docs)
-        ...     violations[0].startswith("decisions shrank below D17")
+        ...     violations[0].startswith("decisions shrank below D19")
         True
     """
     text = (docs_dir / "DECISIONS.md").read_text(encoding="utf-8")
@@ -498,7 +498,7 @@ def check_decisions_ids(docs_dir: Path, repo_root: Path) -> list[str]:
         violations.append(f"decision ids are not contiguous from 1: {sorted(d_ids)}")
     if max(d_ids) < _DECISION_FLOOR:
         violations.append(f"decisions shrank below D{_DECISION_FLOOR}: {sorted(d_ids)}")
-    for adr in ("ADR-001", "ADR-002", "ADR-003", "ADR-004"):
+    for adr in ("ADR-001", "ADR-002", "ADR-003", "ADR-004", "ADR-005"):
         if not re.search(rf"^## .*\b{adr}\b", text, flags=re.MULTILINE):
             violations.append(f"missing {adr} section")
     return violations

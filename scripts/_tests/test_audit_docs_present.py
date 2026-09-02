@@ -71,9 +71,10 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     _write(docs_dir / "ASSUMPTIONS.md", "".join(f"| A{i} | t | v | src | p | open |\n" for i in range(1, 27)))
     _write(
         docs_dir / "DECISIONS.md",
-        "".join(f"| D{i} | t |\n" for i in range(1, 18))
+        "".join(f"| D{i} | t |\n" for i in range(1, 20))
         + "".join(
-            f"## Decision D{i} — {adr}\n" for i, adr in enumerate(("ADR-001", "ADR-002", "ADR-003", "ADR-004"), 1)
+            f"## Decision D{i} — {adr}\n"
+            for i, adr in enumerate(("ADR-001", "ADR-002", "ADR-003", "ADR-004", "ADR-005"), 1)
         ),
     )
     _write(docs_dir / "ESCALATION.md", "escalation\n")
@@ -316,14 +317,14 @@ class TestCheckDecisionsIds:
     def test_flags_a_missing_adr(self, tmp_path: Path) -> None:
         """A missing ADR section heading is reported even when ids are contiguous."""
         _write_required_docs(tmp_path / "docs", tmp_path)
-        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 18)))
+        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 20)))
 
         violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
 
         assert any("missing ADR-001 section" in violation for violation in violations)
 
     def test_is_clean_for_a_full_register(self, tmp_path: Path) -> None:
-        """A contiguous register at the floor with all four ADR sections reports no violation."""
+        """A contiguous register at the floor with every ADR section reports no violation."""
         _write_required_docs(tmp_path / "docs", tmp_path)
         assert audit.check_decisions_ids(tmp_path / "docs", tmp_path) == []
 

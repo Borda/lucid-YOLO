@@ -12,6 +12,7 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 ### Added
 
 - Phase 13 (WP-141…153, release 0.6.0) and Phase 14 (WP-154…166, release 0.7.0): contributor admission, the augmentation regression guard, the keypoint ONNX export and `predict_keypoints` that 0.5.0's own entry named as owed, and then the augmentation stack moving to `fuse-augmentations`. Two phases rather than one so the guard is published before anything it guards is allowed to move (WP-140b).
+- D19 and ADR-005: the boundary between this project and `fuse-augmentations`, written down before any code moves (WP-145). `fuse` owns the pixel-and-geometry engine — matrix sampling and composition, single-pass resampling, per-modality transport, constant-fill padding, the letterbox segment and the post-warp instance filter — and `lucid-yolo` owns `Targets`, the composition order, the R1 Table S3 recipe, dataset IO, DOTA tiling, polygon rings, multi-image assemblies and everything from `assign/` inward. The rule settling the cases nobody enumerated: convention lives upstream, policy lives here. The ADR also records the five-step migration protocol, the reciprocal battle-test contract, and four conditions on promoting `fuse` to a runtime dependency, of which the first — real SemVer releases on PyPI — is an upstream commitment recorded as unconfirmed rather than as settled.
 
 ## [0.5.0] - 2026-08-25
 
