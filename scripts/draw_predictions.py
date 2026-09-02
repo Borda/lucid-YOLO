@@ -1,18 +1,21 @@
 #!/usr/bin/env python
 # SPDX-License-Identifier: Apache-2.0
-"""Draw one checkpoint's predictions over the image they were made on (WP-067).
+"""Draw one checkpoint's predictions over the image they were made on (WP-067, WP-152).
 
 The release's worked example: a checkpoint, an image, and a figure showing what the model
 actually answered — boxes for a ``detect`` checkpoint, boxes and instance masks for a
-``segment`` one, rotated quadrilaterals for an ``obb`` one. The prediction itself is not
-recomputed here in any form: :func:`~lucid_yolo.predict.predict_image`,
-:func:`~lucid_yolo.predict.predict_segmentation` and
-:func:`~lucid_yolo.predict.predict_oriented` answer, and this module draws their answer.
+``segment`` one, rotated quadrilaterals for an ``obb`` one, boxes with their point sets
+for a ``keypoints`` one. The prediction itself is not recomputed here in any form:
+:func:`~lucid_yolo.predict.predict_image`,
+:func:`~lucid_yolo.predict.predict_segmentation`,
+:func:`~lucid_yolo.predict.predict_oriented` and
+:func:`~lucid_yolo.predict.predict_keypoints` answer, and this module draws their answer.
 
-Three drawing functions rather than one that switches, because the three answers are
-three different shapes and the split is the one the library already makes: a ``(N, 6)``
-A9 tuple, that tuple beside a row-aligned mask stack, and a ``(N, 7)`` A45 tuple whose
-box columns are a centre and two extents rather than corners. Each takes an
+Four drawing functions rather than one that switches, because the four answers are four
+different shapes and the split is the one the library already makes: a ``(N, 6)``
+A9 tuple, that tuple beside a row-aligned mask stack, a ``(N, 7)`` A45 tuple whose
+box columns are a centre and two extents rather than corners, and that A9 tuple beside a
+``(N, K, 2)`` point stack. Each takes an
 already-computed prediction and an image array, so a drawing can be asserted without an
 inference — which is what makes the geometry below testable at all.
 
@@ -91,8 +94,10 @@ from lucid_yolo.eval.checkpoint import load_eval_module, pick_device
 from lucid_yolo.predict import (
     DECODE_PATHS,
     DEFAULT_CONF_THRESHOLD,
+    KeypointPrediction,
     SegmentedPrediction,
     predict_image,
+    predict_keypoints,
     predict_oriented,
     predict_segmentation,
 )
@@ -103,7 +108,7 @@ matplotlib.use("Agg")
 # current when it is first imported, so a figure would go looking for a display that no
 # gate has. Same order, same reason, as `scripts/plot_training.py`.
 import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon, Rectangle
+from matplotlib.patches import Circle, Polygon, Rectangle
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -124,6 +129,7 @@ __all__ = [
     "RenderOptions",
     "class_color",
     "draw_detections",
+    "draw_keypoints",
     "draw_oriented",
     "draw_segmentation",
     "main",
@@ -175,11 +181,20 @@ _RBOX_LABEL_COLUMN = RBOX_COLUMNS + 1
 #: carries.
 _DRAW_EVERYTHING = 0.0
 
-#: The three tasks, named as :attr:`~lucid_yolo.ptl.module.DetectionLitModule.task` and
+#: The four tasks, named as :attr:`~lucid_yolo.ptl.module.DetectionLitModule.task` and
 #: :data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE` already spell them.
 _DETECT_TASK = "detect"
 _SEGMENT_TASK = "segment"
 _OBB_TASK = "obb"
+_KEYPOINTS_TASK = "keypoints"
+
+#: Radius in pixels of a drawn keypoint marker. Fixed rather than scaled to the box: a
+#: pose figure is read by whether a point sits on its feature, and a marker that grew with
+#: the object would hide exactly the small-object error worth seeing.
+_KEYPOINT_RADIUS = 2.0
+
+#: Line width of a skeleton edge, thinner than a box edge so the two read apart.
+_SKELETON_WIDTH = 1.0
 
 
 def class_color(label: int) -> tuple[float, float, float]:
@@ -508,7 +523,7 @@ def draw_oriented(
 class RenderOptions:
     """What the command was asked for, before any checkpoint has been read.
 
-    Frozen and named rather than a bag of parameters threaded through three renderers:
+    Frozen and named rather than a bag of parameters threaded through four renderers:
     the values arrive together from one parse, travel together, and none of them is
     meaningful to change halfway through a render.
 
@@ -549,7 +564,7 @@ class _Run:
 
     :class:`RenderOptions` carries what a caller asked for, including the two questions
     only a loaded checkpoint can settle — which task, and therefore which letterbox side.
-    Resolving them once into this pair keeps the three renderers free of a defaulting rule
+    Resolving them once into this pair keeps the four renderers free of a defaulting rule
     each, which is how the oriented path would end up drawn at 640 px.
     """
 
@@ -602,13 +617,109 @@ def _render_oriented(module: DetectionLitModule, run: _Run, image: ImageArray, a
     return draw_oriented(image, detections, axes=axes)
 
 
+def _render_keypoints(module: DetectionLitModule, run: _Run, image: ImageArray, axes: Axes) -> Axes:
+    """Predict boxes with their point sets and draw both."""
+    prediction = predict_keypoints(
+        module,
+        run.image,
+        img_size=run.img_size,
+        decoder=run.decoder,
+        conf_threshold=run.conf_threshold,
+        device=run.device,
+    )
+    return draw_keypoints(image, prediction, axes=axes)
+
+
 #: Which entry point draws which task. The keys are also the ``--task`` choices, so the
 #: flag cannot offer a task no renderer serves, and adding one is a single entry.
 _RENDERERS: dict[str, Callable[[DetectionLitModule, _Run, ImageArray, Axes], Axes]] = {
     _DETECT_TASK: _render_detect,
     _SEGMENT_TASK: _render_segment,
     _OBB_TASK: _render_oriented,
+    _KEYPOINTS_TASK: _render_keypoints,
 }
+
+
+def draw_keypoints(
+    image: ImageArray,
+    prediction: KeypointPrediction,
+    conf_threshold: float = _DRAW_EVERYTHING,
+    skeleton: Sequence[tuple[int, int]] | None = None,
+    axes: Axes | None = None,
+) -> Axes:
+    """Draw a keypoint prediction: each detection's box, its points, and any skeleton edges.
+
+    Boxes and point sets are filtered by **one** row mask, computed once, for the reason
+    :func:`draw_segmentation` gives: the two are only meaningful row-aligned, and a pose
+    drawn on the neighbouring object is a plausible figure no shape check catches.
+
+    ``skeleton`` is a caller argument with no default edges, and deliberately so. Which
+    points connect to which is dataset metadata, exactly as the left/right flip pairs are
+    (A64): the head predicts ``K`` points and knows nothing about what they mean, so
+    baking COCO's human topology in here would make a figure of a 15-point letter
+    skeleton or a 12-point animal one silently wrong. With no skeleton the points are
+    drawn on their own, which is the honest figure for a schema nobody has named.
+
+    Args:
+        image: The **original** image as ``(height, width, 3)`` 8-bit RGB.
+        prediction: The row-aligned detections and point sets
+            :func:`~lucid_yolo.predict.predict_keypoints` returns, in original-image
+            coordinates.
+        conf_threshold: Rows scoring at or below this are not drawn, with their points.
+        skeleton: Optional ``(start, end)`` index pairs on the point axis, drawn as edges
+            in the detection's class colour. Defaults to no edges.
+        axes: Draw into these axes instead of a new figure's.
+
+    Returns:
+        The axes drawn into: the image as ``images[0]``, then per surviving detection its
+        rectangle and label, its skeleton edges, and one marker patch per point.
+
+    Raises:
+        ValueError: If the detections are not ``(N, 6)``, if the point sets are not one
+            per detection, or if a skeleton edge names a point the prediction lacks.
+
+    Examples:
+        ```pycon
+        >>> import numpy as np, torch
+        >>> from lucid_yolo.predict import KeypointPrediction
+        >>> points = torch.tensor([[[8.0, 8.0], [16.0, 12.0]]])
+        >>> posed = KeypointPrediction(torch.tensor([[4.0, 4.0, 20.0, 16.0, 0.9, 1.0]]), points)
+        >>> axes = draw_keypoints(np.zeros((32, 32, 3), dtype=np.uint8), posed, skeleton=[(0, 1)])
+        >>> len(axes.patches), len(axes.lines)  # one box plus two markers, one edge
+        (3, 1)
+        >>> plt.close(axes.figure)
+
+        ```
+    """
+    detections, keypoints = prediction.detections, prediction.keypoints
+    _require_width(detections, DET_WIDTH, "draw_keypoints")
+    if keypoints.shape[0] != detections.shape[0]:
+        raise ValueError(
+            f"draw_keypoints needs one point set per detection; got {keypoints.shape[0]} sets "
+            f"for {detections.shape[0]} detections. The pairing is what KeypointPrediction exists "
+            f"to protect, and drawing them unpaired would put every pose on the wrong object."
+        )
+    for start, end in skeleton or ():
+        if not (0 <= start < prediction.num_keypoints and 0 <= end < prediction.num_keypoints):
+            raise ValueError(f"skeleton edge {(start, end)} is out of range for K={prediction.num_keypoints}")
+
+    keep = _above(detections, conf_threshold, SCORE_COLUMN)
+    target = _show_image(image, axes)
+    _draw_boxes(target, detections[keep])
+    for row, points in zip(detections[keep], keypoints[keep], strict=True):
+        colour = class_color(int(row[LABEL_COLUMN]))
+        for start, end in skeleton or ():
+            target.plot(
+                [float(points[start, 0]), float(points[end, 0])],
+                [float(points[start, 1]), float(points[end, 1])],
+                color=colour,
+                linewidth=_SKELETON_WIDTH,
+            )
+        for point in points:
+            target.add_patch(
+                Circle((float(point[0]), float(point[1])), radius=_KEYPOINT_RADIUS, facecolor=colour, edgecolor="none")
+            )
+    return target
 
 
 def _read_image_array(path: Path) -> ImageArray:

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Single-image inference from a trained checkpoint (WP-089, WP-090, WP-091).
+"""Single-image inference from a trained checkpoint (WP-089, WP-090, WP-091, WP-152).
 
 One image file in, detections out, in the **original** image's coordinates. Everything
 between is already written somewhere else and is called rather than restated: the
@@ -18,9 +18,12 @@ letterbox inverse written a second time is the WP-053a defect class: two copies 
 transform, each with its own passing tests, free to disagree by a pad the day either
 side's rounding changes. Nothing here computes a ratio, a pad or a corner.
 
-Three tasks, three entry points. :func:`predict_image` answers with axis-aligned boxes;
+Four tasks, four entry points. :func:`predict_image` answers with axis-aligned boxes;
 :func:`predict_segmentation` answers with boxes **and** their instance masks;
-:func:`predict_oriented` answers with rotated boxes. Each refuses the other tasks by name
+:func:`predict_oriented` answers with rotated boxes; :func:`predict_keypoints` answers
+with boxes and their point sets. The fourth arrived at WP-152, a release after the task
+it serves: 0.5.0 shipped keypoints with no shipped way to run a checkpoint on an image.
+Each refuses the other tasks by name
 rather than falling through, and the refusal is here in the library rather than in the
 command, because :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward` returns a
 :class:`~lucid_yolo.models.heads.detect.DualHeadOutput` for *every* task. A segmentation
@@ -28,9 +31,10 @@ or oriented checkpoint handed to :func:`predict_image` would otherwise produce b
 silently, with its mask or angle branch never consulted: plausible output, no error, and
 the masks or the headings the caller asked for absent.
 
-Three functions rather than one that switches on the task, because the three answers are
-different shapes: a ``(N, 6)`` A9 tuple, that tuple beside a mask stack, and a ``(N, 7)``
-A45 tuple whose box columns are not corners at all. A single function returning a union
+Four functions rather than one that switches on the task, because the four answers are
+different shapes: a ``(N, 6)`` A9 tuple, that tuple beside a mask stack, a ``(N, 7)``
+A45 tuple whose box columns are not corners at all, and that A9 tuple beside a
+``(N, K, 2)`` point stack. A single function returning a union
 does not remove the switch, it moves it into every caller — and into every caller's type
 checker, which can only see the union. The split is the one
 :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward` and
@@ -59,8 +63,8 @@ Assumptions:
     and ``theta``. :func:`predict_oriented` therefore re-normalizes nothing — see its
     docstring for why that seam is the decode rather than this module.
 
-Provenance: R1 sec. 3.2.1, R1 Eq. 7, R1 Eq. 13, R3 sec. 4. Assumptions: A9, A10, A23,
-A37, A45, A61.
+Provenance: R1 sec. 3.2.1, R1 Eq. 7, R1 Eq. 13, R3 sec. 4, R14. Assumptions: A9, A10,
+A23, A37, A45, A61, A64.
 """
 
 from __future__ import annotations
@@ -84,6 +88,7 @@ from lucid_yolo.decode.rotated_nms import RotatedNMSDecoder
 from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.eval.annotations import read_letterboxed_image
 from lucid_yolo.eval.segment_decode import decode_instance_masks, masks_to_original
+from lucid_yolo.models.heads.keypoint import decode_keypoints
 from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 
 if TYPE_CHECKING:
@@ -100,8 +105,10 @@ __all__ = [
     "DEFAULT_ORIENTED_IMG_SIZE",
     "ORIENTED_DECODE_PATH",
     "DecodePath",
+    "KeypointPrediction",
     "SegmentedPrediction",
     "predict_image",
+    "predict_keypoints",
     "predict_oriented",
     "predict_segmentation",
 ]
@@ -144,6 +151,9 @@ _SEGMENT_TASK = "segment"
 
 #: The task :func:`predict_oriented` serves.
 _OBB_TASK = "obb"
+
+#: The task :func:`predict_keypoints` serves.
+_KEYPOINTS_TASK = "keypoints"
 
 
 def predict_image(
@@ -553,3 +563,202 @@ def _decode_oriented(
         head_out.o2m_cls, head_out.o2m_box, angles, anchor_points, strides
     )
     return suppressed
+
+
+@dataclass(frozen=True)
+class KeypointPrediction:
+    """One image's detections and their point sets, both in original coordinates.
+
+    A frozen pair for the same reason :class:`SegmentedPrediction` is one: the two
+    fields mean nothing apart. Point set ``n`` belongs to detection ``n``, and a bare
+    tuple invites a caller to carry one onward alone or unpack the two the wrong way
+    round -- a pose attached to the neighbouring object being a plausible answer that
+    no shape check catches.
+
+    Attributes:
+        detections: A CPU tensor of shape ``(N, 6)`` whose rows are the A9 tuple
+            ``[x1, y1, x2, y2, score, class]`` in original-image pixels,
+            score-descending, exactly as :func:`predict_image` returns them.
+        keypoints: Point coordinates ``(N, K, 2)`` on the original pixel grid (A10),
+            row ``n`` being detection ``n``'s. ``K`` is whatever the checkpoint's head
+            predicts -- read from the decoded tensor, never assumed to be COCO's 17.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> prediction = KeypointPrediction(torch.zeros(0, 6), torch.zeros(0, 3, 2))
+        >>> prediction.detections.shape[0] == prediction.keypoints.shape[0]
+        True
+        >>> KeypointPrediction(torch.zeros(2, 6), torch.zeros(2, 5, 2)).num_keypoints
+        5
+
+        ```
+    """
+
+    detections: Tensor
+    keypoints: Tensor
+
+    @property
+    def num_keypoints(self) -> int:
+        """Point count ``K`` this prediction carries, from the tensor rather than a constant.
+
+        Returns:
+            The size of the point axis.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> KeypointPrediction(torch.zeros(1, 6), torch.zeros(1, 17, 2)).num_keypoints
+            17
+
+            ```
+        """
+        return int(self.keypoints.shape[1])
+
+
+def predict_keypoints(
+    module: DetectionLitModule,
+    image: Path,
+    img_size: int = 640,
+    decoder: DecodePath = "e2e",
+    conf_threshold: float = DEFAULT_CONF_THRESHOLD,
+    device: torch.device | None = None,
+) -> KeypointPrediction:
+    """Locate objects and their points in one image file, in original-image coordinates.
+
+    :func:`predict_image` plus the point branch, composed the way
+    :func:`predict_segmentation` composes the mask branch and for the same reason: the
+    point stem is dense over anchors, so the selected path must report the *anchor*
+    each surviving row came from and the points are gathered by that index. The
+    decode-then-gather order is :class:`~lucid_yolo.export.KeypointExportGraph`'s and
+    the training module's own ``val/oks_mAP``'s, so all three read one composition.
+
+    Points are mapped back with :meth:`~lucid_yolo.data.letterbox.Letterbox.inverse_map`
+    -- the same exact analytic inverse the boxes take (A10), applied to the point axis
+    flattened into a plain point list, so a point and the box around it cannot land on
+    two different grids.
+
+    ``K`` is read from the decoded tensor, never assumed. The head's point count is a
+    constructor argument (A64) and COCO's 17 is one instantiation of it; a function that
+    assumed 17 would silently mis-shape every other schema.
+
+    Args:
+        module: An eval-mode ``keypoints`` module, as
+            :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
+        image: Path to the image file to read.
+        img_size: Letterbox side the model sees. Defaults to ``640`` (R1 sec. 4.4).
+        decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one
+            branch, ``"nms"`` for the confidence-threshold plus class-wise suppression
+            path over the dense branch. The choice reaches the points too: each path
+            reads its **own** branch's point stem.
+        conf_threshold: Detections at or below this score are dropped, with their
+            points. Defaults to :data:`DEFAULT_CONF_THRESHOLD`.
+        device: Device to run on. Defaults to CPU; the command resolves ``auto`` through
+            :func:`~lucid_yolo.eval.checkpoint.pick_device` and passes the result.
+
+    Returns:
+        A :class:`KeypointPrediction` holding the ``(N, 6)`` detections and their
+        ``(N, K, 2)`` point coordinates, row-aligned.
+
+    Raises:
+        ValueError: If the module's task is not ``keypoints``, naming the task it is; or
+            if a module claiming that task emits no points on the selected branch.
+
+    Examples:
+        ```pycon
+        >>> callable(predict_keypoints)  # a real call needs a checkpoint and an image file
+        True
+
+        ```
+    """
+    if module.task != _KEYPOINTS_TASK:
+        raise ValueError(
+            f"predict_keypoints handles task={_KEYPOINTS_TASK!r}; this checkpoint's task is {module.task!r}. "
+            f"A detection checkpoint goes through predict_image, which has no points to return, a "
+            f"segmentation one through predict_segmentation, which has masks instead of them, and an "
+            f"oriented one through predict_oriented, which has an angle."
+        )
+    run_on = torch.device("cpu") if device is None else device
+    letterbox = Letterbox(img_size)
+    canvas_image, orig_size = read_letterboxed_image(image, letterbox)
+    batch = canvas_image.unsqueeze(0).to(run_on)
+    canvas = (int(batch.shape[-2]), int(batch.shape[-1]))
+
+    module.to(run_on).eval()
+    with torch.no_grad():
+        head_out = module(batch)
+    anchor_points, strides = anchor_grid(canvas, run_on)
+    detections, anchor_index, raw_points = _decode_with_points(
+        head_out, decoder, conf_threshold, anchor_points, strides
+    )
+
+    # One selection for the boxes and for the indices the points are gathered by, so the
+    # two cannot drift by a row. Padding rows go by their missing anchor rather than by
+    # their score: a row with no source anchor is not a detection at any threshold, and
+    # letting one through would gather some real anchor's pose.
+    keep = (detections[0, :, SCORE_COLUMN] > conf_threshold) & (anchor_index[0] >= 0)
+    kept = detections[0][keep]
+    dense_points = decode_keypoints(raw_points, anchor_points, strides)
+    canvas_points = dense_points[0].index_select(0, anchor_index[0][keep].to(torch.int64))
+    mapped = to_letterboxed_original(
+        kept.unsqueeze(0).cpu(), orig_size=orig_size, letterboxed_size=canvas, allow_upscale=letterbox.allow_upscale
+    )
+    return KeypointPrediction(
+        detections=mapped[0],
+        keypoints=_points_to_original(canvas_points.cpu(), letterbox, orig_size, canvas),
+    )
+
+
+def _decode_with_points(
+    head_out: DualHeadOutput,
+    decoder: DecodePath,
+    conf_threshold: float,
+    anchor_points: Tensor,
+    strides: Tensor,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """Decode the selected path and return its detections, anchor indices and raw points.
+
+    :func:`_decode_with_coefficients` for the point stem, and the same rule holds: the
+    three come from one branch and must keep coming from one branch, since pairing
+    either decoder's rows with the other branch's points yields a plausible pose of a
+    different object. Choosing all three in one place makes that pairing unrepresentable
+    rather than merely unlikely.
+    """
+    if decoder == "e2e":
+        detections, anchor_index = TopKDecoder().decode_with_indices(
+            head_out.o2o_cls, head_out.o2o_box, anchor_points, strides
+        )
+        raw_points = head_out.o2o_keypoints
+    else:
+        detections, anchor_index = NMSDecoder(conf_threshold=conf_threshold).decode_with_indices(
+            head_out.o2m_cls, head_out.o2m_box, anchor_points, strides
+        )
+        raw_points = head_out.o2m_keypoints
+    if raw_points is None:
+        raise ValueError(
+            f"this checkpoint's task is {_KEYPOINTS_TASK!r} but its head emits no points on the "
+            f"{decoder!r} branch. The checkpoint was built without the point stems and cannot "
+            f"produce a pose."
+        )
+    return detections, anchor_index, raw_points
+
+
+def _points_to_original(
+    points: Tensor, letterbox: Letterbox, orig_size: tuple[int, int], canvas: tuple[int, int]
+) -> Tensor:
+    """Map ``(N, K, 2)`` canvas points onto the original pixel grid, keeping the axis shape.
+
+    The inverse takes a flat point list, so the instance and point axes are folded
+    together for the call and restored after. Folding rather than looping is not merely
+    faster: one call means one mapping, so no row can take a different inverse from its
+    neighbour.
+
+    An empty prediction skips the call and returns an empty stack of the right shape --
+    ``K`` survives, since a caller reading :attr:`KeypointPrediction.num_keypoints` on an
+    image with nothing in it should still learn the schema.
+    """
+    if not points.shape[0]:
+        return points
+    instances, num_points, coords = points.shape
+    flat = letterbox.inverse_map(points.reshape(instances * num_points, coords), orig_size, canvas)
+    return flat.reshape(instances, num_points, coords)

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``lucid-predict`` — detections for one image, from one checkpoint (WP-089, WP-090, WP-091).
+"""``lucid-predict`` — detections for one image, from one checkpoint (WP-089, WP-090, WP-091, WP-152).
 
 One command, no task flag::
 
@@ -7,15 +7,19 @@ One command, no task flag::
     lucid-predict --checkpoint runs/det.ckpt --image street.jpg --decoder nms --output dets.json
     lucid-predict --checkpoint runs/seg.ckpt --image street.jpg --output masks.json
     lucid-predict --checkpoint runs/obb.ckpt --image aerial.png --output rboxes.json
+    lucid-predict --checkpoint runs/pose.ckpt --image street.jpg --output poses.json
 
 The task is read from the checkpoint, exactly as ``lucid-eval`` reads it: a caller who
 names the wrong task gets a wrong answer, and a caller who names none cannot. A
 ``detect`` checkpoint answers with boxes, a ``segment`` one additionally with each
-detection's instance mask, and an ``obb`` one with rotated boxes, through the three entry
-points of :mod:`lucid_yolo.predict`. Which of the three runs is decided here, once, from
-the checkpoint's own task; each entry point additionally refuses the other two by name,
-because :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward` would happily return
-axis-aligned boxes for any of them.
+detection's instance mask, an ``obb`` one with rotated boxes, and a ``keypoints`` one with
+each detection's point set, through the four entry points of :mod:`lucid_yolo.predict`.
+Which of the four runs is decided here, once, from the checkpoint's own task; each entry
+point additionally refuses the other three by name, because
+:meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward` would happily return
+axis-aligned boxes for any of them. The keypoint branch arrived at WP-152, a release
+after the task it serves: until then the dispatch's final ``else`` was detection, written
+before a fourth task existed.
 
 ``--ema``, ``--device`` and ``--output`` keep ``lucid-eval``'s spellings and semantics,
 so the two commands cannot disagree about what a flag means. ``--img_size`` defaults from
@@ -25,7 +29,8 @@ table, rather than restating ``640`` here.
 Assumptions:
     The roadmap row says nothing about output shape, so: stdout gets one line per
     detection, and ``--output`` writes a JSON object ``{"info", "image", "decoder",
-    "conf_threshold", "masks", "detections"}`` whose ``detections`` are records of ``box``
+    "conf_threshold", "masks", "detections"}``, plus an optional ``boxes`` or
+    ``keypoints`` key on the reports that have one (below), whose ``detections`` are records of ``box``
     (``xyxy``, original-image pixels), ``score`` and ``label`` — mirroring
     ``lucid-eval``'s report, which also nests the checkpoint provenance under ``info``.
     Labels are contiguous class indices; a single image carries no category map. The
@@ -49,6 +54,17 @@ Assumptions:
     running a segmentation checkpoint asked. RLE keeps one file, adds no dependency, and
     round-trips exactly.
 
+    A keypoint report keeps ``box`` and adds ``keypoints`` to each record: the
+    detection's points as ``[[x, y], ...]`` in the same original-image pixels, in the
+    head's own point order. The report's top-level ``keypoints`` key names that layout
+    (``"xy-pairs"``) for the reason ``masks`` names the mask encoding, and the layout is
+    worth naming because COCO's own keypoint field is a **flat triplet** list carrying a
+    visibility flag. This one is neither flat nor triplets: nothing in this project
+    predicts visibility, so a third column would be an invented number. ``info`` gains
+    ``num_keypoints``, since ``K`` is a property of whichever schema supplied the points
+    (A64) and a reader should not have to re-load the checkpoint to tell a 17-point human
+    pose from a 15-point letter one. Both keys appear on keypoint reports only.
+
     An oriented report replaces ``box`` with **two** derived geometries of the same
     object: ``rbox``, the A45 five-tuple exactly as
     :func:`~lucid_yolo.predict.predict_oriented` returned it, and ``polygon``, its four
@@ -65,8 +81,8 @@ Assumptions:
     oriented reports only — the ``box`` of the other two is plain ``xyxy`` and was
     already shipped without it.
 
-Provenance: R1 sec. 3.2.1, R1 Eq. 7, R1 Eq. 13, R3 sec. 4, R1 sec. 4.4, R18 sec. 4.
-Assumptions: A9, A10, A23, A37, A45.
+Provenance: R1 sec. 3.2.1, R1 Eq. 7, R1 Eq. 13, R3 sec. 4, R1 sec. 4.4, R18 sec. 4, R14.
+Assumptions: A9, A10, A23, A37, A45, A64.
 """
 
 from __future__ import annotations
@@ -93,6 +109,7 @@ from lucid_yolo.predict import (
     DEFAULT_CONF_THRESHOLD,
     DecodePath,
     predict_image,
+    predict_keypoints,
     predict_oriented,
     predict_segmentation,
 )
@@ -104,6 +121,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DetectionRecord",
+    "KeypointDetectionRecord",
     "OrientedDetectionRecord",
     "RleMask",
     "SegmentedDetectionRecord",
@@ -122,6 +140,16 @@ _SEGMENT_TASK = "segment"
 
 #: The task whose checkpoints produce rotated boxes instead of corners (WP-091).
 _OBB_TASK = "obb"
+
+#: The task whose checkpoints additionally produce point sets (WP-152).
+_KEYPOINTS_TASK = "keypoints"
+
+#: Value of a keypoint report's ``keypoints`` key: the layout its ``keypoints`` records
+#: are written in -- one ``[x, y]`` pair per point, in the head's own point order, in
+#: original-image pixels. Named because COCO's own keypoint field is a flat triplet list
+#: carrying a visibility flag, and this one is neither flat nor triplets: nothing here
+#: predicts visibility, so writing a third column would be inventing a number.
+_KEYPOINT_FORMAT = "xy-pairs"
 
 #: Coordinate count of a rotated box's corner ring, ``[x1, y1, ..., x4, y4]``. Named so
 #: the flattening reads as "one ring per row" rather than as an inferred dimension, which
@@ -198,6 +226,23 @@ class OrientedDetectionRecord(TypedDict):
     label: int
 
 
+class KeypointDetectionRecord(DetectionRecord):
+    """A detection record that also carries its point set.
+
+    Inherits rather than restates, for the reason
+    :class:`SegmentedDetectionRecord` does: a reader of either report parses ``box``,
+    ``score`` and ``label`` the same way, and the added field is visibly the one thing
+    that differs.
+
+    Attributes:
+        keypoints: The detection's points as ``[[x, y], ...]`` in the same
+            original-image coordinates as ``box``, in the head's own point order. The
+            length is the checkpoint's ``K``, never assumed (A64).
+    """
+
+    keypoints: list[list[float]]
+
+
 class SegmentedDetectionRecord(DetectionRecord):
     """A detection record that also carries its instance mask.
 
@@ -224,7 +269,7 @@ def predict(
 ) -> int:
     """Detect objects in one image, and segment or orient them when the checkpoint can.
 
-    Which of the three happens is the checkpoint's ``task``, not a flag: a ``segment``
+    Which of the four happens is the checkpoint's ``task``, not a flag: a ``segment``
     checkpoint run as a detector would answer plausibly with its mask branch unread, an
     ``obb`` one with its angle branch unread, and that is precisely the mistake a flag
     lets a caller make.
@@ -260,7 +305,7 @@ def predict(
     info["decoder"] = decoder
     resolved_img_size = DEFAULT_IMG_SIZE.get(task, 640) if img_size is None else img_size
     run_on = pick_device(device)
-    records: list[DetectionRecord] | list[OrientedDetectionRecord]
+    records: list[DetectionRecord] | list[OrientedDetectionRecord] | list[KeypointDetectionRecord]
     box_format: str | None = None
     if task == _OBB_TASK:
         rotated = predict_oriented(
@@ -274,7 +319,22 @@ def predict(
         records = _to_oriented_records(rotated)
         lines = _oriented_lines(records)
         mask_format: str | None = None
+        keypoint_format: str | None = None
         box_format = _OBB_BOX_FORMAT
+    elif task == _KEYPOINTS_TASK:
+        posed = predict_keypoints(
+            module,
+            image,
+            img_size=resolved_img_size,
+            decoder=decoder,
+            conf_threshold=conf_threshold,
+            device=run_on,
+        )
+        records = _to_keypoint_records(posed.detections, posed.keypoints)
+        lines = _keypoint_lines(records)
+        mask_format = None
+        keypoint_format = _KEYPOINT_FORMAT
+        info["num_keypoints"] = posed.num_keypoints
     elif task == _SEGMENT_TASK:
         prediction = predict_segmentation(
             module,
@@ -287,6 +347,7 @@ def predict(
         records = _to_segmented_records(prediction.detections, prediction.masks)
         lines = _detection_lines(records)
         mask_format = _MASK_FORMAT
+        keypoint_format = None
     else:
         # Not an `elif task == "detect"`: an unknown task must be refused, and the refusal
         # belongs to the library (see `lucid_yolo.predict`), which is where it names the
@@ -303,6 +364,7 @@ def predict(
         records = _to_records(detections)
         lines = _detection_lines(records)
         mask_format = None
+        keypoint_format = None
 
     print(
         f"predict: {image} -> {len(records)} detections, path={decoder}, "
@@ -325,6 +387,11 @@ def predict(
         # new and its angle convention is the thing oriented formats disagree about.
         if box_format is not None:
             payload["boxes"] = box_format
+        # Added rather than always present, for the same reason `boxes` is: the other
+        # shipped report shapes stay byte-identical, and a reader finds this key exactly
+        # when the records carry a point set.
+        if keypoint_format is not None:
+            payload["keypoints"] = keypoint_format
         # Created rather than required, for the reason `detect_eval.run` states: the
         # forward pass is the expensive part and this file is its only durable form.
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -377,6 +444,41 @@ def _to_oriented_records(detections: Tensor) -> list[OrientedDetectionRecord]:
             label=int(row[RBOX_COLUMNS + 1]),
         )
         for row, ring in zip(detections, rings, strict=True)
+    ]
+
+
+def _to_keypoint_records(detections: Tensor, keypoints: Tensor) -> list[KeypointDetectionRecord]:
+    """Turn a row-aligned detection tensor and point stack into records carrying both.
+
+    Args:
+        detections: Detections of shape ``(N, 6)`` in original-image coordinates.
+        keypoints: Point coordinates ``(N, K, 2)``, row ``n`` belonging to detection
+            ``n``, as :class:`~lucid_yolo.predict.KeypointPrediction` pairs them.
+
+    Returns:
+        One :class:`KeypointDetectionRecord` per row. ``strict=True`` on the zip is the
+        point, exactly as it is for the mask records: the pairing is what
+        :class:`~lucid_yolo.predict.KeypointPrediction` exists to protect, and a length
+        mismatch that silently truncated would attach every pose to the wrong box from
+        the mismatch onward.
+    """
+    return [
+        KeypointDetectionRecord(**record, keypoints=[[float(x), float(y)] for x, y in points])
+        for record, points in zip(_to_records(detections), keypoints, strict=True)
+    ]
+
+
+def _keypoint_lines(records: Sequence[KeypointDetectionRecord]) -> list[str]:
+    """Render one stdout line per posed detection.
+
+    The point count is printed rather than the points: ``K`` is often 17 and a terminal
+    line carrying 34 coordinates is not read by anyone. The report file carries them all.
+    """
+    return [
+        f"  class={record['label']} score={record['score']:.3f} "
+        f"box=[{' '.join(f'{value:.1f}' for value in record['box'])}] "
+        f"keypoints={len(record['keypoints'])}"
+        for record in records
     ]
 
 

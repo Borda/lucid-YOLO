@@ -15,6 +15,7 @@ supplies the per-task defaults, not the evaluation itself, which its own suites 
 from __future__ import annotations
 
 import importlib
+import json
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -24,7 +25,9 @@ import torch
 
 from lucid_yolo.cli import data as data_cli
 from lucid_yolo.cli import eval as eval_cli
+from lucid_yolo.cli import predict as predict_cli
 from lucid_yolo.data import download
+from lucid_yolo.predict import KeypointPrediction, SegmentedPrediction
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
@@ -176,6 +179,84 @@ def test_an_explicit_size_beats_the_task_default(tmp_path: Path, monkeypatch: py
     )
 
     assert seen["img_size"] == 512
+
+
+@pytest.mark.parametrize(
+    ("task", "expected_entry_point"),
+    [
+        pytest.param("detect", "predict_image", id="detect"),
+        pytest.param("segment", "predict_segmentation", id="segment"),
+        pytest.param("obb", "predict_oriented", id="obb"),
+        pytest.param("keypoints", "predict_keypoints", id="keypoints"),
+    ],
+)
+def test_predict_dispatches_on_the_checkpoints_own_task(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    task: str,
+    expected_entry_point: str,
+) -> None:
+    """Each task reaches its own inference entry point, with no task flag anywhere.
+
+    All four entry points are stubbed, so a wrong dispatch shows up as another stub
+    recording the call. The keypoint case is why this test exists: until WP-152 the
+    command had three branches and a ``keypoints`` checkpoint silently fell through to
+    the detection one, answering with boxes and never consulting the point stem -- a
+    plausible answer, no error, and the pose the caller asked for absent.
+    """
+    called: list[str] = []
+
+    def _record(name: str, result: object) -> Callable[..., object]:
+        def stub(*_args: Any, **_kwargs: Any) -> object:
+            called.append(name)
+            return result
+
+        return stub
+
+    empty_detections = torch.zeros(0, 6)
+    monkeypatch.setattr(predict_cli, "predict_image", _record("predict_image", empty_detections))
+    monkeypatch.setattr(
+        predict_cli,
+        "predict_segmentation",
+        _record("predict_segmentation", SegmentedPrediction(empty_detections, torch.zeros(0, 4, 4, dtype=torch.bool))),
+    )
+    monkeypatch.setattr(predict_cli, "predict_oriented", _record("predict_oriented", torch.zeros(0, 7)))
+    monkeypatch.setattr(
+        predict_cli,
+        "predict_keypoints",
+        _record("predict_keypoints", KeypointPrediction(empty_detections, torch.zeros(0, 17, 2))),
+    )
+    checkpoint = _write_checkpoint(task, tmp_path / f"{task}.ckpt")
+
+    code = predict_cli.predict(checkpoint=checkpoint, image=tmp_path / "image.jpg", ema=False)
+
+    assert code == 0
+    assert called == [expected_entry_point]
+
+
+def test_a_keypoint_report_names_its_point_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A keypoint report carries the point layout and ``K``; the other reports are untouched.
+
+    ``K`` is a property of the checkpoint's schema (A64), so a report that omitted it
+    would leave a reader unable to tell a 17-point human pose from a 15-point letter one
+    without re-loading the checkpoint that wrote it.
+    """
+    points = torch.tensor([[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]])
+    detections = torch.tensor([[0.0, 0.0, 8.0, 8.0, 0.9, 1.0]])
+
+    def stub(*_args: Any, **_kwargs: Any) -> KeypointPrediction:
+        return KeypointPrediction(detections, points)
+
+    monkeypatch.setattr(predict_cli, "predict_keypoints", stub)
+    checkpoint = _write_checkpoint("keypoints", tmp_path / "keypoints.ckpt")
+    report = tmp_path / "report.json"
+
+    predict_cli.predict(checkpoint=checkpoint, image=tmp_path / "image.jpg", output=report, ema=False)
+
+    payload = json.loads(report.read_text())
+    assert payload["keypoints"] == "xy-pairs"
+    assert payload["info"]["num_keypoints"] == 3
+    assert payload["detections"][0]["keypoints"] == [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]
 
 
 def test_the_deprecated_download_alias_is_gone() -> None:
