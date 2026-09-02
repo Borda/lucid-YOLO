@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from lucid_yolo.data.affine import AffineParams, FusedAffineLetterbox, RandomAffine
-from lucid_yolo.data.augment import HorizontalFlip, HSVJitter, hsv_to_rgb, rgb_to_hsv
+from lucid_yolo.data.augment import FlipParams, HorizontalFlip, HSVJitter, HSVParams, hsv_to_rgb, rgb_to_hsv
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.dota import (
     DOTA_CLASSES,
@@ -15,8 +15,8 @@ from lucid_yolo.data.dota import (
 )
 from lucid_yolo.data.download import download_coco
 from lucid_yolo.data.letterbox import Letterbox
-from lucid_yolo.data.mixup import CopyPaste, Mixup
-from lucid_yolo.data.mosaic import MosaicAssembly
+from lucid_yolo.data.mixup import CopyPaste, CopyPasteParams, Mixup, MixupParams
+from lucid_yolo.data.mosaic import MosaicAssembly, MosaicParams
 from lucid_yolo.data.rasterize import rasterize_polygon, rasterize_polygons
 from lucid_yolo.data.rotated_aug import (
     check_rotated_pairing,
@@ -62,14 +62,19 @@ __all__ = [
     "CocoDetectionDataset",
     "Compose",
     "CopyPaste",
+    "CopyPasteParams",
     "DotaObject",
+    "FlipParams",
     "FusedAffineLetterbox",
     "GeometricTransform",
     "HSVJitter",
+    "HSVParams",
     "HorizontalFlip",
     "Letterbox",
     "Mixup",
+    "MixupParams",
     "MosaicAssembly",
+    "MosaicParams",
     "RandomAffine",
     "Targets",
     "TiledTargets",

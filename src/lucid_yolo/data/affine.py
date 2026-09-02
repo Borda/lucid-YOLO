@@ -297,9 +297,89 @@ class RandomAffine:
 
             ```
         """
+        _, height, width = image.shape
+        return self.apply(image, targets, self.sample(height, width))
+
+    def sample(self, height: int, width: int) -> AffineParams:
+        """Draw one :class:`AffineParams` from the configured ranges, consuming the RNG.
+
+        The sampling half of the seam: this is the only method that touches
+        :attr:`generator`, so a caller that wants a *stated* transform rather than a
+        drawn one skips it and builds :class:`AffineParams` directly (WP-147).
+
+        Args:
+            height: Canvas height in pixels; scales the vertical translation range.
+            width: Canvas width in pixels; scales the horizontal translation range.
+
+        Returns:
+            The sampled parameters. Nothing is stashed on the instance -- the
+            ``last_params`` / ``last_matrix`` attributes are set by :meth:`apply`.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> gen = torch.Generator().manual_seed(0)
+            >>> params = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, generator=gen).sample(16, 16)
+            >>> (abs(params.angle), abs(params.translate_x), params.scale)
+            (0.0, 0.0, 1.0)
+
+            ```
+        """
+        gen = self.generator
+        angle = math.radians(_uniform(-self.degrees, self.degrees, gen))
+        shear_x = math.radians(_uniform(-self.shear, self.shear, gen))
+        shear_y = math.radians(_uniform(-self.shear, self.shear, gen))
+        scale = max(_uniform(1.0 - self.scale, 1.0 + self.scale, gen), _MIN_SCALE)
+        translate_x = _uniform(-self.translate, self.translate, gen) * width
+        translate_y = _uniform(-self.translate, self.translate, gen) * height
+        return AffineParams(
+            angle=angle,
+            shear_x=shear_x,
+            shear_y=shear_y,
+            scale=scale,
+            translate_x=translate_x,
+            translate_y=translate_y,
+        )
+
+    def apply(self, image: Tensor, targets: Targets, params: AffineParams) -> tuple[Tensor, Targets]:
+        """Warp ``image`` and ``targets`` through ``params``, drawing nothing.
+
+        The application half of the seam. Given the same ``params`` this is a pure
+        function of its inputs, which is what lets an expectation be frozen against
+        stated parameters rather than against a seed (WP-147).
+
+        Args:
+            image: CHW image tensor (float, in the same value range as the grey
+                fill, i.e. ``[0, 1]``).
+            targets: Geometry to warp alongside the image. Non-empty ``rboxes`` must
+                share the instance axis with ``boxes`` and carry no polygons.
+            params: The affine to apply.
+
+        Returns:
+            The warped ``(C, H, W)`` image (same canvas size as the input) and the
+            warped, clipped and filtered targets.
+
+        Raises:
+            ValueError: If ``rboxes`` is non-empty and breaks WP-056's instance-axis
+                invariant (length mismatch, or polygons alongside).
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from lucid_yolo.data.targets import Targets
+            >>> quarter = AffineParams(
+            ...     angle=0.0, shear_x=0.0, shear_y=0.0, scale=1.0, translate_x=2.0, translate_y=0.0
+            ... )
+            >>> box = Targets(boxes=torch.tensor([[1.0, 1.0, 5.0, 5.0]]), labels=torch.tensor([0]))
+            >>> _, out = RandomAffine().apply(torch.zeros(3, 8, 8), box, quarter)
+            >>> out.boxes.tolist()
+            [[3.0, 1.0, 7.0, 5.0]]
+
+            ```
+        """
         check_rotated_pairing(targets)
         _, height, width = image.shape
-        matrix = self._sample_matrix(height, width)
+        matrix = self._record(params, height, width)
         out_image = self._warp_image(image, matrix, height, width)
         out_targets = self._warp_targets(targets, matrix, height, width)
         return out_image, out_targets
@@ -348,39 +428,71 @@ class RandomAffine:
 
             ```
         """
+        _, in_h, in_w = image.shape
+        return self.apply_to(image, targets, self.sample(in_h, in_w), post_matrix, out_h, out_w)
+
+    def apply_to(
+        self,
+        image: Tensor,
+        targets: Targets,
+        params: AffineParams,
+        post_matrix: Tensor,
+        out_h: int,
+        out_w: int,
+    ) -> tuple[Tensor, Targets]:
+        """Apply ``params`` composed with ``post_matrix``, drawing nothing.
+
+        The stated-parameter sibling of :meth:`warp_to`, standing to it as
+        :meth:`apply` stands to :meth:`__call__` (WP-147).
+
+        Args:
+            image: CHW image tensor (float, in the grey-fill value range ``[0, 1]``).
+            targets: Geometry to warp alongside the image. Non-empty ``rboxes`` must
+                share the instance axis with ``boxes`` and carry no polygons.
+            params: The source-canvas affine to apply.
+            post_matrix: ``(3, 3)`` affine mapping source-canvas pixels to the
+                output canvas, composed after ``params`` for the image warp.
+            out_h: Output canvas height in pixels.
+            out_w: Output canvas width in pixels.
+
+        Returns:
+            The warped ``(C, out_h, out_w)`` image and the canvas-scale warped,
+            clipped and filtered targets (before ``post_matrix``).
+
+        Raises:
+            ValueError: If ``rboxes`` is non-empty and breaks WP-056's instance-axis
+                invariant (length mismatch, or polygons alongside).
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from lucid_yolo.data.targets import Targets
+            >>> identity = AffineParams(
+            ...     angle=0.0, shear_x=0.0, shear_y=0.0, scale=1.0, translate_x=0.0, translate_y=0.0
+            ... )
+            >>> half = torch.tensor([[0.5, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 1.0]])
+            >>> out_image, _ = RandomAffine().apply_to(
+            ...     torch.rand(3, 16, 16), Targets.empty(), identity, half, 8, 8
+            ... )
+            >>> out_image.shape
+            torch.Size([3, 8, 8])
+
+            ```
+        """
         check_rotated_pairing(targets)
         _, in_h, in_w = image.shape
-        matrix = self._sample_matrix(in_h, in_w)
+        matrix = self._record(params, in_h, in_w)
         image_matrix = post_matrix.to(matrix.dtype) @ matrix
         out_image = self._warp_image(image, image_matrix, out_h, out_w)
         out_targets = self._warp_targets(targets, matrix, in_h, in_w)
         return out_image, out_targets
 
-    def _sample_matrix(self, height: int, width: int) -> Tensor:
-        """Sample one affine, stash it on ``last_params``/``last_matrix``, return the matrix."""
-        params = self._sample(height, width)
+    def _record(self, params: AffineParams, height: int, width: int) -> Tensor:
+        """Build the matrix for ``params`` and stash both on ``last_params``/``last_matrix``."""
         matrix = params.matrix(height, width)
         self.last_params = params
         self.last_matrix = matrix
         return matrix
-
-    def _sample(self, height: int, width: int) -> AffineParams:
-        """Draw one :class:`AffineParams` from the configured ranges."""
-        gen = self.generator
-        angle = math.radians(_uniform(-self.degrees, self.degrees, gen))
-        shear_x = math.radians(_uniform(-self.shear, self.shear, gen))
-        shear_y = math.radians(_uniform(-self.shear, self.shear, gen))
-        scale = max(_uniform(1.0 - self.scale, 1.0 + self.scale, gen), _MIN_SCALE)
-        translate_x = _uniform(-self.translate, self.translate, gen) * width
-        translate_y = _uniform(-self.translate, self.translate, gen) * height
-        return AffineParams(
-            angle=angle,
-            shear_x=shear_x,
-            shear_y=shear_y,
-            scale=scale,
-            translate_x=translate_x,
-            translate_y=translate_y,
-        )
 
     def _warp_image(self, image: Tensor, matrix: Tensor, out_h: int, out_w: int) -> Tensor:
         """Resample ``image`` under ``matrix`` into an ``(out_h, out_w)`` canvas.
@@ -689,6 +801,63 @@ class FusedAffineLetterbox:
             ```
         """
         _, in_h, in_w = image.shape
+        return self.apply(image, targets, self.sample(in_h, in_w))
+
+    def sample(self, height: int, width: int) -> AffineParams:
+        """Draw the source-canvas affine, consuming the RNG; the letterbox is deterministic.
+
+        Args:
+            height: Source canvas height in pixels.
+            width: Source canvas width in pixels.
+
+        Returns:
+            The sampled source-canvas :class:`AffineParams`. The letterbox half of
+            this transform draws nothing -- its geometry is resolved from the source
+            size -- so the affine is the whole of what a call samples (WP-147).
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> fused = FusedAffineLetterbox(16, degrees=0.0, translate=0.0, scale=0.0)
+            >>> fused.sample(20, 40).scale
+            1.0
+
+            ```
+        """
+        return self.affine.sample(height, width)
+
+    def apply(self, image: Tensor, targets: Targets, params: AffineParams) -> tuple[Tensor, Targets]:
+        """Warp through ``params`` and the per-sample letterbox, drawing nothing.
+
+        Args:
+            image: CHW image tensor (float, in the grey-fill value range ``[0, 1]``);
+                the source canvas (mosaic assembly or single base image).
+            targets: Geometry to warp alongside the image. Non-empty ``rboxes`` must
+                share the instance axis with ``boxes`` and carry no polygons.
+            params: The source-canvas affine to apply.
+
+        Returns:
+            The ``(C, target_h, target_w)`` letterboxed image resampled once, and
+            the warped, clipped and filtered targets in output-canvas coordinates.
+
+        Raises:
+            ValueError: If ``rboxes`` is non-empty and breaks WP-056's instance-axis
+                invariant (length mismatch, or polygons alongside).
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from lucid_yolo.data.targets import Targets
+            >>> identity = AffineParams(
+            ...     angle=0.0, shear_x=0.0, shear_y=0.0, scale=1.0, translate_x=0.0, translate_y=0.0
+            ... )
+            >>> out_image, _ = FusedAffineLetterbox(16).apply(torch.rand(3, 32, 32), Targets.empty(), identity)
+            >>> out_image.shape
+            torch.Size([3, 16, 16])
+
+            ```
+        """
+        _, in_h, in_w = image.shape
         post_matrix, out_h, out_w = self.letterbox.forward_affine(in_h, in_w)
-        out_image, canvas_targets = self.affine.warp_to(image, targets, post_matrix, out_h, out_w)
+        out_image, canvas_targets = self.affine.apply_to(image, targets, params, post_matrix, out_h, out_w)
         return out_image, self.letterbox.warp_targets(canvas_targets, in_h, in_w)

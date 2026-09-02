@@ -55,13 +55,15 @@ Determinism:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 from torch import Tensor
 
 from lucid_yolo.data.rasterize import rasterize_polygon as _rasterize_polygon
 from lucid_yolo.data.targets import Targets
 
-__all__ = ["CopyPaste", "Mixup"]
+__all__ = ["CopyPaste", "CopyPasteParams", "Mixup", "MixupParams"]
 
 #: Mixup and copy-paste each combine exactly this many images.
 _PAIR_IMAGE_COUNT = 2
@@ -91,6 +93,45 @@ def _uniform(low: float, high: float, generator: torch.Generator | None) -> floa
     if high <= low:
         return float(low)
     return float(torch.empty((), dtype=torch.float64).uniform_(low, high, generator=generator).item())
+
+
+@dataclass(frozen=True)
+class MixupParams:
+    """What one mixup call decided: blend at this factor, or pass the first pair through.
+
+    Attributes:
+        lam: The convex blend factor, or ``None`` when the call does not trigger --
+            the same two-valued meaning :attr:`Mixup.last_lam` has carried since
+            WP-012, so a stated no-op is expressible rather than only a stated blend.
+
+    Examples:
+        ```pycon
+        >>> MixupParams(lam=None).lam is None
+        True
+
+        ```
+    """
+
+    lam: float | None
+
+
+@dataclass(frozen=True)
+class CopyPasteParams:
+    """Which source instances one copy-paste call pastes, by index.
+
+    Attributes:
+        selected: Indices into the source's ``polygons`` list, in paste order. Empty
+            means the call pastes nothing.
+
+    Examples:
+        ```pycon
+        >>> CopyPasteParams(selected=(0, 2)).selected
+        (0, 2)
+
+        ```
+    """
+
+    selected: tuple[int, ...]
 
 
 class Mixup:
@@ -180,15 +221,70 @@ class Mixup:
             ```
         """
         _check_pair(items)
-        (image_a, targets_a), (image_b, targets_b) = items
+        return self.apply(items, self.sample())
+
+    def sample(self) -> MixupParams:
+        """Draw the trigger and, when it fires, the blend factor.
+
+        The sampling half of the seam: this is the only method that touches
+        :attr:`generator`, so a caller wanting a stated blend rather than a drawn one
+        builds :class:`MixupParams` directly (WP-147). The trigger uniform is always
+        consumed; the two gamma draws behind ``lam`` are consumed only when it fires,
+        which is the draw order ``__call__`` has always had.
+
+        Returns:
+            The sampled decision: a blend factor, or ``None`` for a pass-through.
+
+        Examples:
+            ```pycon
+            >>> Mixup(p=0.0).sample()
+            MixupParams(lam=None)
+            >>> 0.0 <= (Mixup(p=1.0).sample().lam or 0.0) <= 1.0
+            True
+
+            ```
+        """
         if _uniform(0.0, 1.0, self.generator) >= self.p:
+            return MixupParams(lam=None)
+        return MixupParams(lam=self._sample_lam())
+
+    def apply(self, items: list[tuple[Tensor, Targets]], params: MixupParams) -> tuple[Tensor, Targets]:
+        """Blend ``items`` at ``params``' factor, or pass the first pair through.
+
+        Args:
+            items: Exactly two ``(image, targets)`` pairs, as :meth:`__call__`
+                requires.
+            params: The blend factor, or ``None`` for a pass-through.
+
+        Returns:
+            Either the blended ``(image, targets)`` or the first input pair
+            untouched.
+
+        Raises:
+            ValueError: If the two images differ in shape, checked only when
+                ``params`` calls for a blend -- a pass-through never reads the second
+                image, which is the behaviour ``__call__`` has always had.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from lucid_yolo.data.targets import Targets
+            >>> a = (torch.ones(3, 4, 4), Targets.empty())
+            >>> b = (torch.zeros(3, 4, 4), Targets.empty())
+            >>> out_image, _ = Mixup(p=1.0).apply([a, b], MixupParams(lam=0.25))
+            >>> float(out_image[0, 0, 0])
+            0.25
+
+            ```
+        """
+        (image_a, targets_a), (image_b, targets_b) = items
+        if params.lam is None:
             self.last_lam = None
             return image_a, targets_a
         if image_a.shape != image_b.shape:
             raise ValueError(f"Mixup requires same-size images; got {tuple(image_a.shape)} and {tuple(image_b.shape)}")
-        lam = self._sample_lam()
-        self.last_lam = lam
-        blended = lam * image_a + (1.0 - lam) * image_b
+        self.last_lam = params.lam
+        blended = params.lam * image_a + (1.0 - params.lam) * image_b
         return blended, Targets.concat([targets_a, targets_b])
 
     def _sample_lam(self) -> float:
@@ -295,31 +391,94 @@ class CopyPaste:
         """
         _check_pair(items)
         _reject_rboxes(items)
+        return self.apply(items, self.sample(len(items[1][1].polygons)))
+
+    def sample(self, candidate_count: int) -> CopyPasteParams:
+        """Draw each of ``candidate_count`` candidates against ``p``, up to ``max_paste``.
+
+        The sampling half of the seam: this is the only method that touches
+        :attr:`generator`, so a caller wanting a stated selection rather than a drawn
+        one builds :class:`CopyPasteParams` directly (WP-147). The draw count depends
+        on the candidate count and the cap alone -- never on pixels -- which is what
+        lets the loop split from the paste it used to interleave with.
+
+        Args:
+            candidate_count: Number of polygon-carrying source instances, i.e.
+                ``len(targets_b.polygons)``.
+
+        Returns:
+            The selected indices, in paste order. Nothing is stashed on the instance
+            -- ``last_pasted`` is set by :meth:`apply`.
+
+        Examples:
+            ```pycon
+            >>> CopyPaste(p=1.0).sample(3).selected
+            (0, 1, 2)
+            >>> CopyPaste(p=1.0, max_paste=1).sample(3).selected
+            (0,)
+            >>> CopyPaste(p=0.0).sample(3).selected
+            ()
+
+            ```
+        """
+        cap = candidate_count if self.max_paste is None else self.max_paste
+        selected: list[int] = []
+        for index in range(candidate_count):
+            if len(selected) >= cap:
+                break
+            if _uniform(0.0, 1.0, self.generator) < self.p:
+                selected.append(index)
+        return CopyPasteParams(selected=tuple(selected))
+
+    def apply(self, items: list[tuple[Tensor, Targets]], params: CopyPasteParams) -> tuple[Tensor, Targets]:
+        """Paste the instances ``params`` names onto the destination, drawing nothing.
+
+        Args:
+            items: Exactly two ``(image, targets)`` pairs -- destination first,
+                source second -- as :meth:`__call__` requires.
+            params: The source instance indices to paste, in paste order.
+
+        Returns:
+            The destination image with the pasted pixels and its targets with the
+            pasted instances appended. When ``params`` selects nothing, a copy of the
+            destination image and a clone of its targets are returned.
+
+        Raises:
+            ValueError: If the two images differ in shape.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from lucid_yolo.data.targets import Targets
+            >>> ring = torch.tensor([[1.0, 1.0], [4.0, 1.0], [4.0, 4.0], [1.0, 4.0]])
+            >>> src = Targets(boxes=torch.tensor([[1.0, 1.0, 4.0, 4.0]]), labels=torch.tensor([5]), polygons=[ring])
+            >>> items = [(torch.zeros(3, 6, 6), Targets.empty()), (torch.ones(3, 6, 6), src)]
+            >>> _, out = CopyPaste(p=1.0).apply(items, CopyPasteParams(selected=(0,)))
+            >>> out.labels.tolist()
+            [5]
+
+            ```
+        """
         (image_a, targets_a), (image_b, targets_b) = items
         if image_a.shape != image_b.shape:
             raise ValueError(
                 f"CopyPaste requires same-size images; got {tuple(image_a.shape)} and {tuple(image_b.shape)}"
             )
         out_image = image_a.clone()
-        selected = self._select_and_paste(out_image, image_b, targets_b)
+        selected = list(params.selected)
+        self._paste_selected(out_image, image_b, targets_b, selected)
         self.last_pasted = len(selected)
         if not selected:
             return out_image, targets_a.clone()
         return out_image, self._merge(targets_a, targets_b, selected)
 
-    def _select_and_paste(self, out_image: Tensor, source: Tensor, targets_b: Targets) -> list[int]:
-        """Draw each candidate against ``p`` (up to ``max_paste``) and paste its mask."""
+    @staticmethod
+    def _paste_selected(out_image: Tensor, source: Tensor, targets_b: Targets, selected: list[int]) -> None:
+        """Rasterise each selected ring and copy its source pixels onto ``out_image`` in place."""
         height, width = out_image.shape[1], out_image.shape[2]
-        cap = len(targets_b.polygons) if self.max_paste is None else self.max_paste
-        selected: list[int] = []
-        for index, ring in enumerate(targets_b.polygons):
-            if len(selected) >= cap:
-                break
-            if _uniform(0.0, 1.0, self.generator) < self.p:
-                mask = _rasterize_polygon(ring, height, width)
-                out_image[:, mask] = source[:, mask]
-                selected.append(index)
-        return selected
+        for index in selected:
+            mask = _rasterize_polygon(targets_b.polygons[index], height, width)
+            out_image[:, mask] = source[:, mask]
 
     @staticmethod
     def _merge(targets_a: Targets, targets_b: Targets, selected: list[int]) -> Targets:

@@ -63,6 +63,8 @@ Testability:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 from torch import Tensor
 
@@ -75,12 +77,48 @@ from lucid_yolo.data.rotated_aug import (
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.data.transforms import boxes_from_polygons
 
-__all__ = ["MosaicAssembly"]
+__all__ = ["MosaicAssembly", "MosaicParams"]
 
 #: Default pad colour: mid-grey ``114/255`` per the YOLO-lineage convention (matches letterbox/affine).
 _DEFAULT_PAD_VALUE = 114.0 / 255.0
 #: Mosaic combines exactly this many images.
 _MOSAIC_IMAGE_COUNT = 4
+
+
+@dataclass(frozen=True)
+class MosaicParams:
+    """The stitch centre one mosaic call anchors its four images to.
+
+    Attributes:
+        center_x: Horizontal canvas coordinate of the stitch centre, in pixels.
+        center_y: Vertical canvas coordinate of the stitch centre, in pixels.
+
+    Examples:
+        ```pycon
+        >>> MosaicParams(center_x=8, center_y=12).as_tuple()
+        (8, 12)
+
+        ```
+    """
+
+    center_x: int
+    center_y: int
+
+    def as_tuple(self) -> tuple[int, int]:
+        """Return the centre as ``(center_x, center_y)``.
+
+        Returns:
+            The centre as a plain tuple, the shape
+            :attr:`MosaicAssembly.last_center` has carried since WP-011.
+
+        Examples:
+            ```pycon
+            >>> MosaicParams(center_x=1, center_y=2).as_tuple()
+            (1, 2)
+
+            ```
+        """
+        return (self.center_x, self.center_y)
 
 
 class MosaicAssembly:
@@ -186,11 +224,69 @@ class MosaicAssembly:
 
             ```
         """
+        return self.apply(items, self.sample())
+
+    def sample(self) -> MosaicParams:
+        """Draw the stitch centre, consuming two uniforms from the RNG.
+
+        The sampling half of the seam: this is the only method that touches
+        :attr:`generator`, so a caller wanting a stated centre rather than a drawn
+        one builds :class:`MosaicParams` directly (WP-147).
+
+        Returns:
+            The sampled centre, each axis an integer drawn uniformly from
+            ``[0.5S, 1.5S]``. Nothing is stashed on the instance -- ``last_center``
+            is set by :meth:`apply`.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> gen = torch.Generator().manual_seed(0)
+            >>> centre = MosaicAssembly(target_size=8, generator=gen).sample()
+            >>> 4 <= centre.center_x <= 12 and 4 <= centre.center_y <= 12
+            True
+
+            ```
+        """
+        low = 0.5 * self.target_size
+        high = 1.5 * self.target_size
+        cx = int(torch.empty((), dtype=torch.float64).uniform_(low, high, generator=self.generator).item())
+        cy = int(torch.empty((), dtype=torch.float64).uniform_(low, high, generator=self.generator).item())
+        return MosaicParams(center_x=cx, center_y=cy)
+
+    def apply(self, items: list[tuple[Tensor, Targets]], params: MosaicParams) -> tuple[Tensor, Targets]:
+        """Stitch ``items`` about ``params``' centre, drawing nothing.
+
+        Args:
+            items: Exactly four ``(image, targets)`` pairs, as :meth:`__call__`
+                requires.
+            params: The stitch centre to anchor the four images to.
+
+        Returns:
+            The ``(C, 2S, 2S)`` stitched image and the shifted, clipped, filtered
+            and merged targets.
+
+        Raises:
+            ValueError: If ``items`` does not hold exactly four pairs, or an input's
+                non-empty ``rboxes`` break WP-056's instance-axis invariant.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from lucid_yolo.data.targets import Targets
+            >>> box = Targets(boxes=torch.tensor([[1.0, 1.0, 5.0, 5.0]]), labels=torch.tensor([0]))
+            >>> items = [(torch.rand(3, 8, 8), box.clone()) for _ in range(4)]
+            >>> out_image, _ = MosaicAssembly(target_size=8).apply(items, MosaicParams(center_x=8, center_y=8))
+            >>> out_image.shape
+            torch.Size([3, 16, 16])
+
+            ```
+        """
         self._check_items(items)
         canvas_size = 2 * self.target_size
         reference = items[0][0]
         canvas = reference.new_full((reference.shape[0], canvas_size, canvas_size), self.pad_value)
-        cx, cy = self._sample_center()
+        cx, cy = params.as_tuple()
         self.last_center = (cx, cy)
         placed: list[Targets] = []
         for index, (image, targets) in enumerate(items):
@@ -205,14 +301,6 @@ class MosaicAssembly:
             raise ValueError(f"MosaicAssembly requires exactly {_MOSAIC_IMAGE_COUNT} items; got {len(items)}")
         for _image, targets in items:
             check_rotated_pairing(targets)
-
-    def _sample_center(self) -> tuple[int, int]:
-        """Sample an integer centre ``(cx, cy)`` uniformly from ``[0.5S, 1.5S]`` per axis."""
-        low = 0.5 * self.target_size
-        high = 1.5 * self.target_size
-        cx = int(torch.empty((), dtype=torch.float64).uniform_(low, high, generator=self.generator).item())
-        cy = int(torch.empty((), dtype=torch.float64).uniform_(low, high, generator=self.generator).item())
-        return cx, cy
 
     @staticmethod
     def _placement(

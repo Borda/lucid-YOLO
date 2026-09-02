@@ -33,13 +33,15 @@ sec. 7).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 from torch import Tensor
 
 from lucid_yolo.data.rotated_aug import mirror_rboxes
 from lucid_yolo.data.targets import Targets
 
-__all__ = ["HSVJitter", "HorizontalFlip", "hsv_to_rgb", "rgb_to_hsv"]
+__all__ = ["FlipParams", "HSVJitter", "HSVParams", "HorizontalFlip", "hsv_to_rgb", "rgb_to_hsv"]
 
 #: Channel count of an RGB / HSV image (leading dimension of a CHW tensor).
 _RGB_CHANNELS = 3
@@ -180,6 +182,62 @@ def _select_sector(index: Tensor, choices: list[Tensor]) -> Tensor:
     return result
 
 
+@dataclass(frozen=True)
+class HSVParams:
+    """One sampled set of HSV gains, in the units the jitter applies them in.
+
+    Attributes:
+        hue: Additive hue gain, as a fraction of the hue circle.
+        saturation: Multiplicative saturation gain, applied as ``1 + saturation``.
+        value: Multiplicative value gain, applied as ``1 + value``.
+
+    Examples:
+        ```pycon
+        >>> HSVParams(hue=0.0, saturation=0.0, value=0.0).as_tuple()
+        (0.0, 0.0, 0.0)
+
+        ```
+    """
+
+    hue: float
+    saturation: float
+    value: float
+
+    def as_tuple(self) -> tuple[float, float, float]:
+        """Return the three gains in ``(hue, saturation, value)`` order.
+
+        Returns:
+            The gains as a plain tuple, the shape :attr:`HSVJitter.last_gains` has
+            carried since WP-013.
+
+        Examples:
+            ```pycon
+            >>> HSVParams(hue=0.1, saturation=-0.2, value=0.3).as_tuple()
+            (0.1, -0.2, 0.3)
+
+            ```
+        """
+        return (self.hue, self.saturation, self.value)
+
+
+@dataclass(frozen=True)
+class FlipParams:
+    """Whether one horizontal-flip call mirrors, decided by its draw.
+
+    Attributes:
+        flipped: ``True`` when the image and every modality are mirrored.
+
+    Examples:
+        ```pycon
+        >>> FlipParams(flipped=True).flipped
+        True
+
+        ```
+    """
+
+    flipped: bool
+
+
 class HSVJitter:
     """Photometric HSV jitter applied to the image alone (WP-013).
 
@@ -255,14 +313,62 @@ class HSVJitter:
 
             ```
         """
-        hue_gain = _uniform(-self.hsv_h, self.hsv_h, self.generator)
-        sat_gain = _uniform(-self.hsv_s, self.hsv_s, self.generator)
-        val_gain = _uniform(-self.hsv_v, self.hsv_v, self.generator)
-        self.last_gains = (hue_gain, sat_gain, val_gain)
+        return self.apply(image, targets, self.sample())
+
+    def sample(self) -> HSVParams:
+        """Draw one :class:`HSVParams` from the configured ranges, consuming the RNG.
+
+        The sampling half of the seam: this is the only method that touches
+        :attr:`generator`, so a caller wanting stated gains rather than drawn ones
+        builds :class:`HSVParams` directly (WP-147).
+
+        Returns:
+            The three sampled gains. Nothing is stashed on the instance --
+            ``last_gains`` is set by :meth:`apply`.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> gen = torch.Generator().manual_seed(0)
+            >>> jitter = HSVJitter(hsv_h=0.0, hsv_s=0.0, hsv_v=0.0, generator=gen)
+            >>> tuple(abs(gain) for gain in jitter.sample().as_tuple())
+            (0.0, 0.0, 0.0)
+
+            ```
+        """
+        return HSVParams(
+            hue=_uniform(-self.hsv_h, self.hsv_h, self.generator),
+            saturation=_uniform(-self.hsv_s, self.hsv_s, self.generator),
+            value=_uniform(-self.hsv_v, self.hsv_v, self.generator),
+        )
+
+    def apply(self, image: Tensor, targets: Targets, params: HSVParams) -> tuple[Tensor, Targets]:
+        """Apply ``params`` to ``image`` in HSV space, drawing nothing.
+
+        Args:
+            image: CHW RGB image tensor with values in ``[0, 1]``.
+            targets: Geometry carried alongside the image; returned untouched.
+            params: The gains to apply.
+
+        Returns:
+            The colour-jittered ``(C, H, W)`` image and the original ``targets``.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from lucid_yolo.data.targets import Targets
+            >>> image = torch.rand(3, 8, 8)
+            >>> out, _ = HSVJitter().apply(image, Targets.empty(), HSVParams(hue=0.0, saturation=0.0, value=0.0))
+            >>> torch.allclose(out, image, atol=1e-5)
+            True
+
+            ```
+        """
+        self.last_gains = params.as_tuple()
         hsv = rgb_to_hsv(image)
-        hue = (hsv[0] + hue_gain) % 1.0
-        saturation = (hsv[1] * (1.0 + sat_gain)).clamp(0.0, 1.0)
-        value = (hsv[2] * (1.0 + val_gain)).clamp(0.0, 1.0)
+        hue = (hsv[0] + params.hue) % 1.0
+        saturation = (hsv[1] * (1.0 + params.saturation)).clamp(0.0, 1.0)
+        value = (hsv[2] * (1.0 + params.value)).clamp(0.0, 1.0)
         out_image = hsv_to_rgb(torch.stack([hue, saturation, value], dim=0))
         return out_image, targets
 
@@ -358,15 +464,59 @@ class HorizontalFlip:
 
             ```
         """
-        self.last_flipped = self._draw()
-        if not self.last_flipped:
+        return self.apply(image, targets, self.sample())
+
+    def sample(self) -> FlipParams:
+        """Draw whether this call flips, consuming one uniform against ``p``.
+
+        The sampling half of the seam: this is the only method that touches
+        :attr:`generator`, so a caller wanting a stated flip rather than a drawn one
+        builds :class:`FlipParams` directly (WP-147).
+
+        Returns:
+            The drawn decision. Nothing is stashed on the instance --
+            ``last_flipped`` is set by :meth:`apply`.
+
+        Examples:
+            ```pycon
+            >>> HorizontalFlip(p=1.0).sample()
+            FlipParams(flipped=True)
+            >>> HorizontalFlip(p=0.0).sample()
+            FlipParams(flipped=False)
+
+            ```
+        """
+        return FlipParams(flipped=_uniform(0.0, 1.0, self.generator) < self.p)
+
+    def apply(self, image: Tensor, targets: Targets, params: FlipParams) -> tuple[Tensor, Targets]:
+        """Mirror ``image`` and ``targets`` when ``params`` says so, drawing nothing.
+
+        Args:
+            image: CHW image tensor.
+            targets: Geometry to mirror when the image is flipped.
+            params: Whether to mirror.
+
+        Returns:
+            Either the original ``(image, targets)`` or the left-right flipped image
+            with every target modality mirrored.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from lucid_yolo.data.targets import Targets
+            >>> boxes = torch.tensor([[0.0, 0.0, 1.0, 2.0]])
+            >>> t = Targets(boxes=boxes, labels=torch.tensor([0]))
+            >>> _, out = HorizontalFlip().apply(torch.zeros(3, 2, 4), t, FlipParams(flipped=True))
+            >>> out.boxes.tolist()
+            [[3.0, 0.0, 4.0, 2.0]]
+
+            ```
+        """
+        self.last_flipped = params.flipped
+        if not params.flipped:
             return image, targets
         width = float(image.shape[-1])
         return image.flip(-1), self._mirror_targets(targets, width, self.keypoint_flip_pairs)
-
-    def _draw(self) -> bool:
-        """Return whether this call flips, sampling one uniform draw against ``p``."""
-        return _uniform(0.0, 1.0, self.generator) < self.p
 
     @staticmethod
     def _mirror_targets(targets: Targets, width: float, keypoint_flip_pairs: list[tuple[int, int]] | None) -> Targets:
