@@ -1,0 +1,39 @@
+{
+  "producer": "scripts.golden_producers:assignment_cases",
+  "tolerances": {
+    "tal_positives_tiny": 0.0,
+    "stal_positives_tiny": 0.0,
+    "tal_candidates_tiny": 0.0,
+    "stal_candidates_tiny": 0.0,
+    "stal_positives_6x20": 0.0,
+    "stal_candidates_6x20": 0.0,
+    "tal_candidates_6x20": 0.0,
+    "stal_candidates_20x6": 0.0,
+    "tal_candidates_20x6": 0.0,
+    "stal_surrogate_6x20_width": 0.0,
+    "stal_surrogate_6x20_height": 0.0,
+    "unique_positives_per_gt_max": 0.0,
+    "unique_total_positives": 0.0,
+    "o2m_positives_per_gt_max": 0.0,
+    "o2m_total_positives": 0.0,
+    "multi_gt_candidates_total": 0.0
+  },
+  "values": {
+    "tal_positives_tiny": 0.0,
+    "stal_positives_tiny": 4.0,
+    "tal_candidates_tiny": 0.0,
+    "stal_candidates_tiny": 4.0,
+    "stal_positives_6x20": 4.0,
+    "stal_candidates_6x20": 4.0,
+    "tal_candidates_6x20": 0.0,
+    "stal_candidates_20x6": 4.0,
+    "tal_candidates_20x6": 0.0,
+    "stal_surrogate_6x20_width": 16.0,
+    "stal_surrogate_6x20_height": 20.0,
+    "unique_positives_per_gt_max": 1.0,
+    "unique_total_positives": 3.0,
+    "o2m_positives_per_gt_max": 10.0,
+    "o2m_total_positives": 30.0,
+    "multi_gt_candidates_total": 56.0
+  }
+}

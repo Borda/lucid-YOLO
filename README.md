@@ -46,7 +46,7 @@ flowchart LR
     O2O --> OUT[300 detections<br/>x1 y1 x2 y2 score class]
 ```
 
-The interesting part is the **one-to-one branch**. A classical detector predicts many boxes per object and deletes the duplicates afterwards with non-maximum suppression — an operation that is not a neural network, does not export cleanly, and costs latency that grows with the number of objects. Train a second branch to assign exactly one prediction per object, and suppression has nothing left to do: ranking by score and taking the top 300 *is* the decode. The exported graph carries a `TopK` node and no `NonMaxSuppression` node, and a test in this repository asserts exactly that on all three tasks.
+The interesting part is the **one-to-one branch**. A classical detector predicts many boxes per object and deletes the duplicates afterwards with non-maximum suppression — an operation that is not a neural network, does not export cleanly, and costs latency that grows with the number of objects. Train a second branch to assign exactly one prediction per object, and suppression has nothing left to do: ranking by score and taking the top 300 *is* the decode. The exported graph carries a `TopK` node and no `NonMaxSuppression` node, and a test in this repository asserts exactly that on all four tasks.
 
 The cost is accuracy, and this project measures it rather than assuming it (see below).
 

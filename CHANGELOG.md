@@ -2,7 +2,7 @@
 
 All notable changes to lucid-yolo are documented here, following the Keep a Changelog convention; versioning is a perpetual 0.x release train — no 1.0 is ever planned, promised, or tagged — per ADR-002 (docs/DECISIONS.md).
 
-## [Unreleased]
+## [0.6.0] - 2026-09-03
 
 ### Changed
 
