@@ -2,6 +2,17 @@
 
 All notable changes to lucid-yolo are documented here, following the Keep a Changelog convention; versioning is a perpetual 0.x release train — no 1.0 is ever planned, promised, or tagged — per ADR-002 (docs/DECISIONS.md).
 
+## [Unreleased]
+
+### Changed
+
+- The `[HUMAN]` roadmap tag is now `[PRINCIPAL]`, project-wide. It never meant a person rather than a machine; it meant the party who drives the project rather than the party who executes it, which is the split every use of it actually turns on. Anatomical uses of "human" are untouched, as are the pre-existing uses of "operator" meaning whoever runs the command -- the principal decides, the operator executes (WP-140b).
+- D18: the one-WP-one-commit contract is a reproduction instrument and ends when the reproduction does. Once the report carries all four accepted tiers and the repository is public, a change altering no shipped behaviour, no public symbol, no golden and no documented assumption lands as an ordinary gated commit; the gate itself never relaxes, and adding a new task restarts the full procedure. Contributor admission is built as three layers, because a signature records a claim and never detects the code it is claiming about (WP-140b).
+
+### Added
+
+- Phase 13 (WP-141…153, release 0.6.0) and Phase 14 (WP-154…166, release 0.7.0): contributor admission, the augmentation regression guard, the keypoint ONNX export and `predict_keypoints` that 0.5.0's own entry named as owed, and then the augmentation stack moving to `fuse-augmentations`. Two phases rather than one so the guard is published before anything it guards is allowed to move (WP-140b).
+
 ## [0.5.0] - 2026-08-25
 
 ### Added
@@ -71,7 +82,7 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Documentation
 
-- The reproduction report gains a consolidated note reading the detection, segmentation and oriented sections against each other. It appends rather than merges, because D10 makes the report append-only and merging three sections would rewrite three records three human gates signed off on; it says in its own first line that it is not a fourth tier. What the consolidation produces is an absence: the NMS-free deploy path's cost against NMS is the one quantity all three tiers could have reported in the same units, and the oriented tier never evaluated an NMS baseline at all (WP-065).
+- The reproduction report gains a consolidated note reading the detection, segmentation and oriented sections against each other. It appends rather than merges, because D10 makes the report append-only and merging three sections would rewrite three records three principal gates signed off on; it says in its own first line that it is not a fourth tier. What the consolidation produces is an absence: the NMS-free deploy path's cost against NMS is the one quantity all three tiers could have reported in the same units, and the oriented tier never evaluated an NMS baseline at all (WP-065).
 
 - `docs/DATASETS.md` gains a reference section putting the COCO and YOLO trees side by side, with every citation naming the enclosing symbol instead of a line range — line numbers rotted three times while that one section was being written, two of them shipped, and the values were right each time with only the references wrong (WP-099d).
 

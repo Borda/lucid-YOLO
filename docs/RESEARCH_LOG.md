@@ -548,7 +548,7 @@ What the package changes is therefore not behaviour but what is asserted. The te
 
 <a id="wp-065"></a>
 
-The row said "merge det/seg/obb sections". It appends instead, and the reason is D10: the report is append-only, a later release correcting an earlier claim by adding to it rather than editing the record away. Merging three accepted sections would rewrite three records that three `[HUMAN]` gates signed off on. So the consolidation is a fourth section that reads the other three against each other and revises none of them, and its own first line says it is not a fourth tier: no run stands behind it.
+The row said "merge det/seg/obb sections". It appends instead, and the reason is D10: the report is append-only, a later release correcting an earlier claim by adding to it rather than editing the record away. Merging three accepted sections would rewrite three records that three `[PRINCIPAL]` gates signed off on. So the consolidation is a fourth section that reads the other three against each other and revises none of them, and its own first line says it is not a fourth tier: no run stands behind it.
 
 **The consolidation found an absence, and the absence is the result.** The NMS-free deploy path's cost against NMS is the one quantity all three tiers could have reported in the same units — Det-smoke measures 1.11 AP raw and 1.46 EMA, Seg-smoke 1.27 box and 0.81 segm. OBB-smoke reports EMA against raw weights and never evaluated an NMS baseline at all, so the project has no figure for what NMS-free deployment costs orientation, on a path built precisely to deploy without NMS. Three sections can each be complete and the set still have a hole in it; nothing but putting them in one table shows it.
 

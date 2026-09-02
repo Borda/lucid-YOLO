@@ -7,16 +7,20 @@ First file an agent (or engineer) executing the roadmap reads. Mirrors blueprint
 ## 1. The loop
 
 1. Read this file, `docs/DECISIONS.md`, `docs/ASSUMPTIONS.md`, `docs/ROADMAP.md`.
-2. Select **lowest-numbered WP whose dependencies are all `done`**, not marked **[HUMAN]**.
+2. Select **lowest-numbered WP whose dependencies are all `done`**, not marked **[PRINCIPAL]**.
 3. Implement **only that WP's scope**. Scope creep is a defect: unrelated fixes become their own WP.
 4. Run `make gate`. Must be green, every previously frozen golden included.
 5. Commit once (sec. 5 format) on `main` (D12a — one WP = one commit; each independently revertable, leaving `main` releasable).
 6. Flip WP row to `done` in `docs/ROADMAP.md`, same commit. Keep the Scope cell near the table's median (~285 chars) — guidance, not a limit, and the reasoning behind the scope belongs in the linked RESEARCH_LOG.md section, per that file's header.
-7. **Stop and report.** No chaining into the next WP without operator authorization for the session.
+7. **Stop and report.** No chaining into the next WP without principal authorization for the session.
 
 **Staged set must equal gate-tested set.** Step 4 certifies a tree, not an intention: any edit between gate run and `git commit` invalidates the green — including a docs edit, which is the form this actually takes. Docs-only *commit* is exempt; a docs edit riding inside a code commit is not, nor is a step-6 roadmap flip made after step 4 ran. Re-run the gate, or at minimum the meta tests, before staging. Failure surfaces one commit later as a red `main` with no obvious owner: `fcf3040` shipped that way, and the next agent spent a full run reporting a blocker it was forbidden to fix.
 
-Pushes batched at phase boundaries, each requiring explicit human confirmation (D12a). Release tags always [HUMAN].
+**[PRINCIPAL]** marks work that belongs to whoever *drives* the project rather than whoever *executes* it — the calls that come from intent, ownership or risk appetite, and so cannot be answered by reading the code. It is a role, not a species: an agent acting with delegated authority is still executing, and a principal who writes the patch themselves is still deciding.
+
+Pushes batched at phase boundaries, each requiring explicit principal confirmation (D12a). Release tags always [PRINCIPAL].
+
+**This loop has an end condition (D18).** Once the reproduction report carries all four accepted tiers and the repository is public, a change that alters no shipped behaviour, adds or removes no public symbol, moves no golden and changes no documented assumption lands as an ordinary gated commit rather than a tracked WP. Everything else still opens one, the gate never relaxes, and adding a new **task** to the model family restarts the full procedure — its own phase, numbered WPs, smoke tier, principal gate and 0.MINOR — because a new task is a new reproduction claim. Until WP-141 lands, the contract above applies in full.
 
 ## 2. Environment
 
@@ -47,7 +51,7 @@ Stop and write a `docs/ESCALATION.md` entry — symptom, WP, hypotheses tried, s
 2. Answering a question would require a denylisted source.
 3. WP spec conflicts with the technical specification or the papers.
 4. A change would require altering a frozen golden.
-5. A run would exceed 4 GPU-hours and is not already [HUMAN].
+5. A run would exceed 4 GPU-hours and is not already [PRINCIPAL].
 
 ## 5. Commit format (provenance-carrying)
 
@@ -76,7 +80,7 @@ Internal identifiers use descriptive names derived from the papers' terminology 
 
 ## 7. Standing prohibitions
 
-Never: consult or install `ultralytics` or any mirror; create a model-topology config format (ADR-001); copy code from any external detection repository (check LICENSE and provenance before consulting *any* external detection repo, third-party YOLO-seg/YOLO-OBB forks included); plan, promise, or tag a 1.0 (ADR-002); modify a frozen golden; start a [HUMAN] WP; commit datasets or downloaded weights; leave `main` red; download, fine-tune, distill from, or compare against released Ultralytics checkpoints.
+Never: consult or install `ultralytics` or any mirror; create a model-topology config format (ADR-001); copy code from any external detection repository (check LICENSE and provenance before consulting *any* external detection repo, third-party YOLO-seg/YOLO-OBB forks included); plan, promise, or tag a 1.0 (ADR-002); modify a frozen golden; start a [PRINCIPAL] WP; commit datasets or downloaded weights; leave `main` red; download, fine-tune, distill from, or compare against released Ultralytics checkpoints.
 
 ## 8. Delegated work packages
 

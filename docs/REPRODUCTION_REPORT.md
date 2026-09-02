@@ -115,7 +115,7 @@ ______________________________________________________________________
 
 ## 🖌️ 0.2.0 — Instance segmentation
 
-The Seg-smoke tier has run and was **accepted 2026-08-10** at roadmap 054's `[HUMAN]` gate, together with the numeric criterion below, which `seg_smoke.yaml` had stated only qualitatively. This section records what the run measured and what it was measured against.
+The Seg-smoke tier has run and was **accepted 2026-08-10** at roadmap 054's `[PRINCIPAL]` gate, together with the numeric criterion below, which `seg_smoke.yaml` had stated only qualitatively. This section records what the run measured and what it was measured against.
 
 ### What was reproduced
 
@@ -227,7 +227,7 @@ ______________________________________________________________________
 
 ## 🔄 0.3.0 — Oriented detection
 
-The OBB-smoke tier has run and was **accepted 2026-08-14** at roadmap 064's `[HUMAN]` gate. This section records what the run measured, what it can and cannot be compared against, and where the criterion `obb_smoke.yaml` stated no longer fits the instruments — the acceptance was given on the first two, and explicitly not on the third.
+The OBB-smoke tier has run and was **accepted 2026-08-14** at roadmap 064's `[PRINCIPAL]` gate. This section records what the run measured, what it can and cannot be compared against, and where the criterion `obb_smoke.yaml` stated no longer fits the instruments — the acceptance was given on the first two, and explicitly not on the third.
 
 ### What was reproduced
 

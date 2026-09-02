@@ -2,7 +2,7 @@
 """Unit gates for the WP-123 RLE loss (R14, A65, A66).
 
 Since the flow's own correctness cannot be checked against a training-run
-metric until the [GPU][HUMAN]-gated pose-smoke tier (WP-125), every property a
+metric until the [GPU][PRINCIPAL]-gated pose-smoke tier (WP-125), every property a
 unit test *can* pin here is load-bearing: invertibility (the flow's synthesis
 and inverse must be exact inverses of each other, or the density evaluation is
 wrong), the log-determinant bookkeeping (checked against autograd's own

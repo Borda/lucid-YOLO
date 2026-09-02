@@ -1,6 +1,6 @@
 # 🔄 Model card — lucid-yolo oriented detector (n scale)
 
-Covers the oriented detection model produced by the OBB-smoke tier run, released as `0.3.0`. That tier was accepted at its human gate (roadmap 064) on 2026-08-14, on the evidence recorded in `REPRODUCTION_REPORT.md`. One card per task family; detection and instance segmentation have their own.
+Covers the oriented detection model produced by the OBB-smoke tier run, released as `0.3.0`. That tier was accepted at its principal gate (roadmap 064) on 2026-08-14, on the evidence recorded in `REPRODUCTION_REPORT.md`. One card per task family; detection and instance segmentation have their own.
 
 ## 📇 Model details
 

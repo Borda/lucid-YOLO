@@ -8,7 +8,7 @@ name: Release
 # Golden freezing (`make freeze-goldens MINOR=0.N`) is performed by the release
 # work-package commit itself, not by this workflow — the frozen snapshot must be
 # reviewed and committed before the tag is pushed. Publication to PyPI is a
-# [HUMAN] decision and is deliberately absent here: this workflow only builds and
+# [PRINCIPAL] decision and is deliberately absent here: this workflow only builds and
 # uploads the distributions as inspectable artifacts.
 
 on:
