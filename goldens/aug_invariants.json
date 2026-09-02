@@ -1,0 +1,37 @@
+{
+  "producer": "scripts.golden_producers:aug_invariants",
+  "tolerances": {
+    "affine_kept_instances": 0.0,
+    "affine_image_mean": 0.002,
+    "affine_bbox_coord_sum": 0.05,
+    "affine_polygon_area": 0.5,
+    "fused_image_mean": 0.002,
+    "fused_bbox_coord_sum": 0.05,
+    "letterbox_pad_fraction": 0.0,
+    "letterbox_image_mean": 0.002,
+    "mosaic_kept_instances": 0.0,
+    "mosaic_image_mean": 0.002,
+    "mixup_image_mean": 0.002,
+    "mixup_total_instances": 0.0,
+    "copypaste_written_pixels": 0.0,
+    "hsv_image_mean": 0.002,
+    "rotated_rbox_area": 0.5
+  },
+  "values": {
+    "affine_kept_instances": 2.0,
+    "affine_image_mean": 0.5565,
+    "affine_bbox_coord_sum": 121.3428,
+    "affine_polygon_area": 276.7792,
+    "fused_image_mean": 0.5529,
+    "fused_bbox_coord_sum": 91.0071,
+    "letterbox_pad_fraction": 0.4,
+    "letterbox_image_mean": 0.5024,
+    "mosaic_kept_instances": 8.0,
+    "mosaic_image_mean": 0.5299,
+    "mixup_image_mean": 0.5462,
+    "mixup_total_instances": 4.0,
+    "copypaste_written_pixels": 224.0,
+    "hsv_image_mean": 0.6506,
+    "rotated_rbox_area": 96.1935
+  }
+}

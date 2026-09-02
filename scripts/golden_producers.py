@@ -53,7 +53,13 @@ from lucid_yolo.assign import (
     make_anchor_points,
     surrogate_boxes,
 )
+from lucid_yolo.data.affine import AffineParams, FusedAffineLetterbox, RandomAffine
+from lucid_yolo.data.augment import HSVJitter, HSVParams
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
+from lucid_yolo.data.letterbox import Letterbox
+from lucid_yolo.data.mixup import CopyPaste, CopyPasteParams, Mixup, MixupParams
+from lucid_yolo.data.mosaic import MosaicAssembly, MosaicParams
+from lucid_yolo.data.targets import Targets
 from lucid_yolo.models.build import (
     build_detector,
     build_keypoint_detector,
@@ -950,4 +956,179 @@ def kp_params_flops() -> dict[str, float]:
         metrics[f"{variant}_params"] = float(count_params(model))
         gflops = count_flops(model.deploy(), img_size=_DET_IMG_SIZE)
         metrics[f"{variant}_gflops"] = round(gflops, _DET_GFLOP_DECIMALS)
+    return metrics
+
+
+#: Deterministic canvas side for the WP-149 augmentation-invariant scene.
+_AUG_CANVAS = 32
+#: Grey fill every geometric transform pads with (114/255, the YOLO-lineage value).
+_AUG_FILL = 114.0 / 255.0
+#: Rounding for the tolerance-pinned float aggregates in :func:`aug_invariants`.
+_AUG_DECIMALS = 4
+
+
+def _aug_scene() -> tuple[Tensor, Targets]:
+    """Build the fixed image and targets every :func:`aug_invariants` metric runs on.
+
+    The image is analytic rather than drawn: a separable ramp plus one bright block,
+    so it carries structure a warp can move without any RNG entering the producer.
+    Targets carry boxes, polygons, keypoints and one rotated box, so a single scene
+    exercises every modality the transforms transport.
+
+    Returns:
+        The ``(3, 32, 32)`` image and its targets.
+
+    Examples:
+        ```pycon
+        >>> image, targets = _aug_scene()
+        >>> image.shape, targets.boxes.shape
+        (torch.Size([3, 32, 32]), torch.Size([2, 4]))
+
+        ```
+    """
+    axis = torch.linspace(0.0, 1.0, _AUG_CANVAS, dtype=torch.float32)
+    ramp = axis.unsqueeze(0) * 0.5 + axis.unsqueeze(1) * 0.5
+    image = ramp.unsqueeze(0).repeat(3, 1, 1)
+    image[:, 8:16, 8:16] = 1.0
+    targets = Targets(
+        boxes=torch.tensor([[6.0, 6.0, 18.0, 18.0], [20.0, 4.0, 28.0, 14.0]]),
+        labels=torch.tensor([0, 1]),
+        polygons=[
+            torch.tensor([[6.0, 6.0], [18.0, 6.0], [18.0, 18.0], [6.0, 18.0]]),
+            torch.tensor([[20.0, 4.0], [28.0, 4.0], [28.0, 14.0], [20.0, 14.0]]),
+        ],
+        keypoints=torch.tensor([[[8.0, 8.0], [16.0, 16.0]], [[21.0, 5.0], [27.0, 13.0]]]),
+        keypoint_vis=torch.tensor([[2, 2], [2, 1]]),
+    )
+    return image, targets
+
+
+def _aug_rotated_scene() -> tuple[Tensor, Targets]:
+    """Build the rotated-modality variant of :func:`_aug_scene`.
+
+    Rotated boxes cannot share a target set with polygons (WP-056), so the oriented
+    metrics run on their own scene rather than on a modality-stripped copy of the
+    main one.
+
+    Returns:
+        The ``(3, 32, 32)`` image and targets carrying one rotated box.
+
+    Examples:
+        ```pycon
+        >>> _aug_rotated_scene()[1].rboxes.shape
+        torch.Size([1, 5])
+
+        ```
+    """
+    image, _ = _aug_scene()
+    targets = Targets(
+        boxes=torch.tensor([[8.0, 9.0, 20.0, 15.0]]),
+        labels=torch.tensor([0]),
+        rboxes=torch.tensor([[14.0, 12.0, 12.0, 6.0, 0.35]]),
+    )
+    return image, targets
+
+
+def _polygon_area(rings: list[Tensor]) -> float:
+    """Total shoelace area of every ring, as one float.
+
+    Args:
+        rings: Polygon rings, each ``(P, 2)``.
+
+    Returns:
+        The summed absolute area. Ring order and winding do not affect it, which is
+        what makes it usable as an aggregate over a clipped set whose vertex counts
+        move.
+
+    Examples:
+        ```pycon
+        >>> _polygon_area([torch.tensor([[0.0, 0.0], [2.0, 0.0], [2.0, 3.0], [0.0, 3.0]])])
+        6.0
+
+        ```
+    """
+    total = 0.0
+    for ring in rings:
+        x = ring[:, 0]
+        y = ring[:, 1]
+        rolled_x = torch.roll(x, -1)
+        rolled_y = torch.roll(y, -1)
+        total += float(torch.abs(torch.dot(x, rolled_y) - torch.dot(rolled_x, y)) / 2.0)
+    return total
+
+
+def aug_invariants() -> dict[str, float]:
+    """Scalar aggregates over every transform, run from *stated* parameters (WP-149).
+
+    The golden half of the augmentation regression guard. Exact tensor geometry
+    lives in ``tests/data/test_aug_frozen.py`` as pytest literals, where the diff
+    shows the numbers next to the case that produced them; what belongs here is the
+    scalar aggregate a literal would express badly -- a surviving instance count, a
+    total polygon area, a pad-fill fraction, an image mean.
+
+    Every value is produced by calling a transform's ``apply`` with parameters
+    written into this function, never by sampling: an upstream engine will not draw
+    the same numbers from the same seed, so a seed-keyed value would break at the
+    swap for reasons unrelated to correctness. Nothing here touches a generator, so
+    the producer is deterministic without one.
+
+    Returns:
+        A mapping of fifteen metrics: integer counts pinned exactly, float
+        aggregates pinned within a resampling tolerance.
+
+    Examples:
+        ```pycon
+        >>> metrics = aug_invariants()
+        >>> metrics["affine_kept_instances"]
+        2.0
+        >>> 0.0 < metrics["letterbox_pad_fraction"] < 1.0
+        True
+
+        ```
+    """
+    image, targets = _aug_scene()
+    metrics: dict[str, float] = {}
+
+    composite = AffineParams(angle=0.35, shear_x=0.12, shear_y=-0.08, scale=1.15, translate_x=2.5, translate_y=-1.5)
+    affine_image, affine_targets = RandomAffine().apply(image, targets, composite)
+    metrics["affine_kept_instances"] = float(affine_targets.boxes.shape[0])
+    metrics["affine_image_mean"] = round(float(affine_image.mean()), _AUG_DECIMALS)
+    metrics["affine_bbox_coord_sum"] = round(float(affine_targets.boxes.sum()), _AUG_DECIMALS)
+    metrics["affine_polygon_area"] = round(_polygon_area(affine_targets.polygons), _AUG_DECIMALS)
+
+    fused_image, fused_targets = FusedAffineLetterbox(24).apply(image, targets, composite)
+    metrics["fused_image_mean"] = round(float(fused_image.mean()), _AUG_DECIMALS)
+    metrics["fused_bbox_coord_sum"] = round(float(fused_targets.boxes.sum()), _AUG_DECIMALS)
+
+    letterboxed, _ = Letterbox((24, 40))(image, targets)
+    metrics["letterbox_pad_fraction"] = round(
+        float((letterboxed[0] - _AUG_FILL).abs().lt(1e-6).to(torch.float32).mean()), _AUG_DECIMALS
+    )
+    metrics["letterbox_image_mean"] = round(float(letterboxed.mean()), _AUG_DECIMALS)
+
+    mosaic_items = [(image, targets.clone()) for _ in range(4)]
+    mosaic_image, mosaic_targets = MosaicAssembly(target_size=_AUG_CANVAS).apply(
+        mosaic_items, MosaicParams(center_x=26, center_y=38)
+    )
+    metrics["mosaic_kept_instances"] = float(mosaic_targets.boxes.shape[0])
+    metrics["mosaic_image_mean"] = round(float(mosaic_image.mean()), _AUG_DECIMALS)
+
+    mixed, mixed_targets = Mixup(p=1.0).apply(
+        [(image, targets.clone()), (affine_image, affine_targets.clone())], MixupParams(lam=0.6)
+    )
+    metrics["mixup_image_mean"] = round(float(mixed.mean()), _AUG_DECIMALS)
+    metrics["mixup_total_instances"] = float(mixed_targets.boxes.shape[0])
+
+    pasted, _ = CopyPaste(p=1.0).apply(
+        [(torch.zeros_like(image), Targets.empty()), (image, targets.clone())], CopyPasteParams(selected=(0, 1))
+    )
+    metrics["copypaste_written_pixels"] = float((pasted[0] > 0.0).sum())
+
+    jittered, _ = HSVJitter().apply(image, targets, HSVParams(hue=0.06, saturation=-0.3, value=0.25))
+    metrics["hsv_image_mean"] = round(float(jittered.mean()), _AUG_DECIMALS)
+
+    rotated_image, rotated_targets = _aug_rotated_scene()
+    _, sheared = RandomAffine().apply(rotated_image, rotated_targets, composite)
+    metrics["rotated_rbox_area"] = round(float((sheared.rboxes[:, 2] * sheared.rboxes[:, 3]).sum()), _AUG_DECIMALS)
+
     return metrics
