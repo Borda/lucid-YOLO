@@ -157,22 +157,3 @@ class TestRotatedBoxesGuard:
 
         with pytest.raises(ValueError, match="instance axis"):
             fused(torch.rand(3, 96, 96), targets)
-
-
-class TestDeterminism:
-    """Two seeded transforms with the same seed give byte-identical outputs."""
-
-    def test_same_seed_identical_outputs(self) -> None:
-        """Equal-seed generators produce equal fused images and targets."""
-        image = torch.rand(3, 180, 240)
-        targets = _polygon_targets(180)
-        fused_a = FusedAffineLetterbox(128, degrees=15.0, translate=0.1, scale=0.2, shear=5.0, generator=_generator(99))
-        fused_b = FusedAffineLetterbox(128, degrees=15.0, translate=0.1, scale=0.2, shear=5.0, generator=_generator(99))
-
-        image_a, targets_a = fused_a(image.clone(), targets.clone())
-        image_b, targets_b = fused_b(image.clone(), targets.clone())
-
-        assert torch.equal(image_a, image_b)
-        assert torch.equal(targets_a.boxes, targets_b.boxes)
-        for ring_a, ring_b in zip(targets_a.polygons, targets_b.polygons, strict=True):
-            assert torch.equal(ring_a, ring_b)

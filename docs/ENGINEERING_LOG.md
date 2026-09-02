@@ -1067,3 +1067,19 @@ The guard's third tier is the one that pins rather than proves, and the discipli
 **Golden discovery was verified positively, not inferred.** WP-139's lesson is that the harness globs, so it cannot notice a golden that was never written; a green run therefore proves nothing about a file's presence. `check_goldens.py` was run directly and printed `PASS aug_invariants.json — 15 metric(s)` and `31/31`, up from 30. That is the check, not the green gate around it.
 
 `tests/data/test_aug_seam.py` is deleted here as WP-147 said it would be. It existed to witness that `__call__` equals `sample()` then `apply()` while the frozen tiers did not yet exist; now that tiers A, B and C all call `apply` with stated parameters, the seam is exercised by every case in all three files, and a witness that outlived its gap would just be a slower way of asserting the same thing.
+
+### WP-150 — the tier that is allowed to move
+
+<a id="wp-150"></a>
+
+Six determinism assertions were scattered across five test files, each sitting beside the behaviour assertions for its own transform: `TestDeterminism` in `test_affine.py`, `test_fused_warp.py` and `test_mosaic.py`, `TestMixupDeterminism` and `TestCopyPasteDeterminism` in `test_mixup_copypaste.py`, and two seeded cases inside `test_photometric.py`'s jitter and flip classes. All six now live in `tests/data/test_aug_determinism.py`, labelled tier D.
+
+**The move is not tidying. It is about what a failure will mean.** Every assertion in the file is keyed to a *seed*, and a seed pins whichever sampler happens to be installed. A replacement engine will not draw the same numbers from the same seed — different call order, different distributions, different consumption of the stream — so these values moving at an implementation swap is expected and says nothing at all about correctness. Tiers A, B and C moving at a swap is a defect. Those are opposite verdicts from the same red test run, and the only thing that tells them apart is which file the failure is in.
+
+**Mixed in, the two verdicts share a keystroke.** A tier-D failure at swap time reads as a regression, and the natural response — re-freeze it, the values were always going to move — is exactly the response that would silently destroy a tier-B guard sitting three classes above it in the same file. Separated, the response follows from the filename. This is the same argument the plan makes for never re-freezing an expectation in the same commit as a call-site swap, applied one level up: keep the thing that is allowed to move away from the thing that is not.
+
+**Two counterparts were added rather than only moved.** Tier D is a two-sided property — same seed gives the same output, *different* seeds give different output — and only the first half existed. The second half is what catches a transform that ignores its generator and reads the global RNG: such a transform passes the equal-seeds case whenever the global state happens to line up, which under a seeded test suite is most of the time. That is not hypothetical here; WP-079 was opened by an augmentation RNG collapse. The flip case gained a related assertion, that sixteen draws at `p=0.5` contain both outcomes, so a trigger stuck on one branch fails rather than agreeing with itself.
+
+**`test_letterbox.py`'s `TestDeterminism` stayed where it is, and that is the useful distinction.** It asserts that two calls on the same input return the same output — purity, not reproducibility. `Letterbox` has no generator, nothing about it is keyed to a seed, and it will not be re-frozen at any swap. A rescope that swept every class named `TestDeterminism` into the tier-D file would have moved it, and the name is the only thing the two have in common.
+
+No value in the tier-D file appears in `goldens/`, and none should: reproducibility is a property of a run rather than a number worth carrying across releases.

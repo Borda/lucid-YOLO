@@ -137,13 +137,6 @@ class TestHSVJitter:
         assert torch.equal(out_targets.boxes, targets.boxes)
         assert torch.equal(out_targets.rboxes, targets.rboxes)
 
-    def test_seeded_determinism(self) -> None:
-        """Two jitters sharing a seed produce byte-identical output."""
-        image = torch.rand(3, 12, 12)
-        a, _ = HSVJitter(generator=_generator(7))(image, Targets.empty())
-        b, _ = HSVJitter(generator=_generator(7))(image, Targets.empty())
-        assert torch.equal(a, b)
-
 
 class TestHorizontalFlip:
     """Horizontal flip mirrors the image and every carried target modality exactly."""
@@ -241,16 +234,6 @@ class TestHorizontalFlip:
         assert torch.equal(out_image, image)
         assert out_targets is targets
         assert flip.last_flipped is False
-
-    def test_seeded_draw_determinism(self) -> None:
-        """The flip decision is reproducible across a shared seed over many draws."""
-        image = torch.rand(3, 4, 6)
-        flip_a = HorizontalFlip(p=0.5, generator=_generator(21))
-        flip_b = HorizontalFlip(p=0.5, generator=_generator(21))
-        decisions_a = [(flip_a(image, Targets.empty()), flip_a.last_flipped)[1] for _ in range(16)]
-        decisions_b = [(flip_b(image, Targets.empty()), flip_b.last_flipped)[1] for _ in range(16)]
-        assert decisions_a == decisions_b
-        assert all(isinstance(d, bool) for d in decisions_a)
 
     def test_mirrored_angle_above_quarter_pi_is_re_canonicalized(self) -> None:
         """An angle above pi/4 mirrors to pi - theta, inside the range the bare negation left (WP-058)."""

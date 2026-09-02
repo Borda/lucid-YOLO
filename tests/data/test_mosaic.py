@@ -316,23 +316,3 @@ class TestGuards:
 
         with pytest.raises(ValueError, match="instance axis"):
             mosaic(items)
-
-
-class TestDeterminism:
-    """Two seeded generators with the same seed give byte-identical outputs."""
-
-    def test_same_seed_identical_outputs(self) -> None:
-        """Equal-seed generators produce equal mosaic images, boxes and centres."""
-        images = [_image() for _ in range(_MOSAIC_COUNT)]
-        boxes = _one_box_targets()
-        items_a = [(image.clone(), boxes.clone()) for image in images]
-        items_b = [(image.clone(), boxes.clone()) for image in images]
-        mosaic_a = MosaicAssembly(target_size=_TARGET, generator=_generator(99))
-        mosaic_b = MosaicAssembly(target_size=_TARGET, generator=_generator(99))
-
-        image_a, targets_a = mosaic_a(items_a)
-        image_b, targets_b = mosaic_b(items_b)
-
-        assert torch.equal(image_a, image_b)
-        assert torch.equal(targets_a.boxes, targets_b.boxes)
-        assert mosaic_a.last_center == mosaic_b.last_center

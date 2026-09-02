@@ -278,24 +278,6 @@ class TestMixupGuards:
             mixup([(torch.ones(3, _SIDE, _SIDE), Targets.empty())])
 
 
-class TestMixupDeterminism:
-    """Equal-seed generators produce byte-identical blends."""
-
-    def test_same_seed_identical_outputs(self) -> None:
-        """Two identically seeded mixups give equal images, boxes and lam."""
-        a = (torch.rand(3, _SIDE, _SIDE), _boxes_only(1))
-        b = (torch.rand(3, _SIDE, _SIDE), _boxes_only(1))
-        mixup_a = Mixup(p=0.5, generator=_generator(99))
-        mixup_b = Mixup(p=0.5, generator=_generator(99))
-
-        image_a, targets_a = mixup_a([a, b])
-        image_b, targets_b = mixup_b([a, b])
-
-        assert torch.equal(image_a, image_b)
-        assert torch.equal(targets_a.boxes, targets_b.boxes)
-        assert mixup_a.last_lam == mixup_b.last_lam
-
-
 class TestCopyPastePaste:
     """A pasted instance lands its pixels and its box/label/polygon on the destination."""
 
@@ -376,31 +358,6 @@ class TestCopyPasteGuards:
 
         with pytest.raises(ValueError, match="same-size"):
             copy_paste([destination, source])
-
-
-class TestCopyPasteDeterminism:
-    """Equal-seed generators produce byte-identical paste decisions and pixels."""
-
-    def test_same_seed_identical_outputs(self) -> None:
-        """Two identically seeded copy-pastes give equal images, boxes and paste counts."""
-        ring_a = _square_ring(1.0, 1.0, 3.0, 3.0)
-        ring_b = _square_ring(4.0, 4.0, 6.0, 6.0)
-        source = Targets(
-            boxes=torch.tensor([[1.0, 1.0, 3.0, 3.0], [4.0, 4.0, 6.0, 6.0]]),
-            labels=torch.tensor([1, 2]),
-            polygons=[ring_a, ring_b],
-        )
-        destination = (torch.zeros(3, _SIDE, _SIDE), Targets.empty())
-        items = [destination, (torch.ones(3, _SIDE, _SIDE), source)]
-        copy_paste_a = CopyPaste(p=0.5, generator=_generator(7))
-        copy_paste_b = CopyPaste(p=0.5, generator=_generator(7))
-
-        image_a, targets_a = copy_paste_a(items)
-        image_b, targets_b = copy_paste_b(items)
-
-        assert torch.equal(image_a, image_b)
-        assert torch.equal(targets_a.boxes, targets_b.boxes)
-        assert copy_paste_a.last_pasted == copy_paste_b.last_pasted
 
 
 class TestRasterizer:
