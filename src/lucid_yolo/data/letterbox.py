@@ -11,6 +11,16 @@ to letterboxed pixel coordinates is the pure scale-plus-translation affine
 inverse — eval-time predictions in letterboxed space can be un-letterboxed back
 to original-image coordinates without loss.
 
+The fit and the resample both come from ``fuse-augmentations`` (WP-155):
+:func:`~fuse_augmentations.letterbox_geometry` resolves the ratio, the content
+size and the pads, :func:`~fuse_augmentations.letterbox_matrix` builds the
+forward affine above, and a letterbox-only
+:class:`~fuse_augmentations.Compose` resamples the image in a single warp from
+the source canvas straight to the letterboxed one. What stays local is the
+inverse — built analytically from the same resolved fit rather than by inverting
+a matrix numerically — and the routing of each target modality through the
+forward affine.
+
 :class:`Letterbox` conforms to
 :class:`~lucid_yolo.data.transforms.GeometricTransform`: one call warps the image
 and every modality carried by :class:`~lucid_yolo.data.targets.Targets` (boxes,
@@ -32,10 +42,13 @@ Inverse API:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import torch
-import torch.nn.functional as F
+from fuse_augmentations import (  # type: ignore[import-untyped]
+    Compose,
+    LetterboxGeometry,
+    letterbox_geometry,
+    letterbox_matrix,
+)
 from torch import Tensor
 
 from lucid_yolo.data.targets import Targets
@@ -67,75 +80,58 @@ def _as_hw(target_size: int | tuple[int, int]) -> tuple[int, int]:
     return int(height), int(width)
 
 
-@dataclass(frozen=True)
-class _LetterboxGeom:
-    """Resolved letterbox geometry for one original/target size pairing.
+def _forward_matrix(orig_h: int, orig_w: int, out_h: int, out_w: int, allow_upscale: bool) -> Tensor:
+    """Return the ``3x3`` float64 original-to-letterboxed affine for one size pairing.
 
-    Attributes:
-        r: Aspect-preserving scale ratio applied to both axes.
-        new_h: Height of the resized content region, ``round(H * r)``.
-        new_w: Width of the resized content region, ``round(W * r)``.
-        pad_left: Left padding (floor of half the horizontal slack).
-        pad_top: Top padding (floor of half the vertical slack).
-        out_h: Target canvas height.
-        out_w: Target canvas width.
-    """
-
-    r: float
-    new_h: int
-    new_w: int
-    pad_left: int
-    pad_top: int
-    out_h: int
-    out_w: int
-
-    def forward_matrix(self, dtype: torch.dtype) -> Tensor:
-        """Return the ``3x3`` original-to-letterboxed affine in ``dtype``."""
-        return torch.tensor(
-            [[self.r, 0.0, self.pad_left], [0.0, self.r, self.pad_top], [0.0, 0.0, 1.0]],
-            dtype=dtype,
-        )
-
-    def inverse_matrix(self, dtype: torch.dtype) -> Tensor:
-        """Return the ``3x3`` letterboxed-to-original affine in ``dtype``."""
-        inv_r = 1.0 / self.r
-        return torch.tensor(
-            [[inv_r, 0.0, -self.pad_left * inv_r], [0.0, inv_r, -self.pad_top * inv_r], [0.0, 0.0, 1.0]],
-            dtype=dtype,
-        )
-
-
-def _resolve_geometry(orig_h: int, orig_w: int, out_h: int, out_w: int, allow_upscale: bool) -> _LetterboxGeom:
-    """Compute the letterbox geometry mapping ``(orig_h, orig_w)`` into ``(out_h, out_w)``.
+    A thin adapter over :func:`~fuse_augmentations.letterbox_matrix`, which builds the
+    matrix batched: it resolves the same fit :func:`~fuse_augmentations.letterbox_geometry`
+    does and returns ``[[r, 0, pad_left], [0, r, pad_top], [0, 0, 1]]``. ``float64`` is
+    what makes the inverse exact, and the leading batch axis is dropped because every
+    caller here maps one size pairing at a time.
 
     Args:
-        orig_h: Original image height.
-        orig_w: Original image width.
-        out_h: Target canvas height.
-        out_w: Target canvas width.
-        allow_upscale: If ``False``, clamp the ratio at ``1.0`` so the content is
-            never enlarged beyond its native size.
+        orig_h: Source image height in pixels.
+        orig_w: Source image width in pixels.
+        out_h: Target canvas height in pixels.
+        out_w: Target canvas width in pixels.
+        allow_upscale: Whether the fit may enlarge content past its native size.
 
     Returns:
-        The resolved :class:`_LetterboxGeom`.
+        The ``(3, 3)`` float64 forward affine.
     """
-    r = min(out_h / orig_h, out_w / orig_w)
-    if not allow_upscale:
-        r = min(r, 1.0)
-    new_w = max(1, round(orig_w * r))
-    new_h = max(1, round(orig_h * r))
-    pad_left = (out_w - new_w) // 2
-    pad_top = (out_h - new_h) // 2
-    return _LetterboxGeom(r=r, new_h=new_h, new_w=new_w, pad_left=pad_left, pad_top=pad_top, out_h=out_h, out_w=out_w)
+    matrix: Tensor = letterbox_matrix(orig_h, orig_w, out_h, out_w, allow_upscale, dtype=torch.float64)[0]
+    return matrix
+
+
+def _inverse_matrix(geometry: LetterboxGeometry, dtype: torch.dtype) -> Tensor:
+    """Return the ``3x3`` letterboxed-to-original affine for a resolved fit, in ``dtype``.
+
+    Written out rather than obtained by inverting the forward matrix: a pure
+    scale-plus-translation has a closed-form inverse, and spelling it keeps
+    :meth:`Letterbox.inverse_map` free of the residual a numerical inversion would
+    leave in the round trip A10 requires to be exact.
+
+    Args:
+        geometry: The resolved fit, from :func:`~fuse_augmentations.letterbox_geometry`.
+        dtype: Dtype of the returned matrix.
+
+    Returns:
+        The ``(3, 3)`` inverse affine.
+    """
+    inv_r = 1.0 / geometry.r
+    return torch.tensor(
+        [[inv_r, 0.0, -geometry.pad_left * inv_r], [0.0, inv_r, -geometry.pad_top * inv_r], [0.0, 0.0, 1.0]],
+        dtype=dtype,
+    )
 
 
 class Letterbox:
     """Aspect-preserving resize-and-pad transform with an exact inverse (A10).
 
     The image is scaled by ``r = min(target_h / H, target_w / W)`` (a single
-    ratio for both axes), resized with antialiased bilinear interpolation and
-    padded symmetrically to the target canvas with ``pad_value``. Boxes, polygons,
-    rotated-box centres and keypoints are warped through the same
+    ratio for both axes) and padded to the target canvas with ``pad_value``, in
+    one upstream warp from the source canvas to the letterboxed one. Boxes,
+    polygons, rotated-box centres and keypoints are warped through the same
     scale-plus-translation affine; rotated-box ``w``/``h`` scale by ``r`` and
     ``theta`` is unchanged, and keypoint visibilities carry over untouched (a
     letterbox never crops, so no annotated point leaves the canvas).
@@ -168,6 +164,17 @@ class Letterbox:
         self.out_h, self.out_w = _as_hw(target_size)
         self.pad_value = float(pad_value)
         self.allow_upscale = allow_upscale
+        # A `fuse` pipeline holding nothing but the letterbox, built once: the canvas, the
+        # fill and the upscale policy are all fixed here, and building it here is also what
+        # makes an unusable `pad_value` fail at construction rather than at the first image.
+        # A constant pad colour is spelled `fill=` and requires `padding_mode="zeros"` —
+        # the value stays in the image's own range, so `114/255` transfers unchanged.
+        self._resample = Compose.from_params(
+            letterbox=(self.out_h, self.out_w),
+            allow_upscale=self.allow_upscale,
+            fill=self.pad_value,
+            padding_mode="zeros",
+        )
 
     def __call__(self, image: Tensor, targets: Targets) -> tuple[Tensor, Targets]:
         """Letterbox ``image`` and warp ``targets`` through the matching affine.
@@ -196,10 +203,10 @@ class Letterbox:
             ```
         """
         _, height, width = image.shape
-        geom = _resolve_geometry(height, width, self.out_h, self.out_w, self.allow_upscale)
-        out_image = self._resize_pad(image, geom)
-        out_targets = self._warp_targets(targets, geom)
-        return out_image, out_targets
+        # The pipeline warps a batch; this transform is per-sample, so the batch axis is
+        # added and dropped around the one call rather than carried through the class.
+        out_image: Tensor = self._resample(image.unsqueeze(0)).squeeze(0)
+        return out_image, self.warp_targets(targets, height, width)
 
     def inverse_map(self, points: Tensor, orig_size: tuple[int, int], letterboxed_size: tuple[int, int]) -> Tensor:
         """Map letterboxed points back to original-image coordinates exactly.
@@ -227,8 +234,8 @@ class Letterbox:
         """
         orig_h, orig_w = orig_size
         out_h, out_w = letterboxed_size
-        geom = _resolve_geometry(orig_h, orig_w, out_h, out_w, self.allow_upscale)
-        return self._warp(points, geom.inverse_matrix(torch.float64))
+        geometry = letterbox_geometry(orig_h, orig_w, out_h, out_w, self.allow_upscale)
+        return self._warp(points, _inverse_matrix(geometry, torch.float64))
 
     def forward_affine(self, orig_h: int, orig_w: int) -> tuple[Tensor, int, int]:
         """Return the forward affine and output size mapping a source into this canvas.
@@ -259,17 +266,16 @@ class Letterbox:
 
             ```
         """
-        geom = _resolve_geometry(orig_h, orig_w, self.out_h, self.out_w, self.allow_upscale)
-        return geom.forward_matrix(torch.float64), geom.out_h, geom.out_w
+        return _forward_matrix(orig_h, orig_w, self.out_h, self.out_w, self.allow_upscale), self.out_h, self.out_w
 
     def warp_targets(self, targets: Targets, orig_h: int, orig_w: int) -> Targets:
         """Warp ``targets`` through the letterbox affine for a source size, no image.
 
-        Applies the same forward affine :meth:`__call__` applies to the geometry —
-        boxes, polygons and keypoints mapped point-wise, rotated-box centres warped
-        with extents scaled and angle fixed — but touches no image. It lets a fused
-        warp letterbox its targets after another transform has already produced them
-        at the source canvas.
+        The single target-side implementation: :meth:`__call__` routes through it after
+        resampling the image, and a fused warp calls it directly to letterbox targets
+        another transform has already produced at the source canvas. Boxes, polygons and
+        keypoints are mapped point-wise and rotated-box centres are warped with extents
+        scaled and angle fixed — no image is touched either way.
 
         Args:
             targets: Geometry at the source canvas to map into the letterboxed
@@ -291,30 +297,14 @@ class Letterbox:
 
             ```
         """
-        geom = _resolve_geometry(orig_h, orig_w, self.out_h, self.out_w, self.allow_upscale)
-        return self._warp_targets(targets, geom)
-
-    def _resize_pad(self, image: Tensor, geom: _LetterboxGeom) -> Tensor:
-        """Resize ``image`` to the content region and pad it to the target canvas."""
-        resized = F.interpolate(
-            image.unsqueeze(0),
-            size=(geom.new_h, geom.new_w),
-            mode="bilinear",
-            align_corners=False,
-            antialias=True,
-        ).squeeze(0)
-        pad_right = geom.out_w - geom.new_w - geom.pad_left
-        pad_bottom = geom.out_h - geom.new_h - geom.pad_top
-        return F.pad(
-            resized, (geom.pad_left, pad_right, geom.pad_top, pad_bottom), mode="constant", value=self.pad_value
-        )
-
-    def _warp_targets(self, targets: Targets, geom: _LetterboxGeom) -> Targets:
-        """Warp every modality of ``targets`` through the forward affine."""
-        matrix = geom.forward_matrix(torch.float64)
+        matrix = _forward_matrix(orig_h, orig_w, self.out_h, self.out_w, self.allow_upscale)
+        # The matrix carries the ratio in its diagonal, but a rotated box needs it as a
+        # scalar; both come from the same upstream fit over the same arguments, so they
+        # cannot disagree about what ``r`` is.
+        ratio = float(letterbox_geometry(orig_h, orig_w, self.out_h, self.out_w, self.allow_upscale).r)
         boxes = self._warp(targets.boxes.reshape(-1, 2), matrix).reshape(-1, 4)
         polygons = [self._warp(ring, matrix) for ring in targets.polygons]
-        rboxes = self._warp_rboxes(targets.rboxes, matrix, geom.r)
+        rboxes = self._warp_rboxes(targets.rboxes, matrix, ratio)
         keypoints = self._warp_keypoints(targets.keypoints, matrix)
         # The instance axis is untouched by a letterbox, so the R18 difficult flags carry
         # over row for row, and so do the keypoint visibilities (WP-132). A letterbox

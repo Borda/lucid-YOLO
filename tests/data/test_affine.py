@@ -324,6 +324,87 @@ class TestVisibilityFilter:
         assert out.boxes.shape[0] == 0
 
 
+def _sliver_targets(route: str) -> Targets:
+    """Build one box clipped to a sliver, on the modality axis naming ``route``.
+
+    The box spans ``[60, 10, 160, 40]`` on a 64-wide canvas, so clipping leaves four
+    columns of thirty rows — 4% of its own area — which every threshold pairing below
+    is chosen against.
+
+    Args:
+        route: ``"rotated"``, ``"polygons"`` or ``"boxes"``, naming which of the three
+            keep-mask call sites the returned targets route through.
+
+    Returns:
+        Targets carrying exactly one instance.
+
+    Examples:
+        >>> _sliver_targets("boxes").boxes.tolist()
+        [[60.0, 10.0, 160.0, 40.0]]
+        >>> _sliver_targets("rotated").rboxes.shape
+        torch.Size([1, 5])
+    """
+    boxes = torch.tensor([[60.0, 10.0, 160.0, 40.0]])
+    labels = torch.tensor([0])
+    if route == "rotated":
+        return Targets(boxes=boxes, labels=labels, rboxes=torch.tensor([[110.0, 25.0, 100.0, 30.0, 0.0]]))
+    if route == "polygons":
+        ring = torch.tensor([[60.0, 10.0], [160.0, 10.0], [160.0, 40.0], [60.0, 40.0]])
+        return Targets(boxes=boxes, labels=labels, polygons=[ring])
+    return Targets(boxes=boxes, labels=labels)
+
+
+@pytest.mark.parametrize("route", ["rotated", "polygons", "boxes"])
+class TestKeepThresholdsReachUpstream:
+    """Both thresholds are passed to upstream's keep mask at every one of the three call sites.
+
+    Upstream's ``instance_keep_mask`` defaults ``min_size`` and ``min_visibility`` to
+    ``0.0``, which drops nothing, against this project's ``2.0`` and ``0.1``. Omitting
+    either argument at any call site keeps every instance with no shape change and no
+    exception, so the failure is silent — these cases are what makes it loud. One case per
+    site per threshold, plus the control that the drop is the threshold's doing.
+    """
+
+    def test_size_threshold_drops_the_sliver(self, route: str) -> None:
+        """A four-column clipped box falls below ``min_box_size`` and is dropped.
+
+        ``min_visibility`` is pinned at ``0.0`` so nothing but the size rule can account
+        for the drop: if ``min_size`` were left to upstream's default the instance would
+        survive, since 4 >= 0.0.
+        """
+        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, min_box_size=8.0, min_visibility=0.0)
+
+        _, out = affine(_image(), _sliver_targets(route))
+
+        assert out.boxes.shape[0] == 0
+
+    def test_visibility_threshold_drops_the_sliver(self, route: str) -> None:
+        """A box retaining 4% of its area falls below ``min_visibility`` and is dropped.
+
+        ``min_box_size`` is pinned at ``0.0`` so nothing but the visibility rule can
+        account for the drop: at upstream's default of ``0.0`` the instance would survive,
+        since 0.04 >= 0.0.
+        """
+        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, min_box_size=0.0, min_visibility=0.5)
+
+        _, out = affine(_image(), _sliver_targets(route))
+
+        assert out.boxes.shape[0] == 0
+
+    def test_upstream_defaults_would_keep_the_sliver(self, route: str) -> None:
+        """With both thresholds at upstream's defaults the same instance survives.
+
+        The control for the two cases above: it pins that they fail for the reason claimed
+        — the thresholds this project passes — rather than because the sliver is dropped by
+        the clip, the warp or anything else on the path.
+        """
+        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, min_box_size=0.0, min_visibility=0.0)
+
+        _, out = affine(_image(), _sliver_targets(route))
+
+        assert out.boxes.shape[0] == 1
+
+
 class TestRotatedBoxesGuard:
     """The rotated path filters, so it demands WP-056's instance-axis invariant."""
 

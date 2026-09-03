@@ -82,6 +82,7 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
+from fuse_augmentations import instance_keep_mask  # type: ignore[import-untyped]
 from torch import Tensor
 
 from lucid_yolo.data.letterbox import Letterbox
@@ -553,7 +554,7 @@ class RandomAffine:
         warped = warp_rboxes(targets.rboxes, matrix)
         pre_boxes = rbox_envelopes(warped)
         rboxes, post_boxes = clip_rboxes_to_canvas(warped, float(height), float(width))
-        keep = self._keep_mask(pre_boxes, post_boxes)
+        keep = instance_keep_mask(pre_boxes, post_boxes, min_size=self.min_box_size, min_visibility=self.min_visibility)
         full = Targets(
             boxes=post_boxes,
             labels=targets.labels.clone(),
@@ -572,7 +573,7 @@ class RandomAffine:
         pre_boxes = boxes_from_polygons(warped_rings)
         clipped_rings = [self._clip_points(ring, height, width) for ring in warped_rings]
         post_boxes = boxes_from_polygons(clipped_rings)
-        keep = self._keep_mask(pre_boxes, post_boxes)
+        keep = instance_keep_mask(pre_boxes, post_boxes, min_size=self.min_box_size, min_visibility=self.min_visibility)
         full = Targets(
             boxes=post_boxes,
             labels=targets.labels.clone(),
@@ -590,7 +591,7 @@ class RandomAffine:
         """Box-only path: warp corners to an axis-aligned extent, clip, filter."""
         pre_boxes = self._transform_box_corners(targets.boxes, matrix)
         post_boxes = self._clip_boxes(pre_boxes, height, width)
-        keep = self._keep_mask(pre_boxes, post_boxes)
+        keep = instance_keep_mask(pre_boxes, post_boxes, min_size=self.min_box_size, min_visibility=self.min_visibility)
         full = Targets(
             boxes=post_boxes,
             labels=targets.labels.clone(),
@@ -599,17 +600,6 @@ class RandomAffine:
             keypoint_vis=targets.keypoint_vis.clone(),
         )
         return full.filter(keep)
-
-    def _keep_mask(self, pre_boxes: Tensor, post_boxes: Tensor) -> Tensor:
-        """Boolean keep mask from clipped size and kept-area (visibility) thresholds."""
-        widths = post_boxes[:, 2] - post_boxes[:, 0]
-        heights = post_boxes[:, 3] - post_boxes[:, 1]
-        pre_area = (pre_boxes[:, 2] - pre_boxes[:, 0]).clamp(min=0.0) * (pre_boxes[:, 3] - pre_boxes[:, 1]).clamp(
-            min=0.0
-        )
-        post_area = widths.clamp(min=0.0) * heights.clamp(min=0.0)
-        visibility = torch.where(pre_area > 0.0, post_area / pre_area.clamp(min=1e-12), torch.zeros_like(pre_area))
-        return (widths >= self.min_box_size) & (heights >= self.min_box_size) & (visibility >= self.min_visibility)
 
     @staticmethod
     def _transform_box_corners(boxes: Tensor, matrix: Tensor) -> Tensor:
@@ -704,11 +694,12 @@ class FusedAffineLetterbox:
     resampling differs (one bilinear pass instead of two).
 
     The single ``grid_sample`` pass is **not antialiased** (``grid_sample`` has no
-    antialias mode), unlike the standalone :class:`~lucid_yolo.data.letterbox.Letterbox`,
-    whose downscale uses ``antialias=True`` and which remains the validation/eval
-    path. This is a recorded train-time deviation (A32): cv2-lineage training
-    resizes are conventionally non-antialiased, and dropping the antialias pass is
-    a large part of the measured speedup.
+    antialias mode). Since WP-155 the standalone
+    :class:`~lucid_yolo.data.letterbox.Letterbox` — still the validation/eval path —
+    resamples through ``fuse`` and is not antialiased either, so the two paths no
+    longer differ in filter, only in how many warps they take. This is a recorded
+    deviation (A32): cv2-lineage resizes are conventionally non-antialiased, and
+    dropping the antialias pass is a large part of the measured speedup.
 
     Rotated boxes ride the wrapped affine's rotated path (WP-058) and are then
     mapped through the letterbox affine, whose uniform scale and translation

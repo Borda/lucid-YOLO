@@ -20,7 +20,7 @@ import pytest
 import torch
 
 from lucid_yolo.data import Targets, boxes_from_polygons
-from lucid_yolo.data.mosaic import MosaicAssembly
+from lucid_yolo.data.mosaic import MosaicAssembly, MosaicParams
 
 #: Base size ``S``; the assembled canvas is ``2S x 2S``.
 _TARGET = 32
@@ -241,6 +241,100 @@ class TestInstanceCounts:
         _, out = mosaic(items)
 
         assert out.boxes.shape[0] <= _MOSAIC_COUNT
+
+
+def _sliver_items(route: str) -> list[tuple[torch.Tensor, Targets]]:
+    """Return four tiles each carrying one box that clips to a sliver, on ``route``'s axis.
+
+    Paired with a centre of ``(_TILE, _TILE)``, image 0 places at offset ``(0, 0)``, so its
+    box spans ``[60, 10, 160, 40]`` against a 64-wide canvas and keeps four columns of
+    thirty rows — 4% of its own area. The other three place further right or lower and clip
+    away entirely, which is why the control below expects one survivor rather than four.
+
+    Args:
+        route: ``"rotated"``, ``"polygons"`` or ``"boxes"``, naming which of the three
+            keep-mask call sites the returned targets route through.
+
+    Returns:
+        Four ``(image, targets)`` pairs.
+
+    Examples:
+        >>> len(_sliver_items("boxes"))
+        4
+        >>> _sliver_items("rotated")[0][1].rboxes.shape
+        torch.Size([1, 5])
+    """
+    boxes = torch.tensor([[60.0, 10.0, 160.0, 40.0]])
+    labels = torch.tensor([0])
+
+    def _targets() -> Targets:
+        if route == "rotated":
+            return Targets(
+                boxes=boxes.clone(), labels=labels.clone(), rboxes=torch.tensor([[110.0, 25.0, 100.0, 30.0, 0.0]])
+            )
+        if route == "polygons":
+            ring = torch.tensor([[60.0, 10.0], [160.0, 10.0], [160.0, 40.0], [60.0, 40.0]])
+            return Targets(boxes=boxes.clone(), labels=labels.clone(), polygons=[ring])
+        return Targets(boxes=boxes.clone(), labels=labels.clone())
+
+    return [(_image(), _targets()) for _ in range(_MOSAIC_COUNT)]
+
+
+#: Centre that anchors image 0 at offset ``(0, 0)``, so its targets are shifted by nothing
+#: and the clip against the canvas is the only thing acting on them.
+_ANCHORED_CENTRE = MosaicParams(center_x=_TILE, center_y=_TILE)
+
+
+@pytest.mark.parametrize("route", ["rotated", "polygons", "boxes"])
+class TestKeepThresholdsReachUpstream:
+    """Both thresholds are passed to upstream's keep mask at every one of the three call sites.
+
+    Upstream's ``instance_keep_mask`` defaults ``min_size`` and ``min_visibility`` to
+    ``0.0``, which drops nothing, against this project's ``2.0`` and ``0.1``. Omitting
+    either argument at any call site keeps every instance with no shape change and no
+    exception, so the failure is silent — these cases are what makes it loud. One case per
+    site per threshold, plus the control that the drop is the threshold's doing.
+    """
+
+    def test_size_threshold_drops_the_sliver(self, route: str) -> None:
+        """A four-column clipped box falls below ``min_box_size`` and is dropped.
+
+        ``min_visibility`` is pinned at ``0.0`` so nothing but the size rule can account
+        for the drop: at upstream's default the instance would survive, since 4 >= 0.0.
+        """
+        mosaic = MosaicAssembly(target_size=_TARGET, min_box_size=8.0, min_visibility=0.0)
+
+        _, out = mosaic.apply(_sliver_items(route), _ANCHORED_CENTRE)
+
+        assert out.boxes.shape[0] == 0
+
+    def test_visibility_threshold_drops_the_sliver(self, route: str) -> None:
+        """A box retaining 4% of its area falls below ``min_visibility`` and is dropped.
+
+        ``min_box_size`` is pinned at ``0.0`` so nothing but the visibility rule can
+        account for the drop: at upstream's default the instance would survive, since
+        0.04 >= 0.0.
+        """
+        mosaic = MosaicAssembly(target_size=_TARGET, min_box_size=0.0, min_visibility=0.5)
+
+        _, out = mosaic.apply(_sliver_items(route), _ANCHORED_CENTRE)
+
+        assert out.boxes.shape[0] == 0
+
+    def test_upstream_defaults_would_keep_every_instance(self, route: str) -> None:
+        """With both thresholds at upstream's defaults all four instances survive.
+
+        The control for the two cases above, and the sharpest statement of what omitting an
+        argument would cost: at ``0.0``/``0.0`` not only image 0's sliver survives but the
+        three instances the placement clips away to nothing do too — a zero-width box is
+        still ``>= 0.0`` on both rules — so the pipeline would carry three empty instances
+        with every shape lining up and nothing raising.
+        """
+        mosaic = MosaicAssembly(target_size=_TARGET, min_box_size=0.0, min_visibility=0.0)
+
+        _, out = mosaic.apply(_sliver_items(route), _ANCHORED_CENTRE)
+
+        assert out.boxes.shape[0] == _MOSAIC_COUNT
 
 
 class TestQuadrantPlacement:

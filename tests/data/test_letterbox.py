@@ -15,6 +15,7 @@ from collections.abc import Iterator
 
 import pytest
 import torch
+from fuse_augmentations import letterbox_matrix  # type: ignore[import-untyped]
 
 from lucid_yolo.data import Letterbox, Targets, apply_affine_to_points, boxes_from_polygons
 
@@ -139,6 +140,38 @@ class TestAspectPreservation:
         total_w_slack = _TARGET - round(_ORIG_W * _EXPECTED_R)
         assert abs((total_w_slack - pad_left) - pad_left) <= 1
         assert abs((total_h_slack - pad_top) - pad_top) <= 1
+
+
+class TestUpstreamFit:
+    """The fit and the fill are upstream's, not a second local implementation of them (WP-155)."""
+
+    def test_forward_affine_is_upstreams_matrix(self) -> None:
+        """``forward_affine`` returns exactly what ``letterbox_matrix`` builds for the same size.
+
+        The whole point of delegating: a local re-derivation that agreed today could drift
+        from upstream's on any future bump while every coordinate test stayed green, since
+        both sides would be reading the same local number.
+        """
+        matrix, out_h, out_w = Letterbox(_TARGET).forward_affine(_ORIG_H, _ORIG_W)
+        upstream = letterbox_matrix(_ORIG_H, _ORIG_W, _TARGET, _TARGET, True, dtype=torch.float64)[0]
+
+        assert torch.equal(matrix, upstream)
+        assert (out_h, out_w) == (_TARGET, _TARGET)
+
+    def test_pad_value_reaches_the_upstream_resample(self) -> None:
+        """The requested pad colour fills the padded band of the resampled image.
+
+        ``pad_value`` travels as upstream's ``fill=`` with ``padding_mode="zeros"``; drop
+        either half and the band comes back black while the geometry stays perfect.
+        """
+        pad_value = 114.0 / 255.0
+
+        out_image, _ = Letterbox(_TARGET, pad_value=pad_value)(_image(), Targets.empty())
+
+        pad_top = (_TARGET - round(_ORIG_H * _EXPECTED_R)) // 2
+        assert torch.allclose(
+            out_image[:, : pad_top - 1, :], torch.full_like(out_image[:, : pad_top - 1, :], pad_value)
+        )
 
 
 class TestTargetConsistency:

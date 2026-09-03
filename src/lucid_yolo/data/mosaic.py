@@ -66,6 +66,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import torch
+from fuse_augmentations import instance_keep_mask  # type: ignore[import-untyped]
 from torch import Tensor
 
 from lucid_yolo.data.rotated_aug import (
@@ -350,7 +351,7 @@ class MosaicAssembly:
         shifted = shift_rboxes(targets.rboxes, float(off_x), float(off_y))
         pre_boxes = rbox_envelopes(shifted)
         rboxes, post_boxes = clip_rboxes_to_canvas(shifted, float(canvas_size), float(canvas_size))
-        keep = self._keep_mask(pre_boxes, post_boxes)
+        keep = instance_keep_mask(pre_boxes, post_boxes, min_size=self.min_box_size, min_visibility=self.min_visibility)
         full = Targets(
             boxes=post_boxes,
             labels=targets.labels.clone(),
@@ -369,7 +370,7 @@ class MosaicAssembly:
         pre_boxes = boxes_from_polygons(shifted_rings)
         clipped_rings = [ring.clamp(0.0, float(canvas_size)) for ring in shifted_rings]
         post_boxes = boxes_from_polygons(clipped_rings)
-        keep = self._keep_mask(pre_boxes, post_boxes)
+        keep = instance_keep_mask(pre_boxes, post_boxes, min_size=self.min_box_size, min_visibility=self.min_visibility)
         full = Targets(
             boxes=post_boxes,
             labels=targets.labels.clone(),
@@ -387,7 +388,7 @@ class MosaicAssembly:
         shift = torch.tensor([off_x, off_y, off_x, off_y], dtype=torch.float32)
         pre_boxes = targets.boxes + shift
         post_boxes = pre_boxes.clamp(0.0, float(canvas_size))
-        keep = self._keep_mask(pre_boxes, post_boxes)
+        keep = instance_keep_mask(pre_boxes, post_boxes, min_size=self.min_box_size, min_visibility=self.min_visibility)
         full = Targets(
             boxes=post_boxes,
             labels=targets.labels.clone(),
@@ -432,14 +433,3 @@ class MosaicAssembly:
         if keypoints.shape[0] == 0:
             return keypoints.clone()
         return keypoints + torch.tensor([off_x, off_y], dtype=keypoints.dtype)
-
-    def _keep_mask(self, pre_boxes: Tensor, post_boxes: Tensor) -> Tensor:
-        """Boolean keep mask from clipped size and kept-area (visibility) thresholds."""
-        widths = post_boxes[:, 2] - post_boxes[:, 0]
-        heights = post_boxes[:, 3] - post_boxes[:, 1]
-        pre_area = (pre_boxes[:, 2] - pre_boxes[:, 0]).clamp(min=0.0) * (pre_boxes[:, 3] - pre_boxes[:, 1]).clamp(
-            min=0.0
-        )
-        post_area = widths.clamp(min=0.0) * heights.clamp(min=0.0)
-        visibility = torch.where(pre_area > 0.0, post_area / pre_area.clamp(min=1e-12), torch.zeros_like(pre_area))
-        return (widths >= self.min_box_size) & (heights >= self.min_box_size) & (visibility >= self.min_visibility)

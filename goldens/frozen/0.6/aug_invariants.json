@@ -25,7 +25,7 @@
     "fused_image_mean": 0.5506,
     "fused_bbox_coord_sum": 91.4892,
     "letterbox_pad_fraction": 0.4,
-    "letterbox_image_mean": 0.5024,
+    "letterbox_image_mean": 0.4994,
     "mosaic_kept_instances": 8.0,
     "mosaic_image_mean": 0.5299,
     "mixup_image_mean": 0.5453,
