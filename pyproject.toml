@@ -77,7 +77,7 @@ dev = [
   # keypoint training path is gated on (WP-121b, WP-131, WP-132) all landed after the last
   # PyPI dev release, and PyPI forbids re-uploading the 0.10.0.dev0 version string, so a
   # bare version pin cannot reach them.
-  "fuse-augmentations @ git+https://github.com/Borda/fuse-augmentations@fedde0c1a482ac1add313fd823f6bc18e7b47436",
+  "fuse-augmentations @ git+https://github.com/Borda/fuse-augmentations@a5a276addf38e2dfd80ecaf287b2328445e545a6",
   "matplotlib>=3.8",
   # WP-066's export gate only. The export itself is `torch.onnx.export`, already a
   # runtime dep, so nothing a consumer installs changes: `onnx` reads the emitted

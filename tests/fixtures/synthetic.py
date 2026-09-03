@@ -44,7 +44,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fuse_augmentations.data import generate_dataset  # type: ignore[import-untyped]
-from fuse_augmentations.data.animals import animal_shapes  # type: ignore[import-untyped]
+from fuse_augmentations.data.animals import AnimalShape  # type: ignore[import-untyped]
 from fuse_augmentations.data.config import DEFAULT_SHAPES, SplitRatios  # type: ignore[import-untyped]
 
 if TYPE_CHECKING:
@@ -216,7 +216,7 @@ def generate_keypoints_fixtures(root: Path) -> Path:
         fmt="coco",
         task="keypoints",
         class_mode="shape",
-        shapes=animal_shapes(KEYPOINTS_ANIMAL_COUNT),
+        shapes=tuple(AnimalShape)[:KEYPOINTS_ANIMAL_COUNT],
         split_ratios=_SINGLE_SPLIT,
         seed=KEYPOINTS_SEED,
         img_size=_IMG_SIZE,

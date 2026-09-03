@@ -2,6 +2,12 @@
 
 All notable changes to lucid-yolo are documented here, following the Keep a Changelog convention; versioning is a perpetual 0.x release train — no 1.0 is ever planned, promised, or tagged — per ADR-002 (docs/DECISIONS.md).
 
+## [Unreleased]
+
+### Changed
+
+- R21 advances from `fedde0c1` to `a5a276a` — `fuse-augmentations` 0.12, the tree upstream tags `v0.12.0` from and the capability floor the rest of Phase 14 is gated on (WP-154). No call site delegates anything yet; this row is the pin and the re-freeze it forces. `tests/fixtures/synthetic.py` imported `animal_shapes`, which upstream's restructure removed, so the bump fails at collection rather than quietly; the replacement is `tuple(AnimalShape)[:KEYPOINTS_ANIMAL_COUNT]`, which is what that helper did, read from upstream's source at the old pin rather than assumed from the name. The two generator-derived goldens are re-frozen with every one of their sixteen moved values traced to a named upstream commit before it moved: of the fifteen commits spanned, only `964fd07` and `abbf1f2` touch the generator, `964fd07` is fixture-neutral measured at the commit, and `abbf1f2` — `PrimitiveShape.TRIANGLE` equilateral again, `polygon_to_obb` re-derived in the shape's upright frame — accounts for all sixteen, returning each bit-exactly to the value frozen before `0a0cc640` introduced the obtuse-scalene triangle. Zero untraced deltas.
+
 ## [0.6.0] - 2026-09-03
 
 ### Changed
