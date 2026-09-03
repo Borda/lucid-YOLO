@@ -505,8 +505,61 @@ def check_decisions_ids(docs_dir: Path, repo_root: Path) -> list[str]:
 
 
 #: Every check, in the order the original test file declared them.
+#: Licence families the pull-request attestation must name, keyed by the label the
+#: template groups them under. Every family here is one D13 excludes from the permissive
+#: allowlist, and the point of pinning them is that the attestation narrows silently: the
+#: line named Ultralytics alone for eight months while meaning all of this, and a reader
+#: could only have learned the real rule by finding D13 themselves.
+_ATTESTATION_FAMILIES = ("AGPL", "GPL", "LGPL", "SSPL", "BSL", "Elastic", "PolyForm")
+
+#: The two cases the families miss, checked as substrings for the same reason: neither is
+#: a licence name, and both are the kind of clause that falls out of a rewrite unnoticed.
+_ATTESTATION_CLAUSES = ("proprietary", "cannot be read")
+
+
+def check_pull_request_attestation_covers_the_allowlist(docs_dir: Path, repo_root: Path) -> list[str]:
+    """The pull-request template's clean-room line names the whole excluded set (WP-143).
+
+    The admissible set is D13's permissive allowlist, so what a contributor attests to
+    not having copied from is everything outside it. The template named the Ultralytics
+    denylist alone, which is one instance of the rule stated as though it were the rule:
+    a contributor reading it would conclude a GPL detector was fair game.
+
+    ``docs_dir`` is unused and present so the check matches the signature every other
+    check in this module carries, which is what lets :data:`_CHECKS` stay a plain tuple.
+
+    Args:
+        docs_dir: Unused; part of the shared check signature.
+        repo_root: Repository root holding ``.github/PULL_REQUEST_TEMPLATE.md``.
+
+    Returns:
+        One violation naming every family or clause the template fails to mention.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     (root / ".github").mkdir()
+        ...     _ = (root / ".github" / "PULL_REQUEST_TEMPLATE.md").write_text("- [ ] no Ultralytics")
+        ...     check_pull_request_attestation_covers_the_allowlist(root / "docs", root)[0][:46]
+        'pull-request attestation does not name: AGPL, '
+    """
+    del docs_dir
+    template = repo_root / ".github" / "PULL_REQUEST_TEMPLATE.md"
+    if not template.is_file():
+        return [f"missing pull-request template: {template.relative_to(repo_root)}"]
+    text = template.read_text(encoding="utf-8")
+    missing = [family for family in _ATTESTATION_FAMILIES if family not in text]
+    missing += [clause for clause in _ATTESTATION_CLAUSES if clause not in text.lower()]
+    if missing:
+        return [f"pull-request attestation does not name: {', '.join(missing)}"]
+    return []
+
+
 _CHECKS = (
     check_policy_docs_exist,
+    check_pull_request_attestation_covers_the_allowlist,
     check_model_cards_are_required,
     check_log_links_resolve,
     check_assumption_ids_contiguous,

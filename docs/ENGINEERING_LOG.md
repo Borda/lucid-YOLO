@@ -1346,6 +1346,18 @@ One thing worth recording for whoever edits this file next: ruff's autofix remov
 
 Two smaller things. The job installs nothing, the checker being standard-library only, so layer one costs a container start rather than a dependency resolve. And the two SHAs reach the command through the environment rather than the command string: they are interpolated from event data, and a value reaching a shell directly is how that becomes an injection rather than a range.
 
+### WP-143 — one instance of a rule, stated as though it were the rule
+
+<a id="wp-143"></a>
+
+The pull-request template's clean-room line read "no denylisted source (Ultralytics repo, mirror, package copy, or `docs.ultralytics.com`) was consulted". Every word true, and the rule it enforces is much wider: D13's admissible set is the permissive allowlist — MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC — so what a contributor attests to is not having copied from anything outside it. A contributor reading the old line would reasonably conclude a GPL detector was fair game, which is not a misreading; it is what the line said.
+
+The checklist now enumerates copyleft (AGPL, GPL, LGPL, SSPL), source-available (BSL, Elastic, PolyForm), paid or proprietary source of any kind, and any source whose licence cannot be read — D17's case, where unreadable is not permissive. Ultralytics stays, moved to the end and labelled as the instance a YOLO contributor reaches for by reflex rather than as the definition. A second item asks for the sign-off WP-142 checks, so the template and the CI job agree about what a pull request owes.
+
+**The row's real deliverable is that it cannot narrow again silently.** A checklist is prose a maintainer edits, and the failure mode is not a wholesale revert — which is obvious — but one family falling out of a rewrite. `check_pull_request_attestation_covers_the_allowlist` in `audit_docs_present.py` pins each family and both clauses, so a dropped `SSPL` fails the gate naming `SSPL` rather than passing as an attestation that still looks thorough. That the previous line survived eight months while meaning all of this is the argument for gating it rather than trusting the next edit.
+
+Two notes on the check itself. It takes `docs_dir` and discards it, so it matches the signature every other check in that module carries and `_CHECKS` stays a plain tuple rather than growing a dispatch. And the two non-licence conditions — "proprietary", "cannot be read" — are matched as substrings against the lowercased text, because neither is a licence name and both are exactly the kind of clause that falls out of a rewrite unnoticed.
+
 ### Phase 14 — what each row does, and where its boundary is
 
 <a id="phase-14-rows"></a>

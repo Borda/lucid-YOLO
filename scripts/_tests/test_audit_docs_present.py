@@ -347,3 +347,64 @@ def test_the_live_docs_tree_is_currently_clean() -> None:
     that touches any docs file, not just a new one.
     """
     assert audit.find_violations(REPO_ROOT / "docs", REPO_ROOT) == []
+
+
+class TestCheckPullRequestAttestationCoversTheAllowlist:
+    """Tests for ``audit.check_pull_request_attestation_covers_the_allowlist``."""
+
+    @staticmethod
+    def _write_template(repo_root: Path, body: str) -> None:
+        """Write a pull-request template into a synthetic repository root."""
+        (repo_root / ".github").mkdir(parents=True, exist_ok=True)
+        (repo_root / ".github" / "PULL_REQUEST_TEMPLATE.md").write_text(body, encoding="utf-8")
+
+    def test_flags_a_template_naming_only_the_denylist(self, tmp_path: Path) -> None:
+        """Naming Ultralytics alone states one instance of the rule as though it were the rule.
+
+        This is the pre-WP-143 template, and the violation it produces is the whole
+        reason the check exists: a contributor reading that line would reasonably
+        conclude a GPL detector was fair game.
+        """
+        self._write_template(tmp_path, "- [ ] Clean-room acknowledged: no Ultralytics source was consulted\n")
+
+        violations = audit.check_pull_request_attestation_covers_the_allowlist(tmp_path / "docs", tmp_path)
+
+        assert len(violations) == 1
+        assert "AGPL" in violations[0]
+        assert "proprietary" in violations[0]
+
+    def test_is_clean_when_every_family_and_clause_is_named(self, tmp_path: Path) -> None:
+        """A template naming each excluded family and both clauses reports nothing."""
+        self._write_template(
+            tmp_path,
+            "AGPL, GPL, LGPL, SSPL, BSL, Elastic, PolyForm, proprietary, and any licence that cannot be read\n",
+        )
+
+        assert audit.check_pull_request_attestation_covers_the_allowlist(tmp_path / "docs", tmp_path) == []
+
+    def test_flags_a_single_dropped_family(self, tmp_path: Path) -> None:
+        """One family falling out of a rewrite is caught, which is the realistic failure.
+
+        The template is prose a maintainer edits; a wholesale revert is obvious and a
+        single dropped line is not.
+        """
+        self._write_template(
+            tmp_path,
+            "AGPL, GPL, LGPL, BSL, Elastic, PolyForm, proprietary, and any licence that cannot be read\n",
+        )
+
+        violations = audit.check_pull_request_attestation_covers_the_allowlist(tmp_path / "docs", tmp_path)
+
+        assert violations == ["pull-request attestation does not name: SSPL"]
+
+    def test_flags_a_missing_template(self, tmp_path: Path) -> None:
+        """A deleted template is a missing attestation, not an empty one."""
+        violations = audit.check_pull_request_attestation_covers_the_allowlist(tmp_path / "docs", tmp_path)
+
+        assert violations == ["missing pull-request template: .github/PULL_REQUEST_TEMPLATE.md"]
+
+    def test_the_live_template_passes(self) -> None:
+        """The repository's own template satisfies the check it ships with."""
+        repo_root = Path(__file__).resolve().parents[2]
+
+        assert audit.check_pull_request_attestation_covers_the_allowlist(repo_root / "docs", repo_root) == []
