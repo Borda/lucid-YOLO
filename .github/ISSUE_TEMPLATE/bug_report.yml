@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Bug report
+description: Something behaves differently from what the docs or the report state.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: run `make gate` on an unmodified checkout. A gate that is already
+        red there is usually an environment problem rather than a defect, and it is the
+        fastest thing to rule out.
+
+        `docs/CONTRIBUTING.md` carries the clean-room rule and the contribution process.
+        **Never report a vulnerability here** -- use the repository's security advisory
+        form, so the report stays private until there is a fix.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: >-
+        The commit you are on. "Latest" is not a version -- this project ships release
+        commits ahead of its own tags, so the hash is what identifies the tree.
+      placeholder: f285af5
+    validations:
+      required: true
+  - type: dropdown
+    id: gate
+    attributes:
+      label: Is `make gate` green on an unmodified checkout?
+      options:
+        - "Yes"
+        - "No"
+        - "Not run"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and where that expectation comes from
+      description: >-
+        A document, a golden, a docstring or a reported figure. An expectation with a
+        source is actionable; an expectation without one is a discussion.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Exact output, exact numbers. Paste rather than paraphrase.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The shortest command or script that shows it.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: >-
+        OS, architecture and accelerator. Cross-platform last-bit divergence in the
+        goldens is expected and documented (A26); a structural difference is not.
+      placeholder: macOS 15 arm64, MPS
+    validations:
+      required: true

@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Reproduction gap
+description: A number in the report or a golden does not reproduce.
+labels: ["reproduction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This template exists because a numeric disagreement is not an ordinary bug: the
+        question is which of two runs is right, and that is answerable only with both
+        sides stated.
+  - type: input
+    id: figure
+    attributes:
+      label: The figure that disagrees
+      description: The golden metric, report table row, or model-card number.
+      placeholder: goldens/aug_invariants.json -> letterbox_image_mean
+    validations:
+      required: true
+  - type: input
+    id: expected
+    attributes:
+      label: Published value
+    validations:
+      required: true
+  - type: input
+    id: observed
+    attributes:
+      label: Value you obtained
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Run configuration
+      description: >-
+        Commit, config file, seed, dataset and its version, hardware. A reproduction gap
+        with an unnamed seed cannot be told apart from run-to-run variance.
+    validations:
+      required: true
+  - type: checkboxes
+    id: clean_room
+    attributes:
+      label: Clean room
+      options:
+        - label: >-
+            No denylisted source was consulted while investigating this -- no reference
+            YOLO implementation, no copyleft, source-available, paid or proprietary
+            source, and no source whose licence could not be read (D13, D17).
+          required: true

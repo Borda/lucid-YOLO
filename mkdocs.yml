@@ -124,3 +124,5 @@ nav:
       - Research log: RESEARCH_LOG.md
       - Engineering log: ENGINEERING_LOG.md
       - Escalation log: ESCALATION.md
+  - Contributing:
+      - Contributor guide: CONTRIBUTING.md

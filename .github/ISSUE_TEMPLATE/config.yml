@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# No contact links: every one would be an absolute URL into a repository that is not yet
+# public (O3), so none can be verified before it ships. The pointers they would carry --
+# the contributor guide at `docs/CONTRIBUTING.md`, and reporting a vulnerability through
+# the security advisory form rather than a public issue -- are stated in the templates
+# themselves instead, where a reader reaches them without a link that may not resolve.
+blank_issues_enabled: false
