@@ -242,8 +242,7 @@ class Letterbox:
 
         Exposes the pure scale-and-translation letterbox geometry for a source of
         ``(orig_h, orig_w)`` without resampling any image, so a caller can compose
-        it into another warp (see
-        :class:`~lucid_yolo.data.affine.FusedAffineLetterbox`).
+        it into another warp or state it to one.
 
         Args:
             orig_h: Source image height in pixels.

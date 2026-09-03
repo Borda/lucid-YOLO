@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit gate for the WP-070 fused affine+letterbox single-warp transform.
+"""Unit gate for the WP-070 fused affine+letterbox single warp, delegated in WP-156.
+
+The fusion is now ``RandomAffine(letterbox=...)``: the affine and the
+aspect-preserving fit are two transforms in one upstream segment, composed into
+one matrix and one resample. The local class that used to hold that composition
+is gone, and this file follows the behaviour rather than the class.
 
 Covers the output contract (shape/dtype/value range), hand-computed box mapping
 for identity-affine cases on both the mosaic-square and single-image branches,
@@ -17,7 +22,6 @@ import pytest
 import torch
 
 from lucid_yolo.data import (
-    FusedAffineLetterbox,
     Letterbox,
     RandomAffine,
     Targets,
@@ -65,8 +69,8 @@ class TestProtocol:
     """The fused transform conforms to the geometric-transform protocol."""
 
     def test_is_geometric_transform(self) -> None:
-        """FusedAffineLetterbox satisfies the runtime GeometricTransform protocol."""
-        assert isinstance(FusedAffineLetterbox(32), GeometricTransform)
+        """A letterboxing RandomAffine satisfies the runtime GeometricTransform protocol."""
+        assert isinstance(RandomAffine(letterbox=32), GeometricTransform)
 
 
 class TestOutputContract:
@@ -83,7 +87,7 @@ class TestOutputContract:
     )
     def test_image_shape_dtype_range(self, in_h: int, in_w: int) -> None:
         """Any source size letterboxes to a square float32 image within the fill range."""
-        fused = FusedAffineLetterbox(128, degrees=10.0, translate=0.1, scale=0.2, generator=_generator())
+        fused = RandomAffine(degrees=10.0, translate=0.1, scale=0.2, generator=_generator(), letterbox=128)
 
         out_image, _ = fused(torch.rand(3, in_h, in_w), Targets.empty())
 
@@ -97,7 +101,7 @@ class TestKnownBoxMapping:
 
     def test_single_image_scale_one_symmetric_pad(self) -> None:
         """A 4x8 source into an 8x8 canvas keeps x and shifts y by the top pad of 2."""
-        fused = FusedAffineLetterbox(8, degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        fused = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, letterbox=8)
         # r = min(8/4, 8/8) = 1.0; new = (4, 8); pad_top = (8 - 4) // 2 = 2, pad_left = 0.
         targets = Targets(boxes=torch.tensor([[1.0, 1.0, 5.0, 3.0]]), labels=torch.tensor([0]))
 
@@ -107,7 +111,7 @@ class TestKnownBoxMapping:
 
     def test_mosaic_square_pure_half_scale(self) -> None:
         """An 8x8 source into a 4x4 canvas is a pure 0.5 scale with no padding."""
-        fused = FusedAffineLetterbox(4, degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
+        fused = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, letterbox=4)
         # r = min(4/8, 4/8) = 0.5; new = (4, 4); pad = 0 on both axes.
         targets = Targets(boxes=torch.tensor([[2.0, 2.0, 6.0, 6.0]]), labels=torch.tensor([0]))
 
@@ -137,7 +141,7 @@ class TestTwoStepEquivalence:
         two_affine = RandomAffine(**kwargs, generator=_generator(7))
         warped_image, warped_targets = two_affine(image.clone(), targets.clone())
         _, two_targets = Letterbox(128)(warped_image, warped_targets)
-        fused = FusedAffineLetterbox(128, **kwargs, generator=_generator(7))
+        fused = RandomAffine(**kwargs, generator=_generator(7), letterbox=128)
         _, fused_targets = fused(image.clone(), targets.clone())
 
         assert torch.equal(fused_targets.boxes, two_targets.boxes)
@@ -153,7 +157,7 @@ class TestRotatedBoxesGuard:
         """Rotated boxes that do not share the instance axis with boxes are rejected."""
         rboxes = torch.tensor([[10.0, 20.0, 8.0, 4.0, 0.3]])
         targets = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64), rboxes=rboxes)
-        fused = FusedAffineLetterbox(64, degrees=10.0)
+        fused = RandomAffine(degrees=10.0, letterbox=64)
 
         with pytest.raises(ValueError, match="instance axis"):
             fused(torch.rand(3, 96, 96), targets)

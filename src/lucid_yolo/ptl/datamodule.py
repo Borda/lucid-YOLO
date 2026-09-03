@@ -43,8 +43,8 @@ Multi-image augmentation composition:
 
         1. geometric base — with probability :attr:`_TrainPipeline.mosaic_p` a
            four-image :class:`~lucid_yolo.data.mosaic.MosaicAssembly` (else the single image),
-           then :class:`~lucid_yolo.data.affine.FusedAffineLetterbox`, which composes
-           the random affine and the letterbox down to ``img_size`` into one resample;
+           then :class:`~lucid_yolo.data.affine.RandomAffine` with ``letterbox=``, which
+           composes the random affine and the letterbox down to ``img_size`` into one resample;
         2. with probability ``mixup`` a second full geometric sample is blended in
            via :class:`~lucid_yolo.data.mixup.Mixup`;
         3. with probability ``copy_paste`` polygon instances from a third geometric
@@ -100,7 +100,7 @@ from pytorch_lightning import LightningDataModule
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, get_worker_info
 
-from lucid_yolo.data.affine import FusedAffineLetterbox
+from lucid_yolo.data.affine import RandomAffine
 from lucid_yolo.data.augment import HorizontalFlip, HSVJitter
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.layout import DatasetLayout, detect_layout, resolve_split
@@ -755,11 +755,11 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
         self._copy_paste_prob = 0.0 if (oriented or polygon_free) else policy["copy_paste"]
         self._generator = torch.Generator().manual_seed(seed)
         self._mosaic = MosaicAssembly(self._img_size, generator=self._generator)
-        self._fused = FusedAffineLetterbox(
-            self._img_size,
+        self._affine = RandomAffine(
             scale=policy["scale"],
             translate=_AFFINE_TRANSLATE,
             generator=self._generator,
+            letterbox=self._img_size,
         )
         self._mixup = Mixup(p=1.0, generator=self._generator)
         self._copy_paste = CopyPaste(p=1.0, generator=self._generator)
@@ -792,18 +792,18 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
         return self._flip(image, targets)
 
     def _geometric(self, index: int) -> tuple[Tensor, Targets]:
-        """Build the geometric base: optional mosaic, then the fused affine+letterbox.
+        """Build the geometric base: optional mosaic, then the affine onto the letterbox canvas.
 
-        The random affine and the letterbox down to ``img_size`` are composed into
-        a single image resample (:class:`~lucid_yolo.data.affine.FusedAffineLetterbox`),
-        so the geometric path costs one bilinear pass instead of two.
+        The random affine and the letterbox down to ``img_size`` compose into a single
+        image resample (:class:`~lucid_yolo.data.affine.RandomAffine` with
+        ``letterbox=``), so the geometric path costs one bilinear pass instead of two.
         """
         if self._draw() < self.mosaic_p:
             items = [self._base[i] for i in self._mosaic_indices(index)]
             image, targets = self._mosaic(items)
         else:
             image, targets = self._base[index]
-        return self._fused(image, targets)
+        return self._affine(image, targets)
 
     def _maybe_mixup(self, image: Tensor, targets: Targets) -> tuple[Tensor, Targets]:
         """With probability ``mixup`` blend a second full geometric sample in."""

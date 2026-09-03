@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import torch
 
-from lucid_yolo.data.affine import FusedAffineLetterbox, RandomAffine
+from lucid_yolo.data.affine import RandomAffine
 from lucid_yolo.data.augment import HorizontalFlip, HSVJitter
 from lucid_yolo.data.mixup import CopyPaste, Mixup
 from lucid_yolo.data.mosaic import MosaicAssembly
@@ -139,15 +139,15 @@ class TestRandomAffineDeterminism:
         assert not torch.equal(image_a, image_b)
 
 
-class TestFusedAffineLetterboxDeterminism:
+class TestAffineOntoLetterboxCanvasDeterminism:
     """Tier D -- the fused path samples once and reproduces from a seed."""
 
     def test_equal_seeds_give_equal_outputs(self) -> None:
         """Two fused transforms sharing a seed produce equal images, boxes and rings."""
         image = torch.rand(3, 180, 240, generator=_generator(3))
         kwargs = {"degrees": 15.0, "translate": 0.1, "scale": 0.2, "shear": 5.0}
-        fused_a = FusedAffineLetterbox(128, **kwargs, generator=_generator(99))
-        fused_b = FusedAffineLetterbox(128, **kwargs, generator=_generator(99))
+        fused_a = RandomAffine(**kwargs, generator=_generator(99), letterbox=128)
+        fused_b = RandomAffine(**kwargs, generator=_generator(99), letterbox=128)
 
         image_a, targets_a = fused_a(image.clone(), _polygon_targets())
         image_b, targets_b = fused_b(image.clone(), _polygon_targets())

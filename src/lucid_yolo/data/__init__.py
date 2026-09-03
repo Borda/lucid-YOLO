@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from lucid_yolo.data.affine import AffineParams, FusedAffineLetterbox, RandomAffine
+from lucid_yolo.data.affine import AffineParams, RandomAffine
 from lucid_yolo.data.augment import FlipParams, HorizontalFlip, HSVJitter, HSVParams, hsv_to_rgb, rgb_to_hsv
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.dota import (
@@ -65,7 +65,6 @@ __all__ = [
     "CopyPasteParams",
     "DotaObject",
     "FlipParams",
-    "FusedAffineLetterbox",
     "GeometricTransform",
     "HSVJitter",
     "HSVParams",

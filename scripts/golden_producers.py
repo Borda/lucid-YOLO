@@ -53,7 +53,7 @@ from lucid_yolo.assign import (
     make_anchor_points,
     surrogate_boxes,
 )
-from lucid_yolo.data.affine import AffineParams, FusedAffineLetterbox, RandomAffine
+from lucid_yolo.data.affine import AffineParams, RandomAffine
 from lucid_yolo.data.augment import HSVJitter, HSVParams
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.letterbox import Letterbox
@@ -1096,7 +1096,7 @@ def aug_invariants() -> dict[str, float]:
     metrics["affine_bbox_coord_sum"] = round(float(affine_targets.boxes.sum()), _AUG_DECIMALS)
     metrics["affine_polygon_area"] = round(_polygon_area(affine_targets.polygons), _AUG_DECIMALS)
 
-    fused_image, fused_targets = FusedAffineLetterbox(24).apply(image, targets, composite)
+    fused_image, fused_targets = RandomAffine(letterbox=24).apply(image, targets, composite)
     metrics["fused_image_mean"] = round(float(fused_image.mean()), _AUG_DECIMALS)
     metrics["fused_bbox_coord_sum"] = round(float(fused_targets.boxes.sum()), _AUG_DECIMALS)
 

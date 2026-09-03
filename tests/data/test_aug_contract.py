@@ -37,9 +37,11 @@ from __future__ import annotations
 
 import math
 
+import pytest
 import torch
+from fuse_augmentations import FusedAffineSegment, TransformAdapter  # type: ignore[import-untyped]
 
-from lucid_yolo.data.affine import AffineParams, RandomAffine
+from lucid_yolo.data.affine import _ADAPTER, AffineParams, RandomAffine
 from lucid_yolo.data.augment import FlipParams, HorizontalFlip, HSVJitter, HSVParams
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.mixup import CopyPaste, CopyPasteParams, Mixup, MixupParams
@@ -506,3 +508,56 @@ class TestModalityInvariants:
         x, y = warped.keypoints[0, 0].round().to(torch.int64).tolist()
         assert (x, y) == (9, 7)
         assert float(warped_image[0, y, x]) > 0.5
+
+    @pytest.mark.parametrize(
+        "letterbox",
+        [pytest.param(None, id="affine-only"), pytest.param(24, id="affine-and-letterbox")],
+    )
+    def test_the_geometry_fuses_into_one_matrix_bearing_segment(self, letterbox: int | None) -> None:
+        """The affine, and the letterbox with it, reach the image as exactly one warp.
+
+        Upstream groups only *adjacent* geometric operations into one segment, so a
+        colour operation inserted between the affine and the letterbox would split
+        the run silently: each half would resample the image separately, the output
+        would still have the right shape, and every coordinate assertion in this file
+        would still pass. Nothing else here can see that, which is why the segment
+        count is asserted rather than assumed. The kind matters as much as the count —
+        an exact or crop-resize segment carries no composed affine, which is the case
+        upstream reports no matrix for at all.
+        """
+        affine = RandomAffine(letterbox=letterbox)
+
+        segment = affine._segment(_identity_params())
+
+        assert isinstance(segment, FusedAffineSegment)
+        assert len(segment.transforms) == (1 if letterbox is None else 2)
+
+    def test_the_local_adapter_satisfies_the_published_protocol(self) -> None:
+        """The bridge to upstream's engine conforms to the protocol it is passed as.
+
+        The adapter conforms structurally rather than by inheritance — the package
+        ships untyped, so a strict checker rejects subclassing it — which means
+        nothing at import time checks the shape. This is what catches upstream adding
+        a required method: the segment would still build, and would fail at the first
+        call that reached the one now missing.
+        """
+        assert isinstance(_ADAPTER, TransformAdapter)
+
+    def test_a_letterboxed_warp_lands_where_the_two_transform_path_lands(self) -> None:
+        """Fusing the letterbox into the affine moves no coordinate.
+
+        The composition is upstream's (``M_letterbox @ M_affine``) and the target
+        transport is this project's, so the two could disagree about the order without
+        any shape changing. Running the same stated affine through both paths is what
+        pins the order down: warp-then-letterbox by hand, against the single fused
+        warp, on geometry that a wrong order would displace rather than merely blur.
+        """
+        image = torch.rand(3, 32, 32, generator=torch.Generator().manual_seed(11))
+        targets = Targets(boxes=torch.tensor([[4.0, 6.0, 20.0, 18.0]]), labels=torch.tensor([0]))
+        params = AffineParams(angle=0.2, shear_x=0.05, shear_y=-0.03, scale=1.1, translate_x=1.5, translate_y=-2.0)
+
+        _, stepwise = _keeps_everything().apply(image, targets, params)
+        stepwise = Letterbox(24).warp_targets(stepwise, 32, 32)
+        _, fused = RandomAffine(min_box_size=0.0, min_visibility=0.0, letterbox=24).apply(image, targets, params)
+
+        assert torch.equal(fused.boxes, stepwise.boxes)

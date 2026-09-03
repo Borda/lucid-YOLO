@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import torch
 
-from lucid_yolo.data.affine import AffineParams, FusedAffineLetterbox, RandomAffine
+from lucid_yolo.data.affine import AffineParams, RandomAffine
 from lucid_yolo.data.augment import FlipParams, HorizontalFlip, HSVJitter, HSVParams
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.mixup import CopyPaste, CopyPasteParams
@@ -115,7 +115,7 @@ class TestAffineComposite:
         assert torch.allclose(warped.polygons[0], expected, atol=GEOM)
 
 
-class TestFusedAffineLetterbox:
+class TestAffineOntoLetterboxCanvas:
     """Tier B -- the same composite, then an aspect-preserving downscale, in one resample."""
 
     def test_boxes_land_on_frozen_output_canvas_coordinates(self) -> None:
@@ -126,7 +126,7 @@ class TestFusedAffineLetterbox:
         result is a product of two matrices neither of which has a hand-checkable
         envelope after the intermediate clip.
         """
-        _, warped = FusedAffineLetterbox(24).apply(torch.zeros(3, 32, 32), _two_instance_scene(), COMPOSITE)
+        _, warped = RandomAffine(letterbox=24).apply(torch.zeros(3, 32, 32), _two_instance_scene(), COMPOSITE)
 
         expected = torch.tensor([[5.0826, 0.2717, 17.4663, 13.1917], [17.5497, 1.8111, 24.0000, 12.1161]])
         assert torch.allclose(warped.boxes, expected, atol=GEOM)

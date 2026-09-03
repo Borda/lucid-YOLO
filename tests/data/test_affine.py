@@ -418,30 +418,41 @@ class TestRotatedBoxesGuard:
             affine(_image(), targets)
 
 
-class TestWarpTo:
-    """warp_to composes a post-affine into the image warp, leaving targets at canvas scale."""
+class TestLetterboxCanvas:
+    """``letterbox=`` composes the aspect-preserving fit into the same single warp (WP-156)."""
 
-    def test_identity_post_matrix_matches_call_targets(self) -> None:
-        """An identity post-affine to the same canvas reproduces __call__'s targets."""
+    def test_a_same_size_letterbox_matches_the_plain_targets(self) -> None:
+        """A letterbox onto the source canvas reproduces the plain path's targets exactly.
+
+        The fit is the identity when target and source agree, so the letterboxed
+        transform must land where the plain one does. This is the case that catches a
+        composition applied on the wrong side: an inverted or transposed letterbox
+        matrix is still the identity here only if the fit really is one.
+        """
         image = _image()
         targets = _polygon_targets()
-        identity = torch.eye(3, dtype=torch.float64)
-        call_affine = RandomAffine(degrees=12.0, translate=0.1, scale=0.2, shear=3.0, generator=_generator(5))
-        warp_affine = RandomAffine(degrees=12.0, translate=0.1, scale=0.2, shear=3.0, generator=_generator(5))
+        plain = RandomAffine(degrees=12.0, translate=0.1, scale=0.2, shear=3.0, generator=_generator(5))
+        boxed = RandomAffine(
+            degrees=12.0, translate=0.1, scale=0.2, shear=3.0, generator=_generator(5), letterbox=_CANVAS
+        )
 
-        _, call_targets = call_affine(image.clone(), targets.clone())
-        _, warp_targets = warp_affine.warp_to(image.clone(), targets.clone(), identity, _CANVAS, _CANVAS)
+        _, plain_targets = plain(image.clone(), targets.clone())
+        _, boxed_targets = boxed(image.clone(), targets.clone())
 
-        assert torch.equal(warp_targets.boxes, call_targets.boxes)
-        for got, want in zip(warp_targets.polygons, call_targets.polygons, strict=True):
+        assert torch.equal(boxed_targets.boxes, plain_targets.boxes)
+        for got, want in zip(boxed_targets.polygons, plain_targets.polygons, strict=True):
             assert torch.equal(got, want)
 
-    def test_post_matrix_downscales_image_to_output_size(self) -> None:
-        """A half-scale post-affine emits a half-size image in one resample."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0)
-        half = torch.tensor([[0.5, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 1.0]])
-        out = _CANVAS // 2
+    def test_a_smaller_letterbox_emits_its_own_canvas(self) -> None:
+        """A half-size letterbox emits a half-size image from one resample.
 
-        out_image, _ = affine.warp_to(_image(), Targets.empty(), half, out, out)
+        The output size comes from the fit rather than from the input, which is the
+        whole point of fusing the two: the source canvas reaches the training canvas
+        without an intermediate full-size image ever existing.
+        """
+        out = _CANVAS // 2
+        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, letterbox=out)
+
+        out_image, _ = affine(_image(), Targets.empty())
 
         assert out_image.shape == (3, out, out)
