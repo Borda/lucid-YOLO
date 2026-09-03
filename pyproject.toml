@@ -47,6 +47,21 @@ dependencies = [
   # training progress bar, and `lucid-data build-tiles` draws its own (WP-100).
   "tqdm>=4.66",
   "numpy>=1.26",
+  # Promoted from the `dev` group at WP-159, because Phase 14 made it one: five modules
+  # under `data/` import it at module level, so `lucid_yolo.data` -- and `predict`, through
+  # `letterbox` -- cannot import without it, and leaving it in a group meant an install
+  # without that group produced a package that fails on import rather than one missing an
+  # optional extra. ADR-005 gates promotion on four conditions and the first of them,
+  # real SemVer releases to PyPI, is **knowingly not met**: PyPI's latest is `0.10.0.dev0`,
+  # it carries no 0.11 or 0.12 at all, and the capability floor this project stands on is
+  # `a5a276a`. A direct-reference requirement is legal to build and install and illegal to
+  # upload, so this pin makes the distribution unpublishable to PyPI -- accepted by the
+  # principal on 2026-09-04 (D20, docs/ESCALATION.md) on the grounds that publication is
+  # itself an unmade [PRINCIPAL] decision that `release.yml` deliberately omits, so the
+  # condition protects nothing this project currently does. The SHA is the ceiling
+  # condition 2 asks for, being exact rather than a range. Revisit the day a 0.12 reaches
+  # PyPI: the fix is a `>=0.12,<0.13` range and nothing else here changes.
+  "fuse-augmentations @ git+https://github.com/Borda/fuse-augmentations@a5a276addf38e2dfd80ecaf287b2328445e545a6",
 ]
 
 # PEP 735 dependency group, not a `[project.optional-dependencies]` extra: these
@@ -72,12 +87,9 @@ dev = [
   # declared here because a direct import is not a transitive dependency. Apache-2.0 OR
   # BSD-2-Clause, read from the installed distribution's own `License-Expression`.
   "packaging>=24.0",
-  # Pinned to a commit rather than a PyPI version (A26/R21's original intent): the animal
-  # keypoints task, the shape/color category-scoping fix, and the `SymbolShape` family the
-  # keypoint training path is gated on (WP-121b, WP-131, WP-132) all landed after the last
-  # PyPI dev release, and PyPI forbids re-uploading the 0.10.0.dev0 version string, so a
-  # bare version pin cannot reach them.
-  "fuse-augmentations @ git+https://github.com/Borda/fuse-augmentations@a5a276addf38e2dfd80ecaf287b2328445e545a6",
+  # `fuse-augmentations` was declared here until WP-159 promoted it to a runtime
+  # dependency; the reasoning for the commit pin, and for the PyPI condition it fails,
+  # moved with it to `[project].dependencies`.
   "matplotlib>=3.8",
   # WP-066's export gate only. The export itself is `torch.onnx.export`, already a
   # runtime dep, so nothing a consumer installs changes: `onnx` reads the emitted

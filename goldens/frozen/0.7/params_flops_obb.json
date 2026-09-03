@@ -1,0 +1,22 @@
+{
+  "producer": "scripts.golden_producers:obb_params_flops",
+  "tolerances": {
+    "n_gflops": 0.0734,
+    "s_gflops": 0.2797,
+    "m_gflops": 0.8918,
+    "l_gflops": 1.1779,
+    "x_gflops": 2.6328
+  },
+  "values": {
+    "n_params": 2563976.0,
+    "n_gflops": 14.6771,
+    "s_params": 10120782.0,
+    "s_gflops": 55.9375,
+    "m_params": 21009774.0,
+    "m_gflops": 178.3644,
+    "l_params": 25241454.0,
+    "l_gflops": 235.5899,
+    "x_params": 56652248.0,
+    "x_gflops": 526.5584
+  }
+}
