@@ -1198,6 +1198,16 @@ R21 advances from `fedde0c1` to `a5a276a`, and the two breaks WP-153c predicted 
 
 **What is worth naming is why the wall came back.** WP-132's removal was correct and did not survive, because `make freeze-goldens` copies whatever live goldens exist into the new release directory with no notion that two of them are generator-derived. WP-140 froze them into `0.5` and WP-153 into `0.6`, each re-committing the category error the principal had already ruled on, and neither could have noticed: the freeze is a copy, and a copy of a green golden is green until the generator moves. So the remedy the principal authorized once needs to be applied to two more directories, and the mechanism needs to stop reintroducing them, so WP-154c is opened to stop the mechanism reintroducing them rather than to remove them a third time — without it `0.7` freezes them again and WP-159 meets this same wall. The general shape is WP-153b's own lesson in a new place — what the gate reads is safe, and what it does not read drifts silently. Here the gate does read the frozen tree; what nothing reads is the question of which metrics belong in it.
 
+### WP-154c — the mechanism stops reintroducing what it was already told to remove
+
+<a id="wp-154c"></a>
+
+WP-154 closed by naming why WP-132's wall came back: `make freeze-goldens` was a blind `cp goldens/*.json goldens/frozen/$(MINOR)/`, with no notion that `fixture_checksums.json` and `data_checksums.json` are generator-derived — their producers render synthetic images through `fuse-augmentations`, so once that package's generator moves, no future code change can satisfy "the frozen copy still holds". WP-132 removed the two files that wall produced; WP-140 and WP-153 each re-froze them anyway, because a copy of a green golden is green until the generator moves, and nothing in the copy path could tell the two categories apart. Removing the files a third time at WP-159 would only restart the same clock.
+
+The fix is a schema field rather than a human checklist item. `fixture_checksums.json` and `data_checksums.json` now carry `"freezable": false`; every other live golden is freezable by omission, which keeps the six pure-code goldens' files untouched and states the rule as "false is the exception, not true". `scripts/freeze_goldens.py` replaces the Makefile's inline `cp`: it reads each live golden's `freezable` field and copies only the eligible ones, reporting what it skipped rather than skipping silently. `Makefile`'s `freeze-goldens` target calls it. `scripts/check_goldens.py`'s `_parse_golden` reads the same field, and `check_golden` rejects — with a named error, not a silent skip — any golden it finds under `goldens/frozen/` whose `freezable` is `false`; this should never happen once the freeze path is fixed, but a manual copy or a retroactively-flagged old snapshot must still be caught by the gate that reads the frozen tree, not assumed away.
+
+Two things this row does not do. It does not touch either `goldens/frozen/` directory — WP-154 already removed what needed removing, and this row's job is only to stop the mechanism, not to re-litigate the removal. And it does not re-freeze anything: no live golden's values changed, so `goldens/fixture_checksums.json` and `goldens/data_checksums.json` gain one field and nothing else.
+
 ### Phase 14 — what each row does, and where its boundary is
 
 <a id="phase-14-rows"></a>
@@ -1207,6 +1217,10 @@ Phase 14's roadmap cells were the longest in the register by a factor of three, 
 <a id="wp-154-scope"></a>
 
 **WP-154 — the pin bump alone.** The dependency bump and the re-freeze it forces, with nothing delegated. R21 advances from `fedde0c1` to `a5a276a` — the commit `v0.12.0` is tagged from once this roll-out is clean. Two things break loudly and are repaired here. `tests/fixtures/synthetic.py` imports `animal_shapes`, which upstream's restructure removed; the replacement is `tuple(AnimalShape)[:KEYPOINTS_ANIMAL_COUNT]`, the same declaration-order selection the helper performed, and the other three imports from that package are unaffected. The synthetic fixtures themselves also moved: `PrimitiveShape.TRIANGLE` was redesigned from obtuse-scalene to equilateral, `polygon_to_obb` re-derived from an upright frame rather than minimum-area calipers, and the animal family rebuilt around a packaged SVG zoo, against goldens whose tolerance is zero. Every changed golden value is traced to a named upstream change before it is re-frozen; one that cannot be traced is a regression and stops the row rather than being frozen over.
+
+<a id="wp-154c-scope"></a>
+
+**WP-154c — the freeze mechanism, fixed rather than the files, a third time.** WP-154 hit WP-132's wall again: `goldens/frozen/0.5` and `0.6` both re-acquired the two generator-derived goldens, because `make freeze-goldens` is a blind copy with no notion that a golden can be pinned to an external package's output rather than to this project's own code. A `"freezable": false` field on the two live goldens, a `scripts/freeze_goldens.py` that skips them at copy time, and a `check_goldens.py` that rejects one found frozen anyway — so the row that removed the files this time is not the row that has to remove them again next time. No golden value changes and neither frozen directory is touched.
 
 <a id="wp-154b-scope"></a>
 

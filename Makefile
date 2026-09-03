@@ -61,11 +61,13 @@ golden-gpu:
 gate-gpu: test-gpu golden-gpu
 
 # Release-time snapshot of the current goldens (release WPs only, D10).
+# Skips any golden marked "freezable": false — a generator-derived golden can
+# never satisfy "current code still satisfies every frozen value" once its
+# external dependency moves, so it must never enter goldens/frozen/ (WP-154c).
 freeze-goldens:
 	@test -n "$(MINOR)" || { echo "usage: make freeze-goldens MINOR=0.N"; exit 1; }
 	@test -d goldens || { echo "no goldens/ directory to freeze"; exit 1; }
-	mkdir -p goldens/frozen/$(MINOR)
-	cp goldens/*.json goldens/frozen/$(MINOR)/
+	$(PY) scripts/freeze_goldens.py $(MINOR)
 
 # Overfit-100 integration goldens (WP-040/054/064; needs accelerator).
 # Trains an n-scale detector on a fixed ~100-image synthetic slice and gates on

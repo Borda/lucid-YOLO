@@ -5,7 +5,9 @@ Exercises the harness end to end against the repository's real goldens, then
 drives its failure paths with throwaway golden directories: a tampered value, a
 malformed JSON file, and an unresolvable producer must each fail. A copied
 ``frozen/`` file proves frozen snapshots are discovered and compared by the same
-path as live goldens.
+path as live goldens, and a copy marked ``"freezable": false`` proves the harness
+rejects it there rather than silently comparing a snapshot nothing can keep
+green (WP-154c).
 """
 
 import importlib.util
@@ -20,6 +22,8 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HARNESS_PATH = REPO_ROOT / "scripts" / "check_goldens.py"
 REAL_GOLDEN = REPO_ROOT / "goldens" / "fixture_checksums.json"
+#: A real, freezable golden — ``REAL_GOLDEN`` is deliberately not (WP-154c).
+REAL_FREEZABLE_GOLDEN = REPO_ROOT / "goldens" / "assignment_cases.json"
 
 
 def _load_harness() -> ModuleType:
@@ -83,14 +87,42 @@ def test_frozen_golden_is_discovered_and_compared(tmp_path: Path) -> None:
     """A file under ``frozen/`` is discovered and passes the same comparison (DoD e)."""
     frozen_dir = tmp_path / "frozen" / "0.1"
     frozen_dir.mkdir(parents=True)
-    frozen_copy = frozen_dir / "fixture_checksums.json"
-    shutil.copy(REAL_GOLDEN, frozen_copy)
+    frozen_copy = frozen_dir / "assignment_cases.json"
+    shutil.copy(REAL_FREEZABLE_GOLDEN, frozen_copy)
 
     discovered = harness.discover_goldens(tmp_path)
     results = harness.check_all(tmp_path)
 
     assert frozen_copy in discovered
     assert results and all(r.passed for r in results)
+
+
+def test_non_freezable_golden_under_frozen_fails(tmp_path: Path) -> None:
+    """A golden marked ``"freezable": false`` found under ``frozen/`` is rejected (WP-154c)."""
+    frozen_dir = tmp_path / "frozen" / "0.1"
+    frozen_dir.mkdir(parents=True)
+    data = json.loads(REAL_GOLDEN.read_text())
+    data["freezable"] = False
+    frozen_copy = frozen_dir / "fixture_checksums.json"
+    frozen_copy.write_text(json.dumps(data))
+
+    result = harness.check_golden(frozen_copy)
+
+    assert not result.passed
+    assert result.error is not None
+    assert "freezable" in result.error
+
+
+def test_non_freezable_golden_outside_frozen_still_passes(tmp_path: Path) -> None:
+    """A golden marked ``"freezable": false`` is checked normally when it is a live golden."""
+    golden = tmp_path / "fixture_checksums.json"
+    data = json.loads(REAL_GOLDEN.read_text())
+    data["freezable"] = False
+    golden.write_text(json.dumps(data))
+
+    result = harness.check_golden(golden)
+
+    assert result.passed
 
 
 @pytest.mark.parametrize(

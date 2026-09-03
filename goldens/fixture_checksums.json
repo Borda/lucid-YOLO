@@ -1,5 +1,6 @@
 {
   "producer": "scripts.golden_producers:fixture_checksums",
+  "freezable": false,
   "tolerances": {
     "detseg_num_images": 0.0,
     "detseg_num_annotations": 0.0,

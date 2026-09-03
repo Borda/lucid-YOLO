@@ -23,8 +23,18 @@ Golden file schema::
     {
       "producer": "<module>:<function>",
       "tolerances": {"<metric>": <abs_tol_float>},
-      "values": {"<metric>": <number>}
+      "values": {"<metric>": <number>},
+      "freezable": <bool, optional, default true>
     }
+
+``"freezable": false`` marks a golden whose producer's output is pinned to an
+external package rather than to this project's own code (WP-132: two producers
+render synthetic images through ``fuse-augmentations``, so once that package's
+generator moves, no future code change can satisfy "the frozen copy still holds"
+— the frozen snapshot was never a real regression guard). Such a golden is
+excluded from ``make freeze-goldens`` and must never appear under
+``goldens/frozen/``; :func:`check_golden` fails loudly if one ever does, rather
+than silently comparing a snapshot nothing can keep green (WP-154c).
 
 The discovery/compare core is importable (``discover_goldens``, ``check_golden``,
 ``check_all``); :func:`main` is a thin CLI over it.
@@ -200,18 +210,20 @@ def resolve_producer(spec: str) -> Producer:
     return cast(Producer, producer)
 
 
-def _parse_golden(path: Path) -> tuple[str, dict[str, float], dict[str, float]]:
+def _parse_golden(path: Path) -> tuple[str, dict[str, float], dict[str, float], bool]:
     """Read and validate a golden file's schema.
 
     Args:
         path: The golden file path.
 
     Returns:
-        A ``(producer_spec, tolerances, values)`` triple.
+        A ``(producer_spec, tolerances, values, freezable)`` tuple. ``freezable``
+        defaults to ``True`` when the field is absent.
 
     Raises:
-        GoldenError: If the file is not valid JSON, is not an object, or is
-            missing a string ``producer`` or a ``values`` mapping.
+        GoldenError: If the file is not valid JSON, is not an object, is missing
+            a string ``producer`` or a ``values`` mapping, or gives ``freezable``
+            a non-boolean value.
     """
     try:
         data = json.loads(path.read_text())
@@ -228,7 +240,10 @@ def _parse_golden(path: Path) -> tuple[str, dict[str, float], dict[str, float]]:
     tolerances = data.get("tolerances", {})
     if not isinstance(tolerances, dict):
         raise GoldenError("golden 'tolerances' must be an object when present")
-    return producer, tolerances, values
+    freezable = data.get("freezable", True)
+    if not isinstance(freezable, bool):
+        raise GoldenError("golden 'freezable' must be a boolean when present")
+    return producer, tolerances, values, freezable
 
 
 def _compare_values(
@@ -281,7 +296,13 @@ def check_golden(path: Path) -> GoldenResult:
         ```
     """
     try:
-        spec, tolerances, values = _parse_golden(path)
+        spec, tolerances, values, freezable = _parse_golden(path)
+        if not freezable and "frozen" in path.parts:
+            raise GoldenError(
+                "golden is 'freezable': false but found under goldens/frozen/ — a non-freezable "
+                "golden can never satisfy 'current code still satisfies every frozen value' once "
+                "its producer's external dependency moves, so it must never be committed there"
+            )
         producer = resolve_producer(spec)
         actual = producer()
     except GoldenError as exc:
