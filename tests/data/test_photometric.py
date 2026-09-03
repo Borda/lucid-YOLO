@@ -142,12 +142,12 @@ class TestHorizontalFlip:
     """Horizontal flip mirrors the image and every carried target modality exactly."""
 
     def test_p_one_flips_boxes(self) -> None:
-        """p=1 mirrors a hand-built box: x1' = W - x2, x2' = W - x1."""
+        """p=1 mirrors a hand-built box about (W-1)/2: x1' = (W-1) - x2, x2' = (W-1) - x1."""
         flip = HorizontalFlip(p=1.0, generator=_generator())
         image = torch.rand(3, 4, 10)
         boxes = torch.tensor([[2.0, 1.0, 6.0, 3.0]])
         _, out = flip(image, Targets(boxes=boxes, labels=torch.tensor([0])))
-        assert out.boxes.tolist() == [[4.0, 1.0, 8.0, 3.0]]
+        assert out.boxes.tolist() == [[3.0, 1.0, 7.0, 3.0]]
         assert flip.last_flipped is True
 
     def test_double_flip_is_identity(self) -> None:
@@ -161,13 +161,13 @@ class TestHorizontalFlip:
         assert torch.allclose(twice_image, image)
 
     def test_polygon_points_mirror(self) -> None:
-        """Every polygon x-coordinate reflects to W - x; y is untouched."""
+        """Every polygon x-coordinate reflects to (W-1) - x; y is untouched."""
         flip = HorizontalFlip(p=1.0, generator=_generator())
         targets = _targets()
         width = 10
         _, out = flip(torch.rand(3, 4, width), targets)
         for src, dst in zip(targets.polygons, out.polygons, strict=True):
-            assert torch.allclose(dst[:, 0], width - src[:, 0])
+            assert torch.allclose(dst[:, 0], (width - 1) - src[:, 0])
             assert torch.allclose(dst[:, 1], src[:, 1])
 
     def test_keypoints_mirror_without_identity_swap(self) -> None:
@@ -180,7 +180,7 @@ class TestHorizontalFlip:
             keypoint_vis=torch.tensor([[2, 1]]),
         )
         _, out = flip(torch.rand(3, 4, 10), targets)
-        assert out.keypoints.tolist() == [[[9.0, 2.0], [3.0, 3.0]]]
+        assert out.keypoints.tolist() == [[[8.0, 2.0], [2.0, 3.0]]]
         assert out.keypoint_vis.tolist() == [[2, 1]]
 
     def test_keypoints_mirror_and_swap_supplied_pairs(self) -> None:
@@ -193,7 +193,7 @@ class TestHorizontalFlip:
             keypoint_vis=torch.tensor([[2, 1]]),
         )
         _, out = flip(torch.rand(3, 4, 10), targets)
-        assert out.keypoints.tolist() == [[[3.0, 3.0], [9.0, 2.0]]]
+        assert out.keypoints.tolist() == [[[2.0, 3.0], [8.0, 2.0]]]
         assert out.keypoint_vis.tolist() == [[1, 2]]
 
     def test_out_of_range_keypoint_pair_raises(self) -> None:
@@ -209,12 +209,12 @@ class TestHorizontalFlip:
             flip(torch.rand(3, 4, 10), targets)
 
     def test_rbox_centre_mirror_and_theta_negation(self) -> None:
-        """Rotated boxes reflect cx -> W - cx and negate theta (both in range); w/h stay put."""
+        """Rotated boxes reflect cx -> (W-1) - cx and negate theta (both in range); w/h stay put."""
         flip = HorizontalFlip(p=1.0, generator=_generator())
         targets = _targets()
         width = 10
         _, out = flip(torch.rand(3, 4, width), targets)
-        assert torch.allclose(out.rboxes[:, 0], width - targets.rboxes[:, 0])
+        assert torch.allclose(out.rboxes[:, 0], (width - 1) - targets.rboxes[:, 0])
         assert torch.allclose(out.rboxes[:, 4], -targets.rboxes[:, 4])
         assert torch.allclose(out.rboxes[:, 1:4], targets.rboxes[:, 1:4])
 

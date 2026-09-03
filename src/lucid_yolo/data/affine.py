@@ -157,6 +157,13 @@ class AffineParams:
         ``p`` maps to ``A @ (p - c) + t + c`` where ``A`` is the ``2x2`` linear part,
         ``c`` the canvas centre and ``t`` the translation.
 
+        The centre is the **pixel centre** ``((W - 1) / 2, (H - 1) / 2)``, not the
+        canvas corner midpoint ``(W / 2, H / 2)``: a coordinate names a sample
+        point, so the outermost samples sit at ``0`` and ``W - 1`` and their
+        midpoint is what a rotation leaves fixed. This is the convention
+        ``fuse-augmentations`` composes about (WP-154b), and one convention shared
+        between image and coordinate transport is what keeps the two agreeing.
+
         Args:
             height: Canvas height in pixels (sets the centre and vertical axis).
             width: Canvas width in pixels (sets the centre and horizontal axis).
@@ -180,7 +187,7 @@ class AffineParams:
         rotate_scale = torch.tensor([[cos_a, -sin_a], [sin_a, cos_a]], dtype=torch.float64)
         shear = torch.tensor([[1.0, math.tan(self.shear_x)], [math.tan(self.shear_y), 1.0]], dtype=torch.float64)
         linear = rotate_scale @ shear
-        center = torch.tensor([width / 2.0, height / 2.0], dtype=torch.float64)
+        center = torch.tensor([(width - 1) / 2.0, (height - 1) / 2.0], dtype=torch.float64)
         translate = torch.tensor([self.translate_x, self.translate_y], dtype=torch.float64)
         offset = center - linear @ center + translate
         matrix = torch.eye(3, dtype=torch.float64)

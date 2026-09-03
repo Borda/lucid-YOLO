@@ -134,9 +134,9 @@ def check_rotated_pairing(targets: Targets) -> None:
 
 
 def mirror_rboxes(rboxes: Tensor, width: float) -> Tensor:
-    """Mirror rotated boxes about the vertical axis at ``x = width / 2``.
+    """Mirror rotated boxes about the vertical axis at ``x = (width - 1) / 2``.
 
-    The centre reflects (``cx' = width - cx``) and the long-edge direction reflects with
+    The centre reflects (``cx' = (width - 1) - cx``) and the long-edge direction reflects with
     it: ``u = (cos theta, sin theta)`` maps to ``(-cos theta, sin theta)``, the direction
     of ``pi - theta``, which is ``-theta`` plus a half turn — and a rectangle is invariant
     under a half turn. Extents are unchanged, a mirror being an isometry. The result is
@@ -145,7 +145,8 @@ def mirror_rboxes(rboxes: Tensor, width: float) -> Tensor:
 
     Args:
         rboxes: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``, canonical or not.
-        width: Canvas width in pixels; the mirror line sits at ``width / 2``.
+        width: Canvas width in pixels; the mirror line sits at ``(width - 1) / 2``, the
+            axis the image's own column reversal reflects about (WP-154b).
 
     Returns:
         ``(M, 5)`` canonical rotated boxes describing the mirrored rectangles.
@@ -155,12 +156,12 @@ def mirror_rboxes(rboxes: Tensor, width: float) -> Tensor:
         >>> import torch
         >>> box = torch.tensor([[3.0, 5.0, 8.0, 4.0, 1.2]])  # theta above pi/4
         >>> [round(v, 4) for v in mirror_rboxes(box, width=10.0)[0].tolist()]
-        [7.0, 5.0, 8.0, 4.0, 1.9416]
+        [6.0, 5.0, 8.0, 4.0, 1.9416]
 
         ```
     """
     mirrored = rboxes.clone()
-    mirrored[:, 0] = width - rboxes[:, 0]
+    mirrored[:, 0] = (width - 1) - rboxes[:, 0]
     mirrored[:, 4] = -rboxes[:, 4]
     return canonicalize(mirrored)
 

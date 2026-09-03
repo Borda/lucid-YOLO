@@ -149,13 +149,13 @@ class TestAffineDerived:
         assert torch.allclose(warped[:, :, :2], torch.full_like(warped[:, :, :2], FILL), atol=EXACT)
 
     def test_quarter_turn_maps_a_known_box_to_a_known_box(self) -> None:
-        """A 90-degree rotation about the canvas centre maps ``[1,2,3,6]`` to ``[2,1,6,3]``.
+        """A 90-degree rotation about the canvas centre maps ``[1,2,3,6]`` to ``[1,1,5,3]``.
 
-        Derived, not observed: on an 8-pixel canvas the centre is ``(4, 4)`` and the
-        rotation sends ``(x, y)`` to ``(4 - (y - 4), 4 + (x - 4))``, so the corners
-        ``(1, 2)`` and ``(3, 6)`` land on ``(6, 1)`` and ``(2, 3)``, whose envelope
-        is the expected box. A similarity maps a rectangle to a rectangle, so the
-        envelope is exact rather than an over-approximation.
+        Derived, not observed: on an 8-pixel canvas the pixel centre is ``(3.5, 3.5)``
+        and the rotation sends ``(x, y)`` to ``(3.5 - (y - 3.5), 3.5 + (x - 3.5))``, so
+        the corners ``(1, 2)`` and ``(3, 6)`` land on ``(5, 1)`` and ``(1, 3)``, whose
+        envelope is the expected box. A similarity maps a rectangle to a rectangle, so
+        the envelope is exact rather than an over-approximation.
         """
         quarter = AffineParams(angle=math.pi / 2, shear_x=0.0, shear_y=0.0, scale=1.0, translate_x=0.0, translate_y=0.0)
 
@@ -163,14 +163,14 @@ class TestAffineDerived:
             torch.zeros(3, 8, 8), _boxed(torch.tensor([[1.0, 2.0, 3.0, 6.0]])), quarter
         )
 
-        assert torch.allclose(warped.boxes, torch.tensor([[2.0, 1.0, 6.0, 3.0]]), atol=EXACT)
+        assert torch.allclose(warped.boxes, torch.tensor([[1.0, 1.0, 5.0, 3.0]]), atol=EXACT)
 
     def test_a_known_scale_scales_box_coordinates_about_the_centre(self) -> None:
-        """Doubling about the centre sends ``[2,2,4,4]`` to ``[0,0,4,4]`` on an 8-pixel canvas.
+        """Doubling about the centre sends ``[2,2,4,4]`` to ``[0.5,0.5,4.5,4.5]`` on an 8-pixel canvas.
 
-        Derived: a scale of two about ``(4, 4)`` maps ``x`` to ``4 + 2(x - 4)``, so
-        ``2`` goes to ``0`` and ``4`` stays at ``4``. Choosing a box that stays inside
-        the canvas keeps the clip out of the assertion.
+        Derived: a scale of two about the pixel centre ``(3.5, 3.5)`` maps ``x`` to
+        ``3.5 + 2(x - 3.5)``, so ``2`` goes to ``0.5`` and ``4`` goes to ``4.5``.
+        Choosing a box that stays inside the canvas keeps the clip out of the assertion.
         """
         doubled = AffineParams(angle=0.0, shear_x=0.0, shear_y=0.0, scale=2.0, translate_x=0.0, translate_y=0.0)
 
@@ -178,7 +178,7 @@ class TestAffineDerived:
             torch.zeros(3, 8, 8), _boxed(torch.tensor([[2.0, 2.0, 4.0, 4.0]])), doubled
         )
 
-        assert torch.allclose(warped.boxes, torch.tensor([[0.0, 0.0, 4.0, 4.0]]), atol=EXACT)
+        assert torch.allclose(warped.boxes, torch.tensor([[0.5, 0.5, 4.5, 4.5]]), atol=EXACT)
 
 
 class TestLetterboxDerived:
@@ -243,16 +243,17 @@ class TestFlipDerived:
         assert torch.equal(twice.keypoint_vis, targets.keypoint_vis)
 
     def test_one_mirror_reflects_a_box_about_the_vertical_axis(self) -> None:
-        """On a 6-wide canvas the box ``[0,0,1,2]`` mirrors to ``[5,0,6,2]``.
+        """On a 6-wide canvas the box ``[0,0,1,2]`` mirrors to ``[4,0,5,2]``.
 
-        Derived: ``x1' = W - x2`` and ``x2' = W - x1``, which is the only mapping
-        that both reflects and keeps ``x1 < x2``.
+        Derived: the axis is ``(W - 1) / 2 = 2.5``, so ``x1' = (W - 1) - x2`` and
+        ``x2' = (W - 1) - x1``, which is the only mapping that both reflects about the
+        axis the column reversal itself uses and keeps ``x1 < x2``.
         """
         _, mirrored = HorizontalFlip().apply(
             torch.zeros(3, 2, 6), _boxed(torch.tensor([[0.0, 0.0, 1.0, 2.0]])), FlipParams(flipped=True)
         )
 
-        assert torch.allclose(mirrored.boxes, torch.tensor([[5.0, 0.0, 6.0, 2.0]]), atol=EXACT)
+        assert torch.allclose(mirrored.boxes, torch.tensor([[4.0, 0.0, 5.0, 2.0]]), atol=EXACT)
 
 
 class TestRotatedDerived:
@@ -272,7 +273,7 @@ class TestRotatedDerived:
 
         _, warped = _keeps_everything().apply(torch.zeros(3, 8, 8), targets, quarter)
 
-        expected_centre = torch.tensor([4.0, 6.0])
+        expected_centre = torch.tensor([3.0, 6.0])
         assert torch.allclose(warped.rboxes[0, :2], expected_centre, atol=1e-4)
         assert torch.allclose(warped.rboxes[0, 2:4], torch.tensor([4.0, 2.0]), atol=1e-4)
 

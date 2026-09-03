@@ -283,7 +283,7 @@ class TestHorizontalFlipRotated:
         flip = HorizontalFlip(p=1.0, generator=_generator())
         targets = _paired(_rboxes(theta))
         expected = rboxes_to_polygons(targets.rboxes).clone()
-        expected[:, :, 0] = _CANVAS - expected[:, :, 0]
+        expected[:, :, 0] = (_CANVAS - 1) - expected[:, :, 0]
 
         _, out = flip(_image(), targets)
 

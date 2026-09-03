@@ -16,9 +16,10 @@ the YOLO-lineage recipe ([R1] Table S3: ``fliplr=0.5`` plus per-channel HSV gain
 
 :class:`HorizontalFlip`
     A geometric mirror about the vertical axis. With probability ``p`` it reverses the
-    image columns and mirrors every carried modality: axis-aligned boxes swap and
-    reflect their x-extent (``x1' = W - x2``, ``x2' = W - x1``), polygon points reflect
-    (``x' = W - x``), and rotated boxes go through
+    image columns and mirrors every carried modality about ``x = (W - 1) / 2``:
+    axis-aligned boxes swap and reflect their x-extent (``x1' = (W - 1) - x2``,
+    ``x2' = (W - 1) - x1``), polygon points reflect (``x' = (W - 1) - x``), and
+    rotated boxes go through
     :func:`~lucid_yolo.data.rotated_aug.mirror_rboxes` — centre reflected, angle negated,
     result re-canonicalized. The mirror itself is *exact* for the carried long-edge
     representation, so no instance is ever dropped here and no guard is needed. The
@@ -377,10 +378,12 @@ class HorizontalFlip:
     """Left-right image flip with matching target mirroring (WP-013).
 
     With probability ``p`` (drawn per call) the image columns are reversed and every
-    target modality is mirrored about the vertical axis at ``x = W / 2``: boxes swap and
-    reflect their x-extent (``x1' = W - x2``, ``x2' = W - x1``), polygon and keypoint
-    points reflect (``x' = W - x``), and rotated boxes reflect their centre
-    (``cx' = W - cx``) with the angle negated and re-canonicalized (WP-058). When a
+    target modality is mirrored about the vertical axis at ``x = (W - 1) / 2`` — the
+    axis the column reversal itself reflects about, since a coordinate names a sample
+    point and the outermost samples sit at ``0`` and ``W - 1`` (WP-154b). Boxes swap and
+    reflect their x-extent (``x1' = (W - 1) - x2``, ``x2' = (W - 1) - x1``), polygon and
+    keypoint points reflect (``x' = (W - 1) - x``), and rotated boxes reflect their centre
+    (``cx' = (W - 1) - cx``) with the angle negated and re-canonicalized (WP-058). When a
     dataset keypoint pair map is supplied, it then swaps left/right keypoint
     identities (WP-120). With probability ``1 - p`` the image and targets pass
     through unchanged.
@@ -415,7 +418,7 @@ class HorizontalFlip:
         >>> boxes = torch.tensor([[0.0, 0.0, 1.0, 2.0]])
         >>> _, out = flip(image, Targets(boxes=boxes, labels=torch.tensor([0])))
         >>> out.boxes.tolist()
-        [[3.0, 0.0, 4.0, 2.0]]
+        [[2.0, 0.0, 3.0, 2.0]]
         >>> pose = Targets(
         ...     boxes=torch.zeros((1, 4)), labels=torch.tensor([0]),
         ...     keypoints=torch.tensor([[[1.0, 2.0], [3.0, 4.0]]]),
@@ -425,7 +428,7 @@ class HorizontalFlip:
         ...     torch.zeros((3, 2, 4)), pose
         ... )
         >>> mirrored.keypoints.tolist(), mirrored.keypoint_vis.tolist()
-        ([[[1.0, 4.0], [3.0, 2.0]]], [[1, 2]])
+        ([[[0.0, 4.0], [2.0, 2.0]]], [[1, 2]])
 
         ```
     """
@@ -508,7 +511,7 @@ class HorizontalFlip:
             >>> t = Targets(boxes=boxes, labels=torch.tensor([0]))
             >>> _, out = HorizontalFlip().apply(torch.zeros(3, 2, 4), t, FlipParams(flipped=True))
             >>> out.boxes.tolist()
-            [[3.0, 0.0, 4.0, 2.0]]
+            [[2.0, 0.0, 3.0, 2.0]]
 
             ```
         """
@@ -520,21 +523,22 @@ class HorizontalFlip:
 
     @staticmethod
     def _mirror_targets(targets: Targets, width: float, keypoint_flip_pairs: list[tuple[int, int]] | None) -> Targets:
-        """Mirror every modality about ``x = width / 2``, keeping alignment intact."""
+        """Mirror every modality about ``x = (width - 1) / 2``, keeping alignment intact."""
+        axis = width - 1.0
         boxes = targets.boxes.clone()
         x1 = boxes[:, 0].clone()
-        boxes[:, 0] = width - boxes[:, 2]
-        boxes[:, 2] = width - x1
+        boxes[:, 0] = axis - boxes[:, 2]
+        boxes[:, 2] = axis - x1
         polygons = []
         for ring in targets.polygons:
             mirrored = ring.clone()
-            mirrored[:, 0] = width - ring[:, 0]
+            mirrored[:, 0] = axis - ring[:, 0]
             polygons.append(mirrored)
         rboxes = mirror_rboxes(targets.rboxes, width)
         keypoints = targets.keypoints.clone()
         keypoint_vis = targets.keypoint_vis.clone()
         if keypoints.shape[0] > 0:
-            keypoints[..., 0] = width - targets.keypoints[..., 0]
+            keypoints[..., 0] = axis - targets.keypoints[..., 0]
             if keypoint_flip_pairs is not None:
                 keypoint_count = keypoints.shape[1]
                 for pair in keypoint_flip_pairs:

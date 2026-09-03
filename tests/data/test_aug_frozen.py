@@ -89,7 +89,7 @@ class TestAffineComposite:
         """
         _, warped = RandomAffine().apply(torch.zeros(3, 32, 32), _two_instance_scene(), COMPOSITE)
 
-        expected = torch.tensor([[6.8529, 0.1445, 23.3645, 17.3711], [23.4757, 2.1970, 32.0000, 15.9370]])
+        expected = torch.tensor([[6.7768, 0.3623, 23.2884, 17.5889], [23.3996, 2.4148, 32.0000, 16.1548]])
         assert torch.allclose(warped.boxes, expected, atol=GEOM)
 
     def test_a_polygon_ring_lands_on_frozen_vertices(self) -> None:
@@ -110,7 +110,7 @@ class TestAffineComposite:
         _, warped = RandomAffine().apply(torch.zeros(3, 32, 32), single, COMPOSITE)
 
         expected = torch.tensor(
-            [[10.021805, 0.144477], [23.364517, 3.837181], [20.195639, 17.371105], [6.852927, 13.678400]]
+            [[9.945715, 0.362253], [23.288427, 4.054957], [20.119549, 17.588881], [6.776836, 13.896176]]
         )
         assert torch.allclose(warped.polygons[0], expected, atol=GEOM)
 
@@ -128,7 +128,7 @@ class TestFusedAffineLetterbox:
         """
         _, warped = FusedAffineLetterbox(24).apply(torch.zeros(3, 32, 32), _two_instance_scene(), COMPOSITE)
 
-        expected = torch.tensor([[5.1397, 0.1084, 17.5234, 13.0283], [17.6068, 1.6477, 24.0000, 11.9528]])
+        expected = torch.tensor([[5.0826, 0.2717, 17.4663, 13.1917], [17.5497, 1.8111, 24.0000, 12.1161]])
         assert torch.allclose(warped.boxes, expected, atol=GEOM)
 
 
@@ -226,7 +226,7 @@ class TestRotatedUnderShear:
 
         _, warped = RandomAffine().apply(torch.zeros(3, 32, 32), targets, COMPOSITE)
 
-        expected = torch.tensor([[17.332508, 9.373241, 14.028654, 6.856926, 0.616364]])
+        expected = torch.tensor([[17.256418, 9.591017, 14.028654, 6.856925, 0.616364]])
         assert torch.allclose(warped.rboxes, expected, atol=GEOM)
 
 
@@ -254,7 +254,7 @@ class TestKeypointsThroughMirrorAndWarp:
         _, mirrored = flip.apply(torch.zeros(3, 32, 32), targets, FlipParams(flipped=True))
         _, warped = RandomAffine().apply(torch.zeros(3, 32, 32), mirrored, COMPOSITE)
 
-        expected = torch.tensor([[[18.500000, 14.500000], [29.507727, 7.939187], [25.324230, 5.580459]]])
+        expected = torch.tensor([[[17.312017, 14.410050], [28.319744, 7.849238], [24.136246, 5.490510]]])
         assert torch.allclose(warped.keypoints, expected, atol=GEOM)
         assert warped.keypoint_vis.tolist() == [[2, 2, 1]]
 
