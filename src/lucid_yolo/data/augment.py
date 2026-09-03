@@ -20,12 +20,19 @@ the YOLO-lineage recipe ([R1] Table S3: ``fliplr=0.5`` plus per-channel HSV gain
     axis-aligned boxes swap and reflect their x-extent (``x1' = (W - 1) - x2``,
     ``x2' = (W - 1) - x1``), polygon points reflect (``x' = (W - 1) - x``), and
     rotated boxes go through
-    :func:`~lucid_yolo.data.rotated_aug.mirror_rboxes` — centre reflected, angle negated,
-    result re-canonicalized. The mirror itself is *exact* for the carried long-edge
-    representation, so no instance is ever dropped here and no guard is needed. The
-    re-canonicalization is WP-058 closing a WP-013 defect: the bare negation this
-    transform used to carry out left every box with ``theta > pi/4`` outside the
+    :func:`~lucid_yolo.data.rotated_aug.mirror_rboxes` — centre reflected, long-edge
+    direction reflected with it, result re-canonicalized. The mirror itself is *exact* for
+    the carried long-edge representation, so no instance is ever dropped here and no guard
+    is needed. The re-canonicalization is WP-058 closing a WP-013 defect: the bare negation
+    this transform used to carry out left every box with ``theta > pi/4`` outside the
     ``[-pi/4, 3*pi/4)`` long-edge range.
+
+    The keypoint identity swap is :func:`~fuse_augmentations.permute_keypoint_pairs` since
+    WP-157, fed a full-length index this module builds from the dataset's pair list. It
+    permutes *coordinates* and nothing else, so the matching permutation of
+    ``keypoint_vis`` stays here — without it a mirrored sample would carry a visible point
+    marked occluded and its partner marked visible, at identical shapes and with every
+    coordinate assertion still passing.
 
 Both transforms draw every random quantity from an optional :class:`torch.Generator`,
 so a seeded generator gives byte-identical output (the determinism policy of blueprint
@@ -37,6 +44,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import torch
+from fuse_augmentations import permute_keypoint_pairs  # type: ignore[import-untyped]
 from torch import Tensor
 
 from lucid_yolo.data.rotated_aug import mirror_rboxes
@@ -73,6 +81,49 @@ def _uniform(low: float, high: float, generator: torch.Generator | None) -> floa
     if high <= low:
         return float(low)
     return float(torch.empty((), dtype=torch.float64).uniform_(low, high, generator=generator).item())
+
+
+def _keypoint_flip_index(keypoint_flip_pairs: list[tuple[int, int]], keypoint_count: int) -> Tensor:
+    """Expand dataset ``(left, right)`` pairs into upstream's full-length permutation.
+
+    The two shapes disagree and the conversion is this project's, not the caller's: a
+    dataset publishes the *pairs* it wants swapped (A64 keeps that the public surface, so
+    ``K`` stays generic), while :func:`~fuse_augmentations.permute_keypoint_pairs` takes a
+    ``(K,)`` index in which slot ``i`` takes its value from slot ``index[i]`` — identity
+    slots included, not omitted, since upstream rejects an index that is not one entry per
+    slot. Applying the swaps in list order to ``range(K)`` reproduces the sequential
+    per-pair swap this transform used to perform, overlapping pairs included: ``[(0, 1),
+    (1, 2)]`` composes to the same 3-cycle either way.
+
+    Args:
+        keypoint_flip_pairs: ``(left_index, right_index)`` pairs on the keypoint axis.
+        keypoint_count: ``K``, the number of keypoint slots per instance.
+
+    Returns:
+        A ``(K,)`` ``int64`` permutation, usable as the index for both the coordinate
+        permutation and the visibility one.
+
+    Raises:
+        ValueError: If either index of a pair falls outside ``[0, keypoint_count)``. A bad
+            pair is a caller error whichever side does the permutation, so the check stays
+            here rather than surfacing as an out-of-bounds gather from upstream.
+
+    Examples:
+        ```pycon
+        >>> _keypoint_flip_index([(1, 2), (3, 4)], keypoint_count=5).tolist()
+        [0, 2, 1, 4, 3]
+        >>> _keypoint_flip_index([], keypoint_count=3).tolist()
+        [0, 1, 2]
+
+        ```
+    """
+    index = list(range(keypoint_count))
+    for pair in keypoint_flip_pairs:
+        left_index, right_index = pair
+        if not (0 <= left_index < keypoint_count) or not (0 <= right_index < keypoint_count):
+            raise ValueError(f"keypoint flip pair {pair} is out of range for K={keypoint_count}")
+        index[left_index], index[right_index] = index[right_index], index[left_index]
+    return torch.tensor(index, dtype=torch.int64)
 
 
 def rgb_to_hsv(image: Tensor) -> Tensor:
@@ -383,10 +434,11 @@ class HorizontalFlip:
     point and the outermost samples sit at ``0`` and ``W - 1`` (WP-154b). Boxes swap and
     reflect their x-extent (``x1' = (W - 1) - x2``, ``x2' = (W - 1) - x1``), polygon and
     keypoint points reflect (``x' = (W - 1) - x``), and rotated boxes reflect their centre
-    (``cx' = (W - 1) - cx``) with the angle negated and re-canonicalized (WP-058). When a
-    dataset keypoint pair map is supplied, it then swaps left/right keypoint
-    identities (WP-120). With probability ``1 - p`` the image and targets pass
-    through unchanged.
+    (``cx' = (W - 1) - cx``) with the long edge reflected and re-canonicalized (WP-058).
+    When a dataset keypoint pair map is supplied, it then swaps left/right keypoint
+    identities (WP-120) — coordinates and visibility flags together, so a mirrored "left
+    elbow" arrives in the right slot carrying its own flag. With probability ``1 - p`` the
+    image and targets pass through unchanged.
 
     The rotated-box mirror is exact — an isometry maps the rectangle to a rectangle, and
     ``-theta`` names the mirrored long edge up to the half turn a rectangle is invariant
@@ -540,22 +592,20 @@ class HorizontalFlip:
         if keypoints.shape[0] > 0:
             keypoints[..., 0] = axis - targets.keypoints[..., 0]
             if keypoint_flip_pairs is not None:
-                keypoint_count = keypoints.shape[1]
-                for pair in keypoint_flip_pairs:
-                    left_index, right_index = pair
-                    if (
-                        left_index < 0
-                        or right_index < 0
-                        or left_index >= keypoint_count
-                        or right_index >= keypoint_count
-                    ):
-                        raise ValueError(f"keypoint flip pair {pair} is out of range for K={keypoint_count}")
-                    left_keypoints = keypoints[:, left_index].clone()
-                    keypoints[:, left_index] = keypoints[:, right_index]
-                    keypoints[:, right_index] = left_keypoints
-                    left_vis = keypoint_vis[:, left_index].clone()
-                    keypoint_vis[:, left_index] = keypoint_vis[:, right_index]
-                    keypoint_vis[:, right_index] = left_vis
+                flip_index = _keypoint_flip_index(keypoint_flip_pairs, keypoints.shape[1])
+                reversed_mask = torch.ones(keypoints.shape[0], dtype=torch.bool, device=keypoints.device)
+                # Upstream moves coordinates only -- it says so, and it is the right split:
+                # which slot is "left elbow" is dataset schema, and a visibility flag is not
+                # geometry at all. So the same index is applied to `keypoint_vis` here, which
+                # is what makes each flag follow its own point instead of staying behind on a
+                # slot whose identity just changed (A70 keeps it a permutation, never a
+                # demotion).
+                keypoints = permute_keypoint_pairs(keypoints, flip_index, reversed_mask)
+                # `_keypoint_flip_index` builds on the CPU because it is a Python-list
+                # construction; upstream moves it to the keypoint device itself, and this
+                # side does the same rather than inheriting a transform that only works on
+                # the CPU the gate happens to run on.
+                keypoint_vis = keypoint_vis.index_select(1, flip_index.to(device=keypoint_vis.device))
         # A mirror keeps the instance axis, so the per-instance R18 flags ride along.
         return Targets(
             boxes=boxes,

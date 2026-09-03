@@ -196,6 +196,40 @@ class TestHorizontalFlip:
         assert out.keypoints.tolist() == [[[2.0, 3.0], [8.0, 2.0]]]
         assert out.keypoint_vis.tolist() == [[1, 2]]
 
+    def test_mirrored_visibility_flags_follow_their_own_points(self) -> None:
+        """Every flag stays attached to its own point across the mirror and the identity swap.
+
+        The coordinate permutation is upstream's and moves coordinates only, so the
+        visibility permutation is this transform's own (WP-157). Dropping it leaves shapes
+        identical and every coordinate assertion passing while a visible point arrives
+        marked occluded and its partner marked visible -- which is why the invariant asserted
+        here is the *pairing* of each mirrored point with its flag, not the two columns
+        separately. The third slot is unpaired on purpose: it pins that an identity slot
+        neither moves nor loses its flag.
+        """
+        width = 10
+        flip = HorizontalFlip(p=1.0, generator=_generator(), keypoint_flip_pairs=[(0, 2)])
+        targets = Targets(
+            boxes=torch.zeros((1, 4)),
+            labels=torch.tensor([0]),
+            keypoints=torch.tensor([[[1.0, 2.0], [4.0, 5.0], [7.0, 3.0]]]),
+            keypoint_vis=torch.tensor([[2, 0, 1]]),
+        )
+
+        _, out = flip(torch.rand(3, 4, width), targets)
+
+        expected_pairing = {
+            (float(width - 1) - x, y, vis)
+            for (x, y), vis in zip(targets.keypoints[0].tolist(), targets.keypoint_vis[0].tolist(), strict=True)
+        }
+        actual_pairing = {
+            (x, y, vis) for (x, y), vis in zip(out.keypoints[0].tolist(), out.keypoint_vis[0].tolist(), strict=True)
+        }
+        assert actual_pairing == expected_pairing
+        # ... and the swap did fire, so the equality above is not the trivial identity.
+        assert out.keypoints.tolist() == [[[2.0, 3.0], [5.0, 5.0], [8.0, 2.0]]]
+        assert out.keypoint_vis.tolist() == [[1, 0, 2]]
+
     def test_out_of_range_keypoint_pair_raises(self) -> None:
         """Pairs outside the supplied K-point axis are rejected with a clear error."""
         flip = HorizontalFlip(p=1.0, generator=_generator(), keypoint_flip_pairs=[(0, 2)])

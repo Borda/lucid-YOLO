@@ -4,45 +4,55 @@
 WP-055 established the long-edge form and WP-057 the crop-time geometry; this module is
 what the *training-time* transforms — :class:`~lucid_yolo.data.augment.HorizontalFlip`,
 :class:`~lucid_yolo.data.affine.RandomAffine`, :class:`~lucid_yolo.data.mosaic.MosaicAssembly`
-— call so the rotated modality moves with the image instead of being rejected. One
-implementation, four call sites: the alternative is four subtly different angle
-conventions.
+— call so the rotated modality moves with the image instead of being rejected. Since
+WP-157 the arithmetic itself belongs to :mod:`fuse_augmentations`; what stays here is the
+task convention that arithmetic has to be parameterized by, and the one operation upstream
+declines to own.
+
+Delegated, with this project's angle convention passed in (A22):
+    :func:`mirror_rboxes`, :func:`shift_rboxes`, :func:`warp_rboxes` and
+    :func:`rbox_envelopes` are adapters over :func:`~fuse_augmentations.mirror_rboxes`,
+    :func:`~fuse_augmentations.shift_rboxes`, :func:`~fuse_augmentations.transform_rboxes`
+    and :func:`~fuse_augmentations.rbox_envelopes`. Upstream imposes no angle convention of
+    its own and its ``canonicalize`` argument defaults to ``None``, which returns the box
+    exactly as the arithmetic left it — so each of the three transforms is handed
+    :func:`~lucid_yolo.data.rotated_geom.canonicalize` explicitly. That is deliberate and
+    not defensive: the long-edge range is what the assigner, the rotated NMS and the OBB
+    head read, it is a task convention rather than a resampling concern, and a mirror test
+    would not catch its absence, because the two forms a missing wrap leaves behind differ
+    by a half turn that a rectangle is invariant under.
+
+    Upstream's mirror returns ``pi - theta`` where WP-058 returned ``-theta``. Those differ
+    by exactly ``pi``, so canonicalization collapses them to one box and only the rounding
+    of the wrap differs — measured below ``3e-7`` on float32 angles, against the ``1e-4``
+    the frozen geometric expectations are compared at. No frozen value moved for this row.
 
 A general affine does not map a rectangle to a rectangle:
     Only a **similarity** — rotation, uniform scale, translation — preserves
     rectangularity. The random affine also samples per-axis shear, which sends a rectangle
     to a parallelogram, and no ``(cx, cy, w, h, theta)`` describes a parallelogram. So
-    :func:`warp_rboxes` expands the box to the four corners the image warp actually moves,
-    pushes those corners through the very same matrix, and re-fits with
-    :func:`~lucid_yolo.data.rotated_geom.polygons_to_rboxes` — R18's own prescription for
-    its cropped parts ("we need to ensure they can be described as an oriented bounding
-    box with 4 vertices in the clockwise order with a fitting method"). The residual is
-    stated rather than hidden: under a similarity the fit is **exact** (corners map to
-    corners), under shear it is a **fit** whose corners sit up to ``h * sin(s / 2)`` from
-    the warped parallelogram's, where ``s`` is the angle by which the shear tilted the two
-    edge directions off perpendicular.
+    :func:`~fuse_augmentations.transform_rboxes` expands the box to the four corners the
+    image warp actually moves, pushes those corners through the very same matrix, and
+    re-fits — R18's own prescription for its cropped parts ("we need to ensure they can be
+    described as an oriented bounding box with 4 vertices in the clockwise order with a
+    fitting method"). Under a similarity that fit is exact; under shear it is a fit, whose
+    residual upstream's own docstring states in closed form rather than hiding.
 
-Canonical on the way out, everywhere:
-    Every function here returns canonical long-edge boxes (``w >= h``, ``theta`` in
-    ``[-pi/4, 3*pi/4)``). :func:`~lucid_yolo.data.rotated_geom.polygons_to_rboxes` already
-    canonicalizes; the flip and shift paths, which are exact analytic maps rather than
-    fits, call :func:`~lucid_yolo.data.rotated_geom.canonicalize` explicitly. That closes a
-    live defect: WP-013's flip negated ``theta`` and stopped, so every box with
-    ``theta > pi/4`` left the transform outside the canonical range. Negation is the
-    *right* mirror (``-theta`` and ``pi - theta`` differ by ``pi``, which a rectangle is
-    invariant under) — it was only ever the re-wrap that was missing.
-
-Clipping, and the one place augmentation diverges from WP-057:
-    :func:`clip_rboxes_to_canvas` clips against the canvas with **WP-057's** Sutherland-
-    Hodgman clipper and re-fits with WP-057's orientation-preserving fit, rather than
-    growing a second clipper. What it does *not* inherit is R18's 0.7 rule: tiling is
-    dataset preparation, where a clipped part is **flagged** difficult and kept, whereas
-    augmentation is training-time and :class:`~lucid_yolo.data.targets.Targets` carries no
-    ``difficult`` field to flag into. Augmentation therefore **drops** instances, by
-    exactly the visibility rule the axis-aligned path already applies (``min_box_size`` on
-    the clipped envelope's sides and ``min_visibility`` on clipped-over-pre-clip envelope
-    area) — one policy for both modalities. This module supplies the two envelopes; the
-    threshold lives with the caller that owns those two numbers (A40).
+Clipping, the operation upstream refuses by design:
+    Clipping a rotated box yields a polygon, not a rotated box, so :mod:`fuse_augmentations`
+    supplies :func:`~fuse_augmentations.rbox_envelopes` and a plain-box clip and declines to
+    invent the rectangle — which is why :func:`clip_rboxes_to_canvas` and its helper are the
+    two bodies that stay here rather than becoming adapters. It clips against the canvas
+    with **WP-057's** Sutherland-Hodgman clipper and re-fits with WP-057's
+    orientation-preserving fit, rather than growing a second clipper. What it does *not*
+    inherit is R18's 0.7 rule: tiling is dataset preparation, where a clipped part is
+    **flagged** difficult and kept, whereas augmentation is training-time and
+    :class:`~lucid_yolo.data.targets.Targets` carries no ``difficult`` field to flag into.
+    Augmentation therefore **drops** instances, by exactly the visibility rule the
+    axis-aligned path already applies (``min_box_size`` on the clipped envelope's sides and
+    ``min_visibility`` on clipped-over-pre-clip envelope area) — one policy for both
+    modalities. This module supplies the two envelopes; the threshold lives with the caller
+    that owns those two numbers (A40).
 
 Instance axis:
     WP-056's invariant holds throughout: ``rboxes[i]`` is the same instance as
@@ -58,6 +68,18 @@ cross an edge enter the per-instance Python loop the variable clipped-vertex cou
 from __future__ import annotations
 
 import torch
+from fuse_augmentations import (  # type: ignore[import-untyped]
+    mirror_rboxes as _fuse_mirror_rboxes,
+)
+from fuse_augmentations import (
+    rbox_envelopes as _fuse_rbox_envelopes,
+)
+from fuse_augmentations import (
+    shift_rboxes as _fuse_shift_rboxes,
+)
+from fuse_augmentations import (
+    transform_rboxes as _fuse_transform_rboxes,
+)
 from torch import Tensor
 
 from lucid_yolo.data.rotated_geom import canonicalize, polygons_to_rboxes, rboxes_to_polygons
@@ -68,7 +90,6 @@ from lucid_yolo.data.targets import Targets
 # there, and a second copy would be a second set of edge cases. They stay private to
 # `tiling` because emitting *tiles* is that module's public job, not this one's.
 from lucid_yolo.data.tiling import _clip_to_window, _fit_corners, _polygon_area
-from lucid_yolo.data.transforms import apply_affine_to_points
 
 __all__ = [
     "check_rotated_pairing",
@@ -83,12 +104,36 @@ __all__ = [
 _RBOX_DIM = 5
 #: Column count of an ``xyxy`` axis-aligned box.
 _BOX_DIM = 4
-#: Column count of a point ``(x, y)``.
-_POINT_DIM = 2
-#: Corner count of the quadrilateral form of a rotated box.
-_QUAD_CORNERS = 4
 #: Minimum vertex count for a clipped ring to enclose any area (matches WP-057).
 _MIN_AREA_CORNERS = 3
+
+
+def _canonicalize_batched(rboxes: Tensor) -> Tensor:
+    """Adapt the long-edge canonicalizer to upstream's batched box layout.
+
+    :func:`~lucid_yolo.data.rotated_geom.canonicalize` takes a flat ``(M, 5)`` and rejects
+    anything else; :func:`~fuse_augmentations.transform_rboxes` hands its ``canonicalize``
+    callback the ``(batch_size, num_boxes, 5)`` it works in. Flattening and restoring is
+    the whole adapter — canonicalization is per box and carries no cross-box state, so the
+    round trip changes nothing about the result.
+
+    Args:
+        rboxes: Rotated boxes ``(cx, cy, w, h, theta)`` in any leading-dimension layout
+            whose trailing dimension is 5.
+
+    Returns:
+        Canonical long-edge boxes in ``rboxes``'s own shape.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> tall = torch.tensor([[[10.0, 10.0, 4.0, 8.0, 0.0]]])  # short edge stored first
+        >>> [round(v, 4) for v in _canonicalize_batched(tall)[0, 0].tolist()]
+        [10.0, 10.0, 8.0, 4.0, 1.5708]
+
+        ```
+    """
+    return canonicalize(rboxes.reshape(-1, _RBOX_DIM)).reshape(rboxes.shape)
 
 
 def check_rotated_pairing(targets: Targets) -> None:
@@ -136,12 +181,14 @@ def check_rotated_pairing(targets: Targets) -> None:
 def mirror_rboxes(rboxes: Tensor, width: float) -> Tensor:
     """Mirror rotated boxes about the vertical axis at ``x = (width - 1) / 2``.
 
-    The centre reflects (``cx' = (width - 1) - cx``) and the long-edge direction reflects with
-    it: ``u = (cos theta, sin theta)`` maps to ``(-cos theta, sin theta)``, the direction
-    of ``pi - theta``, which is ``-theta`` plus a half turn — and a rectangle is invariant
-    under a half turn. Extents are unchanged, a mirror being an isometry. The result is
-    canonicalized, which is what keeps a box with ``theta > pi/4`` in range: its bare
-    negation would not be (the WP-013 defect this closes).
+    :func:`~fuse_augmentations.mirror_rboxes` does the reflection: the centre reflects
+    (``cx' = (width - 1) - cx``) and the long-edge direction reflects with it, since
+    ``u = (cos theta, sin theta)`` maps to ``(-cos theta, sin theta)``, the direction of
+    ``pi - theta``. Extents are unchanged, a mirror being an isometry. This project's
+    :func:`~lucid_yolo.data.rotated_geom.canonicalize` is passed in as the callback, which
+    is what keeps a box with ``theta > pi/4`` in range — upstream returns the raw
+    ``pi - theta`` when no callback is supplied, and the WP-013 defect this closes was
+    exactly a missing re-wrap.
 
     Args:
         rboxes: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``, canonical or not.
@@ -160,19 +207,18 @@ def mirror_rboxes(rboxes: Tensor, width: float) -> Tensor:
 
         ```
     """
-    mirrored = rboxes.clone()
-    mirrored[:, 0] = (width - 1) - rboxes[:, 0]
-    mirrored[:, 4] = -rboxes[:, 4]
-    return canonicalize(mirrored)
+    mirrored: Tensor = _fuse_mirror_rboxes(rboxes, width, canonicalize=canonicalize)
+    return mirrored
 
 
 def shift_rboxes(rboxes: Tensor, off_x: float, off_y: float) -> Tensor:
     """Translate rotated boxes by a pixel offset.
 
     A translation moves the centre and touches nothing else, so unlike :func:`warp_rboxes`
-    this needs no corner round trip and introduces no fitting residual — which is why the
-    mosaic placement, a pure translation, calls this instead. The output is canonicalized,
-    a bit-for-bit no-op on canonical input.
+    this needs no corner round trip and introduces no fitting residual — which is why
+    :func:`~fuse_augmentations.shift_rboxes` exists as its own upstream path, and why the
+    mosaic placement calls this instead. This project's canonicalizer is passed in as the
+    callback, a bit-for-bit no-op on canonical input.
 
     Args:
         rboxes: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``, canonical or not.
@@ -191,20 +237,27 @@ def shift_rboxes(rboxes: Tensor, off_x: float, off_y: float) -> Tensor:
 
         ```
     """
-    shifted = rboxes.clone()
-    shifted[:, 0] = rboxes[:, 0] + off_x
-    shifted[:, 1] = rboxes[:, 1] + off_y
-    return canonicalize(shifted)
+    shifted: Tensor = _fuse_shift_rboxes(rboxes, off_x, off_y, canonicalize=canonicalize)
+    return shifted
 
 
 def warp_rboxes(rboxes: Tensor, matrix: Tensor) -> Tensor:
     """Push rotated boxes through the same affine the image goes through.
 
-    The box is expanded to the four corners the warp actually moves, those corners are
-    mapped by ``matrix``, and a canonical box is re-fitted to them. Under a similarity the
-    fit reproduces the warped rectangle exactly; under shear the warped quad is a
-    parallelogram and the returned box is the fit described in the module docstring, not a
-    lossless re-parameterization.
+    :func:`~fuse_augmentations.transform_rboxes` expands the box to the four corners the
+    warp actually moves, maps them by ``matrix`` and re-fits; this project's canonicalizer
+    is passed in so the fit lands in the long-edge range. Under a similarity the fit
+    reproduces the warped rectangle exactly; under shear the warped quad is a parallelogram
+    and the returned box is a fit, not a lossless re-parameterization.
+
+    Upstream works batched, so the single instance axis is wrapped and unwrapped here, and
+    the corner round trip runs in ``matrix``'s dtype — the geometry dtype the caller warps
+    its image by, ``float64`` throughout this package. The narrowing back to ``rboxes``'s
+    own dtype happens **inside** the ``canonicalize`` callback rather than after it: a
+    canonical ``float64`` angle sitting a hair inside ``[-pi/4, 3*pi/4)`` can round out of
+    that half-open range on the way to ``float32``, and the range is a postcondition the
+    assigner and the OBB head rely on in the dtype :class:`~lucid_yolo.data.targets.Targets`
+    actually carries, not in the one the warp was computed in.
 
     Args:
         rboxes: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``, canonical or not.
@@ -225,10 +278,15 @@ def warp_rboxes(rboxes: Tensor, matrix: Tensor) -> Tensor:
 
         ```
     """
-    corners = rboxes_to_polygons(rboxes)
-    flat = corners.reshape(-1, _POINT_DIM).to(matrix.dtype)
-    warped = apply_affine_to_points(flat, matrix).to(rboxes.dtype)
-    return polygons_to_rboxes(warped.reshape(-1, _QUAD_CORNERS, _POINT_DIM))
+
+    def _canonical_in_box_dtype(fitted: Tensor) -> Tensor:
+        """Narrow to the box dtype, *then* canonicalize, so the range holds where it is read."""
+        return _canonicalize_batched(fitted.to(rboxes.dtype))
+
+    warped: Tensor = _fuse_transform_rboxes(
+        rboxes.to(matrix.dtype).unsqueeze(0), matrix.unsqueeze(0), canonicalize=_canonical_in_box_dtype
+    )[0]
+    return warped
 
 
 def rbox_envelopes(rboxes: Tensor) -> Tensor:
@@ -236,7 +294,9 @@ def rbox_envelopes(rboxes: Tensor) -> Tensor:
 
     This is the ``boxes[i]`` a rotated-aware transform emits alongside ``rboxes[i]``: the
     envelope of the rotated geometry itself, so the two modalities describe one instance
-    rather than drifting apart (A40).
+    rather than drifting apart (A40). :func:`~fuse_augmentations.rbox_envelopes` computes
+    it, and takes no ``canonicalize`` argument because an envelope carries no angle to
+    canonicalize — it is the bridge *out* of the rotated convention, not a box in it.
 
     Args:
         rboxes: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``, canonical or not.
@@ -253,8 +313,8 @@ def rbox_envelopes(rboxes: Tensor) -> Tensor:
 
         ```
     """
-    corners = rboxes_to_polygons(rboxes)
-    return torch.cat([corners.amin(dim=1), corners.amax(dim=1)], dim=1)
+    envelopes: Tensor = _fuse_rbox_envelopes(rboxes)
+    return envelopes
 
 
 def clip_rboxes_to_canvas(rboxes: Tensor, height: float, width: float) -> tuple[Tensor, Tensor]:
