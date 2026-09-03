@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Release guard: decide whether a version tag may ship (WP-006).
 
-The guard runs three independent checks and lets a tag ship only when all three
+The guard runs four independent checks and lets a tag ship only when all four
 pass:
 
 1. **Tag** — the tag must be a ``v0.MINOR.PATCH`` string. A ``1.x`` (or higher)
@@ -10,8 +10,23 @@ pass:
    shape is refused as malformed.
 2. **Changelog** — the changelog must carry a ``## [MINOR.PATCH]`` section for
    the tag, so every release ships with its notes written.
-3. **Gate** — the gate command (``make gate`` by default) must exit ``0``. A
+3. **Dependency tiers** — every distribution the shipped package imports must be
+   declared in ``[project].dependencies``. Added by WP-160 after WP-159 found the
+   guard blind to the one thing a release is: what a consumer installing the
+   distribution actually receives. Phase 14 moved five modules under ``data/`` onto
+   ``fuse-augmentations`` while its requirement sat in the ``dev`` dependency group,
+   so an install omitting that group produced a package that raised ``ImportError``
+   from ``lucid_yolo.data`` — no test caught it, because the development
+   environment installs every group.
+4. **Gate** — the gate command (``make gate`` by default) must exit ``0``. A
    non-zero exit is a red gate and refuses the tag.
+
+Deliberately **not** checked: whether the runtime requirements are uploadable to
+PyPI. ``[project].dependencies`` currently carries a direct reference — a git URL,
+legal to build and install and illegal to upload — accepted as D20 with the
+consequence recorded, so a check refusing it would re-litigate a decision rather
+than protect one. What the tier check protects is different and unconditional: a
+distribution that cannot import is broken however it was obtained.
 
 The check functions are importable and pure over their inputs; :func:`main` is a
 thin CLI that prints one verdict line per check and exits non-zero on refusal.
@@ -26,17 +41,29 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
+from importlib.metadata import packages_distributions
 from pathlib import Path
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 #: Repository root (``scripts/`` is one level below it).
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: Default changelog consulted for the tag's version section.
 DEFAULT_CHANGELOG = REPO_ROOT / "CHANGELOG.md"
+
+#: Default manifest read for the declared dependency tiers.
+DEFAULT_PYPROJECT = REPO_ROOT / "pyproject.toml"
+
+#: Default import root: the package a built distribution actually ships.
+DEFAULT_PACKAGE_ROOT = REPO_ROOT / "src" / "lucid_yolo"
 
 #: Default gate command re-run before a tag may ship.
 DEFAULT_GATE_CMD = "make gate"
@@ -133,6 +160,140 @@ def check_changelog(tag: str, changelog: Path) -> CheckResult:
     return CheckResult("changelog", True, f"changelog carries a {heading!r} section")
 
 
+def _imported_top_levels(package_root: Path) -> set[str]:
+    """Collect the top-level modules ``package_root`` imports, minus stdlib and itself.
+
+    Absolute imports only: a relative ``from .x import y`` names nothing outside the
+    package, and a conditional or function-local import is still an import the
+    installed package can execute, so the walk is over every ``Import`` node rather
+    than the module preamble alone.
+
+    Args:
+        package_root: Directory of the package a built distribution ships.
+
+    Returns:
+        Top-level module names, e.g. ``{"torch", "yaml"}``.
+
+    Examples:
+        ```pycon
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp) / "pkg"
+        ...     root.mkdir()
+        ...     _ = (root / "m.py").write_text("import os\\nfrom torch import nn\\n")
+        ...     sorted(_imported_top_levels(root))
+        ['torch']
+
+        ```
+    """
+    tops: set[str] = set()
+    for path in sorted(package_root.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                tops.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                tops.add(node.module.split(".")[0])
+    return {top for top in tops if top not in sys.stdlib_module_names} - {package_root.name}
+
+
+def _declared_tiers(pyproject: Path) -> tuple[set[str], dict[str, str]]:
+    """Read which distributions each dependency tier declares.
+
+    Args:
+        pyproject: Manifest to read.
+
+    Returns:
+        The canonicalized names in ``[project].dependencies``, and a mapping from
+        every other declared name to the dependency group that declares it — the
+        second being what turns a refusal into a diagnosis rather than a complaint.
+    """
+    manifest = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    runtime = {str(canonicalize_name(Requirement(req).name)) for req in manifest["project"].get("dependencies", [])}
+    grouped: dict[str, str] = {}
+    for group, requirements in manifest.get("dependency-groups", {}).items():
+        for req in requirements:
+            if not isinstance(req, str):
+                continue
+            name = canonicalize_name(Requirement(req).name)
+            grouped.setdefault(name, group)
+    return runtime, grouped
+
+
+def check_dependency_tiers(
+    pyproject: Path,
+    package_root: Path,
+    distributions: dict[str, list[str]] | None = None,
+) -> CheckResult:
+    """Refuse a tag whose package imports something ``[project].dependencies`` omits.
+
+    A distribution declared only in a dependency group is absent from the built
+    wheel's own ``Requires-Dist``, so an install that does not ask for that group
+    receives a package raising ``ImportError`` on the module that needs it. The
+    development environment installs every group, which is why no test sees this and
+    why it belongs to the release guard rather than to the suite.
+
+    A module that resolves to no installed distribution is reported rather than
+    ignored: it means the environment cannot answer the question, and a guard that
+    treats "unknown" as "fine" is the failure mode this check exists to close.
+
+    Args:
+        pyproject: Manifest declaring the tiers.
+        package_root: Directory of the package the distribution ships.
+        distributions: Top-level module to distribution names, defaulting to the
+            installed environment's own mapping. Injectable so the check is testable
+            against a stated environment rather than whatever happens to be present.
+
+    Returns:
+        A :class:`CheckResult` named ``"dependencies"``.
+
+    Examples:
+        A module whose distribution sits in a group, not in the runtime tier:
+
+        ```pycon
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> manifest = '[project]\\ndependencies = ["torch"]\\n'
+        >>> manifest += '[dependency-groups]\\ndev = ["helper-lib"]\\n'
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     toml = Path(tmp) / "pyproject.toml"
+        ...     _ = toml.write_text(manifest)
+        ...     root = Path(tmp) / "pkg"
+        ...     root.mkdir()
+        ...     _ = (root / "m.py").write_text("import helper\\n")
+        ...     result = check_dependency_tiers(toml, root, {"helper": ["helper-lib"]})
+        >>> result.passed
+        False
+        >>> "dev" in result.detail
+        True
+
+        ```
+    """
+    runtime, grouped = _declared_tiers(pyproject)
+    mapping = packages_distributions() if distributions is None else distributions
+    offenders: list[str] = []
+    for top in sorted(_imported_top_levels(package_root)):
+        dists = {canonicalize_name(dist) for dist in mapping.get(top, [])}
+        if not dists:
+            offenders.append(f"{top} (no installed distribution provides it)")
+        elif not dists & runtime:
+            declared = sorted({grouped[dist] for dist in dists if dist in grouped})
+            where = f"dependency-group {declared[0]!r}" if declared else "nothing"
+            offenders.append(f"{top} (provided by {sorted(dists)[0]}, declared in {where})")
+    if offenders:
+        return CheckResult(
+            "dependencies",
+            False,
+            f"{package_root.name} imports {len(offenders)} module(s) absent from [project].dependencies, "
+            f"so an install without every dependency group cannot import them: {'; '.join(offenders)}",
+        )
+    return CheckResult(
+        "dependencies",
+        True,
+        f"every third-party module {package_root.name} imports is declared in [project].dependencies",
+    )
+
+
 def check_gate(gate_cmd: str) -> CheckResult:
     """Run ``gate_cmd`` and pass only when it exits ``0``.
 
@@ -183,30 +344,51 @@ def _current_tag() -> str | None:
     return completed.stdout.strip() if completed.returncode == 0 else None
 
 
-def evaluate(tag: str, changelog: Path, gate_cmd: str) -> list[CheckResult]:
+def evaluate(
+    tag: str,
+    changelog: Path,
+    gate_cmd: str,
+    pyproject: Path = DEFAULT_PYPROJECT,
+    package_root: Path = DEFAULT_PACKAGE_ROOT,
+) -> list[CheckResult]:
     """Run every release-guard check and return their results in order.
+
+    The gate runs last because it is the only expensive check: a malformed tag, an
+    unwritten changelog section or a mis-tiered dependency is answerable in
+    milliseconds, and there is no reason to spend three minutes on the suite first.
 
     Args:
         tag: The candidate tag.
         changelog: Path to the changelog file.
         gate_cmd: Shell command whose zero exit means a green gate.
+        pyproject: Manifest declaring the dependency tiers.
+        package_root: Directory of the package the distribution ships.
 
     Returns:
-        The ``[tag, changelog, gate]`` results.
+        The ``[tag, changelog, dependencies, gate]`` results.
 
     Examples:
         ```pycon
         >>> import tempfile
         >>> from pathlib import Path
         >>> with tempfile.TemporaryDirectory() as tmp:
-        ...     path = Path(tmp) / "CHANGELOG.md"
-        ...     _ = path.write_text("## [0.1.0]\\n")
-        ...     [r.passed for r in evaluate("v0.1.0", path, "true")]
-        [True, True, True]
+        ...     changelog = Path(tmp) / "CHANGELOG.md"
+        ...     _ = changelog.write_text("## [0.1.0]\\n")
+        ...     toml = Path(tmp) / "pyproject.toml"
+        ...     _ = toml.write_text('[project]\\ndependencies = []\\n')
+        ...     root = Path(tmp) / "pkg"
+        ...     root.mkdir()
+        ...     [r.passed for r in evaluate("v0.1.0", changelog, "true", toml, root)]
+        [True, True, True, True]
 
         ```
     """
-    return [check_tag(tag), check_changelog(tag, changelog), check_gate(gate_cmd)]
+    return [
+        check_tag(tag),
+        check_changelog(tag, changelog),
+        check_dependency_tiers(pyproject, package_root),
+        check_gate(gate_cmd),
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -216,8 +398,8 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command-line arguments (defaults to ``sys.argv[1:]``).
 
     Returns:
-        ``0`` only when the tag, changelog, and gate checks all pass; ``1``
-        otherwise.
+        ``0`` only when the tag, changelog, dependency-tier and gate checks all
+        pass; ``1`` otherwise.
 
     Examples:
         The verdict lines go to stdout and name the changelog by absolute path,
@@ -249,6 +431,18 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_GATE_CMD,
         help="gate command re-run before shipping; non-zero exit refuses the tag (default: 'make gate')",
     )
+    parser.add_argument(
+        "--pyproject",
+        type=Path,
+        default=DEFAULT_PYPROJECT,
+        help="manifest whose [project].dependencies must cover every shipped import (default: <repo>/pyproject.toml)",
+    )
+    parser.add_argument(
+        "--package-root",
+        type=Path,
+        default=DEFAULT_PACKAGE_ROOT,
+        help="package the distribution ships, walked for imports (default: <repo>/src/lucid_yolo)",
+    )
     args = parser.parse_args(argv)
 
     tag = args.tag if args.tag is not None else _current_tag()
@@ -256,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
         print("release guard: HEAD is not exactly a tag — nothing to check")
         return 0
 
-    results = evaluate(tag, args.changelog, args.gate_cmd)
+    results = evaluate(tag, args.changelog, args.gate_cmd, args.pyproject, args.package_root)
     for result in results:
         marker = "PASS" if result.passed else "FAIL"
         print(f"{marker} [{result.name}] {result.detail}")

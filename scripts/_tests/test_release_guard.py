@@ -105,3 +105,122 @@ def test_main_without_tag_or_release_passes_with_nothing_to_check(monkeypatch) -
     """HEAD not being exactly a tag is not a refusal -- most commits are not releases."""
     monkeypatch.setattr(guard, "_current_tag", lambda: None)
     assert guard.main([]) == 0
+
+
+def _write_package(tmp_path: Path, source: str) -> Path:
+    """Write a one-module package whose imports the tier check will walk.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = _write_package(Path(tmp), "import os\\n")
+        ...     root.name
+        'shipped'
+    """
+    root = tmp_path / "shipped"
+    root.mkdir()
+    (root / "module.py").write_text(source, encoding="utf-8")
+    return root
+
+
+def _write_manifest(tmp_path: Path, runtime: str, dev: str = "") -> Path:
+    """Write a manifest declaring the two dependency tiers the check reads.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = _write_manifest(Path(tmp), '"torch"')
+        ...     "[project]" in path.read_text()
+        True
+    """
+    path = tmp_path / "pyproject.toml"
+    path.write_text(
+        f"[project]\ndependencies = [{runtime}]\n\n[dependency-groups]\ndev = [{dev}]\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_group_only_dependency_is_refused(tmp_path: Path) -> None:
+    """A module whose distribution is declared only in a group refuses the tag.
+
+    This is WP-159's own defect, stated as a test: `fuse-augmentations` sat in the
+    `dev` group while five shipped modules imported it, so an install omitting that
+    group raised `ImportError` from `lucid_yolo.data`. The development environment
+    installs every group, which is exactly why the suite could not see it.
+    """
+    manifest = _write_manifest(tmp_path, '"torch"', '"helper-lib"')
+    root = _write_package(tmp_path, "import helper\n")
+
+    result = guard.check_dependency_tiers(manifest, root, {"helper": ["helper-lib"]})
+
+    assert not result.passed
+    assert "helper" in result.detail
+    assert "'dev'" in result.detail, "the refusal must name the group, so it diagnoses rather than complains"
+
+
+def test_runtime_declared_dependency_passes(tmp_path: Path) -> None:
+    """The same import passes once its distribution is declared at runtime."""
+    manifest = _write_manifest(tmp_path, '"helper-lib"', '"pytest"')
+    root = _write_package(tmp_path, "import helper\n")
+
+    assert guard.check_dependency_tiers(manifest, root, {"helper": ["helper-lib"]}).passed
+
+
+def test_import_with_no_installed_distribution_is_refused(tmp_path: Path) -> None:
+    """An import no distribution provides is reported, never silently accepted.
+
+    A guard that reads "unknown" as "fine" is the failure mode this check closes.
+    """
+    manifest = _write_manifest(tmp_path, '"torch"')
+    root = _write_package(tmp_path, "import mystery\n")
+
+    result = guard.check_dependency_tiers(manifest, root, {})
+
+    assert not result.passed
+    assert "mystery" in result.detail
+
+
+def test_stdlib_and_relative_imports_need_no_declaration(tmp_path: Path) -> None:
+    """Neither the standard library nor an intra-package import is a dependency."""
+    manifest = _write_manifest(tmp_path, "")
+    root = _write_package(tmp_path, "import json\nfrom pathlib import Path\nfrom . import sibling\n")
+
+    assert guard.check_dependency_tiers(manifest, root, {}).passed
+
+
+def test_conditional_import_is_still_an_import(tmp_path: Path) -> None:
+    """An import inside a function or a branch is one the installed package can run.
+
+    Walking the module preamble alone would miss it, and a lazily imported
+    dependency is no less required than an eagerly imported one -- it merely fails
+    later, on the call rather than on the import.
+    """
+    manifest = _write_manifest(tmp_path, '"torch"', '"helper-lib"')
+    root = _write_package(tmp_path, "def draw():\n    import helper\n    return helper\n")
+
+    assert not guard.check_dependency_tiers(manifest, root, {"helper": ["helper-lib"]}).passed
+
+
+def test_cli_refuses_a_tag_whose_package_imports_an_undeclared_module(tmp_path: Path) -> None:
+    """The check is wired into the CLI, not merely importable from it."""
+    changelog = _write_changelog(tmp_path, "0.1.0")
+    manifest = _write_manifest(tmp_path, "")
+    root = _write_package(tmp_path, "import torch\n")
+
+    status = guard.main(
+        [
+            "--tag",
+            "v0.1.0",
+            "--changelog",
+            str(changelog),
+            "--gate-cmd",
+            "true",
+            "--pyproject",
+            str(manifest),
+            "--package-root",
+            str(root),
+        ]
+    )
+
+    assert status == 1

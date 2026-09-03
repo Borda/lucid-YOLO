@@ -2,6 +2,12 @@
 
 All notable changes to lucid-yolo are documented here, following the Keep a Changelog convention; versioning is a perpetual 0.x release train — no 1.0 is ever planned, promised, or tagged — per ADR-002 (docs/DECISIONS.md).
 
+## [Unreleased]
+
+### Added
+
+- The release guard reads dependency tiers (WP-160). It validated the tag, the changelog section and the gate — all properties of the repository, none of the artifact — so a fourth check walks the shipped package's imports, resolves each to its distribution, and refuses a tag when one is absent from `[project].dependencies`, naming the dependency group that does declare it. This is WP-159's defect turned into a gate: five modules under `data/` imported `fuse-augmentations` while its requirement sat in the `dev` group, and no test could see it because the development environment installs every group. An import inside a function counts, and a module resolving to no installed distribution is reported rather than skipped. Publishability is deliberately not checked — the runtime table carries a direct reference by decision (D20), so refusing it would re-litigate rather than protect.
+
 ## [0.7.0] - 2026-09-04
 
 ### Changed

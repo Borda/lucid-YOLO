@@ -1302,6 +1302,22 @@ The scope asked for the export list to be "reduced to what survives, so the publ
 
 **What this release does not claim.** No tag is cut and no distribution is published, as at 0.4.0, 0.5.0 and 0.6.0 — four release commits now stand ahead of the train's own tags. The contributor-admission rows WP-141 through WP-144 are still unstarted, WP-141 being a principal row whose three preconditions sit outside the roadmap, so Phase 14 ships with the same four-row tail Phase 13 did. A68, A69 and A70 remain open. No trained weights ship (D14). And the phase's subject is a boundary rather than a capability: nothing in 0.7.0 detects anything 0.6.0 could not, and the case for it is that the augmentation engine is now one implementation maintained in one place, with 43 goldens and a four-tier guard standing where the second copy used to be.
 
+### WP-160 — the guard checked everything except what a release is
+
+<a id="wp-160"></a>
+
+`scripts/release_guard.py` validated the tag string, the changelog section and the gate. All three are about the repository. None is about the artifact: what a consumer installing the distribution actually receives. WP-159 found that by walking into it — five modules under `data/` import `fuse_augmentations`, its requirement sat in the `dev` dependency group, and a wheel installed without that group raises `ImportError` from `lucid_yolo.data`. The fourth check closes that class.
+
+**Why no test could have caught it.** The development environment installs every dependency group, so every import resolves and the suite is green by construction. The defect is only visible from outside that environment, which is the definition of a release-time property rather than a test-time one — and it is why the check belongs in the guard even though it is cheap enough to run anywhere. It also sat legible in `pyproject.toml` for five work packages: the comment beside the pin already said PyPI forbade re-uploading `0.10.0.dev0`, one clause short of the conclusion.
+
+**What it does.** Walk the shipped package for absolute imports, drop the standard library and the package itself, resolve each remaining top-level module to its distribution through `importlib.metadata.packages_distributions`, and refuse the tag when a distribution is missing from `[project].dependencies`. The refusal names the group that *does* declare it, so it diagnoses rather than complains. Two smaller decisions are worth stating: the walk is over every `Import` node rather than the module preamble, because an import inside a function is one the installed package can still execute and merely fails later; and a module resolving to no installed distribution is reported rather than skipped, because a guard that reads "unknown" as "fine" is the failure mode this check exists to close.
+
+**What it deliberately does not check.** Whether the runtime requirements are uploadable to PyPI. `[project].dependencies` carries a direct reference by decision — D20 accepted the unpublishable distribution two commits ago with its consequence recorded — so a check refusing it would re-litigate a decision rather than protect one. The gap that leaves is real and stated here rather than hidden: a *second* direct reference could be added later without any gate objecting. The tier check protects something unconditional instead, since a distribution that cannot import is broken however it was obtained.
+
+**Evidence it is load-bearing.** The group-only case is asserted against a reconstruction of the pre-WP-159 tier layout, where it fails and names `dependency-group 'dev'`; against the tree as it stands it passes, reporting all twelve third-party top-level imports declared at runtime. Six cases were added — group-only, runtime-declared, unresolvable, stdlib-and-relative, conditional-import, and one driving the CLI so the check is wired rather than merely importable.
+
+One thing worth recording for whoever edits this file next: ruff's autofix removed the four new imports on the edit that added them, because at that instant nothing referenced them yet. The same trap caught WP-157.
+
 ### Phase 14 — what each row does, and where its boundary is
 
 <a id="phase-14-rows"></a>
