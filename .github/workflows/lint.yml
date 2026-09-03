@@ -34,3 +34,32 @@ jobs:
           uv pip install --python .venv/bin/python -e . --group dev
       - name: Run pre-commit (all linters + strict mypy + license audit)
         run: .venv/bin/pre-commit run --all-files
+
+  # Admission layer one (WP-142): every commit a contributor submits carries its own
+  # `Signed-off-by`. Pull requests only -- a push to `main` has no contributor range to
+  # check, and this repository's own history predates the requirement, so running it
+  # there would refuse every existing commit rather than any submitted one.
+  #
+  # The check is a file in this repository rather than a hosted app, so it runs the same
+  # way on a laptop and here, and it survives whatever happens to that service. It needs
+  # no environment beyond the standard library, which is why this job installs nothing.
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the range spans the pull request's own commits, and a shallow
+      # clone cannot walk back to its base.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      # The two SHAs go through the environment rather than into the command string:
+      # they are interpolated from event data, and a value reaching a shell directly is
+      # how that becomes an injection rather than a range.
+      - name: Check Developer Certificate of Origin sign-offs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/lint/check_dco.py --range "${BASE_SHA}..${HEAD_SHA}"
