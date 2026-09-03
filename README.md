@@ -13,7 +13,7 @@ A paper describes a method; a repository ships an implementation; and the gap be
 This project rebuilds the methods from the papers alone, deliberately without reading any existing implementation of them, and writes down every point where the papers ran out of instructions. What comes out is three things at once:
 
 - **A test of the claims.** If the NMS-free head really costs 0.6–0.8 AP, an independent implementation should measure something close to that. [It measures 1.11.](#detection--coco-2017-val-5000-images)
-- **A map of the underdetermined.** 63 numbered assumptions — the mask crop frame, the angle convention, the head's initialization bias — each one a place where two faithful implementations could legitimately diverge. See [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
+- **A map of the underdetermined.** 73 numbered assumptions — the mask crop frame, the angle convention, the head's initialization bias — each one a place where two faithful implementations could legitimately diverge. See [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
 - **A codebase you can read.** No config DSL between you and the architecture, one mechanism per module, and every module citing the equation it implements.
 
 **Non-goals**, stated so nothing here is mistaken for them: matching the paper's headline accuracy (that needs a training budget this project does not have), shipping weights for production use, or being faster than the reference implementation. What is claimed is fidelity of *method*, with the evidence attached.
@@ -187,7 +187,7 @@ Then run `make gate`. It runs the linters, the type checker, the full offline su
 
 ## ⚖️ The decisions that shape it
 
-Six choices explain most of what this repository looks like. Each one is argued in `docs/DECISIONS.md`, and each has evidence behind it rather than only a preference.
+Seven choices explain most of what this repository looks like. Each one is argued in `docs/DECISIONS.md`, and each has evidence behind it rather than only a preference.
 
 **No reference implementation is ever read.** A reproduction that consults the original tests nothing — it inherits the answers, including the ones the paper never gave. So the source list is an allowlist: the papers, and a handful of permissively licensed implementations admitted for diagnostics only, each named with the decision that admitted it ([`PROVENANCE.md`](docs/PROVENANCE.md), D13 / ADR-004). Commit messages cite sources by id, and a hook rejects a commit whose citation does not resolve.
 
@@ -198,6 +198,8 @@ Six choices explain most of what this repository looks like. Each one is argued 
 **The reproduction report is append-only** (D10). A later release corrects an earlier claim by adding to it, never by editing the record away — including the claims that did not survive. The 0.4 consolidation reads all three tiers against each other and its headline result is an *absence*: one quantity all three could have reported in the same units, and only two of them did.
 
 **Releases ship no trained weights** (D14). For the oriented model that is a licence conclusion as well as a policy one — DOTA permits academic use only, so weights trained on it could not ship under this repository's Apache-2.0 terms even if the policy allowed it. What ships instead is the recipe, the report, and the frozen goldens that let you tell whether your run matches.
+
+**The augmentation engine is a dependency, not a chapter** ([ADR-005](docs/DECISIONS.md), D19). Resampling — building a matrix, composing several into one, and sampling the image once instead of interpolating repeatedly — is a general-purpose subject, and keeping a private copy of it meant maintaining the weaker of two implementations of the same thing. It now comes from `fuse-augmentations`, under a boundary written down before any code moved: that package owns how a matrix is built, composed and sampled, and this project owns which numbers go into it — the targets container, the composition order, the paper's augmentation recipe, dataset IO, DOTA tiling, and everything from the assigner inward. The claim that the swap changed behaviour and not geometry is checked rather than asserted: the three delegation commits moved exactly one image-mean golden and no coordinate golden at all.
 
 **Dependencies are permissive-only, and audited by what they ship rather than what they say.** The licence gate reads a distribution's declared fields, the licence documents it bundles, *and* the binaries listed in its own `RECORD` — because a wheel can declare BSD-3-Clause, ship a licence file naming no copyleft, and vendor a GPL library anyway. That is not hypothetical: it is why the example in this README is drawn with matplotlib and not the library originally chosen for it (D15, D16).
 
