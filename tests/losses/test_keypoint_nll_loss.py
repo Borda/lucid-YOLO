@@ -282,3 +282,74 @@ def test_toy_convergence_mu_moves_toward_ground_truth() -> None:
 
     assert last_loss < first_loss
     assert torch.allclose(mu_hat.detach(), mu_gt, atol=0.5)
+
+
+class TestUnlabeledPointsReachNoGradient:
+    """A ``v == 0`` point cannot influence the backward pass either (WP-170, A66).
+
+    The control's copy of ``test_rle_loss.py``'s assertion of the same contract,
+    kept here for the reason the module docstring gives for every other
+    duplication: a control that masked a different point set than the loss it
+    controls for would compare two differences at once. The failure was milder
+    here than in RLE -- there is no flow to poison, so only ``mu_hat`` and
+    ``sigma_raw`` took ``NaN`` -- but it was the same failure, and the
+    ``ValueError`` out of the Laplace's argument validation was identical.
+    """
+
+    #: Placeholders a real unlabeled COCO point plausibly carries.
+    CORRUPTIONS = (float("inf"), float("-inf"), float("nan"), 1e30, -999.0)
+
+    def _grads(self, corrupt: float | None) -> tuple[float, list[torch.Tensor]]:
+        """Return the loss value and both input gradients from one backward pass.
+
+        Args:
+            corrupt: Value written into the unlabeled point's target, or ``None``
+                to leave the clean target in place.
+
+        Returns:
+            ``(loss_value, gradients)`` -- the scalar loss and the gradients of
+            ``mu_hat`` and ``sigma_raw``.
+
+        Examples:
+            >>> case = TestUnlabeledPointsReachNoGradient()
+            >>> value, grads = case._grads(None)
+            >>> isinstance(value, float) and len(grads) == 2
+            True
+        """
+        loss_fn = LaplaceNLLLoss()
+        mu_hat = torch.zeros(1, 2, 2, requires_grad=True)
+        sigma_raw = torch.zeros(1, 2, 2, requires_grad=True)
+        mu_gt = torch.tensor([[[0.1, 0.1], [0.3, -0.2]]])
+        if corrupt is not None:
+            mu_gt = mu_gt.clone()
+            mu_gt[0, 1] = torch.tensor([corrupt, corrupt])
+        loss = loss_fn(mu_hat, sigma_raw, mu_gt, torch.tensor([[2, 0]]))
+        loss.backward()
+        assert mu_hat.grad is not None and sigma_raw.grad is not None
+        return float(loss.detach()), [mu_hat.grad, sigma_raw.grad]
+
+    @pytest.mark.parametrize("corrupt", CORRUPTIONS)
+    def test_gradients_are_identical_to_the_clean_run(self, corrupt: float) -> None:
+        """Corrupting the unlabeled target changes no gradient anywhere, bit for bit."""
+        clean_value, clean_grads = self._grads(None)
+        value, grads = self._grads(corrupt)
+
+        assert value == clean_value
+        for clean, actual in zip(clean_grads, grads, strict=True):
+            assert torch.equal(clean, actual)
+
+    @pytest.mark.parametrize("corrupt", CORRUPTIONS)
+    def test_every_gradient_stays_finite(self, corrupt: float) -> None:
+        """No ``NaN`` reaches ``mu_hat`` or ``sigma_raw`` from a point that is ignored."""
+        _, grads = self._grads(corrupt)
+
+        assert all(bool(torch.isfinite(grad).all()) for grad in grads)
+
+    @pytest.mark.parametrize("corrupt", CORRUPTIONS)
+    def test_a_masked_point_does_not_raise_from_argument_validation(self, corrupt: float) -> None:
+        """A non-finite unlabeled target is not rejected by the Laplace base density."""
+        mu_gt = torch.tensor([[[0.1, 0.1], [corrupt, corrupt]]])
+
+        loss = LaplaceNLLLoss()(torch.zeros(1, 2, 2), torch.zeros(1, 2, 2), mu_gt, torch.tensor([[2, 0]]))
+
+        assert bool(torch.isfinite(loss))

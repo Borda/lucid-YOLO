@@ -116,3 +116,84 @@ def test_batched_and_empty_shapes() -> None:
     assert complete_iou(empty, empty).shape == (0,)
     assert box_iou_aligned(empty, empty).shape == (0,)
     assert ciou_loss(empty, empty).shape == (0,)
+
+
+class TestDegenerateGradientMagnitude:
+    """Degenerate boxes take a *bounded* gradient, not merely a finite one (WP-170).
+
+    ``test_gradients_finite_normal_and_degenerate`` above asserts only
+    ``isfinite``, which the aspect term satisfied while backpropagating 3.0e5
+    from a collapsed box: ``atan(w / (h + eps))`` is finite at ``h = 0`` but its
+    derivative there is ``1 / eps``. Finiteness is therefore the wrong predicate
+    for this input class, and these tests pin the magnitude instead.
+    """
+
+    #: Gradient magnitude a degenerate box must stay under. Two orders above the
+    #: ~1e-1 a well-formed pair produces here and two below the 3.0e5 the guarded
+    #: ratio produced, so it separates the two regimes without pinning an exact value.
+    GRADIENT_BOUND = 1.0e3
+
+    def test_collapsed_box_gradient_is_bounded(self) -> None:
+        """A zero-area prediction backpropagates a small gradient, not a 1/eps spike.
+
+        The measured regression: against this target, ``[5, 5, 5, 5]`` gave
+        ``dL/dx1 = 301186.5`` through ``atan(w / (h + eps))``, and ``0.0``
+        through ``atan2(w, h)``.
+        """
+        target = torch.tensor([[0.0, 0.0, 10.0, 20.0]])
+        pred = torch.tensor([[5.0, 5.0, 5.0, 5.0]], requires_grad=True)
+
+        ciou_loss(pred, target).sum().backward()
+
+        assert pred.grad is not None
+        assert torch.isfinite(pred.grad).all()
+        assert float(pred.grad.abs().max()) < self.GRADIENT_BOUND
+
+    def test_a_thin_box_does_not_spike_as_height_vanishes(self) -> None:
+        """The bound holds as ``h`` is driven to zero, not only exactly at it.
+
+        ``1 / (h + eps)`` grows without bound as ``h`` shrinks, so a test sitting
+        only on ``h == 0`` could be satisfied by a special case there. Each row
+        below has a real width and a height stepping down to zero.
+        """
+        heights = [1.0, 1e-2, 1e-4, 1e-6, 0.0]
+        pred = torch.tensor([[0.0, 0.0, 4.0, h] for h in heights], requires_grad=True)
+        target = torch.tensor([[0.0, 0.0, 10.0, 20.0]] * len(heights))
+
+        ciou_loss(pred, target).sum().backward()
+
+        assert pred.grad is not None
+        assert torch.isfinite(pred.grad).all()
+        assert float(pred.grad.abs().max()) < self.GRADIENT_BOUND
+
+    def test_inverted_box_is_gradient_dead_by_design(self) -> None:
+        """An inverted box takes exactly zero gradient on the inverted axis.
+
+        Documented behaviour rather than an accident (``losses/ciou.py`` module
+        docstring): the clamped extents make CIoU blind to a box that names no
+        region, and un-inverting it is the decode boundary's job, not this loss's.
+        Pinned so that a future change to the clamp cannot alter it silently.
+        """
+        target = torch.tensor([[0.0, 0.0, 10.0, 20.0]])
+        pred = torch.tensor([[10.0, 10.0, 0.0, 0.0]], requires_grad=True)
+
+        ciou_loss(pred, target).sum().backward()
+
+        assert pred.grad is not None
+        assert float(pred.grad[0, 0]) == 0.0  # dL/dx1
+        assert float(pred.grad[0, 2]) == 0.0  # dL/dx2
+
+    def test_a_well_formed_pair_keeps_an_informative_gradient(self) -> None:
+        """The bound above is not satisfied by zeroing everything.
+
+        Guards the obvious wrong fix -- clamping the aspect term away entirely --
+        by asserting a normal overlapping pair still moves.
+        """
+        target = torch.tensor([[0.0, 0.0, 10.0, 20.0]])
+        pred = torch.tensor([[1.0, 1.0, 9.0, 19.0]], requires_grad=True)
+
+        ciou_loss(pred, target).sum().backward()
+
+        assert pred.grad is not None
+        assert float(pred.grad.abs().max()) > 0.0
+        assert float(pred.grad.abs().max()) < self.GRADIENT_BOUND

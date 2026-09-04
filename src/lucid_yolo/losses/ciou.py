@@ -12,15 +12,35 @@ For a predicted box ``b`` and target box ``b_gt`` (both ``xyxy``):
 - DIoU penalty ``= rho^2 / c^2`` where ``rho`` is the Euclidean distance between
   the two box centers and ``c`` is the diagonal length of the smallest box
   enclosing both boxes.
-- Aspect term ``v = (4 / pi^2) * (atan(w_gt / h_gt) - atan(w / h))^2`` with
+- Aspect term ``v = (4 / pi^2) * (atan2(w_gt, h_gt) - atan2(w, h))^2`` with
   trade-off weight ``alpha = v / ((1 - IoU) + v)``. Per the paper's optimization
   note, ``alpha`` is treated as a constant with respect to gradients (detached).
 - ``CIoU = IoU - rho^2 / c^2 - alpha * v`` and ``L_CIoU = 1 - CIoU``.
 
-All divisions and aspect-ratio ratios are epsilon-guarded so that degenerate
-zero-area boxes produce neither ``NaN`` nor ``Inf`` in the forward or backward
-pass. Squared distances are used directly (no ``sqrt``), which also avoids the
-infinite gradient of ``sqrt`` at the origin.
+Every division is epsilon-guarded so that degenerate zero-area boxes produce
+neither ``NaN`` nor ``Inf`` in the forward or backward pass. Squared distances are
+used directly (no ``sqrt``), which also avoids the infinite gradient of ``sqrt``
+at the origin.
+
+The aspect term uses ``atan2(w, h)`` rather than the paper's written
+``atan(w / h)``, because the two agree everywhere the ratio is defined and differ
+exactly where it is not. Guarding the ratio as ``atan(w / (h + eps))`` keeps the
+*value* finite at ``h = 0`` but makes the derivative ``1 / eps``: against a
+``[0, 0, 10, 20]`` target, a collapsed prediction ``[5, 5, 5, 5]`` used to
+backpropagate ``dL/dx1 = 3.0e5`` — finite, and large enough to move a box across
+the image in one step. ``atan2`` is exact on the whole axis (``atan2(w, 0) =
+pi/2``), and its derivative at the origin is ``0`` on CPU and MPS alike, so the
+collapsed box now contributes nothing through the aspect term instead of
+dominating the batch.
+
+An **inverted** box — one whose ``x2 < x1`` or ``y2 < y1`` — is deliberately left
+gradient-dead in this loss. Its width and height clamp to zero, so every term
+here sees a point box and no derivative points back towards un-inverting it; the
+measured ``dL/dx1 = dL/dx2 = 0`` is the intended answer, not an oversight. CIoU
+is a similarity between two regions and an inverted description names no region,
+so the repair belongs at the boundary that produces the box, not here — see
+:meth:`~lucid_yolo.decode.nms_path.NMSDecoder._decode_image`, which drops such
+rows rather than scoring them.
 """
 
 import math
@@ -72,14 +92,18 @@ def complete_iou(pred: Tensor, target: Tensor, eps: float = 1e-7) -> Tensor:
 
     Autograd-safe: no in-place operations on the inputs, the aspect-ratio
     trade-off weight ``alpha`` is detached (constant w.r.t. gradients per the
-    paper), and every division and aspect ratio is epsilon-guarded so that
-    degenerate zero-area boxes stay finite in both forward and backward passes.
+    paper), and every division is epsilon-guarded so that degenerate zero-area
+    boxes stay finite in both forward and backward passes. The aspect term needs
+    no such guard — ``atan2`` is defined at ``h = 0`` — which is why a collapsed
+    box is merely uninformative here rather than a ``1 / eps`` gradient spike
+    (module docstring).
 
     Args:
         pred: Predicted boxes of shape ``(N, 4)`` in ``xyxy`` order.
         target: Target boxes of shape ``(N, 4)`` in ``xyxy`` order.
         eps: Small constant guarding the IoU union, the enclosing-diagonal
-            division, the aspect-ratio ratios, and the ``alpha`` denominator.
+            division, and the ``alpha`` denominator. It no longer reaches the
+            aspect term, which is unconditionally defined.
 
     Returns:
         CIoU per pair, shape ``(N,)``. Equals ``1`` for identical boxes and can
@@ -111,7 +135,9 @@ def complete_iou(pred: Tensor, target: Tensor, eps: float = 1e-7) -> Tensor:
     pred_h = (pred[:, 3] - pred[:, 1]).clamp(min=0)
     target_w = (target[:, 2] - target[:, 0]).clamp(min=0)
     target_h = (target[:, 3] - target[:, 1]).clamp(min=0)
-    arctan_diff = torch.atan(target_w / (target_h + eps)) - torch.atan(pred_w / (pred_h + eps))
+    # atan2, not atan(w / (h + eps)): the guarded ratio carries a 1/eps derivative at
+    # h = 0, which turned a collapsed box into a 3e5 gradient (module docstring).
+    arctan_diff = torch.atan2(target_w, target_h) - torch.atan2(pred_w, pred_h)
     v = _FOUR_OVER_PI_SQ * arctan_diff**2
 
     # alpha is a constant w.r.t. gradients (R10 optimization note): detach it.

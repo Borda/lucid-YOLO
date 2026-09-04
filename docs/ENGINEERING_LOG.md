@@ -1542,6 +1542,30 @@ One shape, nine instances: a value outside its domain reached arithmetic or disp
 
 **No existing test changed.** Verified before the guards went in: no test constructs `MuSGD` with a negative or NaN gain, no caller passes `steps < 1`, every canvas constant is stride-divisible, every `conf_threshold` in the tree is in `[0, 1]`, and no test calls `pick_device` with an accelerator name. Five test files gained cases; none had an assertion altered, loosened or skipped.
 
+### WP-170 — six ways a geometrically impossible input answered plausibly
+
+<a id="wp-170"></a>
+
+Not one bug six times, but one *shape* six times: an input that cannot describe a real object produced a number instead of a refusal or a correct zero, and every one of them was invisible to a finiteness assertion.
+
+**The aspect term was a `1/eps` gradient spike.** `atan(w / (h + eps))` with `eps = 1e-7` keeps the *value* finite at `h = 0` and makes the derivative enormous: against target `[0,0,10,20]`, a point box `[5,5,5,5]` drew `grad(x1) = 301186.5`, enough to throw a box across the image in one step. The existing test covered exactly this input class and asserted `torch.isfinite(pred.grad).all()`, which passes on 301186.5 — the assertion that cannot fail on the failure it was written for. `atan2(w, h)` is exact on the whole axis and carries no such derivative; the point box now draws `0.0`. The agent verified `atan2`'s origin gradient empirically on CPU **and** MPS before adopting it rather than trusting the identity — PyTorch returns `0.0`, not `NaN` — and dropped a guard it had planned once the measurement said the guard was unnecessary.
+
+An inverted box draws exactly zero from the aspect term, so CIoU can never un-invert one. That is now documented as intended rather than left as an accident: repair belongs at the decode boundary, which is where M-20 put it.
+
+**A rotated box with negative extents scored IoU 1 — and the finding understated it.** Two negative extents are a half-turn, so `canonicalize` rebuilds a correctly-wound rectangle and the shoelace formula has nothing to object to. The audit reported identical negative boxes matching each other. Measurement found worse: the negative row also scored **1.0 against the honest `[0,0,4,2,0]`** describing that region, so an impossible row was an exact match for a real detection. `_valid_rboxes` now evaluates `isfinite & (w > 0) & (h > 0)` on the inputs **as given**, before canonicalization can erase the evidence, and folds the answer into the final `where`.
+
+**A NaN rotated box was emitted as a detection with a real score.** `torch.where(union > tiny, ...)` selects the zero branch on a NaN comparison, so invalid overlap became zero overlap, so `_suppress` suppressed nothing and the box survived every round. Now the zero is *stated* by the validity mask rather than reached accidentally — which also covers `inf`, whose comparisons behave fine — and the decoder drops non-finite rows at the threshold so the row is never emitted at all.
+
+**ProbIoU overflowed in half precision.** Finite degenerate fp16 boxes produced `B_D = inf`; coincident ones produced all-`NaN` gradients. `_working_dtype` promotes fp16/bf16 to fp32 and casts back. Both public losses needed it independently: the Hellinger `sqrt` has a derivative of ~5e9 at `_RADICAND_FLOOR`, itself `Inf` in fp16, so inheriting promotion from the inner call would have left the coincident-NaN case unfixed. fp32 is bit-preserved — the promotion is an identity cast there, pinned by a test.
+
+**Masking was applied to the reduction, not the inputs.** Every `v == 0` keypoint was still pushed through the RealNVP stack and the base density; only the average excluded it. The value was correctly independent of the masked point, which is what the existing test asserted — but with a non-finite unlabeled coordinate every gradient including the flow's own weights was `NaN` while the loss read healthy, and under default `validate_args` the same input raised `ValueError` from `Normal.log_prob`, so a masked-out annotation crashed the loss. Selection now happens before the arithmetic: flatten to `(N*K, 2)`, index by the mask, run the Laplace term, the flow and the `log sigma` on the selected rows only. The value is bit-identical (3.038270 before and after), the flow cost drops by the unlabeled fraction, and a masked point is now structurally unable to reach any gradient.
+
+**The lesson the row keeps repeating.** Three of the six had a test over exactly the right input that asserted the wrong property — finiteness where magnitude was the question, value-equality where gradient-independence was the question. A degenerate-input test that asserts only "did not produce NaN" certifies that the code survived, not that it answered.
+
+**One gap the agent's own test found in the agent's own fix.** Its first M-20 mask relied on ordering comparisons; `l = r = inf` decodes to `[-inf, -inf, inf, inf]`, which is correctly *ordered* and passed as a box covering the plane. An explicit finiteness term closed it, making the axis-aligned mask symmetric with the rotated decoder's.
+
+**`decode_ltrb` was deliberately not touched.** It is a frozen-golden path, and the drop went to the confidence-threshold boundary in `NMSDecoder._decode_image` instead, where boxes and anchor indices still pass through exactly one selection. Nothing frozen moved: 43/43 before and after. Three pre-existing tests used `torch.zeros` raw distances as incidental scaffolding — zero-area boxes — while asserting the threshold and padding contracts; their *inputs* became 4-pixel boxes on 8-pixel centres, still disjoint, with every assertion left byte-identical and now running against real geometry.
+
 ### Phase 14 — what each row does, and where its boundary is
 
 <a id="phase-14-rows"></a>

@@ -325,11 +325,23 @@ def rotated_iou(boxes_a: Tensor, boxes_b: Tensor) -> Tensor:
       only an edge or a corner therefore intersect in a zero-area polygon and score
       exactly ``0.0`` either way — inclusivity changes which vertices are kept, never the
       area.
-    - A box with zero or negative extent encloses no area. Its polygon has zero or
-      reversed winding, both of which clamp to zero area, so every IoU involving it is
-      ``0.0``. The union is guarded against division by zero, so a degenerate pair yields
-      ``0.0`` rather than ``NaN`` — the same refusal :mod:`lucid_yolo.losses.probiou`
-      makes.
+    - A box with zero or negative extent encloses no area, and every IoU involving it is
+      ``0.0``. This is enforced by :func:`_valid_rboxes` on the arguments **as given**,
+      not left to the winding: :func:`canonicalize` swaps a pair of signed extents back
+      into ``w >= h`` order, and two negative extents are a half-turn that reconstructs
+      the very rectangle the caller wrote as invalid — so ``[-4, -2]`` against itself, and
+      against the honest ``[4, 2]``, both scored ``1.0`` until the validity mask was
+      applied to the inputs rather than inferred from the polygon.
+    - A box carrying a non-finite ``cx``, ``cy``, ``w``, ``h`` or ``theta`` is invalid the
+      same way and also scores ``0.0``. That zero is now stated by the mask rather than
+      arrived at by accident: every comparison against ``NaN`` is false, so the union
+      guard below already took the zero branch, and a caller could not tell "these boxes
+      do not overlap" from "one of these boxes is not a box". The decoders do not rely on
+      the distinction being visible in the number — they drop non-finite rows outright
+      (:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder`) — because a zero overlap
+      suppresses nothing, so a ``NaN`` box that reaches suppression survives every round.
+    - The union is guarded against division by zero, so a degenerate pair yields ``0.0``
+      rather than ``NaN`` — the same refusal :mod:`lucid_yolo.losses.probiou` makes.
 
     Args:
         boxes_a: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``, canonical or not.
@@ -355,6 +367,12 @@ def rotated_iou(boxes_a: Tensor, boxes_b: Tensor) -> Tensor:
         0.3333
         >>> touching = torch.tensor([[4.0, 0.0, 4.0, 2.0, 0.0]])  # shares one edge only
         >>> float(rotated_iou(box, touching))
+        0.0
+        >>> negative = torch.tensor([[0.0, 0.0, -4.0, -2.0, 0.0]])  # not a box at all
+        >>> float(rotated_iou(negative, negative)), float(rotated_iou(negative, box))
+        (0.0, 0.0)
+        >>> nan_angle = torch.tensor([[0.0, 0.0, 4.0, 2.0, float("nan")]])
+        >>> float(rotated_iou(box, nan_angle))
         0.0
         >>> square = torch.tensor([[0.0, 0.0, 3.0, 3.0, 0.2]])
         >>> turned = torch.tensor([[0.0, 0.0, 3.0, 3.0, 0.2 + torch.pi / 2]])
@@ -385,7 +403,46 @@ def rotated_iou(boxes_a: Tensor, boxes_b: Tensor) -> Tensor:
     intersection = _intersection_area(subject, clip)
     union = area_a + area_b - intersection
     tiny = torch.finfo(union.dtype).tiny
-    return torch.where(union > tiny, intersection / union.clamp_min(tiny), torch.zeros_like(union)).clamp(0.0, 1.0)
+    # Validity is read off the arguments as given, never off the polygons: canonicalization
+    # turns a pair of negative extents back into a well-wound rectangle, so by this point
+    # the geometry no longer remembers that the caller wrote something impossible.
+    pair_valid = _valid_rboxes(left)[:, None] & _valid_rboxes(right)[None, :]
+    overlap = torch.where(union > tiny, intersection / union.clamp_min(tiny), torch.zeros_like(union))
+    return torch.where(pair_valid, overlap, torch.zeros_like(overlap)).clamp(0.0, 1.0)
+
+
+def _valid_rboxes(rboxes: Tensor) -> Tensor:
+    """Flag the rows that describe a real rectangle: all-finite, both extents positive.
+
+    The predicate :func:`rotated_iou`'s degenerate-case contract is written against, kept
+    separate from the overlap arithmetic because it has to be evaluated on the *input*
+    parameters. Neither half is recoverable downstream: :func:`canonicalize` reorders
+    signed extents, and every comparison against a ``NaN`` is false, so a polygon built
+    from either kind of invalid row is indistinguishable from one built from a valid one.
+
+    Args:
+        rboxes: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``, canonical or not.
+
+    Returns:
+        ``(M,)`` bool tensor, ``True`` where the row is a box this module will score.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> rows = torch.tensor(
+        ...     [
+        ...         [0.0, 0.0, 4.0, 2.0, 0.0],  # a box
+        ...         [0.0, 0.0, -4.0, -2.0, 0.0],  # both extents negative
+        ...         [0.0, 0.0, 4.0, 0.0, 0.0],  # zero height, no area
+        ...         [0.0, 0.0, 4.0, 2.0, float("nan")],  # non-finite angle
+        ...     ]
+        ... )
+        >>> _valid_rboxes(rows).tolist()
+        [True, False, False, False]
+
+        ```
+    """
+    return rboxes.isfinite().all(dim=1) & (rboxes[:, 2] > 0) & (rboxes[:, 3] > 0)
 
 
 def _wrap_theta(theta: Tensor) -> Tensor:

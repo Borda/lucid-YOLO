@@ -119,7 +119,7 @@ def test_confidence_threshold_drops_low_scores() -> None:
     cls_logits = torch.full((1, 4, 2), -20.0)
     cls_logits[0, 0, 0] = 6.0  # class 0, sigmoid ~ 0.9975
     cls_logits[0, 1, 1] = 0.0  # class 1, sigmoid = 0.5
-    raw_ltrb = torch.zeros(1, 4, 4)  # anchors keep their (distinct) centres as boxes
+    raw_ltrb = torch.full((1, 4, 4), 0.25)  # 4 px boxes on 8 px centres: real area, still disjoint
 
     detections = NMSDecoder(conf_threshold=0.6)(cls_logits, raw_ltrb, points, strides)
 
@@ -141,7 +141,7 @@ def test_fixed_shape_with_zero_padding_and_descending_scores() -> None:
     cls_logits = torch.full((1, 64, 5), -20.0)
     for anchor, class_index in enumerate(range(5)):
         cls_logits[0, anchor, class_index] = 3.0 + anchor  # distinct classes, ascending scores
-    raw_ltrb = torch.zeros(1, 64, 4)
+    raw_ltrb = torch.full((1, 64, 4), 0.25)  # 4 px boxes on 8 px centres: real area, still disjoint
 
     detections = NMSDecoder()(cls_logits, raw_ltrb, points, strides)
 
@@ -244,3 +244,102 @@ def test_decode_with_indices_names_the_surviving_anchors() -> None:
     assert anchors[1].tolist() == [4, 1, -1, -1]  # a different surviving set in the second image
     assert torch.equal(real, detections[..., 4] > 0.0)  # an index exists exactly where a detection does
     assert torch.equal(detections[..., :_BOX_CORNERS][real], gathered[real])
+
+
+class TestDegenerateBoxesAreDropped:
+    """A row that encloses no region is not a detection and takes no ``max_det`` slot (WP-170).
+
+    ``torchvision.ops.batched_nms`` has no opinion on a box whose ``x2 <= x1``:
+    such a box has non-positive area, so its IoU against everything is zero and it
+    suppresses nothing and is suppressed by nothing. Three same-class boxes at
+    ``iou_threshold=0.7``, two of them inverted descriptions of the one region,
+    were therefore all kept. At evaluation an untrained-region anchor cluster
+    emitting them consumes the 300-row budget and pushes real detections out of it.
+
+    The drop sits at the confidence threshold rather than inside ``decode_ltrb``:
+    that function's values are pinned by the frozen goldens, and this boundary
+    reaches the same rows without touching them.
+    """
+
+    #: ltrb distances that decode to a real 8 px box on the anchor they ride.
+    REAL = (0.5, 0.5, 0.5, 0.5)
+    #: The same region written backwards — ``x2`` lands on the far side of ``x1``.
+    INVERTED = (-0.5, -0.5, -0.5, -0.5)
+
+    def _decode(self, distances: list[tuple[float, ...]], logits: list[float]) -> Tensor:
+        """Decode one image whose anchors carry ``distances`` and ``logits``, one class.
+
+        Every box shares class 0 so class-wise NMS cannot be what keeps a row, and
+        the anchors sit on a 1x3 grid so each row rides its own carrier.
+
+        Examples:
+            >>> case = TestDegenerateBoxesAreDropped()
+            >>> case._decode([case.REAL], [6.0]).shape
+            torch.Size([1, 8, 6])
+        """
+        points, strides = _grid(1, len(distances))
+        cls_logits = torch.tensor([[[logit] for logit in logits]])
+        raw_ltrb = torch.tensor([list(distances)])
+        return NMSDecoder(conf_threshold=0.5, iou_threshold=0.7, max_det=8)(cls_logits, raw_ltrb, points, strides)
+
+    def test_inverted_boxes_no_longer_survive_beside_a_real_one(self) -> None:
+        """The finding's own scene: three same-class rows, two inverted, one survivor.
+
+        All three were kept before the drop — the inverted pair suppressed nothing
+        and was suppressed by nothing, so each spent a detection slot.
+        """
+        detections = self._decode([self.REAL, self.INVERTED, self.INVERTED], [6.0, 5.0, 4.0])
+
+        survivors = detections[0, detections[0, :, 4] > 0.0]
+        assert survivors.shape[0] == 1
+        assert survivors[0, 2] > survivors[0, 0]  # x2 > x1
+        assert survivors[0, 3] > survivors[0, 1]  # y2 > y1
+
+    @pytest.mark.parametrize(
+        "degenerate",
+        [
+            pytest.param((0.0, 0.0, 0.0, 0.0), id="zero-area"),
+            pytest.param((-0.5, -0.5, -0.5, -0.5), id="inverted-both-axes"),
+            pytest.param((-0.5, 0.5, -0.5, 0.5), id="inverted-x-only"),
+            pytest.param((0.5, -0.5, 0.5, -0.5), id="inverted-y-only"),
+            pytest.param((0.0, 0.5, 0.0, 0.5), id="zero-width"),
+            pytest.param((float("nan"),) * 4, id="non-finite"),
+            pytest.param((float("inf"),) * 4, id="infinite"),
+        ],
+    )
+    def test_every_degenerate_shape_is_dropped(self, degenerate: tuple[float, ...]) -> None:
+        """No non-positive-area row reaches the output, whichever axis collapsed.
+
+        A non-finite row falls out of the same mask for free: it fails both
+        strict comparisons rather than needing a rule of its own.
+        """
+        detections = self._decode([degenerate], [6.0])
+
+        assert torch.equal(detections, torch.zeros_like(detections))
+
+    def test_a_real_detection_beside_them_is_untouched(self) -> None:
+        """The drop removes only the degenerate rows, never the honest one it sits beside."""
+        detections = self._decode([self.REAL, (0.0, 0.0, 0.0, 0.0)], [6.0, 5.5])
+
+        survivors = detections[0, detections[0, :, 4] > 0.0]
+        assert survivors.shape[0] == 1
+        assert survivors[0, :4].tolist() == [0.0, 0.0, 8.0, 8.0]
+
+    def test_anchor_indices_stay_aligned_with_the_boxes_they_describe(self) -> None:
+        """The index of each survivor still names the anchor its box came from.
+
+        The mask is folded into ``keep`` rather than applied afterwards precisely
+        so the boxes and their anchor indices pass through one selection; applying
+        it later is how a mask ends up describing another anchor's object.
+        """
+        points, strides = _grid(1, 3)
+        cls_logits = torch.tensor([[[-20.0], [6.0], [5.0]]])
+        raw_ltrb = torch.tensor([[list(self.INVERTED), list(self.INVERTED), list(self.REAL)]])
+
+        detections, anchors = NMSDecoder(conf_threshold=0.5, iou_threshold=0.7, max_det=3).decode_with_indices(
+            cls_logits, raw_ltrb, points, strides
+        )
+
+        survivors = detections[0, detections[0, :, 4] > 0.0]
+        assert survivors.shape[0] == 1
+        assert int(anchors[0, 0]) == 2  # the only anchor carrying a real box

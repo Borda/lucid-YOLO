@@ -73,9 +73,26 @@ Numerics
     The obvious alternative — float64 internals cast back out, this repository's habit
     for geometry (``data/affine.py``, ``eval/segment_decode.py``) — is not available: a
     regression loss runs on the training device, and D12c puts training on Apple MPS,
-    which has no float64. Working precision therefore follows the input dtype, and the
-    algebra is what makes float32 sufficient. Head-room is ample either way: the widest
-    intermediate is a product of four sides, so float32 saturates only beyond ~1e9 px.
+    which has no float64. Working precision therefore follows the input dtype **at
+    float32 and above**, and the algebra is what makes float32 sufficient. Head-room is
+    ample either way: the widest intermediate is a product of four sides, so float32
+    saturates only beyond ~1e9 px.
+
+    Below float32 the algebra is not enough, so :func:`_working_dtype` raises the working
+    precision to float32 and the result is cast back to the caller's dtype. The head-room
+    argument is what fails first: float16 saturates at 65504, and the ``excess`` above is
+    a sum of squared side-products over a product of four sides, so a merely *finite*
+    degenerate pair — a 1e-3 px box against a 20x3 one — overflows its numerator to
+    ``Inf`` and reports an infinite ``B_D`` for two boxes that are simply far apart. The
+    Hellinger branch fails second and more quietly: the ``sqrt`` derivative at the
+    radicand floor is ~5e9, which is itself ``Inf`` in float16, so a *coincident* pair —
+    the case :data:`_RADICAND_FLOOR` exists to keep differentiable — backpropagated
+    ``NaN``. bfloat16 has float32's exponent range and so overflows neither, but its
+    8-bit mantissa loses the cancellation-free form's whole point. Since the promotion is
+    a no-op cast for float32 and float64 inputs, it changes no value any current caller
+    computes; a true ``B_D`` above 65504 still returns ``Inf`` in float16, which is an
+    honest overflow of the dtype the caller asked for rather than an artefact of the
+    intermediate arithmetic.
 
     ``1 - B_C`` is computed as ``-expm1(-B_D)``: at ``B_D = 1e-8`` the naive difference
     returns exactly ``0`` in float32, which would report a 1e-4 Hellinger distance as
@@ -141,6 +158,10 @@ def probiou_bhattacharyya_loss(pred: Tensor, target: Tensor, min_side: float = _
     _check_rboxes(pred, "pred")
     _check_rboxes(target, "target")
 
+    out_dtype = torch.result_type(pred, target)
+    work_dtype = _working_dtype(out_dtype)
+    pred, target = pred.to(work_dtype), target.to(work_dtype)
+
     p_cx, p_cy, p_w, p_h, p_theta = _unpack(pred, min_side)
     t_cx, t_cy, t_w, t_h, t_theta = _unpack(target, min_side)
 
@@ -162,7 +183,7 @@ def probiou_bhattacharyya_loss(pred: Tensor, target: Tensor, min_side: float = _
     excess = (
         (p_w * p_h - t_w * t_h) ** 2 + (p_w * t_h - t_w * p_h) ** 2 * cos_sq + (p_w * t_w - p_h * t_h) ** 2 * sin_sq
     ) / (4 * p_w * p_h * t_w * t_h)
-    return centre_term + 0.5 * torch.log1p(excess)
+    return (centre_term + 0.5 * torch.log1p(excess)).to(out_dtype)
 
 
 def probabilistic_iou(pred: Tensor, target: Tensor, min_side: float = _MIN_SIDE) -> Tensor:
@@ -224,11 +245,42 @@ def probiou_hellinger_loss(pred: Tensor, target: Tensor, min_side: float = _MIN_
         >>> probiou_hellinger_loss(pred, target).round(decimals=4)
         tensor([0.9180])
     """
-    distance = probiou_bhattacharyya_loss(pred, target, min_side=min_side)
+    # The promotion has to wrap the square root as well as the covariance arithmetic, not
+    # just be inherited from the call below: the derivative of `sqrt` at _RADICAND_FLOOR is
+    # ~5e9, which is `Inf` in float16, so a coincident pair backpropagates `0 * Inf = NaN`
+    # however exactly `B_D` was computed.
+    out_dtype = torch.result_type(pred, target)
+    work_dtype = _working_dtype(out_dtype)
+    distance = probiou_bhattacharyya_loss(pred.to(work_dtype), target.to(work_dtype), min_side=min_side)
     # 1 - exp(-B_D) directly: the naive difference underflows to exactly 0 in float32
     # around B_D = 1e-8, reporting a small Hellinger distance as a perfect match.
     radicand = -torch.expm1(-distance)
-    return torch.where(radicand > 0, torch.sqrt(radicand.clamp(min=_RADICAND_FLOOR)), torch.zeros_like(radicand))
+    hellinger = torch.where(radicand > 0, torch.sqrt(radicand.clamp(min=_RADICAND_FLOOR)), torch.zeros_like(radicand))
+    return hellinger.to(out_dtype)
+
+
+def _working_dtype(dtype: torch.dtype) -> torch.dtype:
+    """Return the precision the covariance arithmetic runs in for a given input dtype.
+
+    Identity at float32 and above — those inputs keep the exact behaviour the module
+    docstring's error tables were measured with — and float32 for the half dtypes, whose
+    exponent range (float16) or mantissa (bfloat16) the cancellation-free algebra cannot
+    compensate for on its own.
+
+    Args:
+        dtype: The dtype :func:`torch.result_type` gives the two box arguments.
+
+    Returns:
+        The dtype the intermediate covariance and division work is carried out in.
+
+    Examples:
+        >>> import torch
+        >>> _working_dtype(torch.float16), _working_dtype(torch.bfloat16)
+        (torch.float32, torch.float32)
+        >>> _working_dtype(torch.float32), _working_dtype(torch.float64)
+        (torch.float32, torch.float64)
+    """
+    return torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
 
 
 def _centre_term(

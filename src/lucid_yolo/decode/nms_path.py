@@ -172,13 +172,22 @@ class NMSDecoder(nn.Module):
             >>> from lucid_yolo.assign.grid import make_anchor_points
             >>> points, strides = make_anchor_points([(1, 2)], [8])
             >>> cls_logits = torch.tensor([[[-5.0], [5.0]]])  # only anchor 1 clears the threshold
-            >>> raw_ltrb = torch.zeros(1, 2, 4)
+            >>> raw_ltrb = torch.full((1, 2, 4), 0.25)  # a real 4 px box on each anchor
             >>> decoder = NMSDecoder(conf_threshold=0.5, max_det=3)
             >>> detections, anchors = decoder.decode_with_indices(cls_logits, raw_ltrb, points, strides)
             >>> detections.shape
             torch.Size([1, 3, 6])
             >>> anchors  # anchor 1 survives; the remaining rows are padding
             tensor([[ 1, -1, -1]])
+
+            A box has to enclose an area to be a detection: zero ``ltrb`` distances put
+            ``x2`` exactly on ``x1``, and such a row is dropped with the sub-threshold
+            ones rather than spending one of the ``max_det`` slots.
+
+            >>> flat = torch.zeros(1, 2, 4)
+            >>> _, none_kept = decoder.decode_with_indices(cls_logits, flat, points, strides)
+            >>> none_kept
+            tensor([[-1, -1, -1]])
         """
         boxes = decode_ltrb(raw_ltrb, anchor_points, strides)  # (B, A, 4)
         confidence = cls_logits.sigmoid()
@@ -203,7 +212,26 @@ class NMSDecoder(nn.Module):
             the threshold's ``keep`` mask and the suppression's ``order`` — rather
             than recovered afterwards.
         """
-        keep = scores >= self.conf_threshold
+        # Degenerate rows are dropped at the threshold, not at the decode: `decode_ltrb`
+        # is a pure `(l, t, r, b) -> xyxy` transcription whose values are pinned by the
+        # frozen goldens, so clamping there would move numbers this boundary can leave
+        # untouched. `batched_nms` has no opinion on a box whose `x2 <= x1` — such a box
+        # has non-positive area, so its IoU against everything is zero and it suppresses
+        # nothing, which lets an untrained-region anchor cluster consume `max_det` slots
+        # and push real detections out of the budget. Strict `>` therefore drops the
+        # zero-area case as well as the inverted one; neither describes a region.
+        # The mask stays folded into `keep` so the anchor indices below are threaded
+        # through exactly one selection, which is this method's stated invariant.
+        # Finiteness is asserted rather than inferred from the two comparisons. `NaN`
+        # corners would indeed fail them, but an infinite pair does not: `l = r = inf`
+        # decodes to `[-inf, -inf, inf, inf]`, which is correctly *ordered* and would
+        # have passed as a box covering the plane.
+        keep = (
+            (scores >= self.conf_threshold)
+            & boxes.isfinite().all(dim=-1)
+            & (boxes[:, 2] > boxes[:, 0])
+            & (boxes[:, 3] > boxes[:, 1])
+        )
         anchors = keep.nonzero(as_tuple=False).flatten()  # source anchor row of each survivor
         boxes, scores, classes = boxes[keep], scores[keep], classes[keep]
         order = batched_nms(boxes, scores, classes, self.iou_threshold)[: self.max_det]

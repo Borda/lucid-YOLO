@@ -28,6 +28,7 @@ from torch import Tensor
 
 from lucid_yolo.data.rotated_geom import canonicalize
 from lucid_yolo.losses import probabilistic_iou, probiou_bhattacharyya_loss, probiou_hellinger_loss
+from lucid_yolo.losses.probiou import _working_dtype
 
 #: Pairs spanning square/elongated, aligned/rotated, overlapping/disjoint.
 _PAIRS = [
@@ -529,3 +530,134 @@ def test_scores_stay_in_range_over_a_random_sweep() -> None:
 
     assert (scores >= 0).all() and (scores <= 1).all()
     assert (probiou_bhattacharyya_loss(pred, target) >= 0).all()
+
+
+class TestHalfPrecision:
+    """The covariance arithmetic runs at float32 whatever dtype the caller brought (WP-170).
+
+    The module's cancellation-free algebra is what makes *float32* sufficient; it
+    cannot rescue float16, whose 65504 ceiling the ``excess`` numerator clears on
+    merely-far-apart boxes, nor bfloat16, whose 8-bit mantissa discards the
+    cancellation the algebra exists to avoid. Both failures produce a plausible
+    number or a healthy-looking zero rather than an error:
+
+    - a finite degenerate float16 pair returned ``B_D = Inf`` and ``NaN`` gradients
+      on ``w`` and ``h``;
+    - a *coincident* float16 pair returned ``L1 = 0.0`` — correct — with ``NaN``
+      gradients in all five parameters, because ``d(sqrt)/dx`` at
+      ``_RADICAND_FLOOR`` is ~5e9, itself ``Inf`` in float16.
+
+    The existing degeneracy tests above run at the default float32 and so saw none
+    of it.
+    """
+
+    #: A degenerate-but-finite pair: a 1e-3 px box against an ordinary elongated one.
+    DEGENERATE = (0.0, 0.0, 1e-3, 1e-3, 0.0)
+    #: The ordinary box the degenerate one is scored against.
+    ORDINARY = (5.0, 5.0, 20.0, 3.0, 0.5)
+    #: A well-formed box, used where a coincident pair is needed.
+    COINCIDENT = (3.0, 4.0, 9.0, 2.0, 0.4)
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_a_degenerate_pair_stays_finite_in_value_and_gradient(self, dtype: torch.dtype) -> None:
+        """``B_D`` of a finite degenerate pair is finite, and so are its gradients.
+
+        In float16 the numerator ``(w1 h1 - w2 h2)^2`` reaches ~3.6e3 over a
+        denominator of ~2.4e-4, and the quotient overflows the dtype rather than
+        the quantity: the true value is ~9.93.
+        """
+        pred = torch.tensor([self.DEGENERATE], dtype=dtype, requires_grad=True)
+        target = torch.tensor([self.ORDINARY], dtype=dtype)
+
+        distance = probiou_bhattacharyya_loss(pred, target)
+        distance.sum().backward()
+
+        assert torch.isfinite(distance).all()
+        assert pred.grad is not None and torch.isfinite(pred.grad).all()
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_a_degenerate_pair_agrees_with_the_float32_evaluation(self, dtype: torch.dtype) -> None:
+        """The finite value is the *right* one, not merely a number that fits the dtype."""
+        reference = probiou_bhattacharyya_loss(torch.tensor([self.DEGENERATE]), torch.tensor([self.ORDINARY]))
+        low = probiou_bhattacharyya_loss(
+            torch.tensor([self.DEGENERATE], dtype=dtype), torch.tensor([self.ORDINARY], dtype=dtype)
+        )
+
+        assert float(low) == pytest.approx(float(reference), rel=1e-2)
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_a_coincident_pair_takes_zero_gradient_not_nan(self, dtype: torch.dtype) -> None:
+        """The Hellinger branch's own guard survives the narrow dtype.
+
+        ``_RADICAND_FLOOR`` exists to keep a coincident pair differentiable; at
+        float16 the derivative it produces is itself ``Inf``, so the ``0 * Inf``
+        the exact-zero branch is meant to avoid came back as ``NaN`` anyway.
+        """
+        pred = torch.tensor([self.COINCIDENT], dtype=dtype, requires_grad=True)
+        target = torch.tensor([self.COINCIDENT], dtype=dtype)
+
+        loss = probiou_hellinger_loss(pred, target)
+        loss.sum().backward()
+
+        assert float(loss.detach()) == 0.0
+        assert pred.grad is not None
+        assert torch.isfinite(pred.grad).all()
+        assert torch.equal(pred.grad, torch.zeros_like(pred.grad))
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_both_losses_return_the_callers_dtype(self, dtype: torch.dtype) -> None:
+        """The promotion is internal: what comes back is what the caller passed in."""
+        pred = torch.tensor([self.COINCIDENT], dtype=dtype)
+        target = torch.tensor([self.ORDINARY], dtype=dtype)
+
+        assert probiou_bhattacharyya_loss(pred, target).dtype == dtype
+        assert probiou_hellinger_loss(pred, target).dtype == dtype
+        assert probabilistic_iou(pred, target).dtype == dtype
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_gradients_flow_in_all_five_parameters(self, dtype: torch.dtype) -> None:
+        """A separated pair still moves every parameter, so the fix did not zero the loss."""
+        pred = torch.tensor([self.COINCIDENT], dtype=dtype, requires_grad=True)
+        target = torch.tensor([self.ORDINARY], dtype=dtype)
+
+        probiou_hellinger_loss(pred, target).sum().backward()
+
+        assert pred.grad is not None
+        assert torch.isfinite(pred.grad).all()
+        assert float(pred.grad.abs().sum()) > 0.0
+
+    def test_float32_is_untouched_by_the_promotion(self) -> None:
+        """Float32 and float64 take an identity cast, so no landed value moves.
+
+        The property that bounds this change's blast radius: the oriented training
+        path runs at float32, where ``_working_dtype`` is the identity and the
+        arithmetic is the same arithmetic it always was.
+
+        Both values are compared at six decimals rather than bit-exactly. The bit-exact
+        form asserted a property neither loss offers: both end in a libm call — ``log``
+        under ``B_D``, ``expm1`` under the Hellinger square root — and libm transcendentals
+        are not correctly rounded, so an implementation is free to return either neighbour
+        of the true result. It did: a full-suite run returned ``0.9179757237434387`` for
+        the Hellinger value against the ``0.9179757833480835`` stored here, adjacent
+        float32 values one ulp (``5.96e-08``) apart, on a tree where 200 repeats and a
+        clean full suite both return the stored one. Six decimals is the same remedy
+        WP-167 applied to ``clamped_tolerance``: pin the comparison to the precision the
+        property needs instead of widening it to whatever passes. Both observed Hellinger
+        values round to ``0.917976``.
+
+        What six decimals deliberately does not do is discriminate the working dtype:
+        promotion to float64 reads ``0.9179757561057065`` and ``1.849470081982182``, which
+        round to the same six decimals. That is not a gap left open. The identity of
+        ``_working_dtype`` is asserted directly on the two lines above, which is a stronger
+        and more legible guard than inferring a dtype from the last bits of a transcendental.
+        These two comparisons carry the remaining half of the property — that the arithmetic
+        itself did not move — and any real change to it moves these numbers by far more than
+        an ulp.
+        """
+        pred = torch.tensor([[3.0, 4.0, 9.0, 2.0, 0.4]])
+        target = torch.tensor([[5.0, 1.0, 7.0, 3.0, -0.2]])
+
+        assert _working_dtype(torch.float32) is torch.float32
+        assert _working_dtype(torch.float64) is torch.float64
+        assert round(float(probiou_bhattacharyya_loss(pred, target)), 6) == 1.849470
+        assert round(float(probiou_hellinger_loss(pred, target)), 6) == 0.917976

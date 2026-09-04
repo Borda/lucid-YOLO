@@ -371,3 +371,125 @@ class TestCouplingScaleBound:
 
         assert "scale" in names
         assert layer.conditioner.scale.requires_grad
+
+
+class TestUnlabeledPointsReachNoGradient:
+    """A ``v == 0`` point cannot influence the backward pass either (WP-170, A66).
+
+    ``TestVisibilityMasking`` above asserts the loss *value* is independent of an
+    unlabeled point's target, and it was: the mask was applied to the reduction,
+    which makes the number right. Everything upstream of the reduction still ran.
+    Every ``v == 0`` residual was divided by ``sigma_hat``, pushed through the
+    RealNVP stack and evaluated under the standard-normal base, so one non-finite
+    unlabeled annotation produced ``NaN`` gradients on the shared flow weights and
+    on every *visible* point's ``mu_hat`` — while the reported loss stayed healthy
+    and the value assertion above stayed green.
+
+    Value-independence and gradient-independence are different properties and only
+    the second one matters for training; these tests pin the second.
+    """
+
+    #: Placeholders a real unlabeled COCO point plausibly carries.
+    CORRUPTIONS = (float("inf"), float("-inf"), float("nan"), 1e30, -999.0)
+
+    def _grads(self, corrupt: float | None) -> tuple[float, list[torch.Tensor]]:
+        """Return the loss value and every gradient produced by one backward pass.
+
+        Builds the loss from a fixed seed each call so the flow's weights are
+        identical between the clean and the corrupted run, making the two directly
+        comparable under ``torch.equal``.
+
+        Args:
+            corrupt: Value written into the unlabeled point's target, or ``None``
+                to leave the clean target in place.
+
+        Returns:
+            ``(loss_value, gradients)`` — the scalar loss, and the gradients of
+            ``mu_hat``, ``sigma_raw`` and every flow parameter in a fixed order.
+
+        Examples:
+            >>> case = TestUnlabeledPointsReachNoGradient()
+            >>> value, grads = case._grads(None)
+            >>> isinstance(value, float) and len(grads) > 2
+            True
+        """
+        torch.manual_seed(0)
+        loss_fn = RLELoss()
+        mu_hat = torch.zeros(1, 2, 2, requires_grad=True)
+        sigma_raw = torch.zeros(1, 2, 2, requires_grad=True)
+        mu_gt = torch.tensor([[[0.1, 0.1], [0.3, -0.2]]])
+        if corrupt is not None:
+            mu_gt = mu_gt.clone()
+            mu_gt[0, 1] = torch.tensor([corrupt, corrupt])
+        loss = loss_fn(mu_hat, sigma_raw, mu_gt, torch.tensor([[2, 0]]))
+        loss.backward()
+        assert mu_hat.grad is not None and sigma_raw.grad is not None
+        return float(loss.detach()), [mu_hat.grad, sigma_raw.grad, *(p.grad for p in loss_fn.parameters())]
+
+    @pytest.mark.parametrize("corrupt", CORRUPTIONS)
+    def test_gradients_are_identical_to_the_clean_run(self, corrupt: float) -> None:
+        """Corrupting the unlabeled target changes no gradient anywhere, bit for bit.
+
+        The strong form of A66: not "the masked point contributes little" but "the
+        masked point is not in the graph", which ``torch.equal`` against the clean
+        run is what actually establishes.
+        """
+        clean_value, clean_grads = self._grads(None)
+        value, grads = self._grads(corrupt)
+
+        assert value == clean_value
+        for clean, actual in zip(clean_grads, grads, strict=True):
+            assert torch.equal(clean, actual)
+
+    @pytest.mark.parametrize("corrupt", CORRUPTIONS)
+    def test_every_gradient_stays_finite(self, corrupt: float) -> None:
+        """No ``NaN`` reaches ``mu_hat``, ``sigma_raw`` or the flow's own weights.
+
+        The flow's weights are the consequence that outlives the step: they are
+        shared across every point in the batch, so one unlabeled annotation
+        poisoned the density for all of them.
+        """
+        _, grads = self._grads(corrupt)
+
+        assert all(bool(torch.isfinite(grad).all()) for grad in grads)
+
+    @pytest.mark.parametrize("corrupt", CORRUPTIONS)
+    def test_a_masked_point_does_not_raise_from_argument_validation(self, corrupt: float) -> None:
+        """A non-finite unlabeled target is not rejected by the base distribution.
+
+        ``torch.distributions`` validates its arguments by default, so before the
+        selection moved upstream the standard-normal base raised ``ValueError`` on
+        a residual belonging to a point the loss had already decided to ignore --
+        a masked-out annotation crashing the loss outright.
+        """
+        mu_gt = torch.tensor([[[0.1, 0.1], [corrupt, corrupt]]])
+
+        loss = RLELoss()(torch.zeros(1, 2, 2), torch.zeros(1, 2, 2), mu_gt, torch.tensor([[2, 0]]))
+
+        assert bool(torch.isfinite(loss))
+
+    def test_the_flow_only_sees_the_labelled_points(self) -> None:
+        """Selection happens before the flow, so its input is ``(V, 2)`` not ``(N*K, 2)``.
+
+        The structural claim behind the two assertions above, and the reason the
+        fix also costs less: three of four points here are unlabeled and never
+        reach the RealNVP stack at all.
+        """
+        seen: list[tuple[int, ...]] = []
+        loss_fn = RLELoss()
+        original = loss_fn.flow.log_density
+
+        def _record(x: torch.Tensor) -> torch.Tensor:
+            """Record the shape the flow is called with, then defer to the real method."""
+            seen.append(tuple(x.shape))
+            return original(x)
+
+        loss_fn.flow.log_density = _record  # type: ignore[method-assign]
+        loss_fn(
+            torch.zeros(2, 2, 2),
+            torch.zeros(2, 2, 2),
+            torch.zeros(2, 2, 2),
+            torch.tensor([[2, 0], [0, 0]]),
+        )
+
+        assert seen == [(1, 2)]

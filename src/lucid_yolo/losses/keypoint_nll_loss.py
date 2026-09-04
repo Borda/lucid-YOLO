@@ -73,14 +73,16 @@ density is quadratic in that latent (A72's non-finite run). Milder, not benign -
 a loss dominated by a handful of far-out points is still a loss training the
 wrong thing.
 
-**The shared helper is duplicated rather than extracted.** ``_reduce_masked``
-and the two constants below also exist in
+**The shared helpers are duplicated rather than extracted.** ``_select_visible``,
+``_reduce_selected`` and the two constants below also exist in
 :mod:`~lucid_yolo.losses.rle_loss`. Extracting them into a shared private module
 would put a refactor of a **landed, accepted** loss inside an ablation's commit,
-for six lines and two literals; this project's own rule is that three similar
+for a dozen lines and two literals; this project's own rule is that three similar
 lines beat a premature shared abstraction (``CLAUDE.md``, Core Principles). The
 duplication also keeps the two losses free to diverge -- a control that silently
-follows every later change to the thing it controls for is not a control.
+follows every later change to the thing it controls for is not a control. The two
+copies of ``_select_visible`` are not identical for exactly that reason: RLE's
+mentions the flow this ablation does not have.
 
 No detection-repository code of any kind was consulted while writing this module
 -- it is R14's own published table plus this repository's existing
@@ -110,30 +112,74 @@ _BASE_LAPLACE_SCALE = 1.0
 _MIN_SIGMA = 1e-6
 
 
-def _reduce_masked(per_point: Tensor, mask: Tensor) -> Tensor:
-    """Mean a per-point loss over ``mask``, or a finite zero if nothing is masked in.
+def _select_visible(mu_hat: Tensor, sigma_raw: Tensor, mu_gt: Tensor, visibility: Tensor) -> tuple[Tensor, Tensor]:
+    """Flatten ``(N, K, 2)`` point tensors to ``(V, 2)`` rows of *labelled* points only.
+
+    The masking A66 describes, applied to the **inputs** rather than to the reduction --
+    :mod:`~lucid_yolo.losses.rle_loss`'s twin, and duplicated for the same reason the
+    module docstring gives for ``_reduce_selected``. Selecting afterwards makes the loss
+    *value* right and everything else wrong: an unlabelled point's coordinate is not
+    ground truth and may be anything at all, and until it was dropped here every one of
+    them was still divided by ``sigma_hat`` and evaluated under the base density, so a
+    single non-finite unlabelled annotation produced ``NaN`` gradients on every visible
+    point's own ``mu_hat`` while the reported loss stayed healthy and the masked value
+    stayed exactly correct. With :mod:`torch.distributions`' argument validation left at
+    its default the same input does not even get that far: the Laplace rejects the
+    non-finite residual and a masked-out annotation raises :class:`ValueError` out of the
+    loss.
+
+    Args:
+        mu_hat: Predicted point coordinates, shape ``(N, K, 2)``.
+        sigma_raw: Raw per-axis uncertainty, shape ``(N, K, 2)``.
+        mu_gt: Ground-truth point coordinates, shape ``(N, K, 2)``.
+        visibility: COCO-style visibility, shape ``(N, K)``; ``v > 0`` is kept (A66).
+
+    Returns:
+        ``(residual_inputs, sigma_hat)``: the ``(V, 2)`` ground-truth-minus-prediction
+        offsets of the labelled points, and their ``(V, 2)`` sigmoid-activated,
+        floor-clamped scales. ``V`` is ``0`` when nothing is labelled, and both tensors
+        stay attached to their arguments' graphs.
+
+    Examples:
+        >>> import torch
+        >>> mu_hat = torch.zeros(1, 2, 2)
+        >>> mu_gt = torch.tensor([[[0.5, 0.25], [float("inf"), float("inf")]]])
+        >>> offset, sigma_hat = _select_visible(mu_hat, torch.zeros(1, 2, 2), mu_gt, torch.tensor([[2, 0]]))
+        >>> offset.tolist()  # the unlabelled point never reaches the arithmetic
+        [[0.5, 0.25]]
+        >>> sigma_hat.tolist()
+        [[0.5, 0.5]]
+        >>> _select_visible(mu_hat, torch.zeros(1, 2, 2), mu_gt, torch.tensor([[0, 0]]))[0].shape
+        torch.Size([0, 2])
+    """
+    visible = (visibility > 0).reshape(-1)
+    sigma_hat = torch.sigmoid(sigma_raw.reshape(-1, 2)[visible]).clamp(min=_MIN_SIGMA)
+    return mu_gt.reshape(-1, 2)[visible] - mu_hat.reshape(-1, 2)[visible], sigma_hat
+
+
+def _reduce_selected(per_point: Tensor) -> Tensor:
+    """Mean an already-selected per-point loss, or a finite zero if nothing was selected.
 
     Mirrors :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s
     zero-positives handling: a sum divided by ``max(count, 1)`` stays finite and
     attached to ``per_point``'s graph rather than producing a ``NaN`` ``0 / 0``
-    mean.
+    mean. The selection itself happened in :func:`_select_visible`, before any
+    arithmetic -- this only divides.
 
     Args:
-        per_point: Per-point loss values, any shape.
-        mask: Boolean mask of the same shape; ``True`` entries contribute.
+        per_point: Per-point loss values of the labelled points, shape ``(V,)``.
 
     Returns:
         A scalar (zero-dimensional) tensor.
 
     Examples:
         >>> import torch
-        >>> _reduce_masked(torch.tensor([2.0, 4.0, 6.0]), torch.tensor([True, False, True]))
+        >>> _reduce_selected(torch.tensor([2.0, 6.0]))
         tensor(4.)
-        >>> _reduce_masked(torch.zeros(3), torch.zeros(3, dtype=torch.bool))
+        >>> _reduce_selected(torch.zeros(0))
         tensor(0.)
     """
-    selected = per_point[mask]
-    return selected.sum() / max(selected.numel(), 1)
+    return per_point.sum() / max(per_point.numel(), 1)
 
 
 class LaplaceNLLLoss(nn.Module):
@@ -189,21 +235,25 @@ class LaplaceNLLLoss(nn.Module):
                 normalized frame as ``mu_hat`` (A71).
             visibility: COCO-style visibility, shape ``(N, K)`` int64 (WP-121's
                 ``Targets.keypoint_vis``). Points with ``v == 0`` do not contribute
-                (A66); ``v >= 1`` do, regardless of occlusion.
+                (A66); ``v >= 1`` do, regardless of occlusion. The exclusion is
+                applied by :func:`_select_visible` **before** any arithmetic, so an
+                unlabelled point's coordinate is never divided and never evaluated
+                under the base density -- whatever it holds, including a non-finite
+                placeholder, it can neither perturb a gradient nor raise out of the
+                distribution's argument validation.
 
         Returns:
             A scalar (zero-dimensional) tensor: the mean per-point, per-axis loss
             over every visible point. A finite zero, still attached to ``mu_hat``
             and ``sigma_raw``'s graphs, when no point is visible.
         """
-        sigma_hat = torch.sigmoid(sigma_raw).clamp(min=_MIN_SIGMA)
-        residual = (mu_gt - mu_hat) / sigma_hat
+        offset, sigma_hat = _select_visible(mu_hat, sigma_raw, mu_gt, visibility)  # both (V, 2)
+        residual = offset / sigma_hat
 
         laplace = Laplace(0.0, _BASE_LAPLACE_SCALE)
-        base_log_prob = cast("Tensor", laplace.log_prob(residual)).sum(dim=-1)  # type: ignore[no-untyped-call]  # (N, K)
+        base_log_prob = cast("Tensor", laplace.log_prob(residual)).sum(dim=-1)  # type: ignore[no-untyped-call]  # (V,)
 
-        log_sigma_term = torch.log(sigma_hat).sum(dim=-1)  # (N, K)
-        per_point = -base_log_prob + log_sigma_term  # (N, K), R14 Eq. 8 without the flow term
+        log_sigma_term = torch.log(sigma_hat).sum(dim=-1)  # (V,)
+        per_point = -base_log_prob + log_sigma_term  # (V,), R14 Eq. 8 without the flow term
 
-        mask = visibility > 0
-        return _reduce_masked(per_point, mask)
+        return _reduce_selected(per_point)

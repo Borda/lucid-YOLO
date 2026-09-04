@@ -384,3 +384,81 @@ class TestRegisteredThreshold:
         and nothing would report the divergence.
         """
         assert RotatedNMSDecoder().iou_threshold == ROTATED_NMS_IOU_THRESHOLD
+
+
+class TestNonFiniteRowsAreDropped:
+    """A ``NaN`` or ``Inf`` box never reaches the output as a detection (WP-170).
+
+    Suppression cannot remove such a row and never could: ``rotated_iou`` scores
+    every pair involving a non-finite box ``0.0`` — every comparison against
+    ``NaN`` is false, so the union guard takes the zero branch — and a zero
+    overlap clears no threshold. The row therefore survived every round of
+    ``_suppress`` and was emitted with a real score beside the honest detections,
+    which is why the drop belongs at the confidence threshold, the one boundary
+    that sees it as a row rather than as an overlap.
+    """
+
+    #: A well-formed bar, planted alongside each poisoned row as the control.
+    VALID_BOX = (32.0, 32.0, 20.0, 4.0, 0.3)
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    def test_a_non_finite_angle_is_not_emitted(self, bad: float) -> None:
+        """A box whose ``theta`` is non-finite is dropped, and the valid box beside it stays.
+
+        The realistic entry path: an angle head that has diverged emits ``NaN``
+        for one anchor while the rest of the image decodes normally.
+        """
+        poisoned = (48.0, 48.0, 16.0, 4.0, bad)
+        cls_logits, raw_ltrb, angles, points, strides = _plant([self.VALID_BOX, poisoned], [6.0, 5.0], [0, 1])
+
+        detections = RotatedNMSDecoder(conf_threshold=0.5)(cls_logits, raw_ltrb, angles, points, strides)
+
+        survivors = _survivors(detections)
+        assert survivors.shape[0] == 1
+        assert bool(torch.isfinite(survivors).all())
+        assert int(survivors[0, 6]) == 0  # the valid box's class, not the poisoned one's
+
+    def test_a_non_finite_extent_is_not_emitted(self) -> None:
+        """A box whose decoded ``w``/``h`` is non-finite is dropped the same way.
+
+        Reaches the decoder through the ltrb distances rather than the angle, so
+        the drop is shown to test the decoded row and not one particular input.
+        """
+        cls_logits, raw_ltrb, angles, points, strides = _plant([self.VALID_BOX], [6.0], [0])
+        raw_ltrb[0, 1] = torch.tensor([float("inf")] * 4)
+        cls_logits[0, 1, 1] = 5.0
+
+        detections = RotatedNMSDecoder(conf_threshold=0.5)(cls_logits, raw_ltrb, angles, points, strides)
+
+        survivors = _survivors(detections)
+        assert survivors.shape[0] == 1
+        assert bool(torch.isfinite(survivors).all())
+        assert int(survivors[0, 6]) == 0
+
+    def test_a_non_finite_row_does_not_shield_a_duplicate(self) -> None:
+        """Dropping the bad row leaves ordinary suppression intact behind it.
+
+        Two same-class copies of one bar sit either side of a ``NaN`` row in score
+        order. The ``NaN`` is removed and the duplicate is then suppressed by the
+        survivor, so the drop neither hides a duplicate nor takes a real box with it.
+        """
+        duplicate = (32.0, 32.0, 20.0, 4.0, 0.31)
+        poisoned = (48.0, 48.0, 16.0, 4.0, float("nan"))
+        cls_logits, raw_ltrb, angles, points, strides = _plant(
+            [self.VALID_BOX, poisoned, duplicate], [6.0, 5.0, 4.0], [0, 0, 0]
+        )
+
+        detections = RotatedNMSDecoder(conf_threshold=0.5)(cls_logits, raw_ltrb, angles, points, strides)
+
+        survivors = _survivors(detections)
+        assert survivors.shape[0] == 1
+        assert bool(torch.isfinite(survivors).all())
+
+    def test_an_all_non_finite_image_yields_only_padding(self) -> None:
+        """Every row poisoned leaves an all-zero padded output rather than a crash."""
+        cls_logits, raw_ltrb, angles, points, strides = _plant([(32.0, 32.0, 20.0, 4.0, float("nan"))], [6.0], [0])
+
+        detections = RotatedNMSDecoder(conf_threshold=0.5, max_det=2)(cls_logits, raw_ltrb, angles, points, strides)
+
+        assert detections.shape == (1, 2, 7)
+        assert torch.equal(detections, torch.zeros_like(detections))

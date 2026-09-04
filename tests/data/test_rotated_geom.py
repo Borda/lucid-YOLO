@@ -18,6 +18,7 @@ import pytest
 import torch
 
 from lucid_yolo.data import canonicalize, points_in_rboxes, polygons_to_rboxes, rboxes_to_polygons
+from lucid_yolo.data.rotated_geom import rotated_iou
 
 #: Canonical angle bounds as float32 tensors. The invariant is a float32 one and
 #: ``float32(-pi/4)`` is strictly *below* the float64 ``-math.pi / 4``, so comparing a
@@ -374,3 +375,95 @@ class TestShapeValidation:
         """Quads must be ``(M, 4, 2)``."""
         with pytest.raises(ValueError, match=r"polygons must be \(M, 4, 2\)"):
             polygons_to_rboxes(torch.zeros((2, 5, 2), dtype=torch.float32))
+
+
+class TestRotatedIouRejectsImpossibleGeometry:
+    """A row that is not a rectangle scores ``0.0``, never a plausible overlap (WP-170).
+
+    ``rotated_iou``'s docstring has always promised this for zero and negative
+    extents, but the promise was left to the winding to keep and the winding does
+    not keep it: :func:`canonicalize` swaps a pair of signed extents back into
+    ``w >= h`` order, and two negative extents are a half-turn that rebuilds the
+    very rectangle the caller wrote as impossible. Non-finite rows reached the
+    same zero for an unrelated reason -- every comparison against ``NaN`` is false
+    -- which is a different statement about a different failure and was worth
+    making on purpose.
+    """
+
+    #: A well-formed 4x2 box at the origin, the honest counterpart of the rows below.
+    VALID = (0.0, 0.0, 4.0, 2.0, 0.0)
+
+    def test_two_negative_extents_no_longer_score_a_perfect_match(self) -> None:
+        """``[-4, -2]`` against itself scored ``1.0``; it is an invalid row, so ``0.0``.
+
+        The half-turn case: negating both extents names the same rectangle, so
+        canonicalization produced a correctly wound polygon and the shoelace had
+        nothing left to object to.
+        """
+        negative = torch.tensor([[0.0, 0.0, -4.0, -2.0, 0.0]])
+
+        assert float(rotated_iou(negative, negative)) == 0.0
+
+    def test_a_negative_row_does_not_match_a_real_box(self) -> None:
+        """``[-4, -2]`` scored ``1.0`` against the honest ``[4, 2]`` describing that region.
+
+        Worse than the self-pair: an impossible row was not merely self-consistent,
+        it was accepted as an exact match for a real detection.
+        """
+        negative = torch.tensor([[0.0, 0.0, -4.0, -2.0, 0.0]])
+        valid = torch.tensor([self.VALID])
+
+        assert float(rotated_iou(negative, valid)) == 0.0
+        assert float(rotated_iou(valid, negative)) == 0.0
+
+    @pytest.mark.parametrize("extents", [(-4.0, 2.0), (4.0, -2.0), (0.0, 2.0), (4.0, 0.0), (0.0, 0.0)])
+    def test_mixed_sign_and_zero_extents_score_zero(self, extents: tuple[float, float]) -> None:
+        """Every non-positive extent combination encloses no area, against anything."""
+        width, height = extents
+        invalid = torch.tensor([[0.0, 0.0, width, height, 0.0]])
+        valid = torch.tensor([self.VALID])
+
+        assert float(rotated_iou(invalid, invalid)) == 0.0
+        assert float(rotated_iou(invalid, valid)) == 0.0
+
+    @pytest.mark.parametrize("column", [0, 1, 2, 3, 4])
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_in_any_column_scores_zero(self, column: int, bad: float) -> None:
+        """A non-finite ``cx``, ``cy``, ``w``, ``h`` or ``theta`` yields ``0.0``, not ``NaN``.
+
+        Stated by the validity mask now rather than reached by accident through
+        false ``NaN`` comparisons, so ``inf`` -- which compares perfectly well --
+        is covered by the same rule as ``nan``.
+        """
+        row = torch.tensor([self.VALID])
+        row[0, column] = bad
+        valid = torch.tensor([self.VALID])
+
+        overlap = rotated_iou(row, valid)
+
+        assert float(overlap) == 0.0
+        assert bool(torch.isfinite(overlap).all())
+
+    def test_valid_pairs_are_untouched_by_the_validity_mask(self) -> None:
+        """The refusal costs nothing on well-formed geometry: identity and a known overlap."""
+        valid = torch.tensor([self.VALID])
+        shifted = torch.tensor([[2.0, 0.0, 4.0, 2.0, 0.0]])  # half its width along +x
+
+        assert float(rotated_iou(valid, valid)) == 1.0
+        assert float(rotated_iou(valid, shifted)) == pytest.approx(1.0 / 3.0, abs=1e-4)
+
+    def test_an_invalid_row_does_not_poison_its_neighbours(self) -> None:
+        """Only the pairs involving the bad row collapse; the rest of the matrix stands.
+
+        The mask is per-box and folded into the pair grid, so a single corrupt
+        detection in a batch cannot zero the overlaps of the good ones beside it.
+        """
+        rows = torch.tensor([self.VALID, (0.0, 0.0, -4.0, -2.0, 0.0), (2.0, 0.0, 4.0, 2.0, 0.0)])
+
+        overlap = rotated_iou(rows, rows)
+
+        assert float(overlap[0, 0]) == 1.0
+        assert float(overlap[2, 2]) == 1.0
+        assert float(overlap[0, 2]) == pytest.approx(1.0 / 3.0, abs=1e-4)
+        assert float(overlap[1].abs().max()) == 0.0  # the invalid row, against everything
+        assert float(overlap[:, 1].abs().max()) == 0.0

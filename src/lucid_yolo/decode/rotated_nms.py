@@ -210,7 +210,13 @@ class RotatedNMSDecoder(nn.Module):
             The ``(max_det, 7)`` A45 detections ``[cx, cy, w, h, theta, score, class]``
             sorted by descending score and padded with score-zero rows.
         """
-        keep = scores >= self.conf_threshold
+        # A non-finite row is dropped here rather than left to the suppression, because
+        # suppression cannot remove it: `rotated_iou` scores every pair involving a
+        # non-finite box `0.0`, that zero clears no threshold, and the row therefore
+        # survives every round of `_suppress` and is emitted as a detection carrying a
+        # real score. The threshold is the only boundary that sees it as a row rather
+        # than as an overlap.
+        keep = (scores >= self.conf_threshold) & rboxes.isfinite().all(dim=-1)
         rboxes, scores, classes = rboxes[keep], scores[keep], classes[keep]
         order = self._suppress(rboxes, scores, classes)
         detection = torch.cat(
