@@ -502,6 +502,42 @@ def normalize_keypoints_to_box(points: Tensor, boxes: Tensor) -> Tensor:
 StepBatch = tuple[Tensor, list["Targets"]] | tuple[Tensor, list["Targets"], list[Tensor] | None]
 
 
+def _host_split(tensors: list[Tensor]) -> tuple[Tensor, ...]:
+    """Move a batch's per-image tensors to the host in one transfer rather than one each.
+
+    Every validation accumulator needs its ground truth on the host. Moving each
+    image's tensor on its own issues one device-to-host transfer per image per
+    field, and what each one carries is a few kilobytes against the accelerator's
+    fixed per-transfer latency -- a batch of 16 with three fields is 48 transfers
+    for a payload that fits in one. Concatenating along the batch axis pays that
+    latency once and splits the result back into the same per-image pieces, with
+    the same values in the same order (WP-163).
+
+    Args:
+        tensors: One tensor per image, agreeing on every dimension after the
+            first. An empty list returns an empty tuple.
+
+    Returns:
+        The same tensors, on the host, in the order given.
+
+    Examples:
+        >>> _host_split([torch.tensor([[1.0, 2.0]]), torch.zeros(0, 2)])
+        (tensor([[1., 2.]]), tensor([], size=(0, 2)))
+        >>> _host_split([])
+        ()
+    """
+    if not tensors:
+        return ()
+    host = torch.cat(tensors).cpu()
+    pieces: list[Tensor] = []
+    start = 0
+    for tensor in tensors:
+        stop = start + int(tensor.shape[0])
+        pieces.append(host[start:stop])
+        start = stop
+    return tuple(pieces)
+
+
 def _split_batch(batch: StepBatch) -> tuple[Tensor, list[Targets], list[Tensor] | None]:
     """Split a step batch into images, targets and the loader's mask stacks.
 
@@ -1073,7 +1109,11 @@ class DetectionLitModule(LightningModule):
                 }
             )
         if self.task != "obb":
-            ground_truth = [{"boxes": t.boxes.cpu(), "labels": t.labels.cpu()} for t in targets]
+            host_boxes = _host_split([t.boxes for t in targets])
+            host_labels = _host_split([t.labels for t in targets])
+            ground_truth = [
+                {"boxes": boxes, "labels": labels} for boxes, labels in zip(host_boxes, host_labels, strict=True)
+            ]
             self._val_map.update(preds, ground_truth)
         if self._val_segm is not None and seg_out is not None and masks is not None:
             image_size = (int(images.shape[-2]), int(images.shape[-1]))
@@ -1120,13 +1160,12 @@ class DetectionLitModule(LightningModule):
         rboxes = decode_rboxes(head_out.o2o_box, angles, anchor_points, strides)
         detections = o2o_rotated_topk(head_out.o2o_cls, rboxes, k=MAX_DETECTIONS)
         self._val_rotated_preds.extend(rotated_detections_to_predictions(detections.detach()))
+        host_rboxes = _host_split([target.rboxes.detach() for target in targets])
+        host_labels = _host_split([target.labels.detach() for target in targets])
+        host_difficult = _host_split([target.difficult.detach() for target in targets])
         self._val_rotated_targets.extend(
-            {
-                "rboxes": target.rboxes.detach().cpu(),
-                "labels": target.labels.detach().cpu().to(torch.long),
-                "difficult": target.difficult.detach().cpu(),
-            }
-            for target in targets
+            {"rboxes": rboxes, "labels": labels.to(torch.long), "difficult": difficult}
+            for rboxes, labels, difficult in zip(host_rboxes, host_labels, host_difficult, strict=True)
         )
 
     def _update_val_keypoints(
@@ -1175,7 +1214,10 @@ class DetectionLitModule(LightningModule):
         dense_points = decode_keypoints(raw_points, anchor_points, strides)
         gathered_points = gather_keypoints(dense_points, anchor_indices).cpu()
         cpu_detections = detections.cpu()
-        for index, target in enumerate(targets):
+        host_keypoints = _host_split([target.keypoints.detach() for target in targets])
+        host_visibility = _host_split([target.keypoint_vis.detach() for target in targets])
+        host_labels = _host_split([target.labels.detach() for target in targets])
+        for index in range(len(targets)):
             keep = cpu_detections[index, :, SCORE_COLUMN] > 0.0
             self._val_keypoint_preds.append(
                 {
@@ -1186,9 +1228,9 @@ class DetectionLitModule(LightningModule):
             )
             self._val_keypoint_targets.append(
                 {
-                    "keypoints": target.keypoints.detach().cpu(),
-                    "visibility": target.keypoint_vis.detach().cpu(),
-                    "labels": target.labels.detach().cpu().to(torch.long),
+                    "keypoints": host_keypoints[index],
+                    "visibility": host_visibility[index],
+                    "labels": host_labels[index].to(torch.long),
                 }
             )
 
@@ -1244,7 +1286,9 @@ class DetectionLitModule(LightningModule):
         cpu_detections = detections.cpu()
         preds = []
         ground_truth = []
-        for index, target in enumerate(targets):
+        host_labels = _host_split([target.labels for target in targets])
+        host_masks = _host_split([mask.to(torch.bool) for mask in masks])
+        for index in range(len(targets)):
             decoded = decode_instance_masks(
                 prototypes[index : index + 1],
                 kept_coefficients[index : index + 1],
@@ -1259,7 +1303,7 @@ class DetectionLitModule(LightningModule):
                     "masks": decoded[keep],
                 }
             )
-            ground_truth.append({"labels": target.labels.cpu(), "masks": masks[index].to(torch.bool).cpu()})
+            ground_truth.append({"labels": host_labels[index], "masks": host_masks[index]})
         self._val_segm.update(preds, ground_truth)
         self._val_segm_seen = True
 

@@ -35,7 +35,7 @@ from lucid_yolo.losses.dual_loss import DualLossOutput
 from lucid_yolo.models.heads.detect import decode_ltrb
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.ptl import DetectionLitModule, collate_detection, pad_targets, unpack_batch
-from lucid_yolo.ptl.module import _StepContext
+from lucid_yolo.ptl.module import _host_split, _StepContext
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -373,3 +373,49 @@ def test_val_map_metric_leaves_state_dict_unchanged() -> None:
     """The WP-077 val mAP metric adds no state_dict entries, so older checkpoints still load."""
     module = _tiny_module()
     assert not [key for key in module.state_dict() if key.startswith("_val_")]
+
+
+class TestHostSplit:
+    """Tests for ``_host_split``, WP-163's batched device-to-host target transfer."""
+
+    def test_returns_the_same_pieces_the_per_tensor_transfer_would(self) -> None:
+        """One concatenated transfer splits back into exactly the per-image tensors."""
+        tensors = [torch.rand(3, 4), torch.rand(0, 4), torch.rand(5, 4)]
+
+        split = _host_split(tensors)
+
+        assert len(split) == len(tensors)
+        assert all(torch.equal(got, want.cpu()) for got, want in zip(split, tensors, strict=True))
+
+    def test_preserves_dtype_and_trailing_shape(self) -> None:
+        """Labels stay integral and keypoints keep their point and coordinate axes."""
+        labels = [torch.tensor([1, 2]), torch.tensor([3])]
+        keypoints = [torch.rand(2, 7, 3), torch.rand(1, 7, 3)]
+
+        assert [piece.dtype for piece in _host_split(labels)] == [torch.int64, torch.int64]
+        assert [tuple(piece.shape) for piece in _host_split(keypoints)] == [(2, 7, 3), (1, 7, 3)]
+
+    def test_an_empty_batch_returns_no_pieces(self) -> None:
+        """No targets means no transfer to make, rather than a ``torch.cat`` on an empty list."""
+        assert _host_split([]) == ()
+
+    def test_every_image_empty_still_splits(self) -> None:
+        """A batch where no image carries a box yields one empty piece per image."""
+        split = _host_split([torch.zeros(0, 4), torch.zeros(0, 4)])
+
+        assert [tuple(piece.shape) for piece in split] == [(0, 4), (0, 4)]
+
+
+def test_validation_ground_truth_matches_the_per_target_transfer() -> None:
+    """WP-163's batched transfer feeds the mAP metric exactly what the per-target one did."""
+    module = _tiny_module()
+    images, targets = _synthetic_batch()
+    recorded: list[list[dict[str, Tensor]]] = []
+    module._val_map.update = lambda preds, ground_truth: recorded.append(ground_truth)  # type: ignore[method-assign]
+
+    module.validation_step((images, targets), 0)
+
+    assert len(recorded) == 1
+    for entry, target in zip(recorded[0], targets, strict=True):
+        assert torch.equal(entry["boxes"], target.boxes.cpu())
+        assert torch.equal(entry["labels"], target.labels.cpu())
