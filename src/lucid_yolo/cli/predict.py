@@ -287,12 +287,24 @@ def predict(
             comparison column, run on an ``obb`` checkpoint by the rotated suppression
             decoder (WP-091b), which compares rotated overlaps rather than upright ones.
         conf_threshold: Detections at or below this score are dropped, with their masks.
-        img_size: Letterbox side. Defaults per the checkpoint's task.
-        device: ``auto``, ``cpu``, ``mps`` or ``cuda``.
+            In ``[0, 1]``: a negative cut admits the decoders' score-zero padding rows,
+            which are not detections at any threshold and would reach the report as
+            phantom objects at plausible coordinates.
+        img_size: Letterbox side. Defaults per the checkpoint's task, and must be a
+            positive multiple of every head stride.
+        device: ``auto``, ``cpu``, ``mps`` or ``cuda``; a named backend this machine does
+            not have is refused rather than failing later inside ``.to(device)``.
         output: Write the JSON report here; the parent directory is created if absent.
 
     Returns:
         ``0``; a failure here raises rather than returning a code.
+
+    Raises:
+        ValueError: If ``device`` names a backend that is not available
+            (:func:`~lucid_yolo.eval.checkpoint.pick_device`), or if ``decoder``,
+            ``conf_threshold`` or ``img_size`` is outside its domain — the four entry
+            points of :mod:`lucid_yolo.predict` own that check, so this command and a
+            direct library call refuse the same values with the same message.
 
     Examples:
         >>> predict(Path("/nonexistent.ckpt"), Path("/none.jpg"))  # doctest: +IGNORE_EXCEPTION_DETAIL

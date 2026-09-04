@@ -68,14 +68,20 @@ class MuSGD(Optimizer):
         weight_decay: Decoupled weight-decay coefficient ``lambda``, applied to
             matrix parameters only (A12). Must be non-negative. Defaults to
             5e-4.
-        w_muon: Additive gain on the Muon branch. Defaults to 0.5.
-        w_sgd: Additive gain on the SGD branch. Defaults to 0.5.
+        w_muon: Additive gain on the Muon branch. Must be non-negative. Defaults
+            to 0.5.
+        w_sgd: Additive gain on the SGD branch. Must be non-negative. Defaults
+            to 0.5.
         ns_steps: Newton-Schulz iteration count for the orthogonalization
             (A5). Must be positive. Defaults to 5.
 
     Raises:
-        ValueError: If ``lr``, ``weight_decay``, or ``ns_steps`` is out of
-            range, or if ``momentum`` is not in ``[0, 1)``.
+        ValueError: If ``lr``, ``weight_decay``, ``w_muon``, ``w_sgd`` or
+            ``ns_steps`` is out of range, or if ``momentum`` is not in
+            ``[0, 1)``. The two gains are checked against NaN explicitly:
+            every comparison with NaN is false, so ``w_muon < 0.0`` alone
+            admits it, and a NaN gain constructs cleanly and then turns every
+            matrix parameter it touches into NaN on the first step (A7).
 
     Examples:
         >>> import torch
@@ -103,6 +109,10 @@ class MuSGD(Optimizer):
             raise ValueError(f"momentum must be in [0, 1), got {momentum}")
         if weight_decay < 0.0:
             raise ValueError(f"weight_decay must be non-negative, got {weight_decay}")
+        if math.isnan(w_muon) or w_muon < 0.0:
+            raise ValueError(f"w_muon must be non-negative, got {w_muon}")
+        if math.isnan(w_sgd) or w_sgd < 0.0:
+            raise ValueError(f"w_sgd must be non-negative, got {w_sgd}")
         if ns_steps < 1:
             raise ValueError(f"ns_steps must be positive, got {ns_steps}")
         defaults: dict[str, Any] = {

@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit gate for the EMA overlay every acceptance script loads through (WP-095, WP-174).
+"""Unit gate for the loader every acceptance script reads a checkpoint through (WP-095, WP-174, WP-171).
+
+Two surfaces of one module, each previously unexecuted: the EMA overlay that decides
+which weights a published number was measured with, and the device resolution that
+decides where it was measured. ``TestPickDevice`` and the availability case at the end
+belong to WP-171; everything above them to WP-174.
 
 :func:`~lucid_yolo.eval.checkpoint.load_eval_module` is the one door ``lucid-eval``,
 ``lucid-predict`` and the export path all read a checkpoint through, and ``--ema`` is on by
@@ -33,9 +38,11 @@ import pytest
 import torch
 
 from lucid_yolo.eval import checkpoint as loader
+from lucid_yolo.eval.checkpoint import available_devices, pick_device
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from torch import Tensor
@@ -293,3 +300,88 @@ class TestLoadEvalModuleWithEma:
         assert not loaded.training
         for name, tensor in _float_snapshot(loaded).items():
             assert bool((tensor == _SHADOW_VALUE).all()), f"{name} did not take the shadow"
+
+
+@pytest.fixture
+def no_accelerator(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Present a machine with neither CUDA nor MPS, whatever the host actually has."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+    yield
+
+
+@pytest.fixture
+def cuda_present(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Present a machine with CUDA and no MPS, whatever the host actually has."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+    yield
+
+
+class TestPickDevice:
+    """``auto`` resolves to the fastest backend present; a named one must be present."""
+
+    @pytest.mark.parametrize(
+        "requested",
+        [
+            pytest.param("cuda", id="cuda"),
+            pytest.param("cuda:1", id="indexed-cuda"),
+            pytest.param("mps", id="mps"),
+        ],
+    )
+    @pytest.mark.usefixtures("no_accelerator")
+    def test_a_named_backend_the_machine_lacks_is_refused(self, requested: str) -> None:
+        """The refusal names the request and what this machine does have.
+
+        Both halves are asserted because both are what the caller needs: the request
+        tells them which flag was wrong, and the alternatives tell them what to write
+        instead — a fact no stack trace from inside ``.to(device)`` carries. The indexed
+        spelling is included because availability is a property of the backend rather
+        than of the ordinal, and ``torch.device("cuda:1").type`` is ``"cuda"``.
+        """
+        with pytest.raises(ValueError, match="device") as refusal:
+            pick_device(requested)
+
+        assert requested in str(refusal.value)
+        assert "cpu" in str(refusal.value)
+
+    @pytest.mark.usefixtures("cuda_present")
+    def test_a_named_backend_that_is_present_is_passed_through(self) -> None:
+        """A request the machine can satisfy still wins over the auto-resolution.
+
+        The check is availability, not agreement: an operator naming a device is stating
+        a requirement, exactly as ``eval_backend="hotcoco"`` does, and this asserts the
+        guard did not turn that into a preference.
+        """
+        assert pick_device("cuda") == torch.device("cuda")
+
+    @pytest.mark.usefixtures("no_accelerator")
+    def test_cpu_is_accepted_on_a_machine_with_no_accelerator(self) -> None:
+        """``cpu`` is never refused: it is the one backend every machine has."""
+        assert pick_device("cpu") == torch.device("cpu")
+
+    @pytest.mark.usefixtures("no_accelerator")
+    def test_auto_still_falls_back_to_cpu(self) -> None:
+        """``auto`` answers rather than raising when no accelerator is present.
+
+        The guard sits on the explicit branch only, and this is the assertion that says
+        so: a run that names nothing must keep starting on whatever the machine has.
+        """
+        assert pick_device("auto") == torch.device("cpu")
+
+
+@pytest.mark.usefixtures("no_accelerator")
+def test_the_alternatives_offered_are_the_ones_that_would_be_accepted() -> None:
+    """Every name the refusal offers is a name :func:`pick_device` takes.
+
+    The message is only useful if its list is a list of *working* commands, so this
+    asserts the two agree rather than assuming they do: each offered spelling is fed back
+    in, and ``auto`` — which is a resolution rather than a device — is the one that must
+    be handled as such.
+    """
+    offered = available_devices()
+
+    resolved = {name: pick_device(name) for name in offered}
+
+    assert offered == ("cpu", "auto")
+    assert set(resolved.values()) == {torch.device("cpu")}

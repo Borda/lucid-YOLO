@@ -189,10 +189,22 @@ class TestConstructorValidation:
             pytest.param({"lr": 0.1, "momentum": -0.1}, r"momentum must be in \[0, 1\)", id="negative-momentum"),
             pytest.param({"lr": 0.1, "weight_decay": -1.0}, "weight_decay must be non-negative", id="negative-wd"),
             pytest.param({"lr": 0.1, "ns_steps": 0}, "ns_steps must be positive", id="zero-ns-steps"),
+            pytest.param({"lr": 0.1, "w_muon": -0.5}, "w_muon must be non-negative", id="negative-w-muon"),
+            pytest.param({"lr": 0.1, "w_sgd": -0.5}, "w_sgd must be non-negative", id="negative-w-sgd"),
+            pytest.param({"lr": 0.1, "w_muon": math.nan}, "w_muon must be non-negative", id="nan-w-muon"),
+            pytest.param({"lr": 0.1, "w_sgd": math.nan}, "w_sgd must be non-negative", id="nan-w-sgd"),
         ],
     )
     def test_invalid_hyperparameters_raise(self, kwargs: dict[str, float], match: str) -> None:
-        """Each out-of-range hyperparameter raises ValueError with a descriptive message."""
+        """Each out-of-range hyperparameter raises ValueError with a descriptive message.
+
+        The two gains joined the four originals at WP-171: they were the only
+        constructor arguments unchecked, so a negative gain -- which subtracts its
+        branch's update instead of adding it -- and a NaN gain -- which turns every
+        matrix parameter it touches into NaN on the first step -- both constructed
+        cleanly and failed, if at all, as a loss curve rather than as an error. NaN
+        needs the explicit case because ``w_muon < 0.0`` is false for it.
+        """
         param = torch.nn.Parameter(torch.randn(4, 4))
 
         with pytest.raises(ValueError, match=match):

@@ -74,7 +74,7 @@ from typing import TYPE_CHECKING, Literal
 
 import torch
 
-from lucid_yolo.assign.grid import anchor_grid
+from lucid_yolo.assign.grid import anchor_grid, require_grid_side
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.decode.common import (
     BOX_CORNERS,
@@ -90,6 +90,7 @@ from lucid_yolo.eval.annotations import read_letterboxed_image
 from lucid_yolo.eval.segment_decode import decode_instance_masks, masks_to_original
 from lucid_yolo.models.heads.keypoint import decode_keypoints
 from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
+from lucid_yolo.validate import require_in_range, require_one_of
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -156,6 +157,44 @@ _OBB_TASK = "obb"
 _KEYPOINTS_TASK = "keypoints"
 
 
+def _check_predict_arguments(decoder: DecodePath, conf_threshold: float, img_size: int) -> None:
+    """Refuse the three argument values every entry point below would otherwise answer plausibly for.
+
+    One helper rather than a guard per function: the same three arguments appear in all
+    four signatures, and a check written four times is four chances to later fix three of
+    them. It runs at the entry point rather than at the dispatch, because the dispatch is
+    a forward pass later — a canvas the strides do not divide fails inside the neck's
+    concatenation before the decode is reached at all.
+
+    ``decoder`` is the one whose violation is silent. Every dispatch below reads
+    ``decoder == "e2e"`` and takes the one-to-many branch for anything else, so ``"E2E"``,
+    ``"nms "`` or a typo answers with the other branch's boxes — and, in
+    :func:`predict_oriented`, the other branch's headings — with nothing in the output to
+    read as wrong. :data:`DECODE_PATHS` is the runtime spelling of the ``Literal`` that
+    protects statically-checked callers only, and this is the check it exists for.
+
+    Args:
+        decoder: The requested decode path.
+        conf_threshold: The requested confidence cut.
+        img_size: The requested letterbox side.
+
+    Raises:
+        ValueError: If ``decoder`` is not one of :data:`DECODE_PATHS`, if
+            ``conf_threshold`` is outside ``[0, 1]``, or if ``img_size`` is not a positive
+            multiple of every head stride.
+
+    Examples:
+        >>> _check_predict_arguments("e2e", 0.25, 640)  # a usable trio: returns nothing
+        >>> _check_predict_arguments("E2E", 0.25, 640)
+        Traceback (most recent call last):
+            ...
+        ValueError: decoder must be one of ('e2e', 'nms'); got 'E2E'
+    """
+    require_one_of("decoder", decoder, DECODE_PATHS)
+    require_in_range("conf_threshold", conf_threshold, 0.0, 1.0)
+    require_grid_side("img_size", img_size)
+
+
 def predict_image(
     module: DetectionLitModule,
     image: Path,
@@ -191,7 +230,9 @@ def predict_image(
         ``class`` is a contiguous class index (see the module docstring).
 
     Raises:
-        ValueError: If the module's task is not ``detect``, naming the task it is.
+        ValueError: If the module's task is not ``detect``, naming the task it is; or if
+            ``decoder``, ``conf_threshold`` or ``img_size`` is outside its domain, per
+            :func:`_check_predict_arguments`.
 
     Examples:
         >>> callable(predict_image)  # a real call needs a checkpoint and an image file
@@ -204,6 +245,7 @@ def predict_image(
             f"beside its boxes, and an oriented one through predict_oriented, which returns rotated "
             f"boxes rather than the axis-aligned corners this function's tuple carries."
         )
+    _check_predict_arguments(decoder, conf_threshold, img_size)
     run_on = torch.device("cpu") if device is None else device
     letterbox = Letterbox(img_size)
     canvas_image, orig_size = read_letterboxed_image(image, letterbox)
@@ -307,8 +349,10 @@ def predict_segmentation(
         ``(N, orig_height, orig_width)`` boolean masks, row-aligned.
 
     Raises:
-        ValueError: If the module's task is not ``segment``, naming the task it is; or if
-            a module claiming that task has no mask coefficients to decode.
+        ValueError: If the module's task is not ``segment``, naming the task it is; if a
+            module claiming that task has no mask coefficients to decode; or if
+            ``decoder``, ``conf_threshold`` or ``img_size`` is outside its domain, per
+            :func:`_check_predict_arguments`.
 
     Examples:
         >>> callable(predict_segmentation)  # a real call needs a checkpoint and an image file
@@ -320,6 +364,7 @@ def predict_segmentation(
             f"A detection checkpoint goes through predict_image, which has no masks to return, and an "
             f"oriented one through predict_oriented, which has an angle instead of them."
         )
+    _check_predict_arguments(decoder, conf_threshold, img_size)
     run_on = torch.device("cpu") if device is None else device
     letterbox = Letterbox(img_size)
     canvas_image, orig_size = read_letterboxed_image(image, letterbox)
@@ -488,9 +533,10 @@ def predict_oriented(
         contiguous class index (see the module docstring).
 
     Raises:
-        ValueError: If the module's task is not ``obb``, naming the task it is; or if a
+        ValueError: If the module's task is not ``obb``, naming the task it is; if a
             module claiming the task emits no angles on the branch the selected decoder
-            reads.
+            reads; or if ``decoder``, ``conf_threshold`` or ``img_size`` is outside its
+            domain, per :func:`_check_predict_arguments`.
 
     Examples:
         >>> callable(predict_oriented)  # a real call needs a checkpoint and an image file
@@ -503,6 +549,7 @@ def predict_oriented(
             f"predict_segmentation; both answer with axis-aligned corners, which is what a head "
             f"without an angle stem can say."
         )
+    _check_predict_arguments(decoder, conf_threshold, img_size)
     run_on = torch.device("cpu") if device is None else device
     letterbox = Letterbox(img_size)
     canvas_image, orig_size = read_letterboxed_image(image, letterbox)
@@ -661,8 +708,10 @@ def predict_keypoints(
         ``(N, K, 2)`` point coordinates, row-aligned.
 
     Raises:
-        ValueError: If the module's task is not ``keypoints``, naming the task it is; or
-            if a module claiming that task emits no points on the selected branch.
+        ValueError: If the module's task is not ``keypoints``, naming the task it is; if
+            a module claiming that task emits no points on the selected branch; or if
+            ``decoder``, ``conf_threshold`` or ``img_size`` is outside its domain, per
+            :func:`_check_predict_arguments`.
 
     Examples:
         ```pycon
@@ -678,6 +727,7 @@ def predict_keypoints(
             f"segmentation one through predict_segmentation, which has masks instead of them, and an "
             f"oriented one through predict_oriented, which has an angle."
         )
+    _check_predict_arguments(decoder, conf_threshold, img_size)
     run_on = torch.device("cpu") if device is None else device
     letterbox = Letterbox(img_size)
     canvas_image, orig_size = read_letterboxed_image(image, letterbox)

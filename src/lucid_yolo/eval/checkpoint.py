@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
     from torch import Tensor
 
-__all__ = ["load_eval_module", "pick_device"]
+__all__ = ["available_devices", "load_eval_module", "pick_device"]
 
 #: Class name identifying the EMA callback's entry in a checkpoint's ``callbacks`` dict.
 #: The key Lightning writes is the callback's ``state_key``, which carries the callback's
@@ -86,7 +86,15 @@ def load_eval_module(checkpoint: Path, *, use_ema: bool) -> tuple[DetectionLitMo
 
 
 def pick_device(requested: str) -> torch.device:
-    """Resolve ``auto`` to the fastest available backend, else pass ``requested`` through.
+    """Resolve ``auto`` to the fastest available backend, else check ``requested`` exists here.
+
+    A named backend is held to the same availability question ``auto`` asks, rather than
+    passed through (WP-171). ``--device cuda`` on a machine with no CUDA used to be
+    accepted and then fail several minutes later, inside the first ``.to(device)`` — after
+    the checkpoint was loaded and, for a long run, after the annotations were parsed —
+    with a message about a tensor rather than about the flag. The refusal names the
+    request and what this machine does have, because the useful next command is the one
+    the caller cannot guess from a stack trace.
 
     Args:
         requested: ``"auto"`` or any string :class:`torch.device` accepts.
@@ -94,17 +102,69 @@ def pick_device(requested: str) -> torch.device:
     Returns:
         The chosen device.
 
+    Raises:
+        ValueError: If ``requested`` names a backend this machine cannot run on.
+
     Examples:
         >>> pick_device("cpu")
         device(type='cpu')
+        >>> pick_device("auto").type in available_devices()
+        True
     """
     if requested != "auto":
-        return torch.device(requested)
+        device = torch.device(requested)
+        if not _is_available(device):
+            raise ValueError(
+                f"device={requested!r} names a {device.type} backend this machine does not have; "
+                f"available here: {available_devices()}"
+            )
+        return device
     if torch.cuda.is_available():
         return torch.device("cuda")
     if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
+
+
+def available_devices() -> tuple[str, ...]:
+    """Name the backends this machine can actually run on, fastest first.
+
+    Probed on every call rather than resolved once at import: a device string is checked
+    where it enters, and a module-level snapshot would answer for the machine that
+    imported this module rather than for the one running now.
+
+    Returns:
+        The usable ``--device`` spellings, ending in ``"cpu"`` — always available — and
+        ``"auto"``, which is what a caller who does not want to know should pass.
+
+    Examples:
+        >>> available_devices()[-2:]
+        ('cpu', 'auto')
+    """
+    names = ["cuda"] if torch.cuda.is_available() else []
+    if torch.backends.mps.is_available():
+        names.append("mps")
+    return (*names, "cpu", "auto")
+
+
+def _is_available(device: torch.device) -> bool:
+    """Report whether ``device``'s backend can be run on here.
+
+    Only the two accelerators this project ships support for are probed. Anything else
+    — ``cpu``, and whatever other type :class:`torch.device` accepts — passes through
+    unjudged, because a check that guessed at a backend nobody here tests would refuse
+    working configurations rather than protect any.
+
+    Examples:
+        >>> import torch
+        >>> _is_available(torch.device("cpu"))
+        True
+    """
+    if device.type == "cuda":
+        return bool(torch.cuda.is_available())
+    if device.type == "mps":
+        return bool(torch.backends.mps.is_available())
+    return True
 
 
 def _ema_state_key(callbacks: dict[str, dict[str, object]]) -> str:

@@ -10,6 +10,17 @@ script does and drive the two new commands end to end.
 ``lucid-eval``'s dispatch is asserted on both branches with the protocol functions
 stubbed: what is under test is that the checkpoint's own task chooses the protocol and
 supplies the per-task defaults, not the evaluation itself, which its own suites cover.
+
+The refusal group (WP-171) is the other half of that surface: what a command does with a
+value its annotation admits and its arithmetic cannot use. Each case asserts the message
+names the flag the caller typed, because the flag is the only part of the refusal they
+can act on -- a ``ValueError`` reading "invalid value" leaves a caller re-reading their
+own command line. The values are the ones that used to answer *plausibly* rather than
+fail: ``--limit -5`` scored every image but the last five, ``--batch_size 0`` reached a
+``ZeroDivisionError`` three frames down, ``--img_size 641`` crashed inside the neck's
+concatenation, a mis-spelled ``--decoder`` returned the other branch's boxes, a negative
+``--conf_threshold`` admitted the decoders' score-zero padding rows as detections, and an
+unknown task was scored as detection.
 """
 
 from __future__ import annotations
@@ -18,11 +29,13 @@ import importlib
 import json
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
 import torch
 
+from lucid_yolo.assign.grid import HEAD_STRIDES
 from lucid_yolo.cli import data as data_cli
 from lucid_yolo.cli import eval as eval_cli
 from lucid_yolo.cli import predict as predict_cli
@@ -271,3 +284,88 @@ def test_the_deprecated_download_alias_is_gone() -> None:
     assert "lucid-download" not in _declared_scripts()
     assert not hasattr(download, "main")
     assert "main" not in download.__all__
+
+
+@pytest.mark.parametrize(
+    ("argument", "flag"),
+    [
+        pytest.param("--limit=-5", "limit", id="negative-limit"),
+        pytest.param("--batch_size=0", "batch_size", id="zero-batch-size"),
+        pytest.param("--img_size=641", "img_size", id="canvas-off-the-stride"),
+    ],
+)
+def test_eval_refuses_an_argument_outside_its_domain(tmp_path: Path, argument: str, flag: str) -> None:
+    """``lucid-eval`` refuses each unusable flag by name, before it opens the checkpoint.
+
+    The checkpoint path does not exist and that is the assertion's other half: the
+    refusal has to come from the flag rather than from the first thing downstream to
+    trip over it, or the caller reads a ``FileNotFoundError`` and never learns which of
+    their flags was the problem. Each value here used to be accepted: ``-5`` is truthy,
+    so ``images[:-5]`` scored every image *but* the last five while the banner printed
+    the truncated count as the request; ``0`` reached ``math.ceil(len(images) / 0)``; and
+    ``641`` reached the neck, which concatenates an upsampled P5 of width 42 with a P4 of
+    width 41.
+    """
+    with pytest.raises(ValueError, match=flag):
+        eval_cli.main(["--checkpoint", str(tmp_path / "absent.ckpt"), "--data_root", str(tmp_path), argument])
+
+
+def test_eval_refuses_a_task_it_has_no_protocol_for(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A checkpoint task this command implements nothing for is named, not scored as detection.
+
+    The dispatch branches for ``obb`` and ``keypoints`` and ends in the detection
+    protocol, so every other task value fell through and was *scored* — a report carrying
+    detection's numbers under the checkpoint's own task name, which nothing in the file
+    contradicts. The module is stubbed rather than saved, because
+    :class:`~lucid_yolo.ptl.module.DetectionLitModule` refuses an unknown task at
+    construction: the gap was only ever reachable through a checkpoint this repository
+    cannot write, which is exactly why nothing caught it.
+    """
+    monkeypatch.setattr(eval_cli, "load_eval_module", lambda *_args, **_kwargs: (SimpleNamespace(task="panoptic"), {}))
+
+    with pytest.raises(ValueError, match="task") as refusal:
+        eval_cli.main(["--checkpoint", str(tmp_path / "absent.ckpt"), "--data_root", str(tmp_path)])
+
+    assert "panoptic" in str(refusal.value)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "flag"),
+    [
+        pytest.param({"decoder": "E2E"}, "decoder", id="decoder-spelling"),
+        pytest.param({"decoder": "nms "}, "decoder", id="decoder-trailing-space"),
+        pytest.param({"conf_threshold": -0.1}, "conf_threshold", id="negative-threshold"),
+        pytest.param({"conf_threshold": 1.5}, "conf_threshold", id="threshold-above-one"),
+        pytest.param({"img_size": 641}, "img_size", id="canvas-off-the-stride"),
+    ],
+)
+def test_predict_refuses_an_argument_outside_its_domain(tmp_path: Path, overrides: dict[str, Any], flag: str) -> None:
+    """``lucid-predict`` refuses each unusable flag by name, before it reads the image.
+
+    The refusal belongs to the four entry points of :mod:`lucid_yolo.predict` rather than
+    to this command — the same ownership the task refusal already has, so a direct
+    library call and a command line cannot disagree about which values are usable — and
+    this asserts it arrives through the command with the flag's own spelling in it.
+    ``"E2E"`` and ``"nms "`` are the cases worth naming: both used to select the
+    one-to-many branch by falling through ``decoder == "e2e"``, answering with another
+    path's boxes and, for an oriented checkpoint, another path's headings.
+    """
+    checkpoint = _write_checkpoint("detect", tmp_path / "detect.ckpt")
+
+    with pytest.raises(ValueError, match=flag):
+        predict_cli.predict(checkpoint=checkpoint, image=tmp_path / "image.jpg", ema=False, **overrides)
+
+
+def test_the_per_task_defaults_are_themselves_usable_values() -> None:
+    """Both default tables cover the same tasks, and every value in them would be accepted.
+
+    The task guard reads its vocabulary off :data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE`,
+    and the resolved defaults skip the flag checks by construction — a caller who names
+    nothing is trusting these two tables. That makes the tables the one place an unusable
+    value could still reach a protocol, so they are pinned here rather than checked at
+    every call: a task added to one table alone, or a side the strides do not divide,
+    fails in this suite instead of in a queued run.
+    """
+    assert eval_cli.DEFAULT_IMG_SIZE.keys() == eval_cli.DEFAULT_BATCH_SIZE.keys()
+    assert {side % max(HEAD_STRIDES) for side in eval_cli.DEFAULT_IMG_SIZE.values()} == {0}
+    assert min(eval_cli.DEFAULT_BATCH_SIZE.values()) >= 1

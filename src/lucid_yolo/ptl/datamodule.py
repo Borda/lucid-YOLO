@@ -100,6 +100,7 @@ from pytorch_lightning import LightningDataModule
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, get_worker_info
 
+from lucid_yolo.assign.grid import require_grid_side
 from lucid_yolo.data.affine import RandomAffine
 from lucid_yolo.data.augment import HorizontalFlip, HSVJitter
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
@@ -859,7 +860,9 @@ class DetectionDataModule(LightningDataModule):
             single in-process generator).
         variant: Model size letter selecting the augmentation strength policy
             (``"n"``…``"x"``); validated at construction.
-        img_size: Square letterbox side for every emitted sample. Defaults to 640.
+        img_size: Square letterbox side for every emitted sample. Defaults to 640, and
+            must be a positive multiple of every head stride — validated at construction,
+            for the reason ``variant`` is.
         train_images_dir: Override for the train images directory. Defaults to
             whichever of ``data_root/"train2017"`` and ``data_root/"train"``
             :func:`~lucid_yolo.data.layout.resolve_split` finds, so a tiled
@@ -971,6 +974,13 @@ class DetectionDataModule(LightningDataModule):
         self._rotated_targets = bool(rotated_targets)
         self._keypoint_targets = bool(keypoint_targets)
         self._batch_size = int(batch_size)
+        # Checked here because this is where the side enters a run: every image the two
+        # loaders emit is letterboxed to it, and the head divides that canvas by its own
+        # strides. A side the strides do not divide floors to a feature map the neck
+        # cannot concatenate, which surfaces as a shape error inside the first training
+        # step -- an hour into a queued run, and about a tensor rather than about the YAML
+        # key that set it (WP-171).
+        require_grid_side("img_size", img_size)
         self._img_size = int(img_size)
         self._prefetch_factor = int(prefetch_factor)
         workers_were_chosen_here = num_workers is None

@@ -10,7 +10,7 @@ coordinates are enumerated by hand, not lifted from any reference.
 import pytest
 import torch
 
-from lucid_yolo.assign import make_anchor_points
+from lucid_yolo.assign import anchor_grid, make_anchor_points
 
 
 def test_single_level_centers_are_row_major() -> None:
@@ -51,3 +51,41 @@ def test_length_mismatch_raises() -> None:
     """Unequal feature_sizes / strides lengths are rejected."""
     with pytest.raises(ValueError, match="equal length"):
         make_anchor_points([(2, 2)], [4, 8])
+
+
+@pytest.mark.parametrize(
+    "canvas",
+    [
+        pytest.param((100, 100), id="floors-to-96"),
+        pytest.param((641, 641), id="one-past-640"),
+        pytest.param((640, 641), id="width-only"),
+        pytest.param((0, 640), id="empty-height"),
+        pytest.param((-640, 640), id="negative-height"),
+    ],
+)
+def test_a_canvas_the_strides_do_not_divide_is_refused(canvas: tuple[int, int]) -> None:
+    """A canvas that does not tile every level raises instead of flooring silently (WP-171).
+
+    The docstring has declared the precondition since WP-025 and nothing checked it, so
+    the floor division answered anyway: ``(100, 100)`` returned the grid of a 96 px
+    canvas, and ``(641, 641)`` returned the *same 8400 anchors as 640* — a grid pairing
+    every prediction with the wrong pixel, with no error anywhere to read as wrong. The
+    two negative sides are separate cases because divisibility alone does not refuse
+    them: ``0 % 32`` and ``-640 % 32`` are both zero, so positivity is its own condition.
+    """
+    with pytest.raises(ValueError, match="canvas"):
+        anchor_grid(canvas, torch.device("cpu"))
+
+
+def test_the_640_canvas_the_evaluators_use_still_builds_its_8400_anchors() -> None:
+    """The guard leaves the deployed canvas untouched, at the size every protocol runs.
+
+    A precondition added to a function four call sites already depend on is worth
+    asserting from the accepting side too: the refusal above is only correct if 640 —
+    what both COCO evaluators, single-image inference and the export graph pass — is
+    still built, and built identically.
+    """
+    points, strides = anchor_grid((640, 640), torch.device("cpu"))
+
+    assert points.shape == (8400, 2)
+    assert sorted(set(strides.tolist())) == [8.0, 16.0, 32.0]

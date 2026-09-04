@@ -20,7 +20,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-__all__ = ["HEAD_STRIDES", "anchor_grid", "make_anchor_points"]
+__all__ = ["HEAD_STRIDES", "anchor_grid", "make_anchor_points", "require_grid_canvas", "require_grid_side"]
 
 #: Column count of an ``(x, y)`` anchor point.
 _POINT_DIM = 2
@@ -91,6 +91,83 @@ def make_anchor_points(
     return torch.cat(points_per_level, dim=0), torch.cat(strides_per_level, dim=0)
 
 
+def _fits_strides(side: int, strides: tuple[int, ...]) -> bool:
+    """Report whether one canvas side tiles every level exactly.
+
+    Positivity is a separate condition rather than a consequence of the remainder:
+    ``0 % 32`` and ``-32 % 32`` are both zero, so divisibility alone admits an empty
+    canvas and a negative one.
+
+    Examples:
+        >>> _fits_strides(640, HEAD_STRIDES), _fits_strides(641, HEAD_STRIDES)
+        (True, False)
+        >>> _fits_strides(0, HEAD_STRIDES)
+        False
+    """
+    return side >= 1 and not any(side % stride for stride in strides)
+
+
+def require_grid_side(name: str, side: int, strides: tuple[int, ...] = HEAD_STRIDES) -> None:
+    """Refuse a letterbox side the head's levels cannot tile, naming the flag it arrived as.
+
+    The rule is one line of arithmetic and the reason it is worth a public function is
+    what a violation does instead of failing: at 641 px the stride-32 level floors to 20
+    cells covering 640 px, its upsampling doubles that to 40 against P4's 41, and
+    :meth:`~lucid_yolo.models.neck.DetectionNeck.forward` concatenates the two — so the
+    refusal has to happen at the flag, before a model runs, rather than inside a tensor
+    op several frames down. :func:`anchor_grid` is the second half of the same guard,
+    for the callers that have a canvas rather than a flag.
+
+    Args:
+        name: The argument or flag spelling the caller used (``"img_size"`` at every
+            command), quoted back in the message.
+        side: The letterbox side in pixels.
+        strides: Per-level input-pixel strides the side must tile. Defaults to
+            :data:`HEAD_STRIDES`.
+
+    Raises:
+        ValueError: If ``side`` is not positive and divisible by every stride.
+
+    Examples:
+        >>> require_grid_side("img_size", 640)  # a usable canvas: returns nothing
+        >>> require_grid_side("img_size", 641)
+        Traceback (most recent call last):
+            ...
+        ValueError: img_size must be positive and divisible by every head stride (8, 16, 32); got 641
+    """
+    if not _fits_strides(side, strides):
+        raise ValueError(f"{name} must be positive and divisible by every head stride {strides}; got {side}")
+
+
+def require_grid_canvas(canvas: tuple[int, int], strides: tuple[int, ...] = HEAD_STRIDES) -> None:
+    """Refuse a ``(height, width)`` canvas the head's levels cannot tile.
+
+    :func:`require_grid_side` for callers holding a canvas instead of a flag — both
+    axes, one message, so a canvas that is rectangular by accident is refused on the axis
+    that is wrong rather than on the first one checked.
+
+    Args:
+        canvas: Input canvas ``(height, width)`` in pixels.
+        strides: Per-level input-pixel strides both sides must tile. Defaults to
+            :data:`HEAD_STRIDES`.
+
+    Raises:
+        ValueError: If either side is not positive and divisible by every stride.
+
+    Examples:
+        >>> require_grid_canvas((640, 640))  # a usable canvas: returns nothing
+        >>> require_grid_canvas((100, 100))
+        Traceback (most recent call last):
+            ...
+        ValueError: canvas must be positive (height, width) divisible by every head stride (8, 16, 32); got (100, 100)
+    """
+    height, width = canvas
+    if not (_fits_strides(height, strides) and _fits_strides(width, strides)):
+        raise ValueError(
+            f"canvas must be positive (height, width) divisible by every head stride {strides}; got {canvas}"
+        )
+
+
 def anchor_grid(
     canvas: tuple[int, int],
     device: torch.device,
@@ -110,6 +187,11 @@ def anchor_grid(
     rectangular case is the general one: a square canvas is ``(s, s)``, while a square
     signature cannot express a letterbox that is not square.
 
+    The divisibility this docstring has always declared is now checked (WP-171). The
+    floor division below is silent about a canvas that does not satisfy it: at 100 px it
+    returns the grid of a 96 px canvas, and at 641 px the same 8400 anchors as 640 — a
+    grid that pairs every prediction with the wrong pixel, and no error anywhere.
+
     Args:
         canvas: Input canvas ``(height, width)`` in pixels, each divisible by every
             stride.
@@ -122,6 +204,10 @@ def anchor_grid(
         The ``(A, 2)`` anchor centres in canvas pixels and their ``(A,)`` strides, both
         on ``device``.
 
+    Raises:
+        ValueError: If either canvas side is not positive and divisible by every stride,
+            per :func:`require_grid_canvas`.
+
     Examples:
         >>> import torch
         >>> points, strides = anchor_grid((64, 64), torch.device("cpu"))
@@ -129,7 +215,12 @@ def anchor_grid(
         torch.Size([84, 2])
         >>> sorted(set(strides.tolist()))
         [8.0, 16.0, 32.0]
+        >>> anchor_grid((641, 641), torch.device("cpu"))
+        Traceback (most recent call last):
+            ...
+        ValueError: canvas must be positive (height, width) divisible by every head stride (8, 16, 32); got (641, 641)
     """
+    require_grid_canvas(canvas, strides)
     height, width = canvas
     feature_sizes = [(height // stride, width // stride) for stride in strides]
     points, stride_per_anchor = make_anchor_points(feature_sizes, list(strides))

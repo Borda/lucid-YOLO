@@ -36,9 +36,11 @@ from typing import TYPE_CHECKING
 
 from jsonargparse import auto_cli
 
+from lucid_yolo.assign.grid import require_grid_side
 from lucid_yolo.eval import detect_eval, pose_eval, rotated_eval
 from lucid_yolo.eval.checkpoint import load_eval_module
 from lucid_yolo.eval.coco_eval import hotcoco_available
+from lucid_yolo.validate import require_at_least, require_one_of
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -91,6 +93,47 @@ def _resolve_eval_backend(requested: str) -> tuple[str, str | None]:
     return ("hotcoco", None) if available else ("faster_coco_eval", reason)
 
 
+def _check_arguments(batch_size: int | None, img_size: int | None, limit: int) -> None:
+    """Refuse the argument values the three protocols below would otherwise run on.
+
+    One check at the single entry point all three pass through, rather than one per
+    protocol: :mod:`~lucid_yolo.eval.detect_eval`, :mod:`~lucid_yolo.eval.pose_eval` and
+    :mod:`~lucid_yolo.eval.rotated_eval` each read ``limit`` and ``batch_size`` in their
+    own idiom, and three copies of one rule are three chances for one to be edited alone.
+    What those idioms do with a value outside its domain is why this is not merely tidy.
+    ``if limit:`` is true for ``-5``, so ``images[:-5]`` scores every image *but* the last
+    five while the banner prints the truncated count as though it were the request; on the
+    oriented path ``len(predictions) >= -5`` holds after the first batch, so the run breaks
+    out immediately and reports a number from a handful of tiles; and
+    ``math.ceil(len(images) / 0)`` raises from inside the progress-bar construction rather
+    than at the flag that caused it.
+
+    ``None`` is not a value here but "unset": both defaults are resolved from the
+    checkpoint's own task once it is known, out of tables this module owns.
+
+    Args:
+        batch_size: The caller's ``batch_size``, or ``None`` to take the task default.
+        img_size: The caller's ``img_size``, or ``None`` to take the task default.
+        limit: The caller's ``limit``; ``0`` scores everything.
+
+    Raises:
+        ValueError: If ``limit`` is negative, if ``batch_size`` is below ``1``, or if
+            ``img_size`` is not a positive multiple of every head stride.
+
+    Examples:
+        >>> _check_arguments(32, 640, 0)  # a usable trio: returns nothing
+        >>> _check_arguments(0, None, 0)
+        Traceback (most recent call last):
+            ...
+        ValueError: batch_size must be a number >= 1; got 0
+    """
+    require_at_least("limit", limit, 0)
+    if batch_size is not None:
+        require_at_least("batch_size", batch_size, 1)
+    if img_size is not None:
+        require_grid_side("img_size", img_size)
+
+
 def evaluate(
     checkpoint: Path,
     data_root: Path,
@@ -133,16 +176,36 @@ def evaluate(
     Returns:
         The protocol's exit code.
 
+    Raises:
+        ValueError: If ``limit``, ``batch_size`` or ``img_size`` is outside its domain
+            (:func:`_check_arguments`), or if the checkpoint's task is not one this
+            command implements a protocol for.
+
     Examples:
         >>> evaluate(Path("/nonexistent.ckpt"), Path("/data"))  # doctest: +IGNORE_EXCEPTION_DETAIL
         Traceback (most recent call last):
         FileNotFoundError: ...
+
+        The arguments are checked before the checkpoint is opened, so a refused flag
+        costs nothing and names itself rather than the file it never got to:
+
+        >>> evaluate(Path("/nonexistent.ckpt"), Path("/data"), limit=-5)
+        Traceback (most recent call last):
+            ...
+        ValueError: limit must be a number >= 0; got -5
     """
+    _check_arguments(batch_size, img_size, limit)
     module, info = load_eval_module(checkpoint, use_ema=ema)
     task = str(module.task)
+    # Refused rather than defaulted: the dispatch below ends in the detection protocol, so
+    # a task this command implements nothing for would be *scored* as detection — a report
+    # carrying one protocol's numbers under another's name, which is unfalsifiable from the
+    # file. The four are read off the defaults table rather than restated here, so a fifth
+    # task arrives with its own defaults or does not arrive at all.
+    require_one_of("task", task, tuple(DEFAULT_IMG_SIZE))
     info["task"] = task
-    resolved_img_size = DEFAULT_IMG_SIZE.get(task, 640) if img_size is None else img_size
-    resolved_batch_size = DEFAULT_BATCH_SIZE.get(task, 32) if batch_size is None else batch_size
+    resolved_img_size = DEFAULT_IMG_SIZE[task] if img_size is None else img_size
+    resolved_batch_size = DEFAULT_BATCH_SIZE[task] if batch_size is None else batch_size
     if task == "obb":
         return rotated_eval.run(
             module,

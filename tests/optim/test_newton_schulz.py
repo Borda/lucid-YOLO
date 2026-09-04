@@ -167,7 +167,7 @@ class TestEdgeCases:
 
 
 class TestInputValidation:
-    """Non-2D inputs are rejected."""
+    """Non-2D inputs and step counts that run no iteration are rejected."""
 
     @pytest.mark.parametrize(
         "shape",
@@ -182,3 +182,38 @@ class TestInputValidation:
 
         with pytest.raises(ValueError, match="2D matrix"):
             orthogonalize(matrix)
+
+    @pytest.mark.parametrize(
+        "steps",
+        [
+            pytest.param(0, id="zero"),
+            pytest.param(-1, id="negative"),
+        ],
+    )
+    def test_steps_below_one_raises(self, steps: int) -> None:
+        """A step count that runs no iteration raises ValueError naming ``steps``.
+
+        ``range(0)`` and ``range(-1)`` are both empty, so the loop was skipped and the
+        Frobenius-normalized *input* came back wearing this function's name: a matrix
+        whose singular values are the input's rescaled, not driven anywhere near 1.
+        :class:`~lucid_yolo.optim.musgd.MuSGD` has always refused ``ns_steps < 1``, so
+        the guard existed only on the caller's side of a public function (WP-171).
+        """
+        matrix = torch.randn(16, 16)
+
+        with pytest.raises(ValueError, match="steps"):
+            orthogonalize(matrix, steps=steps)
+
+    def test_a_single_step_still_moves_the_singular_values(self) -> None:
+        """``steps=1`` is accepted and is not a no-op, which is what makes 1 the boundary.
+
+        The refusal above is a claim about where the usable range starts; asserting the
+        first accepted value does something distinguishes that boundary from an
+        off-by-one that would have rejected a working configuration.
+        """
+        matrix = _random_conditioned(16, 16, torch.float32)
+
+        result = orthogonalize(matrix, steps=1)
+
+        assert not torch.allclose(_singular_values(result), _singular_values(matrix))
+        assert not torch.isnan(result).any()

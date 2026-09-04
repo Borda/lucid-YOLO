@@ -50,7 +50,12 @@ def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
         ``matrix`` (i.e. an approximation of ``U V^T``).
 
     Raises:
-        ValueError: If ``matrix`` is not 2-dimensional.
+        ValueError: If ``matrix`` is not 2-dimensional, or if ``steps`` is below 1.
+            ``steps=0`` skips the loop entirely and returns the Frobenius-normalized
+            input, whose singular values are whatever the input's were rescaled -- a
+            matrix that is not orthogonal and carries nothing saying so. The caller in
+            :class:`~lucid_yolo.optim.musgd.MuSGD` has always refused ``ns_steps < 1``;
+            this function is public and had been relying on it.
 
     Examples:
         The iteration does not produce an exactly orthogonal matrix — with these
@@ -65,9 +70,21 @@ def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
         torch.Size([64, 64])
         >>> bool(torch.linalg.svdvals(q).max() < 1.5)  # never blown up
         True
+
+        A step count below one runs no iteration at all, so it is refused rather than
+        answering with a normalized copy of the input:
+
+        >>> orthogonalize(torch.randn(4, 4), steps=0)
+        Traceback (most recent call last):
+            ...
+        ValueError: orthogonalize needs steps >= 1 to iterate, got steps=0
     """
     if matrix.ndim != 2:
         msg = f"orthogonalize expects a 2D matrix, got a {matrix.ndim}D tensor"
+        raise ValueError(msg)
+
+    if steps < 1:
+        msg = f"orthogonalize needs steps >= 1 to iterate, got steps={steps}"
         raise ValueError(msg)
 
     in_dtype = matrix.dtype
