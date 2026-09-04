@@ -159,6 +159,33 @@ def test_conf_threshold_zeroes_low_entries_without_reshaping() -> None:
     assert torch.equal(filtered[..., 5], unfiltered[..., 5])  # classes untouched
 
 
+def test_the_scored_rows_are_a_leading_run() -> None:
+    """Rows with a live score are always a prefix, whatever zeroed them.
+
+    Three separate mechanisms can leave a zero score in the output, and all three
+    are suffix operations: the ranking is score-descending, ``pad_detections``
+    appends its zero rows after the ranked ones, and a confidence threshold cuts a
+    descending column from some point on. A consumer may therefore replace the
+    boolean score mask with a count and a slice, which is what
+    :meth:`~lucid_yolo.ptl.module.DetectionLitModule._update_val_segm` does to
+    avoid copying a whole mask stack (WP-164). Nothing else states the property, so
+    a reordering of the decode would otherwise break that caller silently.
+    """
+    torch.manual_seed(0)
+    points, strides = _grid(4, 4, stride=8)  # 16 anchors
+    cls_logits = torch.randn(3, points.shape[0], 2)
+    raw_ltrb = torch.rand(3, points.shape[0], 4)
+    # k above the anchor count, so zero-row padding and the threshold both apply.
+    decoder = TopKDecoder(k=24, conf_threshold=0.5)
+
+    detections = decoder(cls_logits, raw_ltrb, points, strides)
+
+    for image in detections:
+        live = image[:, 4] > 0.0
+        assert 0 < int(live.sum()) < live.shape[0]  # neither all-live nor all-zero
+        assert torch.equal(live.nonzero().flatten(), torch.arange(int(live.sum())))
+
+
 def test_inverse_letterbox_known_geometry() -> None:
     """A box in canvas coords maps back to its known original-image coords."""
     # A 2x4 original letterboxed into a 4x4 canvas gains 1px top/bottom pads:

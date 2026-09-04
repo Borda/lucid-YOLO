@@ -1262,6 +1262,9 @@ class DetectionLitModule(LightningModule):
 
         Masks are decoded one image at a time: every kept detection materialises a
         full-grid float map, and a whole batch at once is a needless memory spike.
+        Only the surviving detections are decoded — the padding rows a fixed-length
+        decoder pads with are excluded before the decode rather than discarded after
+        it, which is sound because they are always a suffix (see the loop's comment).
 
         Args:
             seg_out: The segmentation forward output of this batch.
@@ -1289,18 +1292,26 @@ class DetectionLitModule(LightningModule):
         host_labels = _host_split([target.labels for target in targets])
         host_masks = _host_split([mask.to(torch.bool) for mask in masks])
         for index in range(len(targets)):
+            # The surviving rows are a prefix, so a count is all the decode needs.
+            # `TopKDecoder` ranks score-descending, `pad_detections` appends its zero
+            # rows after the ranked ones, and `_zero_below_threshold` zeroes a
+            # descending column from some point on -- three suffix operations, so
+            # `score > 0` can only ever be a leading run. Counting it on the host
+            # copy that is already here costs nothing, and slicing to that count
+            # decodes the real detections alone rather than decoding a hundred rows
+            # to discard the padding immediately afterwards (WP-164).
+            kept = int((cpu_detections[index, :, SCORE_COLUMN] > 0.0).sum())
             decoded = decode_instance_masks(
                 prototypes[index : index + 1],
-                kept_coefficients[index : index + 1],
-                grid_boxes[index : index + 1],
+                kept_coefficients[index : index + 1, :kept],
+                grid_boxes[index : index + 1, :kept],
                 image_size=proto_grid,
             )[0].cpu()
-            keep = cpu_detections[index, :, SCORE_COLUMN] > 0.0
             preds.append(
                 {
-                    "scores": cpu_detections[index, keep, SCORE_COLUMN],
-                    "labels": cpu_detections[index, keep, _LABEL_COLUMN].long(),
-                    "masks": decoded[keep],
+                    "scores": cpu_detections[index, :kept, SCORE_COLUMN],
+                    "labels": cpu_detections[index, :kept, _LABEL_COLUMN].long(),
+                    "masks": decoded,
                 }
             )
             ground_truth.append({"labels": host_labels[index], "masks": host_masks[index]})

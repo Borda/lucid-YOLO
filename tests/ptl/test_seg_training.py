@@ -604,6 +604,43 @@ def test_scored_masks_are_paired_with_the_boxes_own_anchors() -> None:
     assert lit_rows == [[index % _TOY_COEFFS] for index in anchor_indices[0].tolist()]
 
 
+def test_zero_scored_rows_are_dropped_before_the_decode_rather_than_after() -> None:
+    """A row the score filter drops never reaches the decode, and the kept row is still its own.
+
+    WP-164 replaced a decode of every row followed by ``masks[keep]`` with a decode
+    of ``[:kept]`` alone, which removes a full copy of the mask stack per image. The
+    two are equivalent only if the dropped rows are a suffix *and* the surviving
+    rows keep their pairing with the anchors they were ranked from — a count that
+    slices one row too few or too many yields a plausible mask stack of the wrong
+    objects, exactly the failure the pairing test above exists for. This drives the
+    same toy output with two of three rows zero-scored, so a mask decoded from the
+    wrong anchor's coefficients lights a different prototype row and is visible.
+    """
+    module = _tiny_module().eval()
+    captured: list[tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]] = []
+    module._val_segm.update = lambda preds, targets: captured.append((preds, targets))  # type: ignore[union-attr]
+    anchor_indices = torch.tensor([[5, 2, 7]])
+    canvas = _TOY_GRID * _PROTO_STRIDE
+    whole_canvas = torch.tensor([0.0, 0.0, float(canvas), float(canvas)])
+    scores = torch.tensor([[[0.9], [0.0], [0.0]]])  # only the first row survives
+    detections = torch.cat([whole_canvas.expand(1, 3, 4), scores, torch.zeros(1, 3, 1)], dim=-1)
+
+    module._update_val_segm(
+        _toy_segment_output(),
+        detections,
+        anchor_indices,
+        [_synthetic_targets(1)],
+        [torch.zeros(1, _TOY_GRID, _TOY_GRID)],
+        (canvas, canvas),
+    )
+
+    predictions = captured[0][0][0]
+    assert predictions["masks"].shape[0] == 1  # the two zero-scored rows never decoded
+    assert predictions["scores"].tolist() == [pytest.approx(0.9)]
+    lit_rows = sorted(set(predictions["masks"][0].nonzero()[:, 0].tolist()))
+    assert lit_rows == [anchor_indices[0, 0].item() % _TOY_COEFFS]  # anchor 5's own mask
+
+
 def test_scored_masks_and_ground_truth_share_the_prototype_grid() -> None:
     """Predicted and ground-truth masks reach the metric on one grid, at the cap.
 
