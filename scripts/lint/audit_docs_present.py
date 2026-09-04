@@ -36,11 +36,11 @@ _WP_FLOOR = 176
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
 #: stays contiguous. Raise it when adding a decision; never lower it.
-_DECISION_FLOOR = 19
+_DECISION_FLOOR = 20
 
 #: Lowest assumption count ASSUMPTIONS.md is allowed to hold, for the same ratchet
 #: reason as the two floors above.
-_ASSUMPTION_FLOOR = 26
+_ASSUMPTION_FLOOR = 73
 
 #: Paths, relative to ``docs_dir``/``repo_root``, every required policy document must
 #: resolve to. Mirrors the former ``REQUIRED_FILES`` tuple, split into its two roots so
@@ -225,7 +225,15 @@ def check_log_links_resolve(docs_dir: Path, repo_root: Path) -> list[str]:
 
 
 def check_assumption_ids_contiguous(docs_dir: Path, repo_root: Path) -> list[str]:
-    """ASSUMPTIONS.md register rows carry ids A1..AN with no gap or duplicate.
+    """ASSUMPTIONS.md register rows carry ids A1..AN with no gap or duplicate, and never shrink.
+
+    The floor counts rows (``len``) rather than reading the highest id (``max``), for
+    the reason :data:`_WP_FLOOR` already counts them: ``max`` grades the register by
+    its last row alone, so deleting a row from the *middle* leaves the maximum
+    untouched and the floor silent -- and the contiguity check above is what would
+    have caught that, except a deletion from the tail defeats it instead. One
+    predicate cannot see the tail and the other cannot see the middle, which is why
+    the two are separate checks and why this one counts.
 
     Examples:
         >>> import tempfile
@@ -234,7 +242,7 @@ def check_assumption_ids_contiguous(docs_dir: Path, repo_root: Path) -> list[str
         ...     docs = Path(tmp)
         ...     _ = (docs / "ASSUMPTIONS.md").write_text("| A1 | ... |\\n| A3 | ... |\\n", encoding="utf-8")
         ...     check_assumption_ids_contiguous(docs, docs)
-        ['non-contiguous assumption ids: [1, 3]', 'register must carry at least A1-A26']
+        ['non-contiguous assumption ids: [1, 3]', 'assumptions shrank below 73 rows: 2']
     """
     text = (docs_dir / "ASSUMPTIONS.md").read_text(encoding="utf-8")
     ids = [int(m) for m in re.findall(r"^\| A(\d+) \|", text, flags=re.MULTILINE)]
@@ -246,8 +254,8 @@ def check_assumption_ids_contiguous(docs_dir: Path, repo_root: Path) -> list[str
         violations.append("duplicate assumption ids")
     if sorted(ids) != list(range(1, max(ids) + 1)):
         violations.append(f"non-contiguous assumption ids: {sorted(ids)}")
-    if max(ids) < _ASSUMPTION_FLOOR:
-        violations.append(f"register must carry at least A1-A{_ASSUMPTION_FLOOR}")
+    if len(ids) < _ASSUMPTION_FLOOR:
+        violations.append(f"assumptions shrank below {_ASSUMPTION_FLOOR} rows: {len(ids)}")
     return violations
 
 
@@ -478,6 +486,12 @@ def check_decisions_ids(docs_dir: Path, repo_root: Path) -> list[str]:
     register has already reached. Raise the floor when adding a decision; that edit
     is the deliberate act, not a chore.
 
+    The floor counts rows, matching :data:`_WP_FLOOR` and :data:`_ASSUMPTION_FLOOR`.
+    It read the highest id until WP-168, which graded the register by its last row
+    and so stayed silent on a row deleted from the middle -- the one case the
+    contiguity check beside it cannot cover either, since deleting from the tail is
+    what leaves the remainder contiguous.
+
     Examples:
         >>> import tempfile
         >>> from pathlib import Path
@@ -485,7 +499,7 @@ def check_decisions_ids(docs_dir: Path, repo_root: Path) -> list[str]:
         ...     docs = Path(tmp)
         ...     _ = (docs / "DECISIONS.md").write_text("| D1 | ... |\\n", encoding="utf-8")
         ...     violations = check_decisions_ids(docs, docs)
-        ...     violations[0].startswith("decisions shrank below D19")
+        ...     violations[0].startswith("decisions shrank below 20 rows")
         True
     """
     text = (docs_dir / "DECISIONS.md").read_text(encoding="utf-8")
@@ -496,8 +510,8 @@ def check_decisions_ids(docs_dir: Path, repo_root: Path) -> list[str]:
     violations = []
     if d_ids != set(range(1, max(d_ids) + 1)):
         violations.append(f"decision ids are not contiguous from 1: {sorted(d_ids)}")
-    if max(d_ids) < _DECISION_FLOOR:
-        violations.append(f"decisions shrank below D{_DECISION_FLOOR}: {sorted(d_ids)}")
+    if len(d_ids) < _DECISION_FLOOR:
+        violations.append(f"decisions shrank below {_DECISION_FLOOR} rows: {len(d_ids)}")
     for adr in ("ADR-001", "ADR-002", "ADR-003", "ADR-004", "ADR-005"):
         if not re.search(rf"^## .*\b{adr}\b", text, flags=re.MULTILINE):
             violations.append(f"missing {adr} section")

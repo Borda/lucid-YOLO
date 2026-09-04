@@ -82,6 +82,8 @@ Internal identifiers use descriptive names derived from the papers' terminology 
 
 Never: consult or install `ultralytics` or any mirror; create a model-topology config format (ADR-001); copy code from any external detection repository (check LICENSE and provenance before consulting *any* external detection repo, third-party YOLO-seg/YOLO-OBB forks included); plan, promise, or tag a 1.0 (ADR-002); modify a frozen golden; start a [PRINCIPAL] WP; commit datasets or downloaded weights; leave `main` red; download, fine-tune, distill from, or compare against released Ultralytics checkpoints.
 
+**"Modify a frozen golden" is checked, not merely written here** (WP-168). `goldens/frozen/MANIFEST.sha256` pins every frozen file by digest and the `frozen-manifest` pre-commit hook asserts it; the golden harness could not, because it compares each frozen file against that same file's own stored values, so an edit moving the values and the tolerances together was green by construction. Once escalation trigger 4 has been answered and the move is approved, `python scripts/freeze_goldens.py --reseal` is what records it — the only sanctioned writer, and never a hand-edited digest.
+
 ## 8. Delegated work packages
 
 A completion notification is not a completion. The harness reports a delegated task `completed` whether the agent finished or stopped mid-sentence on a partial edit, and the notification carries a `result` field that looks like a report — so an unfinished run reads as a finished one that summarized badly. Happened four times in Phase 8, twice found only by inspecting the worktree.

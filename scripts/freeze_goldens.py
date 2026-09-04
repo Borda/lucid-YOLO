@@ -11,14 +11,36 @@ hand; WP-140 and WP-153 each silently reintroduced them, because the blind copy 
 know. This script reads each live golden's ``"freezable"`` field (``scripts/check_goldens.py``
 schema; defaults to ``True`` when absent) and copies only the freezable ones.
 
+It is also the **only writer of** :data:`MANIFEST_NAME` (WP-168). ``check_goldens.py``
+recomputes each frozen file's producer and compares it against that same file's own stored
+values, so a commit editing a frozen golden's ``values`` and its ``tolerances`` together
+passes the whole gate green — the file is compared with itself. The manifest pins the files
+instead of the numbers, and ``scripts/lint/audit_frozen_manifest.py`` asserts every digest on
+every commit touching ``goldens/frozen/``.
+
+Two writing modes, because a release and a sanctioned move are different acts:
+
+* ``freeze_goldens.py <minor>`` seals the files it just copied and leaves every other row
+  untouched. A release must not re-bless snapshots it did not write.
+* ``freeze_goldens.py --reseal`` recomputes every row from disk. This is the **only**
+  sanctioned way to move a frozen golden, and moving one requires a recorded principal
+  override first — ``AGENTS.md`` §4 escalation trigger 4, §7 standing prohibitions. The
+  flag makes that move an explicit, reviewable act rather than a hand-edited digest.
+
 Examples:
     Freeze the current goldens into ``goldens/frozen/0.7``::
 
         python scripts/freeze_goldens.py 0.7
+
+    Re-seal every frozen file after a principal-approved golden move::
+
+        python scripts/freeze_goldens.py --reseal
 """
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -29,6 +51,196 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: Directory holding the live top-level goldens.
 GOLDENS_DIR = REPO_ROOT / "goldens"
+
+#: Name of the digest manifest, sitting at the root of the frozen tree. The ``.sha256``
+#: extension is load-bearing: ``check_goldens.py`` discovers ``goldens/frozen/**/*.json``,
+#: and a manifest ending in ``.json`` would be handed to the golden parser as a malformed
+#: golden.
+MANIFEST_NAME = "MANIFEST.sha256"
+
+
+def frozen_root(goldens_dir: Path) -> Path:
+    """Return the directory holding the per-minor frozen snapshots.
+
+    Args:
+        goldens_dir: Directory holding the live ``*.json`` goldens.
+
+    Returns:
+        The ``frozen/`` subdirectory, whether or not it exists yet.
+
+    Examples:
+        ```pycon
+        >>> frozen_root(GOLDENS_DIR).name
+        'frozen'
+
+        ```
+    """
+    return goldens_dir / "frozen"
+
+
+def digest(path: Path) -> str:
+    """Return the SHA-256 hex digest of a file's bytes.
+
+    Args:
+        path: File to hash.
+
+    Returns:
+        The 64-character lowercase hex digest.
+
+    Examples:
+        ```pycon
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     sample = Path(tmp) / "f.json"
+        ...     _ = sample.write_bytes(b"{}")
+        ...     digest(sample)[:16]
+        '44136fa355b3678a'
+
+        ```
+    """
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def frozen_files(root: Path) -> list[Path]:
+    """List every frozen file the manifest must cover, manifest excluded.
+
+    Args:
+        root: The ``goldens/frozen`` directory.
+
+    Returns:
+        Sorted paths of every file under ``root`` except :data:`MANIFEST_NAME`, which
+        is excluded from its own digest set — hashing it would change it.
+
+    Examples:
+        ```pycon
+        >>> names = {p.name for p in frozen_files(frozen_root(GOLDENS_DIR))}
+        >>> MANIFEST_NAME in names
+        False
+
+        ```
+    """
+    return sorted(path for path in root.rglob("*") if path.is_file() and path.name != MANIFEST_NAME)
+
+
+def read_manifest(root: Path) -> dict[str, str]:
+    """Read the digest manifest into a ``{relative path: digest}`` mapping.
+
+    Args:
+        root: The ``goldens/frozen`` directory.
+
+    Returns:
+        One entry per manifest row, keyed by POSIX-style path relative to ``root``.
+        Empty when the manifest does not exist, which the checker reports rather than
+        this treating as an empty-and-therefore-satisfied set.
+
+    Examples:
+        ```pycon
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     _ = (root / MANIFEST_NAME).write_text("abc  0.1/optim_toy.json\\n")
+        ...     read_manifest(root)
+        {'0.1/optim_toy.json': 'abc'}
+
+        ```
+    """
+    path = root / MANIFEST_NAME
+    if not path.is_file():
+        return {}
+    rows = (line.split("  ", 1) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+    return {name: value for value, name in rows}
+
+
+def write_manifest(root: Path, entries: dict[str, str]) -> Path:
+    """Write ``entries`` to the manifest in ``sha256sum`` format, sorted by path.
+
+    Args:
+        root: The ``goldens/frozen`` directory.
+        entries: ``{relative path: digest}`` to record.
+
+    Returns:
+        The manifest path written.
+
+    Examples:
+        ```pycon
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = write_manifest(Path(tmp), {"0.1/b.json": "bb", "0.1/a.json": "aa"})
+        ...     path.read_text()
+        'aa  0.1/a.json\\nbb  0.1/b.json\\n'
+
+        ```
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / MANIFEST_NAME
+    path.write_text("".join(f"{entries[name]}  {name}\n" for name in sorted(entries)), encoding="utf-8")
+    return path
+
+
+def seal(root: Path, paths: list[Path]) -> Path:
+    """Record ``paths`` in the manifest, leaving every other row as it stands.
+
+    What a release freeze runs. A row for a file this call did not write is preserved
+    verbatim: re-hashing the whole tree on every freeze would let a tampered snapshot
+    from an earlier minor be re-blessed by the next release, which is the failure the
+    manifest exists to catch.
+
+    Args:
+        root: The ``goldens/frozen`` directory.
+        paths: Files to seal, each under ``root``.
+
+    Returns:
+        The manifest path written.
+
+    Examples:
+        ```pycon
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     _ = write_manifest(root, {"0.1/old.json": "stale-row-kept"})
+        ...     (root / "0.2").mkdir()
+        ...     new = root / "0.2" / "optim_toy.json"
+        ...     _ = new.write_bytes(b"{}")
+        ...     _ = seal(root, [new])
+        ...     sorted(read_manifest(root))
+        ['0.1/old.json', '0.2/optim_toy.json']
+
+        ```
+    """
+    entries = read_manifest(root)
+    entries.update({path.relative_to(root).as_posix(): digest(path) for path in paths})
+    return write_manifest(root, entries)
+
+
+def reseal(root: Path) -> Path:
+    """Recompute every manifest row from what is on disk right now.
+
+    The sanctioned-move command, and the only one: moving a frozen golden's values is
+    forbidden by ``AGENTS.md`` §7 and requires a recorded principal override under §4
+    escalation trigger 4. This flag does not grant that permission — it makes acting on
+    a granted one a single reviewable command instead of a hand-edited digest.
+
+    Args:
+        root: The ``goldens/frozen`` directory.
+
+    Returns:
+        The manifest path written.
+
+    Examples:
+        ```pycon
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     _ = write_manifest(root, {"0.1/gone.json": "row-for-a-deleted-file"})
+        ...     (root / "0.1").mkdir()
+        ...     _ = (root / "0.1" / "here.json").write_bytes(b"{}")
+        ...     _ = reseal(root)
+        ...     sorted(read_manifest(root))
+        ['0.1/here.json']
+
+        ```
+    """
+    return write_manifest(root, {path.relative_to(root).as_posix(): digest(path) for path in frozen_files(root)})
 
 
 def freezable_goldens(goldens_dir: Path) -> list[Path]:
@@ -60,7 +272,7 @@ def freezable_goldens(goldens_dir: Path) -> list[Path]:
 
 
 def freeze(goldens_dir: Path, minor: str) -> tuple[list[Path], list[Path]]:
-    """Copy every freezable live golden into ``goldens_dir/frozen/<minor>/``.
+    """Copy every freezable live golden into ``goldens_dir/frozen/<minor>/`` and seal it.
 
     Args:
         goldens_dir: Directory holding the live ``*.json`` goldens.
@@ -78,38 +290,61 @@ def freeze(goldens_dir: Path, minor: str) -> tuple[list[Path], list[Path]]:
         ...     _ = (d / "a.json").write_text('{"values": {"x": 1.0}}')
         ...     _ = (d / "b.json").write_text('{"values": {"x": 1.0}, "freezable": false}')
         ...     frozen, skipped = freeze(d, "0.1")
-        ...     ([p.name for p in frozen], [p.name for p in skipped])
-        (['a.json'], ['b.json'])
+        ...     ([p.name for p in frozen], [p.name for p in skipped], sorted(read_manifest(frozen_root(d))))
+        (['a.json'], ['b.json'], ['0.1/a.json'])
 
         ```
     """
     all_live = sorted(goldens_dir.glob("*.json"))
     frozen = freezable_goldens(goldens_dir)
     skipped = [p for p in all_live if p not in frozen]
-    dest = goldens_dir / "frozen" / minor
+    root = frozen_root(goldens_dir)
+    dest = root / minor
     dest.mkdir(parents=True, exist_ok=True)
     for path in frozen:
         shutil.copy(path, dest / path.name)
+    seal(root, [dest / path.name for path in frozen])
     return frozen, skipped
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Freeze the current goldens into ``goldens/frozen/<minor>`` and report the result.
+    """Freeze the current goldens into ``goldens/frozen/<minor>``, or re-seal the manifest.
 
     Args:
-        argv: Command-line arguments (defaults to ``sys.argv[1:]``); expects exactly
-            one positional argument, the release minor version (e.g. ``"0.7"``).
+        argv: Command-line arguments (defaults to ``sys.argv[1:]``).
 
     Returns:
-        ``0`` on success, ``1`` when the minor version argument is missing.
+        ``0`` on success, ``1`` when neither a minor version nor ``--reseal`` is given.
+
+    Examples:
+        ```pycon
+        >>> import contextlib, io
+        >>> with contextlib.redirect_stderr(io.StringIO()):
+        ...     main([])
+        1
+
+        ```
     """
-    argv = sys.argv[1:] if argv is None else argv
-    if len(argv) != 1 or not argv[0]:
-        print("usage: freeze_goldens.py <minor>", file=sys.stderr)
+    parser = argparse.ArgumentParser(description="Freeze the live goldens into a release snapshot.")
+    parser.add_argument("minor", nargs="?", default=None, help="release minor version to freeze into, e.g. 0.7")
+    parser.add_argument(
+        "--reseal",
+        action="store_true",
+        help="recompute every manifest digest from disk; the sanctioned way to record a principal-approved "
+        "frozen-golden move, and the only one that is not a hand-edited digest",
+    )
+    args = parser.parse_args(argv)
+
+    root = frozen_root(GOLDENS_DIR)
+    if args.reseal:
+        reseal(root)
+        print(f"re-sealed {len(read_manifest(root))} frozen file(s) in {MANIFEST_NAME}")
+        return 0
+    if not args.minor:
+        print("usage: freeze_goldens.py <minor> | freeze_goldens.py --reseal", file=sys.stderr)
         return 1
-    minor = argv[0]
-    frozen, skipped = freeze(GOLDENS_DIR, minor)
-    print(f"froze {len(frozen)} golden(s) into goldens/frozen/{minor}/")
+    frozen, skipped = freeze(GOLDENS_DIR, args.minor)
+    print(f"froze {len(frozen)} golden(s) into goldens/frozen/{args.minor}/, sealed in {MANIFEST_NAME}")
     if skipped:
         print(f"skipped (freezable: false): {', '.join(p.name for p in skipped)}")
     return 0

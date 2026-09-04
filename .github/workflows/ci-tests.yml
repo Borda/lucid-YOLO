@@ -32,8 +32,16 @@ jobs:
         run: |
           uv venv --python 3.11 .venv
           uv pip install --python .venv/bin/python -e . --group dev
-      - name: Offline unit suite with coverage
-        run: .venv/bin/python -m pytest -m "not gpu and not data" --cov=lucid_yolo --cov-report=term
+      # `make test`, not an inline pytest line. The inline one omitted both
+      # `--doctest-modules` and the `src scripts` paths, so `testpaths = ["tests"]`
+      # applied and CI collected 1548 tests where the Makefile collects 2668: every
+      # `scripts/_tests/` test -- the ten lint checkers, the golden harness, the
+      # release guard -- and some 879 doctests ran on the developer's machine and
+      # never here. A pull request breaking a lint checker's own logic was green.
+      # The Makefile's `PY` is `.venv/bin/python`, which is the venv the step above
+      # creates, so `make` resolves the same interpreter this job installed into.
+      - name: Offline unit suite with coverage (make test)
+        run: make test
       # The frozen-golden sweep. It used to ride `lint.yml`'s `pre-commit
       # --all-files` run, which was CI's only full 43/43 check; WP-162 took
       # `golden-check` off the commit stage, so without this step CI would have

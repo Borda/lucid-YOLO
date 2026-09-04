@@ -182,6 +182,85 @@ def test_short_gpl_license_field_is_flagged(audit: ModuleType) -> None:
     assert len(violations) == 1
 
 
+NON_PERMISSIVE_SAMPLES = (
+    "SSPL-1.0",
+    "Server Side Public License",
+    "Business Source License 1.1",
+    "BUSL-1.1",
+    "Elastic License 2.0",
+    "PolyForm Noncommercial License 1.0.0",
+    "Prosperity Public License 3.0.0",
+    "Commons Clause",
+    "CC-BY-NC-4.0",
+)
+
+
+@pytest.mark.parametrize("sample", NON_PERMISSIVE_SAMPLES)
+def test_non_permissive_pattern_matches_the_named_classes(audit: ModuleType, sample: str) -> None:
+    """Every source-available and non-commercial class D13 and D18d name is recognized.
+
+    The GPL pattern matched none of these: SSPL, BUSL, Elastic, PolyForm, Prosperity,
+    the Commons Clause rider and the CC non-commercial grants are all inadmissible
+    under D13 and all spelled nothing like ``GPL``, so the audit passed a distribution
+    the policy forbids while printing a clean verdict.
+    """
+    assert audit.inadmissible_license(sample) == "non-permissive"
+
+
+@pytest.mark.parametrize("sample", PERMISSIVE_SAMPLES)
+def test_non_permissive_pattern_spares_permissive(audit: ModuleType, sample: str) -> None:
+    """The second pattern leaves permissive licenses alone, exactly as the first does.
+
+    A check that fires on a permissive licence is worse than no check: it is the one
+    that gets an allowlist entry written for it and then stops being read.
+    """
+    assert audit.inadmissible_license(sample) is None
+
+
+def test_an_sspl_distribution_is_rejected(audit: ModuleType) -> None:
+    """A distribution declaring SSPL is a violation, and the finding names the class.
+
+    The DoD case for WP-168. SSPL is what a formerly-permissive dependency relicenses
+    *to* — the licence change lands in a routine transitive bump, and the audit that
+    only knew the GPL family would have reported the tree clean in the same run.
+    """
+    stub = _StubDist(_StubMetadata("relicensed-store", license_text="SSPL-1.0"))
+
+    violations = audit.find_copyleft_violations([stub])
+
+    assert len(violations) == 1
+    name, field = violations[0]
+    assert name == "relicensed-store"
+    assert "non-permissive" in field
+
+
+def test_a_bundled_non_permissive_declaration_is_rejected(audit: ModuleType) -> None:
+    """A wheel declaring Apache for itself and vendoring a BUSL library is a violation."""
+    stub = _bundling_dist("vendors-busl", "Name: some-engine\nLicense: BUSL-1.1\n")
+
+    violations = audit.find_bundled_violations([stub])
+
+    assert [name for name, _ in violations] == ["vendors-busl"]
+
+
+def test_a_distribution_declaring_no_license_is_rejected(audit: ModuleType, tmp_path: Path) -> None:
+    """A shipped distribution declaring no licence at all fails the audit.
+
+    The DoD's second licence case. It is the fourth surface (WP-115) rather than a
+    pattern: the three pattern-matching checks compare a declaration against a
+    forbidden list, so a distribution declaring nothing matches nothing and passes.
+    D13's last clause -- "anything ... of unstated license" -- is what this covers,
+    and it is the only check here that catches a licence class nobody listed.
+    """
+    dists = [_undeclared_dist("says-nothing")]
+    pyproject = _tiered_pyproject(tmp_path, base=("says-nothing",), dev=(), docs=())
+
+    failures, flags = audit.find_unreadable_licenses(dists, audit.dependency_tiers(dists, pyproject))
+
+    assert [name for name, _ in failures] == ["says-nothing"]
+    assert flags == []
+
+
 def _bundling_dist(name: str, body: str, filename: str = "LICENSE.txt") -> _StubDist:
     """A distribution declaring a permissive license while vendoring ``body``.
 

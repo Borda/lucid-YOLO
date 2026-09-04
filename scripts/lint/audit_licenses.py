@@ -1,9 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Dependency-license audit: reject copyleft licenses anywhere in the tree.
+"""Dependency-license audit: reject the licence classes D13 does not admit.
 
 Scans every distribution installed in the active environment and fails when a
-GPL-family (AGPL/GPL/LGPL) license indicator is found, per the project policy
-that every dependency must be Apache-compatible, including transitive ones.
+forbidden licence indicator is found, per the project policy that every dependency
+must be Apache-compatible, including transitive ones.
+
+**What "forbidden" means here is a list of named families, not the policy.** D13
+rules out "AGPL, GPL, LGPL and every other copyleft license; source-available,
+research-only and non-commercial licenses; anything commercially licensed or of
+unstated license" — a description no regex can hold. Two patterns approximate it:
+:data:`COPYLEFT_PATTERN` recognizes the GPL family (AGPL/GPL/LGPL, spelled either as
+an identifier or as "GNU ... General Public License"), and
+:data:`NON_PERMISSIVE_PATTERN` recognizes the source-available and non-commercial
+classes D18d names — SSPL, Business Source/BUSL, Elastic, PolyForm, Prosperity, the
+Commons Clause rider, and non-commercial grants including ``CC BY-NC``. Both are
+consulted through :func:`inadmissible_license`. A copyleft licence outside the GPL
+family (EUPL, OSL, CDDL, MS-RL) is admitted by both patterns and would pass; so
+would a proprietary licence that names itself something new. The last clause of D13
+— "of unstated license" — is the one surface below that is not a pattern at all, and
+it is the only one that catches a class nobody listed.
 
 Four surfaces are read, because neither what a distribution says about itself nor
 what it says in the documents beside it is the whole story.
@@ -59,10 +74,10 @@ or ``docs`` dependency groups appears in no wheel metadata, is imported by ``src
 never, and is vendored into no published artifact, so it is reported and the run
 still passes. A package reachable from both takes the stricter tier, and so does one
 the resolver cannot attribute at all — a gap in the walk must fail loudly rather
-than quietly demote a shipped dependency. The copyleft checks are tier-blind and
-stay that way: an AGPL dependency is a failure wherever it sits, and a distribution
-whose only license document is copyleft prose is a failure for the same reason,
-regardless of which group reached it.
+than quietly demote a shipped dependency. The declared-licence checks are tier-blind
+and stay that way: an AGPL or SSPL dependency is a failure wherever it sits, and a
+distribution whose only license document is forbidden prose is a failure for the same
+reason, regardless of which group reached it.
 
 **The examples below assert nothing about what is installed**, and neither does the test
 suite (WP-115b). This script is the live check — it runs against the real environment as
@@ -97,6 +112,32 @@ PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 #: Matches GPL-family identifiers (AGPL-3.0, GPLv2, LGPL, "GNU General Public License").
 COPYLEFT_PATTERN = re.compile(r"\b(?:[AL]?GPL|GNU (?:Affero |Lesser )?General Public License)", re.IGNORECASE)
+
+#: Matches the non-GPL licence classes D13 rules inadmissible and D18d names by
+#: example: source-available (SSPL, Business Source/BUSL, Elastic), the PolyForm and
+#: Prosperity families, the Commons Clause rider, and any non-commercial grant
+#: (`CC BY-NC`, "NonCommercial"). A second pattern rather than more alternatives in
+#: :data:`COPYLEFT_PATTERN`, because these are not copyleft and filing them there
+#: would make the finding misdescribe what it found — SSPL is copyleft in spirit and
+#: BUSL is not copyleft at all; both are inadmissible for the same policy reason and
+#: for different licence reasons. Tier-blind exactly as the copyleft pattern is: an
+#: SSPL dependency is a failure wherever in the graph it sits.
+#:
+#: Deliberately not a catch-all for "anything unrecognized". That check exists and is
+#: a different one — :func:`unreadable_license_reason`, the fourth surface, which
+#: reports a distribution declaring nothing at all. This pattern names classes, so a
+#: class nobody listed passes it, exactly as :data:`COPYLEFT_BINARIES` says of itself.
+NON_PERMISSIVE_PATTERN = re.compile(
+    r"\b(?:SSPL|Server Side Public License"
+    r"|BUSL|Business Source License"
+    r"|Elastic License"
+    r"|PolyForm"
+    r"|Prosperity Public License"
+    r"|Commons Clause"
+    r"|Non-?Commercial"
+    r"|CC[ -]BY[ -]NC)",
+    re.IGNORECASE,
+)
 
 #: Distributions exempt from the copyleft check, with the reason documented.
 #: Empty by design — any addition requires a DECISIONS.md entry first.
@@ -353,6 +394,38 @@ BUNDLED_BINARY_ALLOWLIST: dict[tuple[str, str], str] = {
 }
 
 
+def inadmissible_license(declaration: str) -> str | None:
+    """Name the forbidden licence class a declaration falls into, or ``None``.
+
+    The single place the two patterns are consulted, so the declared-metadata check
+    and the bundled-document check cannot end up recognizing different policies.
+
+    Args:
+        declaration: One licence string — a metadata field, a classifier, or a
+            ``License:`` line read out of a bundled document.
+
+    Returns:
+        ``"copyleft"`` for a GPL-family match, ``"non-permissive"`` for one of the
+        source-available or non-commercial classes, and ``None`` when neither pattern
+        matches — which includes every licence class this audit has never heard of.
+
+    Examples:
+        >>> inadmissible_license("GPL-3.0-only")
+        'copyleft'
+        >>> inadmissible_license("SSPL-1.0")
+        'non-permissive'
+        >>> inadmissible_license("Business Source License 1.1")
+        'non-permissive'
+        >>> inadmissible_license("Apache-2.0") is None
+        True
+    """
+    if COPYLEFT_PATTERN.search(declaration):
+        return "copyleft"
+    if NON_PERMISSIVE_PATTERN.search(declaration):
+        return "non-permissive"
+    return None
+
+
 def license_indicators(dist: metadata.Distribution) -> list[str]:
     """Collect every license-bearing metadata field of a distribution.
 
@@ -489,8 +562,8 @@ def unreadable_license_reason(dist: metadata.Distribution) -> str | None:
     )
 
 
-def _ships_copyleft_prose(dist: metadata.Distribution) -> bool:
-    """Whether an unidentified license document names a GPL-family license in its header.
+def _ships_inadmissible_prose(dist: metadata.Distribution) -> bool:
+    """Whether an unidentified license document names a forbidden license in its header.
 
     Only ever consulted for a distribution :func:`unreadable_license_reason` already
     reported, so no recognized permissive text reaches this — which matters, because
@@ -498,7 +571,7 @@ def _ships_copyleft_prose(dist: metadata.Distribution) -> bool:
     header is what a license uses to name itself.
     """
     return any(
-        COPYLEFT_PATTERN.search("\n".join(text.splitlines()[:LICENSE_HEADER_LINES]))
+        inadmissible_license("\n".join(text.splitlines()[:LICENSE_HEADER_LINES])) is not None
         for _, text in _license_documents(dist)
     )
 
@@ -628,7 +701,8 @@ def find_bundled_violations(dists: list[metadata.Distribution]) -> list[tuple[st
 
     The counterpart of :func:`find_copyleft_violations` for vendored code: a wheel
     may declare a permissive license for itself and ship a native library under a
-    copyleft one, which the metadata fields never mention.
+    forbidden one, which the metadata fields never mention. Recognizes the same
+    classes the declared check does, through :func:`inadmissible_license`.
 
     Args:
         dists: Distributions to audit.
@@ -652,7 +726,7 @@ def find_bundled_violations(dists: list[metadata.Distribution]) -> list[tuple[st
             # here on the GCC exception, and only libquadmath reaches the allowlist.
             if LICENSE_EXCEPTIONS.search(declaration):
                 continue
-            if COPYLEFT_PATTERN.search(declaration) and name.lower() not in allowed:
+            if inadmissible_license(declaration) is not None and name.lower() not in allowed:
                 violations.append((name, declaration))
                 break
     return violations
@@ -756,8 +830,8 @@ def find_unreadable_licenses(
         ``(failures, flags)``, each a list of ``(distribution name, reason)``, excluding
         anything in :data:`UNREADABLE_ALLOWLIST`. A distribution is a failure when the
         shipped closure reaches it, when no tier reaches it at all, or when the only
-        license document it ships is copyleft prose — the last case ignores the tier,
-        because an AGPL dependency is a failure wherever it sits. The reason carries the
+        license document it ships is forbidden prose — the last case ignores the tier,
+        because an AGPL or SSPL dependency is a failure wherever it sits. The reason carries the
         tier, and an unattributed package says so rather than reading as a base one.
 
     Examples:
@@ -776,7 +850,7 @@ def find_unreadable_licenses(
         # verdict for opposite reasons: one says the wheel republishes this package, the
         # other says the walk never found it and is failing loudly rather than guessing.
         tier = attributed or f"unattributed, treated as {TIER_SHIPPED}"
-        if attributed == TIER_SHIPPED or attributed is None or _ships_copyleft_prose(dist):
+        if attributed == TIER_SHIPPED or attributed is None or _ships_inadmissible_prose(dist):
             failures.append((name, f"{reason} ({tier})"))
         else:
             flags.append((name, f"{reason} ({tier})"))
@@ -786,11 +860,16 @@ def find_unreadable_licenses(
 def find_copyleft_violations(dists: list[metadata.Distribution]) -> list[tuple[str, str]]:
     """Return (distribution name, offending license string) pairs.
 
+    Named for the GPL family it was written against and no longer confined to it:
+    since WP-168 it reports whatever :func:`inadmissible_license` recognizes, which
+    is the copyleft family plus the source-available and non-commercial classes.
+
     Args:
         dists: Distributions to audit.
 
     Returns:
-        One tuple per violating distribution; empty when the tree is clean.
+        One tuple per violating distribution, the string carrying the class that
+        matched; empty when the tree is clean.
 
     Examples:
         >>> find_copyleft_violations([])
@@ -802,8 +881,9 @@ def find_copyleft_violations(dists: list[metadata.Distribution]) -> list[tuple[s
         if name.lower() in {allowed.lower() for allowed in ALLOWLIST}:
             continue
         for field in license_indicators(dist):
-            if COPYLEFT_PATTERN.search(field):
-                violations.append((name, field))
+            family = inadmissible_license(field)
+            if family is not None:
+                violations.append((name, f"{field} ({family})"))
                 break
     return violations
 
@@ -811,8 +891,8 @@ def find_copyleft_violations(dists: list[metadata.Distribution]) -> list[tuple[s
 def _report_copyleft(
     declared: list[tuple[str, str]], bundled: list[tuple[str, str]], binaries: list[tuple[str, str]]
 ) -> None:
-    """Print the copyleft findings under a header that describes them."""
-    print("LICENSE AUDIT FAILED — copyleft licenses found:")
+    """Print the declared-licence findings under a header that describes them."""
+    print("LICENSE AUDIT FAILED — licenses this policy does not admit:")
     for name, field in sorted(declared):
         print(f"  {name}: {field}")
     for name, field in sorted(bundled):
@@ -847,7 +927,7 @@ def main() -> int:
     shipped = sum(len(_shipped_libraries(dist)) for dist in dists)
     print(
         f"license audit clean: {len(dists)} distributions, {shipped} shipped binaries, "
-        "no GPL-family licenses declared, bundled or shipped, none unreadable"
+        "no copyleft or non-permissive licenses declared, bundled or shipped, none unreadable"
     )
     return 0
 

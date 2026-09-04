@@ -26,9 +26,13 @@ lint: precommit
 # function is required to carry one, so leaving them uncollected let four rot in src
 # and three more in scripts. Coverage stays scoped to the lucid_yolo package: the
 # scripts are entry points driving it, not the surface under measurement.
+#
+# Pytest's exit 5 (nothing collected) used to be swallowed here and reported as a
+# pass, a scaffold from before WP-002 when there were no tests to collect. There are
+# 2668, and WP-168 made this target what CI runs, so the swallow would have meant a
+# job that collected nothing reporting green — the failure this row exists to close.
 test:
-	@$(PY) -m pytest -m "not gpu and not data" --doctest-modules --cov=lucid_yolo --cov-report=term src scripts tests; \
-	status=$$?; if [ $$status -eq 5 ]; then echo "no tests collected yet — passing (pre WP-002)"; exit 0; else exit $$status; fi
+	$(PY) -m pytest -m "not gpu and not data" --doctest-modules --cov=lucid_yolo --cov-report=term src scripts tests
 
 precommit:
 	$(VENV)/bin/pre-commit run --all-files

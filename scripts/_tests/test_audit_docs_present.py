@@ -68,10 +68,10 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     docs_dir.mkdir(parents=True, exist_ok=True)
     (docs_dir / "model_cards").mkdir(exist_ok=True)
     _write(docs_dir / "PROVENANCE.md", "".join(f"| R{i} | source {i} |\n" for i in range(1, 22)))
-    _write(docs_dir / "ASSUMPTIONS.md", "".join(f"| A{i} | t | v | src | p | open |\n" for i in range(1, 27)))
+    _write(docs_dir / "ASSUMPTIONS.md", "".join(f"| A{i} | t | v | src | p | open |\n" for i in range(1, 74)))
     _write(
         docs_dir / "DECISIONS.md",
-        "".join(f"| D{i} | t |\n" for i in range(1, 20))
+        "".join(f"| D{i} | t |\n" for i in range(1, 21))
         + "".join(
             f"## Decision D{i} — {adr}\n"
             for i, adr in enumerate(("ADR-001", "ADR-002", "ADR-003", "ADR-004", "ADR-005"), 1)
@@ -171,6 +171,31 @@ class TestCheckAssumptionIdsContiguous:
         violations = audit.check_assumption_ids_contiguous(tmp_path / "docs", tmp_path)
 
         assert "non-contiguous assumption ids: [1, 3]" in violations
+
+    def test_flags_a_row_deleted_from_the_tail(self, tmp_path: Path) -> None:
+        """Deleting A73 leaves the remainder contiguous, and the row-count floor is what sees it."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        full = (tmp_path / "docs" / "ASSUMPTIONS.md").read_text(encoding="utf-8")
+        _write(tmp_path / "docs" / "ASSUMPTIONS.md", full.replace("| A73 | t | v | src | p | open |\n", ""))
+
+        violations = audit.check_assumption_ids_contiguous(tmp_path / "docs", tmp_path)
+
+        assert violations == ["assumptions shrank below 73 rows: 72"]
+
+    def test_flags_a_row_deleted_from_the_middle(self, tmp_path: Path) -> None:
+        """Deleting A40 is reported as a shrink, not only as a gap.
+
+        The ``max(ids)`` predicate this replaced could not see it: A73 still stood, so
+        the floor stayed silent and the only finding was a 73-element id list a reader
+        had to scan for the hole. The count says what actually happened.
+        """
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        full = (tmp_path / "docs" / "ASSUMPTIONS.md").read_text(encoding="utf-8")
+        _write(tmp_path / "docs" / "ASSUMPTIONS.md", full.replace("| A40 | t | v | src | p | open |\n", ""))
+
+        violations = audit.check_assumption_ids_contiguous(tmp_path / "docs", tmp_path)
+
+        assert "assumptions shrank below 73 rows: 72" in violations
 
     def test_is_clean_for_a_full_register(self, tmp_path: Path) -> None:
         """A contiguous register at or above the floor reports no violation."""
@@ -317,11 +342,27 @@ class TestCheckDecisionsIds:
     def test_flags_a_missing_adr(self, tmp_path: Path) -> None:
         """A missing ADR section heading is reported even when ids are contiguous."""
         _write_required_docs(tmp_path / "docs", tmp_path)
-        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 20)))
+        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 21)))
 
         violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
 
         assert any("missing ADR-001 section" in violation for violation in violations)
+
+    def test_flags_a_row_deleted_from_the_middle(self, tmp_path: Path) -> None:
+        """Deleting D5 from a full register drops the count below the floor and is reported.
+
+        The predicate this pins: a ``max(ids)`` floor grades the register by its last
+        row, so D20 surviving would hide D5's deletion behind a contiguity violation
+        alone -- and a contiguity violation is what an id renumbering also produces.
+        Counting rows makes the shrink its own finding.
+        """
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        full = (tmp_path / "docs" / "DECISIONS.md").read_text(encoding="utf-8")
+        _write(tmp_path / "docs" / "DECISIONS.md", full.replace("| D5 | t |\n", ""))
+
+        violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
+
+        assert any("decisions shrank below 20 rows: 19" in violation for violation in violations)
 
     def test_is_clean_for_a_full_register(self, tmp_path: Path) -> None:
         """A contiguous register at the floor with every ADR section reports no violation."""

@@ -157,6 +157,23 @@ repos:
         language: system
         pass_filenames: false
         files: ^(LICENSE|NOTICE|README\.md|src/.*\.py)$
+      # Every frozen golden must still be the file the release wrote. The golden
+      # harness compares each frozen file against its own stored values, so an edit
+      # moving both the values and the tolerances is green there by construction --
+      # this is what makes "never modify a frozen golden" (AGENTS.md sec. 7) a check
+      # rather than prose. Milliseconds: 34 files, one SHA-256 each.
+      #
+      # Runs on every commit rather than on a `files:` filter, for the same reason
+      # license-audit does: it scans tree state, not the diff. Pre-commit selects
+      # staged paths with `--diff-filter=ACMRTUXB`, which omits D, so a commit that
+      # only *deletes* a frozen golden matches no filter and would never trigger the
+      # one check that notices it is gone.
+      - id: frozen-manifest
+        name: "🔒 frozen golden digests"
+        entry: .venv/bin/python scripts/lint/audit_frozen_manifest.py
+        language: system
+        pass_filenames: false
+        always_run: true
       # pyproject.toml and src/lucid_yolo/__init__.py must name the same version.
       - id: version-single-source
         name: "🔢 package version single source of truth"

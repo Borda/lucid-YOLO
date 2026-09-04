@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Release guard: decide whether a version tag may ship (WP-006).
 
-The guard runs four independent checks and lets a tag ship only when all four
+The guard runs six independent checks and lets a tag ship only when all six
 pass:
 
 1. **Tag** — the tag must be a ``v0.MINOR.PATCH`` string. A ``1.x`` (or higher)
@@ -10,7 +10,20 @@ pass:
    shape is refused as malformed.
 2. **Changelog** — the changelog must carry a ``## [MINOR.PATCH]`` section for
    the tag, so every release ships with its notes written.
-3. **Dependency tiers** — every distribution the shipped package imports must be
+3. **Version** — ``lucid_yolo.__version__`` must be the version the tag names.
+   Added by WP-168: the changelog check above is a substring test and never reads
+   the package version, and ``audit_version_single_source.py`` checks only that
+   ``pyproject.toml`` defers to ``__version__`` — neither of them ever sees a tag.
+   Between them, ``v0.8.0`` over a tree still declaring ``0.7.0`` passed every
+   check and shipped a wheel whose version contradicted the tag that built it.
+   The version is parsed statically rather than imported: importing the package
+   executes it, and a guard deciding whether a distribution is shippable must not
+   need that distribution to be importable first.
+4. **Frozen goldens** — ``goldens/frozen/<MAJOR.MINOR>/`` must exist and hold at
+   least one file. A release's whole regression claim is that current code still
+   satisfies every value the release pinned (``scripts/check_goldens.py``), and a
+   minor tagged without its snapshot makes that claim about nothing. Also WP-168.
+5. **Dependency tiers** — every distribution the shipped package imports must be
    declared in ``[project].dependencies``. Added by WP-160 after WP-159 found the
    guard blind to the one thing a release is: what a consumer installing the
    distribution actually receives. Phase 14 moved five modules under ``data/`` onto
@@ -18,7 +31,7 @@ pass:
    so an install omitting that group produced a package that raised ``ImportError``
    from ``lucid_yolo.data`` — no test caught it, because the development
    environment installs every group.
-4. **Gate** — the gate command (``make gate`` by default) must exit ``0``. A
+6. **Gate** — the gate command (``make gate`` by default) must exit ``0``. A
    non-zero exit is a red gate and refuses the tag.
 
 Deliberately **not** checked: whether the runtime requirements are uploadable to
@@ -65,6 +78,12 @@ DEFAULT_PYPROJECT = REPO_ROOT / "pyproject.toml"
 #: Default import root: the package a built distribution actually ships.
 DEFAULT_PACKAGE_ROOT = REPO_ROOT / "src" / "lucid_yolo"
 
+#: Default module read for the single-source ``__version__`` the tag must match.
+DEFAULT_INIT = DEFAULT_PACKAGE_ROOT / "__init__.py"
+
+#: Default root holding one ``<MAJOR.MINOR>/`` snapshot directory per release.
+DEFAULT_FROZEN_ROOT = REPO_ROOT / "goldens" / "frozen"
+
 #: Default gate command re-run before a tag may ship.
 DEFAULT_GATE_CMD = "make gate"
 
@@ -86,7 +105,8 @@ class CheckResult:
     """Outcome of one release-guard check.
 
     Attributes:
-        name: Short check name (``tag``, ``changelog``, or ``gate``).
+        name: Short check name (``tag``, ``changelog``, ``version``, ``goldens``,
+            ``dependencies``, or ``gate``).
         passed: Whether the check permits the tag to ship.
         detail: Human-readable verdict explaining the outcome.
     """
@@ -158,6 +178,115 @@ def check_changelog(tag: str, changelog: Path) -> CheckResult:
     if heading not in text:
         return CheckResult("changelog", False, f"changelog {changelog} has no {heading!r} section")
     return CheckResult("changelog", True, f"changelog carries a {heading!r} section")
+
+
+def _declared_version(init_path: Path) -> str | None:
+    """Read ``__version__`` out of a module's source without executing it.
+
+    Args:
+        init_path: The module assigning ``__version__`` as a string literal.
+
+    Returns:
+        The assigned version, or ``None`` when the module makes no such literal
+        assignment — a computed or absent ``__version__`` is not a version this can
+        read, and saying so beats returning a guess.
+
+    Examples:
+        ```pycon
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = Path(tmp) / "__init__.py"
+        ...     _ = path.write_text('__version__ = "0.4.2"\\n')
+        ...     _declared_version(path)
+        '0.4.2'
+
+        ```
+    """
+    for node in ast.walk(ast.parse(init_path.read_text(encoding="utf-8"))):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Constant):
+            continue
+        names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+        if "__version__" in names and isinstance(node.value.value, str):
+            return node.value.value
+    return None
+
+
+def check_version(tag: str, init_path: Path = DEFAULT_INIT) -> CheckResult:
+    """Verify that the package's own ``__version__`` is the version ``tag`` names.
+
+    Args:
+        tag: The candidate tag; its leading ``v`` is stripped to form the version.
+        init_path: Module declaring ``__version__`` (default: the shipped package's).
+
+    Returns:
+        A :class:`CheckResult` named ``"version"``.
+
+    Examples:
+        ```pycon
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = Path(tmp) / "__init__.py"
+        ...     _ = path.write_text('__version__ = "0.7.0"\\n')
+        ...     (check_version("v0.7.0", path).passed, check_version("v0.8.0", path).passed)
+        (True, False)
+
+        ```
+    """
+    version = tag.removeprefix("v")
+    try:
+        declared = _declared_version(init_path)
+    except (OSError, SyntaxError) as exc:
+        return CheckResult("version", False, f"cannot read {init_path}: {exc}")
+    if declared is None:
+        return CheckResult("version", False, f"{init_path} assigns no literal __version__ this guard can read")
+    if declared != version:
+        return CheckResult(
+            "version",
+            False,
+            f"tag {tag} names version {version} but {init_path.parent.name}.__version__ is {declared!r}; "
+            "the wheel a tag builds carries the package's version, not the tag's",
+        )
+    return CheckResult("version", True, f"tag {tag} matches __version__ {declared!r}")
+
+
+def check_frozen_goldens(tag: str, frozen_root: Path = DEFAULT_FROZEN_ROOT) -> CheckResult:
+    """Verify that the tag's minor carries a non-empty frozen-golden snapshot.
+
+    Args:
+        tag: The candidate tag; its ``MAJOR.MINOR`` prefix names the snapshot directory.
+        frozen_root: Root holding one directory per released minor (default:
+            ``<repo>/goldens/frozen``).
+
+    Returns:
+        A :class:`CheckResult` named ``"goldens"``.
+
+    Examples:
+        ```pycon
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     (root / "0.4").mkdir()
+        ...     _ = (root / "0.4" / "optim_toy.json").write_text("{}")
+        ...     (check_frozen_goldens("v0.4.1", root).passed, check_frozen_goldens("v0.5.0", root).passed)
+        (True, False)
+
+        ```
+    """
+    minor = ".".join(tag.removeprefix("v").split(".")[:2])
+    snapshot = frozen_root / minor
+    frozen = sorted(path for path in snapshot.glob("*.json") if path.is_file()) if snapshot.is_dir() else []
+    if not frozen:
+        return CheckResult(
+            "goldens",
+            False,
+            f"tag {tag} has no frozen goldens at {snapshot}; a release pins the values current code must keep "
+            "satisfying, and an unfrozen minor claims a regression guard it never wrote — run "
+            f"'make freeze-goldens MINOR={minor}'",
+        )
+    return CheckResult("goldens", True, f"{len(frozen)} frozen golden(s) snapshotted at {snapshot}")
 
 
 def _imported_top_levels(package_root: Path) -> set[str]:
@@ -350,12 +479,15 @@ def evaluate(
     gate_cmd: str,
     pyproject: Path = DEFAULT_PYPROJECT,
     package_root: Path = DEFAULT_PACKAGE_ROOT,
+    init_path: Path = DEFAULT_INIT,
+    frozen_root: Path = DEFAULT_FROZEN_ROOT,
 ) -> list[CheckResult]:
     """Run every release-guard check and return their results in order.
 
     The gate runs last because it is the only expensive check: a malformed tag, an
-    unwritten changelog section or a mis-tiered dependency is answerable in
-    milliseconds, and there is no reason to spend three minutes on the suite first.
+    unwritten changelog section, a version the package contradicts, a missing frozen
+    snapshot or a mis-tiered dependency is answerable in milliseconds, and there is
+    no reason to spend three minutes on the suite first.
 
     Args:
         tag: The candidate tag.
@@ -363,9 +495,11 @@ def evaluate(
         gate_cmd: Shell command whose zero exit means a green gate.
         pyproject: Manifest declaring the dependency tiers.
         package_root: Directory of the package the distribution ships.
+        init_path: Module declaring the ``__version__`` the tag must match.
+        frozen_root: Root holding one frozen-golden directory per released minor.
 
     Returns:
-        The ``[tag, changelog, dependencies, gate]`` results.
+        The ``[tag, changelog, version, goldens, dependencies, gate]`` results.
 
     Examples:
         ```pycon
@@ -378,14 +512,23 @@ def evaluate(
         ...     _ = toml.write_text('[project]\\ndependencies = []\\n')
         ...     root = Path(tmp) / "pkg"
         ...     root.mkdir()
-        ...     [r.passed for r in evaluate("v0.1.0", changelog, "true", toml, root)]
-        [True, True, True, True]
+        ...     _ = (root / "__init__.py").write_text('__version__ = "0.1.0"\\n')
+        ...     frozen = Path(tmp) / "frozen" / "0.1"
+        ...     frozen.mkdir(parents=True)
+        ...     _ = (frozen / "optim_toy.json").write_text("{}")
+        ...     results = evaluate(
+        ...         "v0.1.0", changelog, "true", toml, root, root / "__init__.py", frozen.parent
+        ...     )
+        ...     [r.name for r in results]
+        ['tag', 'changelog', 'version', 'goldens', 'dependencies', 'gate']
 
         ```
     """
     return [
         check_tag(tag),
         check_changelog(tag, changelog),
+        check_version(tag, init_path),
+        check_frozen_goldens(tag, frozen_root),
         check_dependency_tiers(pyproject, package_root),
         check_gate(gate_cmd),
     ]
@@ -398,8 +541,8 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command-line arguments (defaults to ``sys.argv[1:]``).
 
     Returns:
-        ``0`` only when the tag, changelog, dependency-tier and gate checks all
-        pass; ``1`` otherwise.
+        ``0`` only when the tag, changelog, version, frozen-golden, dependency-tier
+        and gate checks all pass; ``1`` otherwise.
 
     Examples:
         The verdict lines go to stdout and name the changelog by absolute path,
@@ -443,6 +586,19 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_PACKAGE_ROOT,
         help="package the distribution ships, walked for imports (default: <repo>/src/lucid_yolo)",
     )
+    parser.add_argument(
+        "--init",
+        type=Path,
+        default=DEFAULT_INIT,
+        dest="init_path",
+        help="module whose __version__ the tag must match (default: <repo>/src/lucid_yolo/__init__.py)",
+    )
+    parser.add_argument(
+        "--frozen-root",
+        type=Path,
+        default=DEFAULT_FROZEN_ROOT,
+        help="root holding one frozen-golden directory per released minor (default: <repo>/goldens/frozen)",
+    )
     args = parser.parse_args(argv)
 
     tag = args.tag if args.tag is not None else _current_tag()
@@ -450,7 +606,15 @@ def main(argv: list[str] | None = None) -> int:
         print("release guard: HEAD is not exactly a tag — nothing to check")
         return 0
 
-    results = evaluate(tag, args.changelog, args.gate_cmd, args.pyproject, args.package_root)
+    results = evaluate(
+        tag,
+        args.changelog,
+        args.gate_cmd,
+        args.pyproject,
+        args.package_root,
+        args.init_path,
+        args.frozen_root,
+    )
     for result in results:
         marker = "PASS" if result.passed else "FAIL"
         print(f"{marker} [{result.name}] {result.detail}")

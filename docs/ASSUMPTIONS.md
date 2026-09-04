@@ -2,6 +2,8 @@
 
 Anywhere the papers underdetermine the implementation, the chosen assumption, its public source, and its validation plan are recorded here **before** the corresponding code lands. Rule: any new gap discovered during implementation gets an entry before the code merges. Assumption revisions after a release ship as PATCH (if within golden tolerances) or the next 0.MINOR (if results move).
 
+**Adding a row also raises the floor.** `_ASSUMPTION_FLOOR` in `scripts/lint/audit_docs_present.py` counts the rows this register is allowed to hold and never fall below; the `docs-present` hook reports a shrink against it. It is a ratchet: raise it to the new row count in the same commit that adds the row, never lower it. `_DECISION_FLOOR` (`DECISIONS.md`) and `_WP_FLOOR` (`ROADMAP.md`) work the same way and want the same edit. The floor sat at 26 against 73 rows until WP-168, which is 47 rows of slack — a register can only be certified by a number somebody keeps current.
+
 Status legend: `open` = code not yet landed · `active` = in the codebase · `validated` = validation plan executed and passed · `revised` = superseded (revision history kept inline).
 
 | ID | Gap in papers | Assumption | Public source | Validation | Status |
