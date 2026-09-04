@@ -20,12 +20,14 @@ from typing import ClassVar
 
 import pytest
 import torch
+from faster_coco_eval import COCO, COCOeval_faster
+from faster_coco_eval.core.cocoeval import Params
 from torch import Tensor
 
 from lucid_yolo.assign.grid import HEAD_STRIDES, anchor_grid
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.decode.common import PAD_ANCHOR_INDEX
-from lucid_yolo.eval import pose_eval
+from lucid_yolo.eval import coco_eval, pose_eval
 from lucid_yolo.eval.coco_eval import DualPathEvaluator, evaluate_keypoints, keypoints_to_predictions
 from lucid_yolo.models.heads.detect import DualHeadOutput
 from lucid_yolo.models.heads.keypoint import decode_keypoints
@@ -150,6 +152,72 @@ class TestEvaluateKeypoints:
         corrupted = evaluate_keypoints(predictions, corrupted_targets, sigmas=_TEST_SIGMAS)
 
         assert baseline == corrupted
+
+
+def _keypoint_evaluator() -> COCOeval_faster:
+    """Build the smallest real keypoint evaluator: one image, one two-point instance, one match.
+
+    Examples:
+        >>> _keypoint_evaluator().params.iouType
+        'keypoints'
+    """
+    document = {
+        "images": [{"id": 0}],
+        "annotations": [
+            {
+                "id": 1,
+                "image_id": 0,
+                "category_id": 1,
+                "keypoints": [10.0, 10.0, 2.0, 50.0, 50.0, 2.0],
+                "num_keypoints": 2,
+                "bbox": [10.0, 10.0, 40.0, 40.0],
+                "area": 1600.0,
+                "iscrowd": 0,
+            }
+        ],
+        "categories": [{"id": 1, "name": "1"}],
+    }
+    results = [{"image_id": 0, "category_id": 1, "keypoints": [10.0, 10.0, 2.0, 50.0, 50.0, 2.0], "score": 0.9}]
+    ground_truth = COCO(document)
+    return COCOeval_faster(ground_truth, ground_truth.loadRes(results), iouType="keypoints", kpt_oks_sigmas=[1.0, 1.0])
+
+
+class TestKeypointEvaluationParams:
+    """WP-166: the keypoint detection cap and area partition are this project's, not the library's."""
+
+    def test_pinned_values_equal_the_library_defaults(self) -> None:
+        """The pinned ``maxDets``/``areaRng`` still equal what ``Params.setKpParams`` sets.
+
+        :func:`evaluate_keypoints` pins both so a report's AR lines and its
+        medium/large split are citable numbers rather than whatever the installed
+        faster_coco_eval happens to default to. That pin is only worth having if a
+        library that moves its own default is *noticed*: without this case the two
+        could silently diverge and the comment beside the constants would quietly
+        become false, exactly as the OKS sigma comment did.
+        """
+        defaults = Params(iouType="keypoints")
+
+        assert tuple(defaults.maxDets) == coco_eval._KEYPOINT_MAX_DETS
+        assert tuple(tuple(float(bound) for bound in rng) for rng in defaults.areaRng) == (
+            coco_eval._KEYPOINT_AREA_RANGES
+        )
+
+    def test_evaluator_carries_the_pinned_values(self) -> None:
+        """A constructed keypoint evaluator ends up holding the constants, not the defaults.
+
+        The assignment goes through ``evaluator.params``, and hotcoco's own
+        equivalent attribute is copy-on-read — an assignment there is a silent
+        no-op. This pins that faster_coco_eval's is not, so the pin above is
+        actually in force at ``evaluate()`` time rather than merely written down.
+        """
+        evaluator = _keypoint_evaluator()
+
+        coco_eval._pin_keypoint_params(evaluator)
+
+        assert tuple(evaluator.params.maxDets) == coco_eval._KEYPOINT_MAX_DETS
+        assert tuple(tuple(float(bound) for bound in rng) for rng in evaluator.params.areaRng) == (
+            coco_eval._KEYPOINT_AREA_RANGES
+        )
 
 
 class TestCanonicalGroundTruthMetadata:

@@ -179,15 +179,28 @@ _RECALL_POINTS = 101
 #: fixes its own grid is noticed rather than silently worked around forever.
 _RECALL_GRID: tuple[float, ...] = tuple(index / (_RECALL_POINTS - 1) for index in range(_RECALL_POINTS))
 
+#: COCO's own canonical detection-count thresholds (R12) for the box and mask
+#: protocols, stated explicitly rather than left to either engine's default — the
+#: same reasoning as :data:`_RECALL_GRID`, and given to *both* engines for the same
+#: reason the recall grid is: a statistic whose detection cap depends on which
+#: backend computed it is not the same statistic under one name. Equal to what
+#: torchmetrics and hotcoco both default to today, but a citable,
+#: version-independent number this project's report does not follow if either
+#: default ever moves. Keypoints cap differently — see :data:`_KEYPOINT_MAX_DETS`.
+_MAX_DETS: tuple[int, int, int] = (1, 10, 100)
+
 #: The COCO 17-point OKS per-keypoint sigmas (R12), in COCO's own point order
 #: (nose, l/r eye, l/r ear, l/r shoulder, l/r elbow, l/r wrist, l/r hip, l/r
 #: knee, l/r ankle). Named explicitly here rather than left to
 #: faster_coco_eval's internal default (Params.setKpParams) so the value this
-#: project reports against is citable and version-independent, even though it
-#: currently equals that library default exactly -- verify this against
-#: `faster_coco_eval.core.cocoeval.Params.setKpParams`'s source before trusting
-#: this comment; if the library ever changes its own default, this project's
-#: reported numbers must not silently move with it.
+#: project reports against is citable and version-independent. It agrees with
+#: that library default to within float rounding rather than exactly: the
+#: library writes the table as ``np.array([0.26, 0.25, ...]) / 10.0`` while this
+#: one writes each quotient literally, and the largest elementwise difference is
+#: 1.3877787807814457e-17 (measured against the installed faster_coco_eval,
+#: `faster_coco_eval.core.cocoeval.Params.setKpParams`). Re-measure that figure
+#: rather than trusting this comment; if the library ever moves its own default
+#: by more than rounding, this project's reported numbers must not follow.
 COCO_KEYPOINT_OKS_SIGMAS: tuple[float, ...] = (
     0.026,
     0.025,
@@ -217,6 +230,24 @@ COCO_KEYPOINT_OKS_SIGMAS: tuple[float, ...] = (
 #: monotone rescaling of OKS, so it sets only where a floor sits and never
 #: which run wins (WP-137).
 SYMBOL_KEYPOINT_OKS_SIGMA = 0.072
+
+#: COCO's keypoint detection cap and area partition (R12), pinned for exactly the
+#: reason :data:`COCO_KEYPOINT_OKS_SIGMAS` is: ``Params.setKpParams`` sets all
+#: three, and a report that cites its sigmas but inherits its detection cap and
+#: its medium/large split from whatever the library happens to default to is
+#: citable in one field out of three. The keypoint protocol caps at 20 detections
+#: per image and defines no small bucket, so the ranges below are COCO's
+#: ``all``/``medium``/``large`` in that order (``0``, ``32**2``, ``96**2``, and
+#: ``1e5**2`` as the open upper bound). Equal to the installed faster_coco_eval's
+#: own defaults today, which
+#: ``tests/eval/test_keypoint_eval.py::TestKeypointEvaluationParams`` pins so a
+#: library that moves them is noticed rather than silently followed.
+_KEYPOINT_MAX_DETS: tuple[int, ...] = (20,)
+_KEYPOINT_AREA_RANGES: tuple[tuple[float, float], ...] = (
+    (0.0, 1e10),
+    (1024.0, 9216.0),
+    (9216.0, 1e10),
+)
 
 #: The ten scalar statistics in COCO's keypoint protocol. Unlike bbox/segm,
 #: keypoints have medium and large area buckets only, with no small bucket.
@@ -559,6 +590,34 @@ def _keypoint_results(
     return results, category_ids
 
 
+def _pin_keypoint_params(evaluator: COCOeval_faster) -> None:
+    """Set one keypoint evaluator's detection cap and area partition from this module's constants.
+
+    :data:`COCO_KEYPOINT_OKS_SIGMAS` is passed at construction so the OKS this
+    project reports is a citable number rather than an inherited library default.
+    ``maxDets`` and ``areaRng`` decide the AR lines and the medium/large split of
+    the same report, so they are pinned here for the same reason and from the same
+    kind of named constant (WP-166) — the values themselves are COCO's own, and
+    equal what ``Params.setKpParams`` sets today.
+
+    The read-back is not ceremony: hotcoco's ``params`` is copy-on-read, which
+    makes an assignment to it a silent no-op (see :func:`_hotcoco_stats`), and an
+    unnoticed no-op here would quietly restore exactly the library-default
+    dependence this closes.
+    """
+    evaluator.params.maxDets = list(_KEYPOINT_MAX_DETS)
+    evaluator.params.areaRng = [list(bounds) for bounds in _KEYPOINT_AREA_RANGES]
+    pinned_ranges = tuple(tuple(float(bound) for bound in bounds) for bounds in evaluator.params.areaRng)
+    if tuple(evaluator.params.maxDets) != _KEYPOINT_MAX_DETS or pinned_ranges != _KEYPOINT_AREA_RANGES:
+        raise RuntimeError(
+            "COCOeval_faster did not keep the keypoint maxDets/areaRng it was given, so the "
+            "detection cap and area partition behind this report are the library's rather than "
+            f"COCO's. Expected {list(_KEYPOINT_MAX_DETS)} and "
+            f"{[list(bounds) for bounds in _KEYPOINT_AREA_RANGES]}, got "
+            f"{list(evaluator.params.maxDets)} and {[list(bounds) for bounds in pinned_ranges]}."
+        )
+
+
 def evaluate_keypoints(
     preds: list[dict[str, Tensor]],
     targets: list[dict[str, Tensor]],
@@ -621,17 +680,21 @@ def evaluate_keypoints(
         return dict.fromkeys(_KEYPOINT_METRIC_KEYS, 0.0)
     ids = list(range(len(preds))) if image_ids is None else [int(image_id) for image_id in image_ids]
     annotations, target_categories = _keypoint_annotations(targets, ids)
-    results, prediction_categories = _keypoint_results(preds, ids)
+    results, _ = _keypoint_results(preds, ids)
     if not results:
         return dict.fromkeys(_KEYPOINT_METRIC_KEYS, 0.0)
 
+    # COCO fixes the evaluated category set from the ground truth, so a category
+    # only ever predicted is not a class the split asks about: including it would
+    # add an all-false-positive class whose AP joins the mean. Neutral on this
+    # backend today -- an empty ground-truth class scores the -1 sentinel and is
+    # dropped from the mean, and loadRes accepts a result whose category is absent
+    # from the table (both measured) -- so this is the protocol stated rather than
+    # a number changed (WP-166).
     annotation_dict = {
         "images": [{"id": image_id} for image_id in ids],
         "annotations": annotations,
-        "categories": [
-            {"id": category_id, "name": str(category_id)}
-            for category_id in sorted(target_categories | prediction_categories)
-        ],
+        "categories": [{"id": category_id, "name": str(category_id)} for category_id in sorted(target_categories)],
     }
     with contextlib.redirect_stdout(io.StringIO()):
         coco_ground_truth = COCO(annotation_dict)
@@ -642,6 +705,7 @@ def evaluate_keypoints(
             iouType="keypoints",
             kpt_oks_sigmas=list(sigmas),
         )
+        _pin_keypoint_params(evaluator)
         evaluator.evaluate()
         evaluator.accumulate()
         evaluator.summarize()
@@ -743,11 +807,14 @@ def _new_metric(iou_type: str | tuple[str, ...]) -> MeanAveragePrecision:
     """Construct the metric for one ``iou_type``, on the exact recall grid.
 
     The single place the metric is configured, so the backend, the box format, the
-    recall grid and the detection-cap warning setting cannot differ between the
-    one-shot entry points and the streaming one :class:`DualPathEvaluator` drives.
-    Passing :data:`_RECALL_GRID` here is therefore what gives ``bbox``, ``segm``,
-    the combined pass and the streaming path one definition of average precision
-    rather than four.
+    recall grid, the detection cap and the detection-cap warning setting cannot
+    differ between the one-shot entry points and the streaming one
+    :class:`DualPathEvaluator` drives. Passing :data:`_RECALL_GRID` here is
+    therefore what gives ``bbox``, ``segm``, the combined pass and the streaming
+    path one definition of average precision rather than four; passing
+    :data:`_MAX_DETS` is the same argument one level out, since that constant is
+    what the hotcoco path already pins and a cap left to each library's default
+    would let one engine's AR lines drift from the other's (WP-166).
 
     Why this route, and not the other two the work package weighed:
         ``rec_thresholds`` is a **documented constructor parameter** of
@@ -774,6 +841,7 @@ def _new_metric(iou_type: str | tuple[str, ...]) -> MeanAveragePrecision:
         box_format="xyxy",
         iou_type=iou_type,  # type: ignore[arg-type]
         rec_thresholds=list(_RECALL_GRID),
+        max_detection_thresholds=list(_MAX_DETS),
     )
     if tuple(metric.rec_thresholds) != _RECALL_GRID:
         raise RuntimeError(
@@ -782,6 +850,12 @@ def _new_metric(iou_type: str | tuple[str, ...]) -> MeanAveragePrecision:
             f"report a silently biased mAP. Expected {_RECALL_POINTS} exact hundredths, "
             f"got {list(metric.rec_thresholds)[:3]}... — pin torchmetrics to a version "
             "whose rec_thresholds argument is honoured, or rework _new_metric."
+        )
+    if tuple(metric.max_detection_thresholds) != _MAX_DETS:
+        raise RuntimeError(
+            "MeanAveragePrecision did not honour the max_detection_thresholds it was given, "
+            f"so its AR lines are not COCO's (WP-166). Expected {list(_MAX_DETS)}, got "
+            f"{list(metric.max_detection_thresholds)}."
         )
     # The fixed 300-row decoder output routinely exceeds COCO's top-100 detection
     # cap; keeping only the 100 highest-scoring per image is the standard protocol
@@ -911,38 +985,43 @@ def _encode_mask_rle(mask: Tensor) -> dict[str, object]:
 
 @contextlib.contextmanager
 def _redirect_native_output() -> Iterator[None]:
-    """Silence hotcoco's own stdout/stderr writes for the scope of one evaluator call.
+    """Silence hotcoco's own stdout/stderr writes for the scope of ``summarize()``.
 
     ``contextlib.redirect_stdout`` only reroutes Python's ``sys.stdout`` object;
     hotcoco writes from Rust directly to file descriptor 1 (its summary table)
-    and 2 (one warning per evaluator parameter that differs from COCO's
-    defaults — this project overrides ``recThrs`` and ``maxDets``, so every call
-    would otherwise warn). Verified directly: wrapping a hotcoco ``summarize()``
-    call in ``contextlib.redirect_stdout`` left the summary table on the real
-    terminal and an empty capture buffer — rf-detr PR 1402's own finding,
-    reproduced here rather than taken on faith. Descriptor-level ``os.dup2``
-    is the only redirect that reaches it, scoped tightly around the evaluator
-    calls alone so a genuine failure (hotcoco raises a Python exception on
-    error, never merely writes to descriptor 2) still surfaces normally.
+    and 2 (a warning naming any evaluator parameter that differs from COCO's
+    defaults). Verified directly: wrapping a hotcoco ``summarize()`` call in
+    ``contextlib.redirect_stdout`` left the summary table on the real terminal
+    and an empty capture buffer — rf-detr PR 1402's own finding, reproduced here
+    rather than taken on faith. Descriptor-level ``os.dup2`` is the only redirect
+    that reaches it.
+
+    Scoped to ``summarize()`` alone, and measured rather than assumed: running
+    each phase of a hotcoco pass with descriptors 1 and 2 captured separately
+    (document construction, ``loadRes``, the evaluator constructor, the ``params``
+    assignment, ``evaluate``, ``accumulate``, ``summarize``, ``get_results``)
+    showed every phase but ``summarize`` writing zero bytes — on a ``bbox``
+    document and on a ``segm`` one, and including a run whose ground truth carried
+    a negative-width box, a negative ``area`` and an out-of-range ``iscrowd``.
+    Blinding the other phases therefore bought no
+    silence and cost the one channel a malformed record would be reported on —
+    which matters here, since this scorer builds those records itself (WP-166).
+    Both descriptors still stay closed over ``summarize`` because the parameter
+    warning also lands there, not at the assignment that provokes it.
     """
     saved_fds = [os.dup(fd) for fd in (1, 2)]
-    devnull = os.open(os.devnull, os.O_WRONLY)
     try:
-        os.dup2(devnull, 1)
-        os.dup2(devnull, 2)
-        yield
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, 1)
+            os.dup2(devnull, 2)
+            yield
+        finally:
+            os.close(devnull)
     finally:
         for fd, saved in zip((1, 2), saved_fds, strict=True):
             os.dup2(saved, fd)
             os.close(saved)
-        os.close(devnull)
-
-
-#: COCO's own canonical detection-count thresholds (R12), stated explicitly rather
-#: than left to hotcoco's own default — the same reasoning as :data:`_RECALL_GRID`:
-#: verified equal to hotcoco's default today, but a citable, version-independent
-#: number this project's report does not silently move if that default ever changes.
-_HOTCOCO_MAX_DETS: tuple[int, int, int] = (1, 10, 100)
 
 
 def _hotcoco_stats(preds: list[dict[str, object]], gt: Mapping[str, object], iou_type: str) -> dict[str, float]:
@@ -964,18 +1043,20 @@ def _hotcoco_stats(preds: list[dict[str, object]], gt: Mapping[str, object], iou
     from hotcoco import COCO as HotcocoCOCO  # noqa: PLC0415 - optional dependency, gated on availability
     from hotcoco import COCOeval as HotcocoEval  # noqa: PLC0415 - optional dependency, gated on availability
 
+    ground_truth = HotcocoCOCO(dict(gt))
+    predictions = ground_truth.loadRes(preds)
+    evaluator = HotcocoEval(ground_truth, predictions, iou_type=iou_type)
+    params = evaluator.params
+    params.rec_thrs = list(_RECALL_GRID)
+    params.max_dets = list(_MAX_DETS)
+    evaluator.params = params
+    evaluator.evaluate()
+    evaluator.accumulate()
+    # Only summarize() writes to the raw descriptors, so only summarize() is
+    # blinded -- the phases that would report a malformed record keep theirs.
     with _redirect_native_output():
-        ground_truth = HotcocoCOCO(dict(gt))
-        predictions = ground_truth.loadRes(preds)
-        evaluator = HotcocoEval(ground_truth, predictions, iou_type=iou_type)
-        params = evaluator.params
-        params.rec_thrs = list(_RECALL_GRID)
-        params.max_dets = list(_HOTCOCO_MAX_DETS)
-        evaluator.params = params
-        evaluator.evaluate()
-        evaluator.accumulate()
         evaluator.summarize()
-        results = evaluator.get_results()
+    results = evaluator.get_results()
     return {
         "map": results["AP"],
         "map_50": results["AP50"],
@@ -1010,8 +1091,11 @@ class _HotcocoStreamingScorer:
     (rf-detr PR 1402's second documented trap): an annotation's ``area`` field
     cannot be swapped in place between a box-area pass and a mask-area pass on one
     loaded document the way torchmetrics' internal combined path does, so this
-    scorer builds two separate ground-truth/result documents instead — one with
-    box area, one with RLE mask area — sharing the same underlying detections.
+    scorer builds two separate ground-truth/result documents instead — one whose
+    fallback area is the box's, one whose fallback area is the RLE mask's —
+    sharing the same underlying detections. Where the target carries the
+    annotation's own ``area`` and ``iscrowd``, both documents take those instead,
+    which is what torchmetrics' two halves do as well (WP-166).
     """
 
     def __init__(self) -> None:
@@ -1042,7 +1126,9 @@ class _HotcocoStreamingScorer:
 
     def _accumulate_boxes(self, image_id: int, prediction: dict[str, Tensor], target: dict[str, Tensor]) -> None:
         """Add this image's box ground truth and detections to the box-pass records."""
-        for box, label in zip(target["boxes"].tolist(), target["labels"].tolist(), strict=True):
+        areas = target.get("area")
+        crowds = target.get("iscrowd")
+        for index, (box, label) in enumerate(zip(target["boxes"].tolist(), target["labels"].tolist(), strict=True)):
             x1, y1, x2, y2 = box
             self._categories.add(int(label))
             self._box_annotations.append(
@@ -1051,8 +1137,8 @@ class _HotcocoStreamingScorer:
                     "image_id": image_id,
                     "category_id": int(label),
                     "bbox": [x1, y1, x2 - x1, y2 - y1],
-                    "area": max((x2 - x1) * (y2 - y1), 1.0),
-                    "iscrowd": 0,
+                    "area": float(areas[index]) if areas is not None else max((x2 - x1) * (y2 - y1), 1.0),
+                    "iscrowd": int(crowds[index]) if crowds is not None else 0,
                 }
             )
             self._annotation_id += 1
@@ -1072,19 +1158,25 @@ class _HotcocoStreamingScorer:
 
     def _accumulate_masks(self, image_id: int, prediction: dict[str, Tensor], target: dict[str, Tensor]) -> None:
         """Add this image's RLE-encoded mask ground truth and detections to the segm-pass records."""
-        for mask, label in zip(target["masks"], target["labels"].tolist(), strict=True):
+        areas = target.get("area")
+        crowds = target.get("iscrowd")
+        for index, (mask, label) in enumerate(zip(target["masks"], target["labels"].tolist(), strict=True)):
             rle = _encode_mask_rle(mask)
             # fce_mask.area accepts either RLE counts form (verified directly); no
             # second encode needed to get an area figure out of the same record
-            # already built for the annotation itself.
+            # already built for the annotation itself. It is the fallback rather
+            # than the value, because torchmetrics' segm half reads a supplied
+            # ``area`` too -- measured on a fixture whose annotation area, mask
+            # area and box area name three different buckets, and its segm
+            # statistics landed in the annotation's (WP-166).
             self._segm_annotations.append(
                 {
                     "id": self._annotation_id,
                     "image_id": image_id,
                     "category_id": int(label),
                     "segmentation": rle,
-                    "area": float(fce_mask.area(rle)),
-                    "iscrowd": 0,
+                    "area": float(areas[index]) if areas is not None else float(fce_mask.area(rle)),
+                    "iscrowd": int(crowds[index]) if crowds is not None else 0,
                 }
             )
             self._annotation_id += 1

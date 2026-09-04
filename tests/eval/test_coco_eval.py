@@ -699,6 +699,65 @@ def _synthetic_segm_case(num_images: int = 4, seed: int = 0) -> tuple[list[dict[
     return preds, targets
 
 
+def _crowd_and_area_case() -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
+    """One image whose targets carry a crowd instance and an ``area`` that is not the box area.
+
+    The two fields COCO reads off the annotation rather than off the box, in the
+    one arrangement where both change the answer: the second instance is
+    ``iscrowd=1``, so the detection sitting inside it is ignored rather than
+    counted a false positive, and the first instance's ``area`` of 200 puts it in
+    the *small* bucket although its box measures 200x200. Rebuilding either field
+    from the box moves ``map`` and moves every size bucket.
+
+    Examples:
+        >>> preds, targets = _crowd_and_area_case()
+        >>> targets[0]["iscrowd"].tolist(), targets[0]["area"].tolist()
+        ([0, 1], [200.0, 10000.0])
+    """
+    targets = [
+        {
+            "boxes": torch.tensor([[0.0, 0.0, 200.0, 200.0], [400.0, 400.0, 500.0, 500.0]]),
+            "labels": torch.tensor([1, 1]),
+            "iscrowd": torch.tensor([0, 1]),
+            "area": torch.tensor([200.0, 10000.0]),
+        }
+    ]
+    preds = [
+        {
+            "boxes": torch.tensor([[0.0, 0.0, 200.0, 200.0], [410.0, 410.0, 460.0, 460.0]]),
+            "scores": torch.tensor([0.9, 0.8]),
+            "labels": torch.tensor([1, 1]),
+        }
+    ]
+    return preds, targets
+
+
+def _crowd_and_area_masks_case() -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
+    """The crowd/area case's twin with masks: the same instances, plus a filled patch for each.
+
+    The mask pass reads ``iscrowd`` and ``area`` off the annotation exactly as the
+    box pass does, and gets its own fallback (the RLE's own pixel count) when they
+    are absent, so it needs its own case rather than inheriting the bbox one's
+    coverage.
+
+    Examples:
+        >>> preds, targets = _crowd_and_area_masks_case()
+        >>> targets[0]["masks"].shape
+        torch.Size([2, 500, 500])
+    """
+    preds, targets = _crowd_and_area_case()
+    canvas = 500
+    target_masks = torch.zeros(2, canvas, canvas, dtype=torch.bool)
+    target_masks[0, :200, :200] = True
+    target_masks[1, 400:, 400:] = True
+    prediction_masks = torch.zeros(2, canvas, canvas, dtype=torch.bool)
+    prediction_masks[0, :200, :200] = True
+    prediction_masks[1, 410:460, 410:460] = True
+    targets[0]["masks"] = target_masks
+    preds[0]["masks"] = prediction_masks
+    return preds, targets
+
+
 @pytest.mark.skipif(not coco_eval.hotcoco_available()[0], reason="hotcoco not installed or not usable here")
 class TestHotcocoParity:
     """Hotcoco's streaming scorer must report exactly what faster_coco_eval's does (WP-138).
@@ -742,6 +801,49 @@ class TestHotcocoParity:
         expected_keys = {*_METRIC_KEYS, *(coco_eval._SEGM_PREFIX + key for key in _METRIC_KEYS)}
         assert set(hotcoco_stats) == expected_keys
         for key in expected_keys:
+            assert hotcoco_stats[key] == pytest.approx(faster_stats[key], abs=1e-6), key
+
+    def test_crowd_and_annotation_area_match_faster_coco_eval(self) -> None:
+        """A crowd instance and a non-box ``area`` are honoured identically by both engines (WP-166).
+
+        The parity cases above omit ``iscrowd`` and ``area`` entirely, so both
+        engines fall back to the same reconstruction and agree by construction on
+        the only two fields where they can differ. This case supplies both:
+        crowd-ignore decides ``map``, and the annotation's own ``area`` decides
+        which of the three size buckets the instance lands in, so a scorer that
+        rebuilds either field from the box reports a different protocol here.
+        """
+        preds, targets = _crowd_and_area_case()
+
+        faster = coco_eval._StreamingScorer()
+        faster.update(preds, targets)
+        hotcoco_scorer = coco_eval._HotcocoStreamingScorer()
+        hotcoco_scorer.update(preds, targets)
+
+        faster_stats = faster.compute()
+        hotcoco_stats = hotcoco_scorer.compute()
+        for key in _METRIC_KEYS:
+            assert hotcoco_stats[key] == pytest.approx(faster_stats[key], abs=1e-6), key
+
+    def test_crowd_and_annotation_area_match_across_masks(self) -> None:
+        """The mask pass honours the same two annotation fields the box pass does (WP-166).
+
+        ``_accumulate_masks`` builds its own ground-truth document with its own
+        area fallback — the RLE's pixel count rather than the box's extent — so a
+        crowd instance or a non-box ``area`` can be dropped on the segm side while
+        the bbox side is already correct. This drives the same fixture with masks
+        attached and holds all 24 statistics to the parity contract.
+        """
+        preds, targets = _crowd_and_area_masks_case()
+
+        faster = coco_eval._StreamingScorer()
+        faster.update(preds, targets)
+        hotcoco_scorer = coco_eval._HotcocoStreamingScorer()
+        hotcoco_scorer.update(preds, targets)
+
+        faster_stats = faster.compute()
+        hotcoco_stats = hotcoco_scorer.compute()
+        for key in (*_METRIC_KEYS, *(coco_eval._SEGM_PREFIX + key for key in _METRIC_KEYS)):
             assert hotcoco_stats[key] == pytest.approx(faster_stats[key], abs=1e-6), key
 
     def test_empty_preds_is_zeroed_like_the_faster_coco_eval_path(self) -> None:
