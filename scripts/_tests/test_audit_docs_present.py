@@ -80,7 +80,7 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     _write(docs_dir / "ESCALATION.md", "escalation\n")
     _write(
         docs_dir / "ROADMAP.md",
-        "165 numbered work packages.\n" + "".join(f"| {i:03d} | a | b | c | d | ✅ |\n" for i in range(1, 166)),
+        "176 numbered work packages.\n" + "".join(f"| {i:03d} | a | b | c | d | ✅ |\n" for i in range(1, 177)),
     )
     _write(docs_dir / "DATASETS.md", "datasets\n")
     _write(docs_dir / "TRAINING.md", "training\n")
@@ -206,7 +206,7 @@ class TestCheckRoadmapWpIdsUniqueAndComplete:
 
         violations = audit.check_roadmap_wp_ids_unique_and_complete(tmp_path / "docs", tmp_path)
 
-        assert any("shrank below 165" in violation for violation in violations)
+        assert any("shrank below 176" in violation for violation in violations)
 
     def test_is_clean_at_the_floor(self, tmp_path: Path) -> None:
         """A contiguous roadmap at the floor count reports no violation."""
@@ -262,12 +262,12 @@ class TestCheckRoadmapHeaderCount:
         _write_required_docs(tmp_path / "docs", tmp_path)
         text = (tmp_path / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
         _write(
-            tmp_path / "docs" / "ROADMAP.md", text.replace("165 numbered work packages.", "5 numbered work packages.")
+            tmp_path / "docs" / "ROADMAP.md", text.replace("176 numbered work packages.", "5 numbered work packages.")
         )
 
         violations = audit.check_roadmap_header_count(tmp_path / "docs", tmp_path)
 
-        assert violations == ["header states 5 numbered work packages but the table carries 165"]
+        assert violations == ["header states 5 numbered work packages but the table carries 176"]
 
     def test_is_clean_when_counts_agree(self, tmp_path: Path) -> None:
         """A stated package count matching the numbered rows reports no violation."""
