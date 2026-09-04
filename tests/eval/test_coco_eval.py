@@ -758,6 +758,26 @@ def _crowd_and_area_masks_case() -> tuple[list[dict[str, Tensor]], list[dict[str
     return preds, targets
 
 
+class TestHotcocoIsUsableHere:
+    """The canary under the parity class's ``skipif`` (WP-174)."""
+
+    def test_hotcoco_is_available_and_working(self) -> None:
+        """Hotcoco imports and its compiled extension constructs, unconditionally.
+
+        Every parity case below is guarded by ``skipif`` on this same probe, so if hotcoco
+        stops importing the whole class evaporates and the gate stays green — the failure
+        mode a guarded suite has by construction. hotcoco is not optional here: it is a
+        hard runtime dependency and ``lucid-eval``'s default bbox/segm engine, and three of
+        the five compatibility traps recorded in ``pyproject.toml`` "fail silently rather
+        than raising". So the probe returning ``True`` is itself a contract, asserted
+        without a guard, and the reason string is carried into the failure message because
+        "hotcoco is missing" and "hotcoco is built but broken" need different remedies.
+        """
+        probe = coco_eval.hotcoco_available()
+
+        assert probe == (True, None), f"hotcoco is a hard dependency but is unusable here: {probe[1]}"
+
+
 @pytest.mark.skipif(not coco_eval.hotcoco_available()[0], reason="hotcoco not installed or not usable here")
 class TestHotcocoParity:
     """Hotcoco's streaming scorer must report exactly what faster_coco_eval's does (WP-138).
