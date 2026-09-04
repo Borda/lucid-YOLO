@@ -82,7 +82,7 @@ Gate: tests/data/test_x.py::test_y # what proves the definition of done
 
 `type` is one of `feat`, `fix`, `test`, `ci`, `docs`, `chore`, `perf`, `refactor`, `refine`, `exp`, `release`. Trailers are validated against the register, so a `Provenance:` id that does not resolve fails the check rather than the review.
 
-Under D18's relaxation a change with no roadmap row still carries the other three trailers — the derivation question does not go away just because the tracking did.
+Under D18's relaxation a change with no roadmap row writes `WP: none` — the literal word, matching how `Assumptions:` states its own absence, so the message says no row applies rather than leaving a reader to decide whether one was forgotten. The other three trailers stay mandatory: the derivation question does not go away just because the tracking did.
 
 ## 🐛 Reporting a problem
 

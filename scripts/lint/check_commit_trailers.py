@@ -36,7 +36,14 @@ SUBJECT_RE = re.compile(r"^(feat|fix|test|ci|docs|chore|perf|refactor|refine|exp
 SUBJECT_MAX_LEN = 72
 
 #: Trailer matchers (multiline, one capture group each).
-WP_RE = re.compile(r"^WP: (\d+)\s*$", re.MULTILINE)
+#: ``WP:`` takes a roadmap row id, or the literal ``none`` for the D18 case: once the
+#: reproduction is complete and the repository public, a change altering no shipped
+#: behaviour, no public symbol, no golden and no documented assumption lands without a
+#: tracked row. ``none`` rather than an omitted trailer, matching ``Assumptions:``, so
+#: the message states that no row applies instead of leaving a reader to decide whether
+#: one was forgotten. The other three trailers stay mandatory: the derivation question
+#: does not go away because the tracking did (WP-144).
+WP_RE = re.compile(r"^WP: (\d+|none)\s*$", re.MULTILINE)
 PROVENANCE_RE = re.compile(r"^Provenance:\s*(.+)$", re.MULTILINE)
 ASSUMPTIONS_RE = re.compile(r"^Assumptions:\s*(.+)$", re.MULTILINE)
 GATE_RE = re.compile(r"^Gate:\s*(.+)$", re.MULTILINE)
@@ -50,8 +57,16 @@ PROVENANCE_ROW_RE = re.compile(r"^\| R(\d+) \|", re.MULTILINE)
 #: Co-author separator: a line containing only dashes.
 SEPARATOR_RE = re.compile(r"^---\s*$", re.MULTILINE)
 
-#: Default location of the provenance allowlist, relative to the repo root.
-DEFAULT_PROVENANCE = Path("docs/PROVENANCE.md")
+#: The repository this checker belongs to, resolved from the file rather than from the
+#: process. Every path and every ``git`` call below is anchored here. Read from the
+#: working directory instead, the checker answers about wherever it happens to be
+#: standing: from a subdirectory it dies on the provenance table it cannot find, and
+#: from another checkout it would validate that checkout's history and report clean.
+#: ``release_guard.py`` already anchors this way; these two lint entry points did not.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: Default location of the provenance allowlist.
+DEFAULT_PROVENANCE = REPO_ROOT / "docs" / "PROVENANCE.md"
 
 
 def load_provenance_ids(path: Path) -> set[int]:
@@ -64,7 +79,7 @@ def load_provenance_ids(path: Path) -> set[int]:
         The set of integers ``N`` for every ``| RN |`` table row.
 
     Examples:
-        >>> ids = load_provenance_ids(Path("docs/PROVENANCE.md"))
+        >>> ids = load_provenance_ids(DEFAULT_PROVENANCE)
         >>> 1 in ids
         True
     """
@@ -178,7 +193,7 @@ def _check_trailers(body: str, valid_ids: set[int]) -> list[str]:
     violations: list[str] = []
     wp = WP_RE.findall(body)
     if len(wp) != 1:
-        violations.append(f"expected exactly one 'WP: <digits>' trailer, found {len(wp)}")
+        violations.append(f"expected exactly one 'WP: <digits>' or 'WP: none' trailer, found {len(wp)}")
     violations += _check_provenance(body, valid_ids)
     assumptions = ASSUMPTIONS_RE.search(body)
     if not assumptions:
@@ -241,6 +256,7 @@ def _commit_shas(commit_range: str) -> list[str]:
     """
     result = subprocess.run(
         ["git", "log", "--no-merges", "--format=%H", commit_range],
+        cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=True,
@@ -259,6 +275,7 @@ def _commit_message(sha: str) -> str:
     """
     result = subprocess.run(
         ["git", "log", "-1", "--format=%B", sha],
+        cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=True,

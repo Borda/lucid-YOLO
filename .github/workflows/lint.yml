@@ -63,3 +63,28 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python scripts/lint/check_dco.py --range "${BASE_SHA}..${HEAD_SHA}"
+
+  # Admission layer three (WP-144), and the only one producing a reviewable artifact
+  # rather than a promise: a contributor must name what an algorithmic change derives
+  # from, so an unnamed derivation on a loss or an assigner is visible at review instead
+  # of after release.
+  #
+  # `ci-tests.yml` skips this, correctly, for what lands on `main`: a squash merge
+  # replaces the messages it would have validated, so checking them there validates a
+  # message nobody wrote. That argument covers the merge result and not the submission.
+  # The contributor's own commits are exactly what review reads, and they exist here.
+  trailers:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Check provenance trailers on the pull request's own commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/lint/check_commit_trailers.py --range "${BASE_SHA}..${HEAD_SHA}"

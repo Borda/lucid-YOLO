@@ -14,9 +14,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Linting, strict typing and the copyleft audit live in lint.yml; the
-  # commit-trailer contract is a local pre-commit check, because a squash merge
-  # replaces the messages this workflow would have validated.
+  # Linting, strict typing and the copyleft audit live in lint.yml; the commit-trailer
+  # contract is a local pre-commit check here, because a squash merge replaces the
+  # messages this workflow would have validated. WP-144 narrowed that: the argument
+  # covers the merge result and not the submission, so lint.yml's `trailers` job checks
+  # the pull request's own commits, which are what review actually reads.
   testing:
     runs-on: ubuntu-latest
     steps:
