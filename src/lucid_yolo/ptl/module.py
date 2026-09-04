@@ -169,7 +169,6 @@ from typing import TYPE_CHECKING, cast
 import torch
 from pytorch_lightning import LightningModule
 from torch import Tensor
-from torchmetrics.detection import MeanAveragePrecision
 
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.decode.common import BOX_CORNERS, SCORE_COLUMN
@@ -201,6 +200,7 @@ from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
+from lucid_yolo.ptl.coco_backend import build_mean_average_precision
 from lucid_yolo.ptl.seg_targets import instance_mask_targets, scale_boxes_to_grid, semantic_target
 
 if TYPE_CHECKING:
@@ -853,9 +853,12 @@ class DetectionLitModule(LightningModule):
 
         #: E2E decoder + epoch mAP over the one-to-one branch (WP-077). Neither
         #: carries parameters and the metric's states are non-persistent, so the
-        #: module's ``state_dict`` — and older checkpoints — are unaffected.
+        #: module's ``state_dict`` — and older checkpoints — are unaffected. Both
+        #: metrics come from :func:`~lucid_yolo.ptl.coco_backend.build_mean_average_precision`,
+        #: which is the stock metric with its epoch-to-COCO conversion reading
+        #: scores once per image rather than once per detection (WP-165).
         self._val_decoder = TopKDecoder()
-        self._val_map = MeanAveragePrecision(backend="faster_coco_eval", box_format="xyxy")
+        self._val_map = build_mean_average_precision(backend="faster_coco_eval", box_format="xyxy")
         self._val_map.warn_on_many_detections = False
 
         #: Epoch mask mAP, for ``"segment"`` only (WP-087). A second metric rather
@@ -867,7 +870,7 @@ class DetectionLitModule(LightningModule):
         #: inputs are self-consistent. ``None`` for a detection module, whose
         #: validation must not pay for mask machinery it has no branch for.
         self._val_segm = (
-            MeanAveragePrecision(backend="faster_coco_eval", iou_type="segm") if task == "segment" else None
+            build_mean_average_precision(backend="faster_coco_eval", iou_type="segm") if task == "segment" else None
         )
         if self._val_segm is not None:
             self._val_segm.warn_on_many_detections = False

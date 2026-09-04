@@ -31,7 +31,7 @@ DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 #: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted. Raise it when adding
 #: a work package; never lower it.
-_WP_FLOOR = 164
+_WP_FLOOR = 165
 
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
@@ -309,7 +309,7 @@ def check_roadmap_wp_ids_unique_and_complete(docs_dir: Path, repo_root: Path) ->
         ...     docs = Path(tmp)
         ...     _ = (docs / "ROADMAP.md").write_text("| 001 | ... |\\n| 002 | ... |\\n", encoding="utf-8")
         ...     check_roadmap_wp_ids_unique_and_complete(docs, docs)
-        ['roadmap shrank below 164 work packages: 2']
+        ['roadmap shrank below 165 work packages: 2']
     """
     text = (docs_dir / "ROADMAP.md").read_text(encoding="utf-8")
     ids = [int(m) for m in re.findall(r"^\| (\d{3}) \|", text, flags=re.MULTILINE)]

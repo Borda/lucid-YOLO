@@ -1434,6 +1434,22 @@ This row lands the candidate WP-163 rejected one entry above, and the more usefu
 
 **Unverified on CUDA.** The mechanism — one fewer copy of a boolean tensor, no data-dependent indexing — has no reason to invert there, and this project has no CUDA device to confirm it on. Stated rather than assumed.
 
+### WP-165 — a private method overridden on purpose, and the guard that makes it survivable
+
+<a id="wp-165"></a>
+
+This row lands the candidate WP-163 measured, declined, and recorded so the trade could be re-taken. The principal re-took it. What follows is the mechanism, the honest number, and the reason the coupling is bounded rather than merely acknowledged.
+
+**What the change is.** `torchmetrics` converts an accumulated epoch into the two COCO documents its evaluator scores. Most of that conversion is already hoisted to one call per image — `boxes[image_id].cpu().tolist()`, the same for labels — but each detection's score is read individually as `scores[image_id][k].cpu().tolist()`: a tensor index, a device transfer and a Python conversion per *annotation*, against two per image for everything else. At this project's validation shape that is 100 such chains per image where two would do. The parameter is already optional upstream — `scores=None` builds the annotations without a `score` key — so `_HoistedScoreBackend` passes `None`, lets `super()` build the document, and attaches the scores from one `tolist()` per image afterwards.
+
+**The number, at the call site rather than the function.** `MeanAveragePrecision.compute()` over 320 images of 100 detections: **187.7 ms to 169.5 ms, 9.7% less**, medians of five interleaved trials, every individual trial faster. The conversion in isolation is ~26% faster, which is the figure WP-163 recorded; the 9.7% is the one that belongs in a decision, because `compute` also runs the evaluation the conversion feeds and that part is unchanged. Per epoch this is a fraction of a percent, as WP-163 said when declining it. That has not changed and this entry does not claim otherwise — what changed is who is deciding whether the coupling is worth it.
+
+**Why the coupling is bounded.** `_get_coco_format` is private and carries no compatibility promise, and the failure mode of overriding one is worse than a break: upstream changes what it produces, the override keeps being called, and a validation metric moves with nothing raising. Two things bound that. The override **delegates rather than reimplements** — `super()` builds the document and this writes exactly one field, so any field upstream adds, removes or reshapes arrives unchanged, and a new keyword argument reaches upstream through `**kwargs` instead of hitting a signature that refuses it. And `tests/ptl/test_coco_backend.py` asserts *document equality* against the stock backend on whatever version is installed, so drift that the delegation cannot absorb turns the gate red rather than moving a number. That test is the load-bearing artifact of this row; the speed is the easy part.
+
+**The one place the two documents could have diverged.** Upstream skips an image entirely when its mask list is empty and the document carries no boxes — which is exactly the segmentation path here, where an image whose detections were all filtered contributes nothing. An override that flattened every image's scores in order would then hand the third image's scores to the second image's annotations: plausible masks carrying each other's confidences, which no metric value reveals. The override reproduces that condition, `strict=True` on the zip makes any residual disagreement raise rather than misalign, and the mask test puts the empty image in the *middle* of the batch, where an off-by-one cannot accidentally line up.
+
+**Scope of the private surface.** One attribute assignment, in one factory: `build_mean_average_precision` constructs the stock metric and replaces its `_coco_backend`. Both metrics the module builds go through it, so the reach into `torchmetrics` internals is one line in one place rather than a pattern.
+
 ### Phase 14 — what each row does, and where its boundary is
 
 <a id="phase-14-rows"></a>
