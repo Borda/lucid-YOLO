@@ -1,6 +1,6 @@
 # 🔦 lucid-yolo
 
-> lucid-yolo is an independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance segmentation, and oriented detection methods described in the Ultralytics YOLO26 paper (arXiv:2606.03748). "YOLO" refers to the family of real-time detectors originated by Redmon et al. (2016). This project is not affiliated with, endorsed by, or derived from Ultralytics or its codebase. No Ultralytics source code, configurations, or model weights were consulted or used. See docs/PROVENANCE.md.
+> lucid-yolo is an independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance segmentation, and oriented detection methods described in the YOLO26 paper ([arXiv:2606.03748](https://arxiv.org/abs/2606.03748)). "YOLO" refers to the family of real-time detectors originated by Redmon et al. (2016). This project is not affiliated with, endorsed by, or derived from Ultralytics or its codebase. No Ultralytics source code, configurations, or model weights were consulted or used. See docs/PROVENANCE.md.
 
 **A modern YOLO, written out in full, with its homework shown.** Every mechanism in the paper — the NMS-free end-to-end head, the removal of distribution focal loss, the MuSGD optimizer, the progressive loss schedule, the rotated-box formulation — is implemented here from the published equations, trained, measured, and written up with the numbers it actually produced. Where the papers leave a choice open, the choice is recorded as a numbered assumption instead of buried in the code.
 
