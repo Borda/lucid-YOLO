@@ -182,17 +182,24 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-commit, manual]
-      # `make golden` is the automatic path (part of `make gate`); `stages:
-      # [pre-commit, manual]` means it also runs on `pre-commit run --all-files`,
-      # at the cost of `make gate` invoking check_goldens.py twice (once here,
-      # once via the `golden` target) -- accepted so `--all-files` exercises
-      # every hook, not most of them.
+      # `stages: [manual]`, not `[pre-commit, manual]`. WP-130b put this on every
+      # commit calling it "one already-fast golden recompute"; measured, it is
+      # 34.6 s wall and 65 s CPU, charged to every commit and charged twice per
+      # `make gate` -- once here inside `precommit`, once via the `golden`
+      # target. `make gate` is the merge bar and runs the harness itself, so the
+      # commit-stage copy repeated the gate rather than adding a second opinion,
+      # which is what this file is for: linting and quick checks.
+      #
+      # `lint.yml`'s `--all-files` run was CI's only full 43/43 sweep, so it did
+      # not simply disappear with the stage -- `ci-tests.yml` now runs the
+      # harness as its own step, beside the suite it belongs with. Standalone
+      # here as before: `pre-commit run --hook-stage manual golden-check`.
       - id: golden-check
         name: "🥇 metric golden regression"
         entry: .venv/bin/python scripts/check_goldens.py
         language: system
         pass_filenames: false
-        stages: [pre-commit, manual]
+        stages: [manual]
       # A no-arg invocation is a safe no-op off a tag (`_current_tag` resolves
       # `None` when HEAD is not exactly a tag), so running it on every
       # `--all-files` costs one `git describe` call and nothing else.

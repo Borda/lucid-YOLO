@@ -34,3 +34,11 @@ jobs:
           uv pip install --python .venv/bin/python -e . --group dev
       - name: Offline unit suite with coverage
         run: .venv/bin/python -m pytest -m "not gpu and not data" --cov=lucid_yolo --cov-report=term
+      # The frozen-golden sweep. It used to ride `lint.yml`'s `pre-commit
+      # --all-files` run, which was CI's only full 43/43 check; WP-162 took
+      # `golden-check` off the commit stage, so without this step CI would have
+      # stopped checking the goldens entirely. It lives in this job rather than
+      # back in `lint.yml` because the harness recomputes model metrics -- it is
+      # a test-shaped check, and this is the job that runs the suite.
+      - name: Frozen golden regression
+        run: .venv/bin/python scripts/check_goldens.py

@@ -1386,6 +1386,18 @@ With this row Phase 13's four-row tail closes. Every numbered row in the roadmap
 
 One thing this row does not fix, recorded so the next person does not have to rediscover it: `NOTICE` carries the identical drift, "the Ultralytics YOLO26 paper", and unlike the README's disclaimer sentences that phrase is *not* an audited fragment there. It is the same one-word correction. It is left for whoever touches `NOTICE` next rather than widened into this row.
 
+### WP-162 — what "cheap enough" was worth, measured
+
+<a id="wp-162"></a>
+
+WP-130b moved `golden-check` and `release-guard` from `stages: [manual]` to `[pre-commit, manual]` so that `pre-commit run --all-files` would exercise every hook rather than most of them, and justified both with one sentence: "cheap enough off a release tag". For `release-guard` that is exactly right — off a tag it resolves `git describe`, finds no tag and exits. For `golden-check` it was an estimate nobody checked. Measured: **34.6 s wall, 65 s CPU**, on every commit, and twice per `make gate` — once inside `precommit`, once through the `golden` target. WP-130b's own comment recorded that double invocation as an accepted trade; what it did not have was the size of it.
+
+**The duplication is the argument, not the runtime.** A 34-second hook that found something the gate does not would be worth its cost. This one recomputes the same 43 goldens that `make golden` recomputes, and `make gate` — `precommit test golden` — is the merge bar every commit in this repository has to pass anyway. So the commit-stage copy could never fail where the gate passed. `.pre-commit-config.yaml` is the linting-and-quick-checks surface; a full metric recomputation is a gate step wearing a hook's clothes, and `stages: [manual]` puts it back where WP-130 first had it while keeping the standalone `pre-commit run --hook-stage manual golden-check` path intact.
+
+**What the stage change would have broken, and why the row is two files rather than one.** `lint.yml` runs `pre-commit run --all-files`, and that run was CI's *only* full 43/43 sweep — `ci-tests.yml` runs pytest, whose golden-touching suites (`tests/models/test_param_flops.py`, `tests/assign/test_assignment_goldens.py`, `tests/data/test_data_goldens.py`, `tests/optim/test_toy_convergence.py`) import the harness for specific goldens rather than sweeping all of them. Dropping the stage alone would have taken the sweep out of CI entirely and left a green pipeline saying nothing about the goldens. The harness therefore lands as its own `ci-tests.yml` step, in the job that runs the suite rather than back in the linting job, because recomputing model metrics is test-shaped work.
+
+The trade WP-130b accepted is withdrawn rather than overturned: `--all-files` no longer exercises literally every hook, which is a real and small loss, and the thing bought back is that the gate stops paying for the same 43 goldens twice and a commit stops paying for them at all. `release-guard` keeps `[pre-commit, manual]` — its half of that sentence was never in question.
+
 ### Phase 14 — what each row does, and where its boundary is
 
 <a id="phase-14-rows"></a>
