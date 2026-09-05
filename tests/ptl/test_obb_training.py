@@ -62,7 +62,8 @@ _BOX_GAIN, _CLS_GAIN, _L1_GAIN, _ANGLE_GAIN, _ALPHA = 7.5, 0.5, 6.0, 1.0, 0.5
 #: Column count of a long-edge rotated box.
 _RBOX_DIM = 5
 
-#: The pre-WP-088 ``task="detect"`` training-step snapshot and the run that produced it.
+#: The ``task="detect"`` training-step snapshot and the run that produced it: the
+#: pre-WP-088 scene, re-captured at WP-169 when the align-weight fix moved the objective.
 _SNAPSHOT_FILE = Path(__file__).parent / "prechange_detect_step.json"
 #: Relative tolerance on a term's leverage. The difference of two float32 totals near
 #: 22 resolves to ~2e-6, so a term of order 1e-4 is recovered to about a percent; this
@@ -283,14 +284,26 @@ def test_detect_step_reproduces_the_pre_change_snapshot(single_threaded: None) -
     WP-088 edited modules that also sit on the detection path — the dual loss, the
     target container, four geometric transforms, the COCO reader and the decode
     helpers. "The detection tests still pass" would not distinguish an objective that
-    moved from one that did not; the frozen numbers do. The snapshot was produced by
-    running this exact step against the ``fcf3040`` source tree, exported with
-    ``git archive`` rather than remembered.
+    moved from one that did not; the frozen numbers do. The scene — seeds, config, gains
+    and both target sets — is ``fcf3040``'s, exported with ``git archive`` rather than
+    remembered.
+
+    The *values* were re-captured at WP-169, which is the one change since that has moved
+    this objective; the JSON's ``recapture_reason`` records what and why. In short, the
+    target normalization used to divide by ``t_max + 1e-9``, and ``t_max = s * u_max**6``
+    is far under that floor at initialization, where the head's boxes decode with near-zero
+    IoU. The one-to-many box and L1 terms were therefore reported as ~4e-09 and ~3e-08 —
+    the branch's whole localization objective, weighted into nothing — and the total sat at
+    22.801105. Dividing by ``t_max`` puts them at 7.70e-03 and 5.86e-02 and the total at
+    24.321342. The assignment itself did not move: the same anchors are positive.
 
     **The comparison is to a tolerance, and it did not start that way.** Three values
-    of the same total have now been observed from source trees that compute the same
-    arithmetic: ``22.80110550`` on arm64 with one intra-op thread, ``22.80111694`` on
-    arm64 with twelve, and ``22.80112076`` on x86-64 CI. Summation order is a property
+    of the same total were observed from source trees that compute the same arithmetic
+    — these are the pre-WP-169 totals, and they are what set ``_SNAPSHOT_RTOL``; the
+    spread they measure is a property of the build, not of the objective, so it carries
+    over to the re-captured value unchanged: ``22.80110550`` on arm64 with one intra-op
+    thread, ``22.80111694`` on arm64 with twelve, and ``22.80112076`` on x86-64 CI.
+    Summation order is a property
     of the build and the core count, not of the objective, so bit-identity holds within
     an architecture and cannot hold across one. This test was written asserting equality
     and passed for the whole of Phase 8 — because until the 0.3.0 push it had only ever
@@ -405,6 +418,17 @@ def test_rotated_candidacy_reaches_the_assigner() -> None:
     A25 restricts the rotated ground truth to candidacy, so the only observable effect
     is *which* anchors become positive. A thin diagonal box whose axis-aligned envelope
     is large is where the two tests disagree most, and where a dropped argument shows.
+
+    The observable is the positive **set**, not its size. Until WP-169 this asserted the
+    rotated call produced strictly *fewer* positives, and it passed — but for the wrong
+    reason. The module here is freshly initialized, so every predicted box decodes with
+    near-zero IoU and the whole alignment metric ties at zero; the old ``topk`` then
+    ranked those ties globally instead of within each ground truth's candidates, and the
+    smaller rotated candidate set simply lost more slots to anchors outside it. With that
+    defect fixed a ground truth keeps ``min(k, c)`` of its own candidates either way, and
+    both sets saturate at ``k`` whenever both candidate counts clear it — so the count
+    stopped discriminating while the membership still does. A dropped ``gt_rboxes`` makes
+    the two calls identical, which this still catches.
     """
     module = _tiny_module()
     thin = Targets(
@@ -418,8 +442,9 @@ def test_rotated_candidacy_reaches_the_assigner() -> None:
     rotated = module.loss(*arguments, gt_rboxes=pad_rboxes([thin]))
 
     axis_aligned = module.loss(*arguments)
-    assert int(rotated.o2m_assign.fg_mask.sum()) < int(axis_aligned.o2m_assign.fg_mask.sum())
+    assert not torch.equal(rotated.o2m_assign.fg_mask, axis_aligned.o2m_assign.fg_mask)
     assert int(rotated.o2m_assign.fg_mask.sum()) > 0
+    assert int(axis_aligned.o2m_assign.fg_mask.sum()) > 0
 
 
 def _dense_inputs(module: DetectionLitModule, images: Tensor, target: Targets) -> tuple[Tensor, ...]:

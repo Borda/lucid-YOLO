@@ -177,8 +177,11 @@ class TaskAlignedAssigner:
             (A2 default ``1.0``).
         beta: Exponent on the IoU in ``t = s**alpha * u**beta`` (A2 default
             ``6.0``).
-        eps: Small constant guarding the IoU union and the normalization
-            denominator.
+        eps: Small constant guarding the IoU union division. It does **not**
+            guard the target-normalization denominator: that quantity is
+            ``s * u_max**6``, which an absolute floor swamps at small overlap
+            (see :meth:`_build_result`), so the denominator is floored at the
+            dtype's smallest normal instead.
 
     Examples:
         >>> import torch
@@ -333,12 +336,24 @@ class TaskAlignedAssigner:
     def _select_topk(self, align_metric: Tensor, candidate_mask: Tensor) -> Tensor:
         """Keep each GT's top-``k`` anchors by alignment; ``(B, N, A)`` bool.
 
-        Non-candidate anchors have ``t = 0``, so when ``topk`` exceeds the
-        eligible count the surplus slots land on zeros and are removed by the
-        intersection with ``candidate_mask``.
+        Non-candidates are pushed *below* every candidate before the ranking rather
+        than merely zeroed alongside them. Zeroing alone is not enough: ``t`` is zero
+        at a candidate too whenever the prediction misses its ground truth entirely —
+        the state a freshly initialized head is in, since :func:`decode_ltrb` applies
+        no non-negativity and inverted distances decode to zero-IoU boxes. With the
+        whole row tied at zero, ``topk`` fills its ``k`` slots from the global tie
+        order, which need not contain a single one of *this* ground truth's
+        candidates, and the intersection below then returns zero positives for a
+        ground truth that had several. Filling non-candidates with ``-1`` (the
+        sentinel :meth:`_resolve_conflicts` already uses, and safe because ``t`` is
+        non-negative by construction) makes the ranking pick candidates first, so a
+        ground truth with ``c`` candidates always keeps ``min(k, c)`` of them. The
+        intersection with ``candidate_mask`` still matters when ``k`` exceeds ``c``:
+        those surplus slots land on the ``-1`` fill and are dropped here.
         """
         k = min(self.topk, align_metric.shape[-1])
-        _, topk_index = align_metric.topk(k, dim=-1, largest=True)  # (B, N, k)
+        ranked = align_metric.masked_fill(~candidate_mask, -1.0)  # (B, N, A)
+        _, topk_index = ranked.topk(k, dim=-1, largest=True)  # (B, N, k)
         mask_topk = torch.zeros_like(align_metric, dtype=torch.bool)
         mask_topk.scatter_(-1, topk_index, True)
         return mask_topk & candidate_mask
@@ -403,7 +418,17 @@ class TaskAlignedAssigner:
         iou_pos = iou * mask_pos_f
         t_max = align_pos.amax(dim=-1, keepdim=True)  # (B, N, 1)
         u_max = iou_pos.amax(dim=-1, keepdim=True)  # (B, N, 1)
-        norm_align = align_pos * (u_max / (t_max + self.eps))  # (B, N, A)
+        # The denominator is floored at the dtype's smallest normal, not at ``self.eps``.
+        # ``t_max = s * u_max**6`` collapses as the sixth power of the overlap, so any
+        # *absolute* floor is eventually larger than the quantity it guards: at IoU 0.01,
+        # ``t_max`` is ~5e-13 and a 1e-9 floor shrinks every one of that ground truth's
+        # weights by ~2000x, training a positive as background while ``fg_mask`` still
+        # calls it foreground. Flooring at ``tiny`` only ever guards a true 0/0, and there
+        # ``align_pos`` is zero too (``t_max`` is its own row maximum), so the product is
+        # zero rather than NaN. Sub-normal ``t_max`` — IoU below ~1e-6 — still under-scales,
+        # but such a positive carries a vanishing ``u_max`` weight either way.
+        floor = torch.finfo(align_pos.dtype).tiny
+        norm_align = align_pos * (u_max / t_max.clamp(min=floor))  # (B, N, A)
         align_weights = norm_align.amax(dim=1)  # (B, A); one owning GT per anchor
 
         return AssignResult(

@@ -18,6 +18,13 @@ edge independently and re-canonicalizes when the short edge overtakes the long o
 And the axis-aligned assignment is bit-identical to the values frozen at 485ac14, the
 commit before this work package — every expected value below was produced by running
 that code, not by running the code under test.
+
+WP-169 is the one amendment to that. It corrected the target-normalization denominator,
+which moves the ``align_weight`` column and nothing else: the foreground mask, the
+ground-truth indices, the labels and the target boxes below are still 485ac14's, bit for
+bit. The weights were not re-read off the code under test either — each was corrected by
+the closed-form factor the fix implies, and the correction is spelled out with its
+verification on :data:`_FROZEN_O2M`.
 """
 
 import math
@@ -254,21 +261,33 @@ def _expected_result(rows: list[tuple[int, int, int, int, list[float], float]]) 
 #: Regenerate only from a commit whose axis-aligned path is known good, never from the
 #: code under test. TAL and STAL share these rows: no ground truth in the scene is tiny,
 #: so the STAL surrogate is the identity here and must not move a single value.
+#:
+#: WP-169 moved the ``align_weight`` column and nothing else. The mask, the ground-truth
+#: indices, the labels and the target boxes are still 485ac14's, bit for bit — the fix
+#: changes no anchor's fate in this scene. The weights were re-derived from 485ac14's own
+#: values rather than read off the code under test: the target normalization divided by
+#: ``t_max + 1e-9`` and now divides by ``t_max``, so each frozen weight was corrected by
+#: the closed-form factor ``(t_max + 1e-9) / t_max`` with ``t_max`` the per-ground-truth
+#: maximum of ``t`` over its positives (0.028469763696193695, 0.001523747923783958 and
+#: 0.00017089843458961695 for the scene's three assigned ground truths). Every row agrees
+#: with the current output to within 2 ULP, and the corroborating case is image 1 anchor 5:
+#: it is its ground truth's best anchor, so its weight is exactly ``u_max``, and it lands
+#: on 0.25 exactly where 485ac14 pinned 0.249998539686203 — the absolute floor, visible.
 _FROZEN_O2M = [
-    (0, 1, 0, 0, [2.0, 2.0, 18.0, 18.0], 0.006481748539954424),
-    (0, 4, 0, 0, [2.0, 2.0, 18.0, 18.0], 0.004321165382862091),
-    (0, 5, 0, 0, [2.0, 2.0, 18.0, 18.0], 0.6202530860900879),
-    (0, 10, 1, 1, [10.0, 10.0, 30.0, 30.0], 0.35999977588653564),
-    (0, 14, 1, 1, [10.0, 10.0, 30.0, 30.0], 0.2395859658718109),
-    (1, 2, 0, 1, [0.0, 0.0, 32.0, 32.0], 0.06244543939828873),
-    (1, 5, 0, 1, [0.0, 0.0, 32.0, 32.0], 0.249998539686203),
-    (1, 8, 0, 1, [0.0, 0.0, 32.0, 32.0], 0.046834077686071396),
+    (0, 1, 0, 0, [2.0, 2.0, 18.0, 18.0], 0.0064817494712769985),
+    (0, 4, 0, 0, [2.0, 2.0, 18.0, 18.0], 0.004321165848523378),
+    (0, 5, 0, 0, [2.0, 2.0, 18.0, 18.0], 0.6202531456947327),
+    (0, 10, 1, 1, [10.0, 10.0, 30.0, 30.0], 0.36000001430511475),
+    (0, 14, 1, 1, [10.0, 10.0, 30.0, 30.0], 0.23958612978458405),
+    (1, 2, 0, 1, [0.0, 0.0, 32.0, 32.0], 0.062445804476737976),
+    (1, 5, 0, 1, [0.0, 0.0, 32.0, 32.0], 0.25),
+    (1, 8, 0, 1, [0.0, 0.0, 32.0, 32.0], 0.046834349632263184),
 ]
 #: The same scene under the one-to-one reduction: one positive per ground truth.
 _FROZEN_UNIQUE = [
-    (0, 5, 0, 0, [2.0, 2.0, 18.0, 18.0], 0.6202530860900879),
-    (0, 10, 1, 1, [10.0, 10.0, 30.0, 30.0], 0.35999977588653564),
-    (1, 5, 0, 1, [0.0, 0.0, 32.0, 32.0], 0.249998539686203),
+    (0, 5, 0, 0, [2.0, 2.0, 18.0, 18.0], 0.6202531456947327),
+    (0, 10, 1, 1, [10.0, 10.0, 30.0, 30.0], 0.36000001430511475),
+    (1, 5, 0, 1, [0.0, 0.0, 32.0, 32.0], 0.25),
 ]
 
 

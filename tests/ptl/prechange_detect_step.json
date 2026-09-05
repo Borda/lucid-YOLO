@@ -1,5 +1,6 @@
 {
-  "captured_from": "fcf3040 (pre-WP-088 source tree, exported with `git archive`)",
+  "captured_from": "WP-169 re-capture on the current tree; scene unchanged from fcf3040 (pre-WP-088, exported with `git archive`)",
+  "recapture_reason": "WP-169 (H-17) stopped flooring the target-normalization denominator at an absolute 1e-9. t_max = s * u_max**6 collapses as the sixth power of the overlap, so at initialization -- where decode_ltrb has no non-negativity and raw distances decode inverted, leaving IoU near zero -- the floor swamped t_max and crushed every align weight. The one-to-many box and L1 terms were suppressed by ~1.9e6x (4.1e-09 -> 7.70e-03, 3.2e-08 -> 5.86e-02) and the one-to-one pair by ~15x; grad_l2 went 52.111158077994695 -> 88.35660383599993. Only the objective's weighting moved: seeds, config, gains, the two target sets and state_dict_keys are the fcf3040 values, and the assignment itself (which anchors are positive) is unchanged -- WP-169's other fix, H-16, leaves this scene's total bit-identical.",
   "torch_num_threads": 1,
   "model_seed": 0,
   "batch_seed": 1,
@@ -14,16 +15,16 @@
     "l1": 6.0,
     "alpha": 0.5
   },
-  "total": 22.801105499267578,
+  "total": 24.32134246826172,
   "components": {
-    "train/loss": 22.801105499267578,
-    "train/o2m_box": 4.122600039124791e-09,
-    "train/o2m_cls": 46.05000686645508,
-    "train/o2m_l1": 3.168771911532531e-08,
-    "train/o2o_box": 0.004791006445884705,
-    "train/o2o_cls": 44.787109375,
-    "train/o2o_l1": 0.024620383977890015
+    "train/loss": 24.32134246826172,
+    "train/o2m_box": 0.0076962681487202644,
+    "train/o2m_cls": 46.08039474487305,
+    "train/o2m_l1": 0.058604586869478226,
+    "train/o2o_box": 0.07257051020860672,
+    "train/o2o_cls": 45.09904479980469,
+    "train/o2o_l1": 0.34988924860954285
   },
-  "grad_l2": 52.111158077994695,
+  "grad_l2": 88.35660383599993,
   "state_dict_keys": 714
 }
