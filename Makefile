@@ -15,7 +15,7 @@ TAG       ?=
 
 setup:
 	$(UV) venv --python 3.11 $(VENV)
-	$(UV) pip install --python $(PY) -e . --group dev
+	$(UV) pip install --python $(PY) -e . --group dev --group typing
 	$(VENV)/bin/pre-commit install
 
 # All linters (ruff check/format, mypy, hygiene hooks) run through pre-commit.

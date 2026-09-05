@@ -4,6 +4,12 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ## [Unreleased]
 
+### Changed
+
+- **Contributors with an existing `.venv` must reinstall the dev dependency group.** 0.8.0 added `--doctest-plus` to `addopts` and `pytest-doctestplus>=1.3` to the `dev` group in the same commit, so an environment provisioned before it aborts every `pytest` invocation with `unrecognized arguments: --doctest-plus` — including `make test` and therefore `make gate`, which fail before collecting anything rather than reporting a missing plugin. `make setup` provisions it; an existing tree needs `uv pip install --python .venv/bin/python -e . --group dev --group typing`, the `typing` group being the second thing that release left undeclared. The failure is loud but its message names the flag rather than the plugin, which is the part worth stating here.
+
+## [0.8.0] - 2026-09-05
+
 ### Added
 
 - `docs/CONTRIBUTING.md` and three issue templates (WP-141). The guide states the clean-room rule at its real width — any copyleft, source-available, paid or proprietary source, and any source whose licence cannot be read (D13, D17), with Ultralytics enumerated as the reflex instance rather than the definition — and carries a table of the three admission layers naming what each one does *not* establish, since that is what justifies the next one existing. It lives under `docs/` because that is the one location GitHub resolves `CONTRIBUTING.md` from that is also inside the mkdocs tree, so one file serves both. D18's tracking relaxation is documented and **not yet in force**: it is conditional on the repository being public, which O3 still blocks, and `AGENTS.md` now names that condition instead of naming this row. The issue templates ship no contact links, because every one would be an absolute URL into a repository that cannot be fetched to verify it.

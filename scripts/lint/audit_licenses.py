@@ -69,9 +69,9 @@ finding rather than being given the benefit of the doubt.
 That fourth check is the one graded by tier (:func:`dependency_tiers`), and it is
 the only one. A package in the ``[project.dependencies]`` closure is republished in
 this project's own wheel metadata and installed by everyone who installs it, so an
-unreadable license there is a failure; a package reachable only through the ``dev``
-or ``docs`` dependency groups appears in no wheel metadata, is imported by ``src/``
-never, and is vendored into no published artifact, so it is reported and the run
+unreadable license there is a failure; a package reachable only through the ``dev``,
+``docs`` or ``typing`` dependency groups appears in no wheel metadata, is imported by
+``src/`` never, and is vendored into no published artifact, so it is reported and the run
 still passes. A package reachable from both takes the stricter tier, and so does one
 the resolver cannot attribute at all — a gap in the walk must fail loudly rather
 than quietly demote a shipped dependency. The declared-licence checks are tier-blind
@@ -209,7 +209,7 @@ TIER_SHIPPED = "base"
 #: The dependency groups that ship nowhere. PEP 735 groups appear in no wheel
 #: metadata at all, so a package reached only through one of them is a tool this
 #: repository runs, not a dependency anyone inherits. Reported, not fatal.
-TIER_GROUPS = ("dev", "docs")
+TIER_GROUPS = ("dev", "docs", "typing")
 
 #: How many lines of a license document :func:`recognize_license_text` reads. A
 #: license names itself in its own header; further down, Apache-2.0's appendix

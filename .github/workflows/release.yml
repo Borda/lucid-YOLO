@@ -33,10 +33,12 @@ jobs:
           python-version: "3.11"
           cache: pip
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      # `typing` as well as `dev`: the guard re-runs `make gate`, which runs pre-commit,
+      # which runs the `language: system` mypy hook against this venv's interpreter.
       - name: Create venv and install dev extras
         run: |
           uv venv --python 3.11 .venv
-          uv pip install --python .venv/bin/python -e . --group dev
+          uv pip install --python .venv/bin/python -e . --group dev --group typing
       - name: Release guard (re-runs the full gate)
         run: .venv/bin/python scripts/release_guard.py --tag "${{ github.ref_name }}"
       # README.md is the PyPI long description, and PyPI resolves its relative links
