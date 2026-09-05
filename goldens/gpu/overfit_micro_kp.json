@@ -9,6 +9,6 @@
     "num_classes": 1.0,
     "epochs": 100.0,
     "img_size": 320.0,
-    "train_oks_ap": 0.335667
+    "train_oks_ap": 0.574728
   }
 }

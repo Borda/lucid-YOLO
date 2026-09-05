@@ -9,6 +9,6 @@
     "num_classes": 4.0,
     "epochs": 100.0,
     "img_size": 320.0,
-    "train_rotated_map50": 0.938966
+    "train_rotated_map50": 0.964928
   }
 }
