@@ -2,6 +2,7 @@
 """heads subpackage — see blueprint section 7 layout."""
 
 from lucid_yolo.models.heads.detect import (
+    BranchOutput,
     DualDetectionHead,
     DualHeadOutput,
     decode_ltrb,
@@ -14,6 +15,7 @@ from lucid_yolo.models.heads.semantic import SemanticAux
 
 __all__ = [
     "RBOX_DET_WIDTH",
+    "BranchOutput",
     "DualDetectionHead",
     "DualHeadOutput",
     "ProtoFusion",

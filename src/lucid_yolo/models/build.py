@@ -37,7 +37,7 @@ Provenance: R1 Table 7, R6. Assumptions: A3, A4, A28, A29.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import cast
 
 import torch
@@ -45,7 +45,14 @@ from fvcore.nn import FlopCountAnalysis
 from torch import Tensor, nn
 
 from lucid_yolo.models.backbone import DetectionBackbone
-from lucid_yolo.models.heads import DualDetectionHead, DualHeadOutput, ProtoFusion, ProtoNet, SemanticAux
+from lucid_yolo.models.heads import (
+    BranchOutput,
+    DualDetectionHead,
+    DualHeadOutput,
+    ProtoFusion,
+    ProtoNet,
+    SemanticAux,
+)
 from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS
 from lucid_yolo.models.neck import DetectionNeck
 from lucid_yolo.models.registry import scale_spec
@@ -284,8 +291,8 @@ class _DeployedDetector(nn.Module):
             The one-to-one branch's ``(cls, box)`` pair: dense class logits of
             shape ``(N, A, num_classes)`` and raw ltrb distances ``(N, A, 4)``.
         """
-        cls, box, _, _, _, _ = self.o2o(self.neck(self.backbone(image)))
-        return cls, box
+        branch: BranchOutput = self.o2o(self.neck(self.backbone(image)))
+        return branch.cls, branch.box
 
 
 def build_detector(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> Detector:
@@ -422,9 +429,9 @@ class _DeployedOrientedDetector(nn.Module):
             logits ``(N, A, num_classes)``, raw ltrb distances ``(N, A, 4)``, and
             raw orientation angles ``(N, A, 1)``.
         """
-        cls, box, _, angle, _, _ = self.o2o(self.neck(self.backbone(image)))
-        assert angle is not None  # an OrientedDetector always builds the angle stems
-        return cls, box, angle
+        branch: BranchOutput = self.o2o(self.neck(self.backbone(image)))
+        assert branch.angle is not None  # an OrientedDetector always builds the angle stems
+        return branch.cls, branch.box, branch.angle
 
 
 def build_obb_detector(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> OrientedDetector:
@@ -587,9 +594,9 @@ class _DeployedKeypointDetector(nn.Module):
             logits ``(N, A, num_classes)``, raw ltrb distances ``(N, A, 4)``, and
             raw point-coordinate offsets ``(N, A, K, 2)``.
         """
-        cls, box, _, _, keypoints, _ = self.o2o(self.neck(self.backbone(image)))
-        assert keypoints is not None  # a KeypointDetector always builds the point stems
-        return cls, box, keypoints
+        branch: BranchOutput = self.o2o(self.neck(self.backbone(image)))
+        assert branch.keypoints is not None  # a KeypointDetector always builds the point stems
+        return branch.cls, branch.box, branch.keypoints
 
 
 def build_keypoint_detector(
@@ -794,10 +801,10 @@ class _DeployedSegmenter(nn.Module):
             ``(N, K, H/4, W/4)``.
         """
         features: tuple[Tensor, Tensor, Tensor] = self.neck(self.backbone(image))
-        cls, box, coeff, _, _, _ = self.o2o(features)
-        assert coeff is not None  # a Segmenter always builds the coefficient stems
+        branch: BranchOutput = self.o2o(features)
+        assert branch.coeff is not None  # a Segmenter always builds the coefficient stems
         prototypes: Tensor = self.protonet(self.proto_fusion(features))
-        return cls, box, coeff, prototypes
+        return branch.cls, branch.box, branch.coeff, prototypes
 
 
 def build_segmenter(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> Segmenter:
@@ -840,22 +847,50 @@ def count_params(module: nn.Module) -> int:
     return sum(param.numel() for param in module.parameters())
 
 
-def _tensor_fields(*fields: Tensor | None) -> tuple[Tensor, ...]:
-    """Drop the ``None`` entries from a dataclass's flattened tensor fields.
+def _tensor_fields(output: DualHeadOutput | SegmentOutput) -> tuple[Tensor, ...]:
+    """Flatten a dataclass output's tensor fields, in declaration order.
+
+    The field list is **derived** from :func:`dataclasses.fields` rather than
+    written out. Two hand-maintained enumerations stood here before, and they had
+    already drifted: the segmentation one listed ten fields where the detection
+    one listed twelve, silently dropping the four keypoint fields. Since
+    :func:`build_detection_stages` accepts ``num_coeffs`` and ``num_keypoints``
+    together, a coefficient-and-keypoint model is constructible today, and its
+    point stems would have been absent from the traced graph — a FLOP tally
+    quietly missing a whole subgraph. Deriving the list makes that class of
+    omission unrepresentable.
+
+    Nested dataclass fields are flattened in place (this is how
+    :class:`SegmentOutput` reaches the :class:`~lucid_yolo.models.heads.DualHeadOutput`
+    it holds); the recursion covers the two output dataclasses named in the
+    signature rather than any dataclass, so a *third* one nested here later needs
+    adding to both. That is a type-level edit a type checker will point at, unlike
+    the per-field omission this replaced. ``None`` fields — an optional branch that was not built, or the
+    training-only semantic head at eval (A17) — are dropped. Dropping them is safe
+    for a FLOP tally, which reads the traced graph rather than the returned values.
 
     Args:
-        fields: Dataclass field values in declaration order, any of which may be
-            ``None`` for an optional branch that was not built or is inactive.
+        output: A :class:`~lucid_yolo.models.heads.DualHeadOutput` or
+            :class:`SegmentOutput` instance.
 
     Returns:
-        The present tensors, in the given order.
+        The present tensors, in dataclass declaration order, depth first.
 
     Examples:
         >>> import torch
-        >>> _tensor_fields(torch.zeros(1), None, torch.ones(2))[1].numel()
-        2
+        >>> from lucid_yolo.models.heads import DualHeadOutput
+        >>> out = DualHeadOutput(torch.zeros(1), torch.zeros(2), torch.zeros(3), torch.zeros(4))
+        >>> [tensor.numel() for tensor in _tensor_fields(out)]  # optional fields dropped
+        [1, 2, 3, 4]
     """
-    return tuple(field for field in fields if field is not None)
+    collected: list[Tensor] = []
+    for field in fields(output):
+        value = getattr(output, field.name)
+        if isinstance(value, Tensor):
+            collected.append(value)
+        elif isinstance(value, DualHeadOutput | SegmentOutput):
+            collected.extend(_tensor_fields(value))
+    return tuple(collected)
 
 
 class _TupleOutputAdapter(nn.Module):
@@ -895,35 +930,8 @@ class _TupleOutputAdapter(nn.Module):
             graph rather than the returned values.
         """
         output = self.module(image)
-        if isinstance(output, DualHeadOutput):
-            return _tensor_fields(
-                output.o2m_cls,
-                output.o2m_box,
-                output.o2m_coeff,
-                output.o2m_angle,
-                output.o2m_keypoints,
-                output.o2m_keypoint_sigma,
-                output.o2o_cls,
-                output.o2o_box,
-                output.o2o_coeff,
-                output.o2o_angle,
-                output.o2o_keypoints,
-                output.o2o_keypoint_sigma,
-            )
-        if isinstance(output, SegmentOutput):
-            detect = output.detect
-            return _tensor_fields(
-                detect.o2m_cls,
-                detect.o2m_box,
-                detect.o2m_coeff,
-                detect.o2m_angle,
-                detect.o2o_cls,
-                detect.o2o_box,
-                detect.o2o_coeff,
-                detect.o2o_angle,
-                output.prototypes,
-                output.semantic,
-            )
+        if isinstance(output, DualHeadOutput | SegmentOutput):
+            return _tensor_fields(output)
         return cast("tuple[Tensor, ...] | Tensor", output)
 
 
@@ -945,6 +953,18 @@ def count_flops(module: nn.Module, img_size: int = _DEFAULT_IMG_SIZE) -> float:
     one-to-many branch (see the module docstring); passing the full
     :class:`Detector` counts both branches.
 
+    Counting needs eval mode, and **every** submodule's mode is snapshotted and
+    restored individually rather than the module's own flag being toggled back.
+    A ``deploy()`` view is a freshly constructed module holding *shared*
+    references to its parent's backbone, neck, and one-to-one branch, so its own
+    ``training`` flag is always ``True`` no matter what the parent's is. Reading
+    that one flag and calling ``train()`` on the way out therefore pushed three
+    quarters of an eval-mode detector into train mode through the shared
+    references — leaving the parent reporting ``eval`` while a following forward
+    would use batch statistics and mutate BN running stats, with nothing
+    reporting it. Per-module restoration is what makes the counter observably
+    free of side effects on a shared view.
+
     Args:
         module: A module accepting a ``(1, 3, H, W)`` image (a
             :class:`Detector`, a :meth:`Detector.deploy` view, or any submodule).
@@ -957,14 +977,16 @@ def count_flops(module: nn.Module, img_size: int = _DEFAULT_IMG_SIZE) -> float:
         >>> round(count_flops(build_detector("n").deploy()), 1) > 0
         True
     """
-    was_training = module.training
+    modes = {name: submodule.training for name, submodule in module.named_modules()}
     module.eval()
     image = torch.zeros(1, 3, img_size, img_size)
-    with torch.no_grad():
-        analysis = FlopCountAnalysis(_TupleOutputAdapter(module), image)
-        analysis.unsupported_ops_warnings(False)
-        analysis.uncalled_modules_warnings(False)
-        total = analysis.total()
-    if was_training:
-        module.train()
+    try:
+        with torch.no_grad():
+            analysis = FlopCountAnalysis(_TupleOutputAdapter(module), image)
+            analysis.unsupported_ops_warnings(False)
+            analysis.uncalled_modules_warnings(False)
+            total = analysis.total()
+    finally:
+        for name, submodule in module.named_modules():
+            submodule.training = modes[name]
     return 2.0 * float(total) / 1e9

@@ -15,7 +15,16 @@ by a :class:`torch.optim.lr_scheduler.LambdaLR` (stepped per optimizer step,
 
 - steps ``0 .. warmup_steps-1``: linear ramp ``(step + 1) / warmup_steps``;
 - remaining steps: linear decay from ``1`` at the end of warmup to ``lrf`` at
-  ``total_steps``, clamped at ``lrf`` beyond.
+  step ``total_steps - 1``, clamped at ``lrf`` beyond.
+
+The decay lands on ``total_steps - 1`` rather than ``total_steps`` because that
+is the **last step a run of ``total_steps`` steps actually takes**: ``LambdaLR``
+is invoked with zero-based indices, so index ``total_steps`` is one past the end
+and a schedule anchored there never reaches its own floor. Anchored at
+``total_steps`` the final factor was ``lrf + (1 - lrf) / (total - warmup)`` —
+twice the intended floor at the doctested 100-step shape, and the shorter the
+run the wider the miss, which is exactly backwards for the short smoke tiers
+this project launches.
 
 Provenance: A8 (gap; third-party convention), A31 lineage (generic practice).
 """
@@ -30,9 +39,14 @@ def warmup_decay_factor(step: int, total_steps: int, warmup_steps: int, lrf: flo
 
     Args:
         step: Zero-based optimizer step.
-        total_steps: Total optimizer steps of the run (the decay reaches ``lrf``
-            here); values below 1 are treated as 1.
+        total_steps: Total optimizer steps of the run; the decay reaches ``lrf``
+            at the run's **last** step, ``total_steps - 1``. Values below 1 are
+            treated as 1.
         warmup_steps: Steps of the opening linear ramp; ``0`` disables warmup.
+            Callers are responsible for keeping this below ``total_steps`` — see
+            :meth:`~lucid_yolo.ptl.module.DetectionLitModule.configure_optimizers`,
+            which clamps it — since a ramp at least as long as the run leaves no
+            step for the decay to happen on.
         lrf: Final LR fraction — the multiplier decays from ``1.0`` to ``lrf``.
 
     Returns:
@@ -44,8 +58,8 @@ def warmup_decay_factor(step: int, total_steps: int, warmup_steps: int, lrf: flo
         >>> warmup_decay_factor(9, 100, 10, 0.01)  # warmup peak
         1.0
         >>> round(warmup_decay_factor(55, 100, 10, 0.01), 4)  # mid-decay
-        0.505
-        >>> round(warmup_decay_factor(100, 100, 10, 0.01), 6)  # floor
+        0.4994
+        >>> round(warmup_decay_factor(99, 100, 10, 0.01), 6)  # floor, at the run's last step
         0.01
         >>> warmup_decay_factor(0, 100, 0, 0.5)  # no warmup: decay starts at 1.0
         1.0
@@ -53,6 +67,6 @@ def warmup_decay_factor(step: int, total_steps: int, warmup_steps: int, lrf: flo
     total = max(1, total_steps)
     if step < warmup_steps:
         return float(step + 1) / warmup_steps
-    decay_span = max(1, total - warmup_steps)
+    decay_span = max(1, total - warmup_steps - 1)
     progress = min(1.0, (step - warmup_steps) / decay_span)
     return 1.0 - (1.0 - lrf) * progress

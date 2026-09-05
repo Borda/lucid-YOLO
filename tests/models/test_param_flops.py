@@ -49,6 +49,11 @@ _FLOP_TOL = 0.05
 #: COCO class count the published table is measured at.
 _NUM_CLASSES = 80
 
+#: Input side for the train/eval-mode probes. They assert module state, never a
+#: FLOP value, so the smallest 32-divisible canvas that still traces is enough —
+#: the 640 px protocol would cost seconds per case for an identical assertion.
+_MODE_PROBE_IMG_SIZE = 64
+
 
 @pytest.fixture(autouse=True)
 def _seed_rng() -> None:
@@ -229,3 +234,58 @@ def test_kp_params_flops_golden() -> None:
     assert result.passed, result.error or next(
         f"{c.metric}: expected {c.expected}, got {c.actual}" for c in result.comparisons if not c.passed
     )
+
+
+class TestCountFlopsTrainingMode:
+    """``count_flops`` must leave every module's train/eval mode exactly as it found it.
+
+    Counting requires eval mode, so the counter toggles it — and a ``deploy()`` view
+    is not a private module to toggle. It is freshly constructed but holds *shared*
+    references to its parent's backbone, neck, and one-to-one branch, so anything
+    done to its mode is done to three quarters of the parent detector. Its own
+    ``training`` flag is always ``True`` regardless of the parent's, which made the
+    single-flag save/restore restore the wrong value: measuring an eval-mode
+    detector's FLOPs pushed its backbone, neck, and o2o branch into train mode, and
+    the parent went on reporting ``eval``. A following forward would then use batch
+    statistics and mutate BN running statistics, with nothing reporting it.
+    """
+
+    def test_eval_parent_stays_eval_through_a_deployed_view(self) -> None:
+        """Counting a deploy() view of an eval model leaves every shared submodule in eval.
+
+        The measured failure: ``build_detector("n", 4).eval()`` then
+        ``count_flops(model.deploy(), 64)`` left ``model.training`` False while
+        ``backbone``/``neck``/``o2o`` were all True — the split-brain state that makes
+        the leak invisible to a caller checking the top-level flag.
+        """
+        model = build_detector("n", _NUM_CLASSES).eval()
+
+        count_flops(model.deploy(), _MODE_PROBE_IMG_SIZE)
+
+        assert not any(submodule.training for submodule in model.modules())
+
+    def test_train_parent_stays_train_through_a_deployed_view(self) -> None:
+        """Counting a deploy() view of a training model leaves every shared submodule in train.
+
+        The other direction, which the old single-flag restore happened to get right
+        for the wrong reason: restoration must reinstate the recorded mode, not
+        unconditionally call ``train()``.
+        """
+        model = build_detector("n", _NUM_CLASSES).train()
+
+        count_flops(model.deploy(), _MODE_PROBE_IMG_SIZE)
+
+        assert all(submodule.training for submodule in model.modules())
+
+    @pytest.mark.parametrize("training", [pytest.param(True, id="train"), pytest.param(False, id="eval")])
+    def test_full_detector_mode_survives_counting(self, training: bool) -> None:
+        """Counting the full detector directly restores its own mode, both ways.
+
+        The non-view path, which shares nothing and was already correct — pinned so
+        the per-module restoration cannot regress it while fixing the view.
+        """
+        model = build_detector("n", _NUM_CLASSES).train(training)
+
+        count_flops(model, _MODE_PROBE_IMG_SIZE)
+
+        assert all(submodule.training is training for submodule in model.modules())

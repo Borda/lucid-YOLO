@@ -88,6 +88,7 @@ from lucid_yolo.models.blocks import ConvBNAct, DepthwiseConv
 __all__ = [
     "CLS_PRIOR_PROB",
     "DEFAULT_NUM_COEFFS",
+    "BranchOutput",
     "DualDetectionHead",
     "DualHeadOutput",
     "decode_ltrb",
@@ -461,6 +462,49 @@ def _flatten_level(feature_map: Tensor) -> Tensor:
     return feature_map.flatten(2).transpose(1, 2)
 
 
+@dataclass(frozen=True)
+class BranchOutput:
+    """Dense predictions of a single detection branch.
+
+    One branch's half of :class:`DualHeadOutput`, with the branch prefix dropped:
+    :class:`DualDetectionHead` builds its twelve fields from two of these. The
+    per-field contract is the same one :class:`DualHeadOutput` documents — raw
+    class logits, raw ltrb distances in stride units, tanh-activated
+    coefficients, unactivated angles, and raw unbounded keypoint coordinates and
+    sigma.
+
+    It is a dataclass rather than the tuple this used to be because the tuple
+    fixed only its *width*. Six positional slots, four of them optional and all
+    but two typed ``Tensor | None``, were destructured at five call sites, four
+    of them with underscore placeholders that made the shape of what was skipped
+    invisible. Inserting or reordering an output silently rebound every one of
+    them, and nothing — not the annotations, not the type checker — would have
+    said so. Naming the fields is what makes that class of change loud, and it is
+    the same reasoning that made the enclosing :class:`DualHeadOutput` a
+    dataclass one layer up.
+
+    Attributes:
+        cls: Class logits, shape ``(B, A, num_classes)``, raw.
+        box: Raw ltrb distances, shape ``(B, A, 4)``, in stride units.
+        coeff: Tanh mask coefficients, shape ``(B, A, num_coeffs)``, or ``None``
+            when the branch was built without coefficient stems.
+        angle: Raw orientation angles in radians, shape ``(B, A, 1)``, or
+            ``None`` when the branch was built without orientation stems.
+        keypoints: Raw point-coordinate offsets, shape ``(B, A, K, 2)``, or
+            ``None`` when the branch was built without keypoint stems.
+        keypoint_sigma: Raw, unbounded per-axis uncertainty, shape
+            ``(B, A, K, 2)``, or ``None`` when the branch was built without
+            keypoint stems.
+    """
+
+    cls: Tensor
+    box: Tensor
+    coeff: Tensor | None = None
+    angle: Tensor | None = None
+    keypoints: Tensor | None = None
+    keypoint_sigma: Tensor | None = None
+
+
 class _DetectionBranch(nn.Module):
     """One prediction branch: per-level box/class stems plus optional extra stems.
 
@@ -515,27 +559,26 @@ class _DetectionBranch(nn.Module):
                 _build_keypoint_stem(channels, num_keypoints) for channels in in_channels
             )
 
-    def forward(
-        self, features: tuple[Tensor, Tensor, Tensor]
-    ) -> tuple[Tensor, Tensor, Tensor | None, Tensor | None, Tensor | None, Tensor | None]:
+    def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> BranchOutput:
         """Predict dense scores, ltrb distances, and whichever optional outputs exist.
 
-        The returned tuple has a **fixed** width whatever the branch was built
-        with, the disabled outputs coming back as ``None``. A width that varied
-        with the enabled stem sets would make a three-element result ambiguous
-        between coefficients and angles, which is precisely the kind of
-        positional confusion that pairs one output with another's consumer.
+        The result carries a **fixed** set of named fields whatever the branch
+        was built with, the disabled outputs coming back as ``None``. A shape
+        that varied with the enabled stem sets would make a three-value result
+        ambiguous between coefficients and angles, which is precisely the kind
+        of confusion that pairs one output with another's consumer — and the
+        names close the half of that hole a fixed-width tuple left open, where
+        the *order* was still positional at every call site.
 
         Args:
             features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32.
 
         Returns:
-            The sextuple ``(cls, box, coeff, angle, keypoints,
-            keypoint_sigma)``. ``cls`` is raw class logits ``(B, A,
+            A :class:`BranchOutput` whose ``cls`` is raw class logits ``(B, A,
             num_classes)``, ``box`` raw ltrb distances ``(B, A, 4)``, ``coeff``
             tanh-bounded ``(B, A, num_coeffs)`` or ``None``, ``angle`` the raw
-            ``(B, A, 1)`` orientation of R1 Eq. 13 or ``None``, and the last two
-            values are raw ``(B, A, K, 2)`` coordinate offsets and unbounded
+            ``(B, A, 1)`` orientation of R1 Eq. 13 or ``None``, and whose last
+            two fields are raw ``(B, A, K, 2)`` coordinate offsets and unbounded
             uncertainty or ``None``. ``A`` sums ``H * W`` over levels.
         """
         cls_levels: list[Tensor] = []
@@ -546,7 +589,14 @@ class _DetectionBranch(nn.Module):
         cls = torch.cat(cls_levels, dim=1)
         box = torch.cat(box_levels, dim=1)
         keypoints, keypoint_sigma = self._keypoints(features)
-        return cls, box, self._coefficients(features), self._angles(features), keypoints, keypoint_sigma
+        return BranchOutput(
+            cls=cls,
+            box=box,
+            coeff=self._coefficients(features),
+            angle=self._angles(features),
+            keypoints=keypoints,
+            keypoint_sigma=keypoint_sigma,
+        )
 
     def _coefficients(self, features: tuple[Tensor, Tensor, Tensor]) -> Tensor | None:
         """Run the coefficient stems, tanh-activated, or return ``None`` if absent.
@@ -749,21 +799,21 @@ class DualDetectionHead(nn.Module):
             coefficients, raw orientation angles, and raw point-coordinate and
             uncertainty tensors, for both branches.
         """
-        o2m_cls, o2m_box, o2m_coeff, o2m_angle, o2m_keypoints, o2m_keypoint_sigma = self.o2m(features)
-        o2o_cls, o2o_box, o2o_coeff, o2o_angle, o2o_keypoints, o2o_keypoint_sigma = self.o2o(features)
+        o2m: BranchOutput = self.o2m(features)
+        o2o: BranchOutput = self.o2o(features)
         return DualHeadOutput(
-            o2m_cls=o2m_cls,
-            o2m_box=o2m_box,
-            o2o_cls=o2o_cls,
-            o2o_box=o2o_box,
-            o2m_coeff=o2m_coeff,
-            o2o_coeff=o2o_coeff,
-            o2m_angle=o2m_angle,
-            o2o_angle=o2o_angle,
-            o2m_keypoints=o2m_keypoints,
-            o2o_keypoints=o2o_keypoints,
-            o2m_keypoint_sigma=o2m_keypoint_sigma,
-            o2o_keypoint_sigma=o2o_keypoint_sigma,
+            o2m_cls=o2m.cls,
+            o2m_box=o2m.box,
+            o2o_cls=o2o.cls,
+            o2o_box=o2o.box,
+            o2m_coeff=o2m.coeff,
+            o2o_coeff=o2o.coeff,
+            o2m_angle=o2m.angle,
+            o2o_angle=o2o.angle,
+            o2m_keypoints=o2m.keypoints,
+            o2o_keypoints=o2o.keypoints,
+            o2m_keypoint_sigma=o2m.keypoint_sigma,
+            o2o_keypoint_sigma=o2o.keypoint_sigma,
         )
 
 

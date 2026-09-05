@@ -163,6 +163,7 @@ Provenance: R1 sec. 3.2, R1 Eq. 2-3, R1 Tables S2/S5. Assumptions: A8.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -1406,6 +1407,22 @@ class DetectionLitModule(LightningModule):
         trainer is attached (direct calls in tests and tools), or when the run
         has no positive ``max_epochs`` to anchor the warmup fraction.
 
+        The warmup length is a **fraction of the run**, so a short run can ask
+        for more warmup steps than it has steps: ``warmup_epochs=3`` against a
+        two-epoch smoke budget is config-reachable and is exactly the shape the
+        short tiers get launched at. Left alone, every step would take the ramp
+        branch — the LR would climb for the whole run, peak below ``lr``, and
+        never decay, with nothing saying so. The count is clamped to
+        ``total_steps - 1``, which recovers the peak but not the decay: a run
+        whose requested warmup covers it has no steps left to decay over, so the
+        clamp buys back only the ramp reaching full ``lr`` on the final step.
+        That is the ceiling of what a clamp can do here, which is why it warns
+        rather than applying silently — the recipe cannot be honoured, and the
+        honest signal is to say which schedule actually ran. Clamping rather
+        than raising keeps the launchable run launchable: a crash here would
+        fail a run over a schedule detail on the tier where the schedule matters
+        least.
+
         Returns:
             A :class:`~lucid_yolo.optim.musgd.MuSGD` over ``self.parameters()``,
             alone or inside a Lightning optimizer/scheduler config dict with the
@@ -1425,7 +1442,17 @@ class DetectionLitModule(LightningModule):
         if schedule_off or trainer is None or max_epochs is None or max_epochs <= 0:
             return optimizer
         total_steps = max(1, int(trainer.estimated_stepping_batches))
-        warmup_steps = round(total_steps * self._warmup_epochs / max_epochs)
+        requested_warmup = round(total_steps * self._warmup_epochs / max_epochs)
+        warmup_steps = min(requested_warmup, total_steps - 1)
+        if warmup_steps < requested_warmup:
+            warnings.warn(
+                f"warmup_epochs={self._warmup_epochs} of max_epochs={max_epochs} asks for "
+                f"{requested_warmup} warmup steps, but the run is only {total_steps} steps long: "
+                f"the whole run is warmup and the LR never decays to lr*lrf. "
+                f"Clamping warmup to {warmup_steps} steps so the ramp at least reaches lr on the "
+                f"final step; lower --model.warmup_epochs to leave room for the decay.",
+                stacklevel=2,
+            )
         scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer,
             lambda step: warmup_decay_factor(step, total_steps, warmup_steps, self._lrf),
