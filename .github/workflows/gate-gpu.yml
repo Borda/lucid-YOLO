@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Accelerator Gate
+
+# The schedule the Makefile's `gate-gpu` comment claimed to be. `make gate` runs the
+# offline half on every push; the marked tests and the goldens/gpu/ subtree needed an
+# accelerator, so nothing ran them unless a human remembered — which is how the frozen
+# detection overfit golden drifted for six days under WP-078, and why
+# docs/RESEARCH_LOG.md still records shapes_regression_det.json as outstanding.
+#
+# Arming this workflow is one repository action, deliberately outside the file: set the
+# repository variable GPU_RUNNER_LABEL to the label of a self-hosted CUDA runner (e.g.
+# `gpu-cuda`). Until it is set, both triggers resolve to a visible skipped job rather
+# than a run queued forever against a label no machine answers to. GitHub-hosted runners
+# have no GPU, so there is no default worth hard-coding.
+#
+# Nightly rather than per-push on purpose: the L4 reference run costs ~915 s for the
+# marked tests and retrains the same pipeline again for the goldens, and the point of
+# the target is that drift is caught within a day, not within a minute.
+
+on:
+  schedule:
+    # 04:17 UTC. Offset off the hour because scheduled runs queue behind the top-of-hour
+    # spike, and a nightly gate that starts 30 min late is a nightly gate nobody reads.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-gpu-${{ github.workflow }}-${{ github.ref }}
+  # Never cancel: a half-finished training run leaves no signal about the goldens.
+  cancel-in-progress: false
+
+jobs:
+  gate-gpu:
+    if: vars.GPU_RUNNER_LABEL != ''
+    runs-on: ${{ vars.GPU_RUNNER_LABEL }}
+    # ~2x the L4 reference (915 s of marked tests, then golden-gpu retrains all five
+    # producers), with room for a cold checkout and a first-time dependency install.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: Create venv and install the dev dependency group
+        run: |
+          uv venv --python 3.11 .venv
+          uv pip install --python .venv/bin/python -e . --group dev
+      - name: Report the accelerator the gate is about to run on
+        run: |
+          nvidia-smi || echo "nvidia-smi unavailable"
+          .venv/bin/python -c "import torch; print('cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
+      # `make gate-gpu` is `test-gpu` then `golden-gpu`: the marked tests assert the
+      # WP-040/087/088/132 acceptance floors, the goldens assert the frozen values, and
+      # it was the second of those that silently went stale.
+      #
+      # The transcript is tee'd rather than recomputed: every producer under
+      # `golden-gpu` retrains a model, so a second pass to "record the result" would
+      # cost another full gate and could disagree with the one that decided the run.
+      # `pipefail` keeps the gate's exit status, not tee's, as the job's verdict.
+      - name: Accelerator gate (marked tests + goldens/gpu regression)
+        run: |
+          set -o pipefail
+          mkdir -p .reports/gate-gpu
+          make gate-gpu 2>&1 | tee .reports/gate-gpu/gate.log
+      - name: Upload the run record
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gate-gpu-${{ github.run_id }}
+          path: .reports/gate-gpu/
+          if-no-files-found: warn

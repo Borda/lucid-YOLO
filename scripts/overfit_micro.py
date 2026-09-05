@@ -19,9 +19,11 @@ floor is ``>= 0.95``.
 
 Golden policy (cross-platform, D-golden): the frozen ``goldens/gpu/overfit_micro_det.json``
 pins the integer counts (images, instances, classes, epochs, image size) **exactly**
-and the achieved recall with a generous tolerance (:data:`_RECALL_TOL`) — a
-regression guard against a silent drop, while the ``>= 0.95`` floor (asserted by the
-test and by :func:`main`) is the actual acceptance. The golden lives under
+and the achieved recall with a generous tolerance (:data:`_RECALL_TOL`, narrowed at
+freeze time by :func:`clamped_tolerance` so the band's lower edge never sits below
+the floor) — a regression guard against a silent drop, while the ``>= 0.95`` floor
+(raised by :func:`run_overfit` itself, so every caller enforces it) is the actual
+acceptance. The golden lives under
 ``goldens/gpu/`` so the default offline ``scripts/check_goldens.py`` run — which
 globs only top-level and ``frozen/`` goldens — never recomputes it; it is checked
 only under ``check_goldens.py --include-gpu`` on a machine with an accelerator.
@@ -897,6 +899,37 @@ def evaluate_rotated_map50(module: DetectionLitModule, datamodule: DetectionData
     return evaluate_rotated_map(preds, ground_truth)["map_50"], instances
 
 
+class FloorNotMet(ValueError):
+    """A finished overfit run scored below its task's acceptance floor.
+
+    Raised by :func:`run_overfit`, so the producer and the floor cannot disagree:
+    every caller — the CLI, the golden harness's producers, the marked tests —
+    gets the failure rather than a number that only ``main()`` used to check.
+
+    Deliberately *not* a :class:`RuntimeError`: :func:`run_overfit` catches that
+    to retry training non-deterministically, and a floor miss must never be
+    mistaken for a missing deterministic kernel.
+
+    Args:
+        label: Human-readable metric name (e.g. ``"OKS AP"``).
+        score: The score the run actually achieved.
+        floor: The acceptance floor it had to clear.
+
+    Examples:
+        >>> err = FloorNotMet("recall@0.5", 0.91, 0.95)
+        >>> str(err)
+        'recall@0.5 0.9100 below floor 0.95'
+        >>> (err.score, err.floor)
+        (0.91, 0.95)
+    """
+
+    def __init__(self, label: str, score: float, floor: float) -> None:
+        super().__init__(f"{label} {score:.4f} below floor {floor}")
+        self.label = label
+        self.score = score
+        self.floor = floor
+
+
 @dataclass(frozen=True)
 class TaskSpec:
     """Everything that differs between the three overfit gates.
@@ -1011,9 +1044,16 @@ def run_overfit(task: str = "det") -> dict[str, float]:
     gate metric. Every value is produced by *running* the pipeline, never
     hand-written.
 
+    The task's acceptance floor is enforced *here*, not in :func:`main`: the
+    comparison used to live in the CLI alone, so the three non-detection floors
+    were enforced only when a human ran the CLI — the golden producers and the
+    marked tests could accept a below-floor run. Checking it in the producer makes
+    the producer and the floor impossible to disagree (WP-167 H-01).
+
     Args:
-        task: ``"det"`` (train recall at IoU 0.5) or ``"seg"`` (mean train mask
-            IoU). Defaults to ``"det"``.
+        task: One of the wired gates — ``"det"`` (train recall at IoU 0.5),
+            ``"seg"`` (mean train mask IoU), ``"obb"`` (rotated mAP50) or ``"kp"``
+            (OKS AP). Defaults to ``"det"``.
 
     Returns:
         A mapping of the frozen metrics: ``num_images``, ``num_instances``,
@@ -1022,6 +1062,7 @@ def run_overfit(task: str = "det") -> dict[str, float]:
 
     Raises:
         KeyError: If ``task`` is not one of the wired gates.
+        FloorNotMet: If the achieved score is below the task's acceptance floor.
 
     Examples:
         >>> metrics = run_overfit()  # doctest: +SKIP
@@ -1035,6 +1076,8 @@ def run_overfit(task: str = "det") -> dict[str, float]:
         score, instances, num_classes = _train_and_score(recipe, split, True, spec)
     except RuntimeError:
         score, instances, num_classes = _train_and_score(recipe, split, False, spec)
+    if score < spec.floor:
+        raise FloorNotMet(spec.label, score, spec.floor)
     return {
         "num_images": float(_NUM_IMAGES),
         "num_instances": float(instances),
@@ -1119,8 +1162,44 @@ def overfit_micro_seg() -> dict[str, float]:
     return run_overfit("seg")
 
 
+def clamped_tolerance(score: float, spec: TaskSpec) -> float:
+    """Narrow ``spec``'s tolerance so the band's lower edge never falls below the floor.
+
+    A frozen band is ``score +/- tolerance``, and the flat per-task tolerance was
+    wider than the headroom above the floor for two gates: the keypoint band
+    admitted an OKS AP of 0.285667 against a 0.30 floor, and the oriented band a
+    rotated mAP50 of 0.888966 against a 0.90 floor. A golden that accepts a value
+    the published DoD rejects is not a regression guard, so the band is clamped at
+    freeze time to ``min(tolerance, score - floor)`` (WP-167 H-02). The clamp is a
+    property of the writer, so re-freezing produces a correct band rather than
+    needing the stored JSON hand-edited.
+
+    Args:
+        score: The achieved score being frozen.
+        spec: The task whose floor and nominal tolerance apply.
+
+    Returns:
+        The tolerance to store, rounded to six decimals to match the stored score's
+        precision and never negative.
+
+    Examples:
+        >>> kp = TASK_SPECS["kp"]
+        >>> (kp.tolerance, kp.floor)
+        (0.05, 0.3)
+        >>> clamped_tolerance(0.335667, kp)
+        0.035667
+        >>> clamped_tolerance(0.9, kp)  # headroom exceeds the nominal band
+        0.05
+    """
+    return max(0.0, min(spec.tolerance, round(score - spec.floor, 6)))
+
+
 def write_golden(metrics: dict[str, float], spec: TaskSpec = TASK_SPECS["det"]) -> None:
     """Freeze ``metrics`` into the task's golden JSON with its tolerance pinned.
+
+    The stored tolerance is :func:`clamped_tolerance` of the achieved score, not
+    ``spec.tolerance`` verbatim: a band whose lower edge sits under the acceptance
+    floor would admit values the DoD rejects.
 
     Args:
         metrics: The metric mapping to store as the golden's ``values``.
@@ -1133,7 +1212,7 @@ def write_golden(metrics: dict[str, float], spec: TaskSpec = TASK_SPECS["det"]) 
     spec.golden_path.parent.mkdir(parents=True, exist_ok=True)
     golden = {
         "producer": spec.producer,
-        "tolerances": {spec.metric: spec.tolerance},
+        "tolerances": {spec.metric: clamped_tolerance(metrics[spec.metric], spec)},
         "values": metrics,
     }
     spec.golden_path.write_text(json.dumps(golden, indent=2) + "\n")
@@ -1163,12 +1242,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unsupported task {args.task!r}; wired tasks are {sorted(TASK_SPECS)}")
         return 1
 
-    metrics = run_overfit(args.task)
+    try:
+        metrics = run_overfit(args.task)
+    except FloorNotMet as exc:
+        print(f"FAIL: {exc}")
+        return 1
     score = metrics[spec.metric]
     print(f"overfit-{args.task}: {spec.label} = {score:.4f} over {int(metrics['num_instances'])} instances")
-    if score < spec.floor:
-        print(f"FAIL: {spec.label} {score:.4f} below floor {spec.floor}")
-        return 1
     if args.freeze:
         write_golden(metrics, spec)
         print(f"froze golden -> {spec.golden_path.relative_to(REPO_ROOT)}")

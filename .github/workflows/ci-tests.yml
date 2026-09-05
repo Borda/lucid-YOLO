@@ -19,18 +19,36 @@ jobs:
   # messages this workflow would have validated. WP-144 narrowed that: the argument
   # covers the merge result and not the submission, so lint.yml's `trailers` job checks
   # the pull request's own commits, which are what review actually reads.
+  # `requires-python` is `>=3.11`, and until now only 3.11 ran: 3.12 and 3.13 were
+  # claimed by the metadata and never exercised. macOS likewise -- `gate-gpu.yml`
+  # runs the accelerator half there against MPS, while the offline suite that decides
+  # whether a change may land had only ever run on Linux.
+  #
+  # `UV_TORCH_BACKEND: cpu` matters more here than in a single job: without it every
+  # one of the six cells resolves and downloads a CUDA-linked torch wheel for a runner
+  # with no GPU.
   testing:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Every cell reports. A failure on one interpreter is a finding about that
+      # interpreter, and cancelling its siblings hides whether the others agree --
+      # which is the question a matrix exists to answer.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    env:
+      UV_TORCH_BACKEND: "cpu"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Create venv and install the dev dependency group
         run: |
-          uv venv --python 3.11 .venv
+          uv venv --python ${{ matrix.python-version }} .venv
           uv pip install --python .venv/bin/python -e . --group dev
       # `make test`, not an inline pytest line. The inline one omitted both
       # `--doctest-modules` and the `src scripts` paths, so `testpaths = ["tests"]`
@@ -48,5 +66,12 @@ jobs:
       # stopped checking the goldens entirely. It lives in this job rather than
       # back in `lint.yml` because the harness recomputes model metrics -- it is
       # a test-shaped check, and this is the job that runs the suite.
+      #
+      # One cell only. The stored values were frozen on Linux under 3.11, and the
+      # tolerances are sized for the drift a code change causes, not for the drift a
+      # different interpreter build or a different BLAS produces. Running the sweep in
+      # every cell would report platform differences as golden regressions, which is a
+      # separate question from the one the goldens answer.
       - name: Frozen golden regression
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         run: .venv/bin/python scripts/check_goldens.py

@@ -618,7 +618,10 @@ def _shipped_libraries(dist: metadata.Distribution) -> list[tuple[str, str]]:
 
     Reads the distribution's ``RECORD`` through ``Distribution.files``, so what is
     scanned is what the wheel declared it installed. A distribution without a
-    ``RECORD`` reports no files and is invisible here.
+    ``RECORD`` reports no files and is invisible here. From Python 3.12 on, ``files``
+    also drops any recorded path missing from disk, so what is scanned is the
+    intersection of recorded and present — no narrower for a normal install, where the
+    binaries a wheel records are the binaries it unpacked.
     """
     found = []
     for path in dist.files or ():

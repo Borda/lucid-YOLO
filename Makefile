@@ -47,7 +47,10 @@ gate: precommit test golden
 # accelerator and a generated dataset. Excluded from the offline gate by design,
 # not by accident — but nothing ran them on a schedule either, which is how the
 # frozen detection overfit golden drifted for six days while WP-078 changed the
-# objective underneath it. This target is that schedule.
+# objective underneath it. This target was called "that schedule" while nothing
+# invoked it; the schedule is .github/workflows/gate-gpu.yml (nightly plus manual
+# dispatch), which runs `gate-gpu` below on the self-hosted runner named by the
+# GPU_RUNNER_LABEL repository variable.
 test-gpu:
 	$(PY) -m pytest -m "gpu or data" tests scripts
 

@@ -348,10 +348,19 @@ def synthetic_dist(tmp_path: Path) -> Callable[[str, Sequence[str]], metadata.Di
     copyleft anywhere, and a RECORD listing the files the wheel ships. Going through
     ``Distribution.at`` rather than a stub object means the real ``RECORD`` parser runs,
     which is the part the check depends on.
+
+    Every listed file is also created on disk, empty. A RECORD line alone was enough on
+    Python 3.11, but 3.12 added ``skip_missing_files`` to ``Distribution.files``, which
+    filters the parsed RECORD down to the entries that exist under the distribution's
+    root. Writing only the RECORD there yields a distribution shipping nothing, and the
+    binary scan reads ``files``, so the x264 cases passed on 3.11 and reported clean on
+    3.12 and 3.13 — a fixture artefact, not a behaviour difference in the audit, since a
+    real wheel installs the binaries it records.
     """
 
     def build(name: str, shipped: Sequence[str] = ()) -> metadata.Distribution:
-        info = tmp_path / name / f"{name}-1.0.dist-info"
+        root = tmp_path / name
+        info = root / f"{name}-1.0.dist-info"
         info.mkdir(parents=True, exist_ok=True)
         info.joinpath("METADATA").write_text(
             "Metadata-Version: 2.4\n"
@@ -363,6 +372,10 @@ def synthetic_dist(tmp_path: Path) -> Callable[[str, Sequence[str]], metadata.Di
         )
         info.joinpath("licenses").mkdir(exist_ok=True)
         info.joinpath("licenses", "LICENSE.txt").write_text(PERMISSIVE_LICENSE_DOCUMENT)
+        for path in shipped:
+            installed = root / path
+            installed.parent.mkdir(parents=True, exist_ok=True)
+            installed.touch()
         records = [f"{path},," for path in shipped] + [f"{name}-1.0.dist-info/METADATA,,"]
         info.joinpath("RECORD").write_text("\n".join(records) + "\n")
         return metadata.Distribution.at(info)
