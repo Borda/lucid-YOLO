@@ -184,6 +184,61 @@ def _datamodule(data_root: Path, **kwargs: object) -> DetectionDataModule:
     return DetectionDataModule(data_root=data_root, **settings)  # type: ignore[arg-type]
 
 
+class TestCocoLabelSpaceAgreement:
+    """Both COCO splits are checked against each other's label space before either is served (WP-172).
+
+    Each split's contiguous labels are derived from its own file's ``categories`` list, so
+    two files that disagree produce two different label spaces and nothing downstream can
+    tell: the model trains against one numbering and is scored against another, reporting a
+    plausible metric the whole way. The disagreement is a property of the pair, so ``setup``
+    is the first and only place it can be seen.
+    """
+
+    def test_a_shared_category_set_builds_both_splits(self, tmp_path: Path) -> None:
+        """Splits agreeing on their categories are served, with one label space between them.
+
+        The fixture writes the same ``categories`` list into both files, which is what an
+        ordinary export does; the check has to be silent here or it would reject every
+        healthy dataset.
+        """
+        datamodule = _datamodule(_write_coco_root(tmp_path))
+
+        datamodule.setup("fit")
+
+        assert datamodule._train._base.category_id_to_label == datamodule._val.category_id_to_label
+
+    def test_a_category_only_in_val_is_named_and_raises(self, tmp_path: Path) -> None:
+        """A val-only category raises at ``setup``, naming the ids each side holds alone.
+
+        Adding one category to val alone renumbers every label above it — with ids ``1, 7``
+        the val reader maps ``7 -> 1`` while train has no label ``1`` at all — so this is
+        the silent-relabelling case, not a cosmetic mismatch.
+        """
+        root = _write_coco_root(tmp_path)
+        payload = _coco_payload()
+        payload["categories"] = [{"id": 1, "name": "car"}, {"id": 7, "name": "bus"}]
+        (root / "annotations" / "instances_val.json").write_text(json.dumps(payload), encoding="utf-8")
+        datamodule = _datamodule(root)
+
+        with pytest.raises(ValueError, match=r"only in val: \[7\]"):
+            datamodule.setup("fit")
+
+    def test_a_category_only_in_train_is_named_and_raises(self, tmp_path: Path) -> None:
+        """A train-only category raises too: the check is symmetric, not a val-side filter.
+
+        Guards the direction a one-sided ``issubset`` test would miss — a train file that
+        declares a class the evaluation set never scores.
+        """
+        root = _write_coco_root(tmp_path)
+        payload = _coco_payload()
+        payload["categories"] = [{"id": 1, "name": "car"}, {"id": 4, "name": "van"}]
+        (root / "annotations" / "instances_train.json").write_text(json.dumps(payload), encoding="utf-8")
+        datamodule = _datamodule(root)
+
+        with pytest.raises(ValueError, match=r"only in train: \[4\]"):
+            datamodule.setup("fit")
+
+
 class TestLayoutDispatch:
     """Which reader a ``data_root`` reaches, under one flag and with no overrides."""
 

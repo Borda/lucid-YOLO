@@ -445,6 +445,12 @@ class CopyPaste:
 
         Raises:
             ValueError: If the two images differ in shape.
+            NotImplementedError: If either input carries a non-empty ``rboxes``. The guard
+                is repeated here rather than left to :meth:`__call__` because ``apply`` is
+                its own entrance (WP-147): a caller building :class:`CopyPasteParams`
+                directly never passes through the wrapper, and :meth:`_merge` would drop
+                the modality instead of refusing it. :meth:`__call__` keeps its own copy so
+                that a rotated input is rejected *before* :meth:`sample` consumes a draw.
 
         Examples:
             ```pycon
@@ -459,6 +465,7 @@ class CopyPaste:
 
             ```
         """
+        _reject_rboxes(items)
         (image_a, targets_a), (image_b, targets_b) = items
         if image_a.shape != image_b.shape:
             raise ValueError(
@@ -482,14 +489,44 @@ class CopyPaste:
 
     @staticmethod
     def _merge(targets_a: Targets, targets_b: Targets, selected: list[int]) -> Targets:
-        """Append the selected source instances' box/label/polygon/keypoints to ``a``'s targets."""
+        """Append the selected source instances to ``a``'s targets, carrying every channel.
+
+        Every field on the shared instance axis is taken by the same ``index`` the boxes
+        are, so the merged set is aligned by construction. ``difficult`` is one of them
+        (A51): a rebuild that omitted it would not raise, because
+        :class:`~lucid_yolo.data.targets.Targets` refills an omitted flag column with one
+        ``False`` per instance — which is exactly what makes the loss silent, and what
+        A48's discard rule then misreads as an ordinary false positive.
+
+        ``rboxes`` is not carried, and that is deliberate rather than an omission: a paste
+        transfers a rasterised polygon mask, the oriented path carries no polygons
+        (WP-056), and :func:`_reject_rboxes` therefore refuses a rotated input at both
+        entrances before it can reach here. Carrying the modality would be claiming to
+        paste something the transform cannot paste.
+
+        Args:
+            targets_a: The destination targets, kept in full and in order.
+            targets_b: The source targets the pastes were selected from.
+            selected: The source instance indices to append, in paste order.
+
+        Returns:
+            The merged targets: ``a``'s instances followed by the selected ones.
+        """
         index = torch.tensor(selected, dtype=torch.int64)
         boxes = torch.cat([targets_a.boxes, targets_b.boxes[index]], dim=0)
         labels = torch.cat([targets_a.labels, targets_b.labels[index]], dim=0)
+        difficult = torch.cat([targets_a.difficult, targets_b.difficult[index]], dim=0)
         polygons = [ring.clone() for ring in targets_a.polygons]
         polygons.extend(targets_b.polygons[i].clone() for i in selected)
         keypoints, keypoint_vis = CopyPaste._merge_keypoints(targets_a, targets_b, index)
-        return Targets(boxes=boxes, labels=labels, polygons=polygons, keypoints=keypoints, keypoint_vis=keypoint_vis)
+        return Targets(
+            boxes=boxes,
+            labels=labels,
+            polygons=polygons,
+            difficult=difficult,
+            keypoints=keypoints,
+            keypoint_vis=keypoint_vis,
+        )
 
     @staticmethod
     def _merge_keypoints(targets_a: Targets, targets_b: Targets, index: Tensor) -> tuple[Tensor, Tensor]:

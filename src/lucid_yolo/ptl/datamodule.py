@@ -833,6 +833,51 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
         return float(torch.rand((), generator=self._generator).item())
 
 
+def _check_shared_label_space(train_map: dict[int, int], val_map: dict[int, int]) -> None:
+    """Refuse two COCO splits whose ``categories`` lists disagree (WP-172).
+
+    Each split's contiguous labels are derived from its own file alone —
+    ``_build_category_maps`` sorts that file's category ids and numbers them from zero — so
+    the two mappings are independent derivations that nothing downstream ever compares. One
+    category present in only one file renumbers every label above it, and the failure is
+    silent by construction: the model trains against one numbering, is scored against
+    another, and reports a perfectly plausible number for the wrong question. This is the
+    only place both mappings are in hand, so it is the only place the disagreement is
+    visible.
+
+    Comparing the id *sets* is sufficient rather than merely necessary: the mapping is a
+    function of the sorted id set, so equal sets imply equal mappings. That is why the error
+    names the symmetric difference rather than diffing two dicts.
+
+    Args:
+        train_map: The train split's ``category_id_to_label``.
+        val_map: The val split's ``category_id_to_label``.
+
+    Raises:
+        ValueError: If the splits declare different category ids, naming the ids each side
+            holds alone.
+
+    Examples:
+        ```pycon
+        >>> _check_shared_label_space({1: 0, 2: 1}, {1: 0, 2: 1})
+        >>> try:
+        ...     _check_shared_label_space({1: 0}, {1: 0, 7: 1})
+        ... except ValueError as error:
+        ...     print("only in val: [7]" in str(error))
+        True
+
+        ```
+    """
+    only_train = sorted(set(train_map) - set(val_map))
+    only_val = sorted(set(val_map) - set(train_map))
+    if only_train or only_val:
+        raise ValueError(
+            "train and val declare different COCO label spaces, so the same label names a "
+            f"different class in each split; only in train: {only_train}, only in val: {only_val}. "
+            "Both annotation files must declare the same categories."
+        )
+
+
 class DetectionDataModule(LightningDataModule):
     """Detection datamodule assembling the Phase 1 augmentation pipeline (WP-014).
 
@@ -1208,24 +1253,32 @@ class DetectionDataModule(LightningDataModule):
     def _build_coco_splits(self) -> tuple[_DetectionSource, _DetectionSource]:
         """Build both splits from the resolved (or overridden) COCO paths.
 
+        Each reader derives its own contiguous label space from its own file, so the two are
+        compared here before either is served: two disagreeing ``categories`` lists is a
+        wrong-dataset error that otherwise trains to completion and reports a metric
+        (:func:`_check_shared_label_space`).
+
         Returns:
             The raw train reader and the letterbox-only val reader.
+
+        Raises:
+            ValueError: If the two annotation files declare different category ids.
         """
-        return (
-            CocoDetectionDataset(
-                self._train_images_dir,
-                self._train_ann_file,
-                oriented=self._rotated_targets,
-                keypoints=self._keypoint_targets,
-            ),
-            CocoDetectionDataset(
-                self._val_images_dir,
-                self._val_ann_file,
-                transforms=Letterbox(self._img_size),
-                oriented=self._rotated_targets,
-                keypoints=self._keypoint_targets,
-            ),
+        train = CocoDetectionDataset(
+            self._train_images_dir,
+            self._train_ann_file,
+            oriented=self._rotated_targets,
+            keypoints=self._keypoint_targets,
         )
+        val = CocoDetectionDataset(
+            self._val_images_dir,
+            self._val_ann_file,
+            transforms=Letterbox(self._img_size),
+            oriented=self._rotated_targets,
+            keypoints=self._keypoint_targets,
+        )
+        _check_shared_label_space(train.category_id_to_label, val.category_id_to_label)
+        return train, val
 
     def _build_yolo_splits(self) -> tuple[_DetectionSource, _DetectionSource]:
         """Build both splits from the root's own ``data.yaml`` and label trees.

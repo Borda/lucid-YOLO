@@ -23,7 +23,7 @@ import pytest
 import torch
 
 from lucid_yolo.data import CopyPaste, Mixup, Targets
-from lucid_yolo.data.mixup import _rasterize_polygon
+from lucid_yolo.data.mixup import CopyPasteParams, _rasterize_polygon
 
 #: Square image side used across the suite.
 _SIDE = 8
@@ -358,6 +358,94 @@ class TestCopyPasteGuards:
 
         with pytest.raises(ValueError, match="same-size"):
             copy_paste([destination, source])
+
+
+class TestCopyPasteModalitiesThroughApply:
+    """Every modality survives the ``apply`` seam WP-147 made public (WP-172).
+
+    ``__call__`` is not the only entrance any more: a caller that wants a stated
+    selection rather than a drawn one builds :class:`CopyPasteParams` and calls
+    :meth:`CopyPaste.apply` directly. Each guard and each carried channel therefore
+    has to hold on that path too, not merely on the sampling wrapper.
+    """
+
+    def test_apply_refuses_a_rotated_destination(self) -> None:
+        """A rotated destination is refused by ``apply``, not only by ``__call__``.
+
+        The oriented path carries no polygons, so a rotated instance has nothing to
+        paste and nothing to carry it: reaching the merge, its ``rboxes`` are dropped
+        and the modality leaves silently. The refusal is what keeps that unreachable.
+        """
+        rboxes = torch.tensor([[4.0, 4.0, 3.0, 2.0, 0.2]])
+        rotated = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64), rboxes=rboxes)
+        items = [(torch.zeros(3, _SIDE, _SIDE), rotated), (torch.ones(3, _SIDE, _SIDE), _polygon_source())]
+
+        with pytest.raises(NotImplementedError, match="polygon"):
+            CopyPaste(p=1.0).apply(items, CopyPasteParams(selected=(0,)))
+
+    def test_apply_refuses_a_rotated_source(self) -> None:
+        """A rotated source is refused by ``apply`` on the same grounds as a rotated destination.
+
+        ``_reject_rboxes`` inspects both inputs, so the seam must consult it rather
+        than trusting a wrapper the direct caller never went through.
+        """
+        rboxes = torch.tensor([[4.0, 4.0, 3.0, 2.0, 0.2]])
+        rotated = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64), rboxes=rboxes)
+        items = [(torch.zeros(3, _SIDE, _SIDE), Targets.empty()), (torch.ones(3, _SIDE, _SIDE), rotated)]
+
+        with pytest.raises(NotImplementedError, match="polygon"):
+            CopyPaste(p=1.0).apply(items, CopyPasteParams(selected=()))
+
+    def test_difficult_flags_survive_the_paste(self) -> None:
+        """Both sides' R18 ``difficult`` flags reach the merged instance axis (A48, A51).
+
+        A merge that rebuilds ``Targets`` without the channel does not raise — the
+        container refills it with one ``False`` per instance — so a dropped flag is
+        indistinguishable from an easy instance, and A48's discard rule silently turns
+        every ignorable detection into a false positive.
+        """
+        destination = Targets(
+            boxes=torch.tensor([[1.0, 1.0, 3.0, 3.0]]),
+            labels=torch.tensor([9]),
+            polygons=[_square_ring(1.0, 1.0, 3.0, 3.0)],
+            difficult=torch.tensor([True]),
+        )
+        source = Targets(
+            boxes=torch.tensor([[4.0, 4.0, 6.0, 6.0], [1.0, 4.0, 3.0, 6.0]]),
+            labels=torch.tensor([5, 6]),
+            polygons=[_square_ring(4.0, 4.0, 6.0, 6.0), _square_ring(1.0, 4.0, 3.0, 6.0)],
+            difficult=torch.tensor([False, True]),
+        )
+        items = [(torch.zeros(3, _SIDE, _SIDE), destination), (torch.ones(3, _SIDE, _SIDE), source)]
+
+        _, out = CopyPaste(p=1.0).apply(items, CopyPasteParams(selected=(1,)))
+
+        assert out.difficult.tolist() == [True, True]
+
+    def test_the_pasted_flag_follows_the_selection(self) -> None:
+        """A pasted flag is indexed by the same selection its box is, not by source order.
+
+        Selecting the source's easy instance must yield an easy pasted instance; taking
+        the flag column unindexed, or defaulting it, would score identically on the
+        all-difficult case above and wrongly here.
+        """
+        destination = Targets(
+            boxes=torch.tensor([[1.0, 1.0, 3.0, 3.0]]),
+            labels=torch.tensor([9]),
+            polygons=[_square_ring(1.0, 1.0, 3.0, 3.0)],
+            difficult=torch.tensor([True]),
+        )
+        source = Targets(
+            boxes=torch.tensor([[4.0, 4.0, 6.0, 6.0], [1.0, 4.0, 3.0, 6.0]]),
+            labels=torch.tensor([5, 6]),
+            polygons=[_square_ring(4.0, 4.0, 6.0, 6.0), _square_ring(1.0, 4.0, 3.0, 6.0)],
+            difficult=torch.tensor([False, True]),
+        )
+        items = [(torch.zeros(3, _SIDE, _SIDE), destination), (torch.ones(3, _SIDE, _SIDE), source)]
+
+        _, out = CopyPaste(p=1.0).apply(items, CopyPasteParams(selected=(0,)))
+
+        assert out.difficult.tolist() == [True, False]
 
 
 class TestRasterizer:

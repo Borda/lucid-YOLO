@@ -150,10 +150,55 @@ class TestHorizontalFlip:
         assert out.boxes.tolist() == [[3.0, 1.0, 7.0, 3.0]]
         assert flip.last_flipped is True
 
-    def test_double_flip_is_identity(self) -> None:
-        """Flipping boxes twice returns the original coordinates."""
+    def test_the_mirror_axis_is_the_image_column_reversal(self) -> None:
+        """The mirror is about ``(W-1)/2``, the axis ``image.flip(-1)`` itself reflects about — not ``W/2``.
+
+        ``W-1`` versus ``W`` is a real choice and both appear in the wild, so it is
+        asserted here by its consequence rather than restated as a formula: a box drawn
+        tightly around a bright block must still bound that block after both are
+        mirrored. Under the ``W`` convention the block lands at columns ``{6, 7}`` while
+        the box is carried to ``[7, 8]`` — off by exactly one pixel, and every downstream
+        coordinate inherits the error.
+        """
         flip = HorizontalFlip(p=1.0, generator=_generator())
-        image = torch.rand(3, 4, 10)
+        width = 10
+        image = torch.zeros(3, 4, width)
+        image[:, :, 2:4] = 1.0
+        boxes = torch.tensor([[2.0, 0.0, 3.0, 3.0]])
+
+        out_image, out = flip(image, Targets(boxes=boxes, labels=torch.tensor([0])))
+
+        lit = out_image[0, 0].nonzero().flatten().tolist()
+        assert lit == [6, 7]
+        assert out.boxes[0, 0].item() == float(min(lit))
+        assert out.boxes[0, 2].item() == float(max(lit))
+
+    def test_a_box_at_the_canvas_bound_is_re_clipped(self) -> None:
+        """A box whose ``x2`` sits at the reader's clamp bound ``W`` mirrors to ``x1 = -1`` and is re-clipped.
+
+        The two conventions meet here: extents are clamped to ``[0, W]`` (``coco.py``,
+        ``affine.py``, ``fuse``'s own ``clip_bbox_xyxy``) while the mirror reflects about
+        ``(W-1)/2``, so a box legitimately touching the right edge comes back one pixel
+        off the left edge. The flip is the last stage of the train pipeline, so without a
+        re-clip that negative coordinate is what the assigner receives.
+        """
+        flip = HorizontalFlip(p=1.0, generator=_generator())
+        width = 10
+        boxes = torch.tensor([[4.0, 1.0, float(width), 3.0]])
+
+        _, out = flip(torch.rand(3, 4, width), Targets(boxes=boxes, labels=torch.tensor([0])))
+
+        assert out.boxes.tolist() == [[0.0, 1.0, 5.0, 3.0]]
+
+    def test_double_flip_is_identity(self) -> None:
+        """Flipping boxes twice returns the original coordinates.
+
+        The canvas holds the whole target set here: the involution is a property of the
+        mirror, and the re-clip that keeps the assigner on-canvas necessarily breaks it
+        for geometry that started outside the canvas.
+        """
+        flip = HorizontalFlip(p=1.0, generator=_generator())
+        image = torch.rand(3, 64, 64)
         targets = _targets()
         once_image, once = flip(image, targets)
         twice_image, twice = flip(once_image, once)

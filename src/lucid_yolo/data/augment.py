@@ -575,12 +575,49 @@ class HorizontalFlip:
 
     @staticmethod
     def _mirror_targets(targets: Targets, width: float, keypoint_flip_pairs: list[tuple[int, int]] | None) -> Targets:
-        """Mirror every modality about ``x = (width - 1) / 2``, keeping alignment intact."""
+        """Mirror every modality about ``x = (width - 1) / 2``, then re-clip the boxes to the canvas.
+
+        Two canvas conventions meet here, and the transform needs both:
+
+        * The **mirror axis** is ``(width - 1) / 2``, not ``width / 2``. A coordinate names
+          a sample point, the outermost samples sit at ``0`` and ``width - 1``, and that is
+          the axis ``image.flip(-1)`` itself reflects about — so ``width - 1`` is the only
+          choice under which a target keeps bounding the pixels it bounded before the flip
+          (WP-154b). ``width`` would displace every mirrored coordinate by one pixel.
+        * The **canvas extent** is ``[0, width]``, the area reading the readers and every
+          other transform clamp an ``x`` coordinate to (``coco.py`` on load, ``affine.py``
+          after a warp, and :func:`~fuse_augmentations.clip_bbox_xyxy` upstream).
+
+        Their meeting point is the defect this closes: a box legitimately clamped to
+        ``x2 = width`` on load mirrors to ``x1 = (width - 1) - width = -1``, one pixel off
+        the canvas. The flip is the last stage of the train pipeline, so that coordinate
+        goes straight to the assigner unless it is clipped here.
+
+        The clamp is on ``x`` alone, and only for boxes. A mirror moves nothing else, so
+        clamping ``y`` would edit geometry this transform never touched — a box that arrived
+        off-canvas vertically is another stage's business, and silently trimming it here
+        would make the flip's output depend on a height it does not otherwise read.
+        Keypoints are left where the mirror put them, as
+        :class:`~lucid_yolo.data.affine.RandomAffine` leaves its warped points unclipped and
+        A70 treats off-canvas as a visibility question rather than a coordinate one. Rotated
+        boxes are left alone because clamping a centre while keeping the extents describes a
+        *different* rectangle rather than a clipped one, and the mirror is an isometry that
+        cannot push a wholly on-canvas box off the canvas.
+
+        Args:
+            targets: The geometry to mirror.
+            width: Canvas width in pixels; both the mirror axis and the ``x`` clamp bound.
+            keypoint_flip_pairs: ``(left, right)`` keypoint identity swaps, or ``None``.
+
+        Returns:
+            The mirrored targets: box ``x`` extents on-canvas, every modality carried across.
+        """
         axis = width - 1.0
         boxes = targets.boxes.clone()
         x1 = boxes[:, 0].clone()
         boxes[:, 0] = axis - boxes[:, 2]
         boxes[:, 2] = axis - x1
+        boxes[:, 0::2] = boxes[:, 0::2].clamp(0.0, width)
         polygons = []
         for ring in targets.polygons:
             mirrored = ring.clone()
