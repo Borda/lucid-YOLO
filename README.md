@@ -1,6 +1,6 @@
 # 🔦 lucid-yolo
 
-> lucid-yolo is an independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance segmentation, and oriented detection methods described in the YOLO26 paper ([arXiv:2606.03748](https://arxiv.org/abs/2606.03748)). "YOLO" refers to the family of real-time detectors originated by Redmon et al. (2016). This project is not affiliated with, endorsed by, or derived from Ultralytics or its codebase. No Ultralytics source code, configurations, or model weights were consulted or used. See docs/PROVENANCE.md.
+> lucid-yolo is an independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance segmentation, and oriented detection methods described in the YOLO26 paper ([arXiv:2606.03748](https://arxiv.org/abs/2606.03748)), plus a keypoint task composed onto the same trunk whose loss and evaluation protocol are taken from RLE (arXiv:2107.11291) rather than from that paper. "YOLO" refers to the family of real-time detectors originated by Redmon et al. (2016). This project is not affiliated with, endorsed by, or derived from Ultralytics or its codebase. No Ultralytics source code, configurations, or model weights were consulted or used. See docs/PROVENANCE.md.
 
 **A modern YOLO, written out in full, with its homework shown.** Every mechanism in the paper — the NMS-free end-to-end head, the removal of distribution focal loss, the MuSGD optimizer, the progressive loss schedule, the rotated-box formulation — is implemented here from the published equations, trained, measured, and written up with the numbers it actually produced. Where the papers leave a choice open, the choice is recorded as a numbered assumption instead of buried in the code.
 
@@ -59,7 +59,7 @@ Four tasks, one trunk:
 | **Oriented detection** | one angle per detection, and boxes that turn | `[cx, cy, w, h, theta, score, class]` — a rotated rectangle, not an upright one |
 | **Keypoints** | `K` points per detection, and a normalizing flow that learns what a plausible error looks like instead of assuming it | the detection row, plus `K` `(x, y)` points |
 
-The fourth is **keypoints, not pose**: `K` is a constructor argument the way the class count is, and nothing in the head, the loss or the decode path knows what a point means. Human pose is the instantiation the shipped checkpoint trained on; the wiring gate runs a 7-point synthetic symbol schema instead. It is also the one task not drawn from the YOLO26 paper, which addresses no keypoint task at all — the loss and evaluation protocol come from RLE (arXiv:2107.11291), composed onto the same trunk.
+The fourth is **keypoints, not pose**: `K` is a constructor argument the way the class count is, and nothing in the head, the loss or the decode path knows what a point means. Human pose is the instantiation the shipped checkpoint trained on; the wiring gate runs a 7-point synthetic symbol schema instead. It is also the one task not drawn from the YOLO26 paper: the loss and evaluation protocol come from RLE (arXiv:2107.11291), composed onto the same trunk, and no paper on the allowlist publishes a keypoint architecture or parameter table to check this head against.
 
 Every module names the equation it implements and the assumption it rests on. `docs/ASSUMPTIONS.md` is the list of every place where the papers did not determine an answer and this project had to choose one — 73 of them, each with what was chosen, why, and what would falsify it.
 
@@ -67,7 +67,7 @@ Every module names the equation it implements and the assumption it rests on. `d
 
 ## 📊 What was reproduced
 
-Three tiers have been trained and accepted, each at the **n scale for 50 epochs on one GPU**. That is a smoke tier: enough to show a mechanism works end to end, far short of the paper's own training budget. Read every number below as "this implementation, trained small" — not as a claim about the paper's headline table.
+Four tiers have been trained and accepted — detection, instance segmentation, oriented detection and keypoints — each at the **n scale for 50 epochs on one GPU**. That is a smoke tier: enough to show a mechanism works end to end, far short of the paper's own training budget. Read every number below as "this implementation, trained small" — not as a claim about the paper's headline table.
 
 ### Detection — COCO 2017 val, 5000 images
 
@@ -118,9 +118,9 @@ The ratio is bounded above by construction — every mask starts from a box this
 
 ### What is gated rather than claimed
 
-- **Architecture fidelity**: parameter and FLOP counts for all five scales are held within ±2% params and ±5% FLOPs of the paper's table (n: 2.4M/5.4G through x: 55.7M/193.9G), as a test, on every commit. Detection and segmentation only — the paper publishes no table for oriented detection, and none of the papers describes a keypoint architecture at all, so those two are held against this project's own frozen goldens or not gated.
-- **Regression**: 14 frozen golden metric files, one set per released minor, re-verified beside the 7 live ones on every run of `make gate` — a later release may never silently regress an earlier one's numbers.
-- **The suite**: 2447 tests, all offline, no network, no dataset, no GPU required.
+- **Architecture fidelity**: parameter and FLOP counts for all five scales are held against the paper's own tables, as a test, on every commit — detection against Table 7 within ±2% params (n: 2.4M/5.4G through x: 55.7M/193.9G), instance segmentation against Table S9 within ±3%, oriented detection against Table S11 within ±3.5% at 1024 px on DOTA's 15 classes, and all three within ±5% FLOPs. The oriented tolerance is wider because it is where the angle-stem width is inferred rather than published, and it is stated as such rather than as parity (A20 stays open). Keypoints are the one task with no published table to check — none of the papers describes a keypoint architecture at all — so that head is held against this project's own frozen goldens instead.
+- **Regression**: 34 frozen golden metric files, one set per released minor from 0.2 through 0.7, re-verified beside the 9 live ones on every run of `make gate` — a later release may never silently regress an earlier one's numbers.
+- **The suite**: every test offline — no network, no dataset, no GPU required, and the doctests in `src/` and `scripts/` run with it.
 
 Full write-ups with the exact commands as run, the failures along the way, and what each tier does *not* claim: **docs/REPRODUCTION_REPORT.md**. Per-task model cards, including intended use and limitations: **docs/model_cards/**.
 
@@ -129,11 +129,10 @@ Full write-ups with the exact commands as run, the failures along the way, and w
 ## 🚀 Quickstart
 
 ```bash
-pip install lucid-yolo             # the released wheel
-git clone … && make setup          # or a dev checkout, with the gates
+git clone … && make setup          # a dev checkout, with the gates — the install that works today
 ```
 
-Every distribution published before `0.4.0` is a `.devN` pre-release, which `pip` skips by default; add `--pre` if you specifically want one of those.
+**There is no `pip install lucid-yolo` line here, and that is deliberate.** PyPI carries 26 distributions of this project and every one of them is a `.devN` pre-release that `pip` skips unless asked, the newest a `0.5.0.dev2` snapshot two minors behind this tree — so the bare command resolves to nothing and `--pre` resolves to something older than what this README describes. The current release cannot be uploaded at all: `fuse-augmentations` is a runtime dependency pinned to a git commit, and a direct reference is legal to build and install and illegal to upload to PyPI (docs/DECISIONS.md, D20). The day a `fuse-augmentations` 0.12 reaches PyPI that pin becomes a `>=0.12,<0.13` range and this section gets its install line back.
 
 Four commands cover a whole tier. Datasets are never committed and never downloaded by tests — docs/DATASETS.md says where COCO 2017 and DOTA-v1.0 come from.
 
@@ -152,7 +151,7 @@ lucid-eval --checkpoint runs/det.ckpt --data_root /data/coco --output report.jso
 lucid-predict --checkpoint runs/det.ckpt --image street.jpg
 ```
 
-Swap `det_nano_smoke.yaml` for `seg_nano_smoke.yaml` or `obb_nano_smoke.yaml` and the same four commands train and score the other two tasks. docs/TRAINING.md carries the full recipe per tier, including the batch-size scaling and the one setting that matters most on a hosted runtime.
+Swap `det_nano_smoke.yaml` for `seg_nano_smoke.yaml`, `obb_nano_smoke.yaml` or `pose_nano_smoke.yaml` and the same four commands train and score the other three tasks. docs/TRAINING.md carries the full recipe per tier, including the batch-size scaling and the one setting that matters most on a hosted runtime.
 
 **Releases publish no trained weights** (a deliberate policy — see docs/DECISIONS.md, D14), so every command above takes a checkpoint you trained.
 
@@ -220,9 +219,9 @@ The clean-room rule is absolute and it is what makes the reproduction mean anyth
 
 ## 🏷️ Versioning
 
-Perpetual 0.x release train — each 0.MINOR is a gated capability milestone (0.1 detection, 0.2 instance segmentation, 0.3 oriented detection, 0.4+ rolling). No 1.0 is planned: the project tracks a living specification (the paper plus this project's assumption register), and each release freezes its golden metrics; later releases must never regress them. This is a deliberate policy, not an abandonment signal — see docs/DECISIONS.md.
+Perpetual 0.x release train — each 0.MINOR is a gated capability milestone (0.1 detection, 0.2 instance segmentation, 0.3 oriented detection, 0.5 keypoints, and rolling releases in between). No 1.0 is planned: the project tracks a living specification (the paper plus this project's assumption register), and each release freezes its golden metrics; later releases must never regress them. This is a deliberate policy, not an abandonment signal — see docs/DECISIONS.md.
 
-Current release: **0.4.0** — the three tiers of 0.3 plus the inference path that reads their checkpoints, a second dataset layout, whole-image tile merging and an export gate. It is the first release that trains no new tier and publishes no new accuracy figure. No `v0.1.0` was ever tagged; the detector's history ships inside the 0.2.0 changelog section, and `goldens/frozen/0.2/` is the first frozen set. Releases publish no trained weights (D14), which for the oriented model is a licence matter as well as a policy one: DOTA permits academic use only, so weights trained on it could not ship under this repository's Apache-2.0 terms.
+Current release: **0.7.0** — the augmentation stack leaves this repository. The letterbox fit and resample, the affine warp, the post-warp instance keep mask, the rotated-box transports and the keypoint flip table all delegate to `fuse-augmentations`, and what stays local is the architecture, the task semantics, the supervision targets, the composition order and the paper's own augmentation recipe (ADR-005, D19). It trains no new tier and publishes no new accuracy figure; the four accepted tiers are the ones above, the last of them released at 0.5.0. The two releases before it are the contributor-admission and keypoint-parity guard (0.6.0) and the keypoint tier itself (0.5.0). No `v0.1.0` was ever tagged; the detector's history ships inside the 0.2.0 changelog section, and `goldens/frozen/0.2/` is the first frozen set. Releases publish no trained weights (D14), which for the oriented model is a licence matter as well as a policy one: DOTA permits academic use only, so weights trained on it could not ship under this repository's Apache-2.0 terms.
 
 ## 🧰 Development
 

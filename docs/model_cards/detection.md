@@ -13,7 +13,7 @@ Covers the detection model accepted at the Det-smoke tier for release `0.1.0`. O
 | Output | Two decode paths from one forward: NMS-free end-to-end (`decode/topk_e2e.py`, 300 detections as `[x1, y1, x2, y2, score, class]`) and a one-to-many path with NMS (`decode/nms_path.py`) |
 | Version | `0.0.1.dev12` (checkpoint from run v8, 2026-08-06) |
 | License | Apache-2.0 (code and report). Weights derive from COCO 2017 — see Licensing below |
-| Paper | Methods per Ultralytics YOLO26, arXiv:2606.03748. Independent implementation; not affiliated with, endorsed by, or derived from Ultralytics or its codebase |
+| Paper | Methods per the YOLO26 paper, arXiv:2606.03748. Independent implementation; not affiliated with, endorsed by, or derived from Ultralytics or its codebase |
 
 The architecture is typed Python, not a config DSL (ADR-001): five scale rows (`n/s/m/l/x`) multiply depth, width and max-channels over one topology. Only the `n` scale has been trained.
 

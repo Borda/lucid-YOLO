@@ -7,7 +7,7 @@ name = "lucid-yolo"
 # Single source of truth: src/lucid_yolo/__init__.py. setuptools reads the attribute
 # statically (a plain string literal needs no import), so building never imports torch.
 dynamic = ["version"]
-description = "Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, and oriented-detection methods described in the YOLO26 paper (arXiv:2606.03748)"
+description = "Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, oriented-detection, and keypoint-detection methods described in the YOLO26 paper (arXiv:2606.03748)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"

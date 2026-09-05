@@ -1,10 +1,10 @@
 # 🔦 lucid-yolo
 
-> lucid-yolo is an independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance segmentation, and oriented detection methods described in the Ultralytics YOLO26 paper (arXiv:2606.03748). "YOLO" refers to the family of real-time detectors originated by Redmon et al. (2016). This project is not affiliated with, endorsed by, or derived from Ultralytics or its codebase. No Ultralytics source code, configurations, or model weights were consulted or used. See docs/PROVENANCE.md.
+> lucid-yolo is an independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance segmentation, and oriented detection methods described in the YOLO26 paper (arXiv:2606.03748), plus a keypoint task composed onto the same trunk whose loss and evaluation protocol are taken from RLE (arXiv:2107.11291) rather than from that paper. "YOLO" refers to the family of real-time detectors originated by Redmon et al. (2016). This project is not affiliated with, endorsed by, or derived from Ultralytics or its codebase. No Ultralytics source code, configurations, or model weights were consulted or used. See docs/PROVENANCE.md.
 
 ## 🧭 What this is
 
-A paper describes three real-time vision models. This repository implements them from that description — the equations, the tables, the figures — and from the primary literature the paper cites, and from nothing else. The reference implementation was never opened, and neither was any mirror, package copy, or documentation site generated from it. That constraint is the point of the exercise rather than an obstacle to it: an implementation that shares no lineage with the original is the only kind that can independently test whether the published claims follow from the published method.
+A paper describes three real-time vision models, and a second paper the keypoint loss a fourth task is built on. This repository implements all four from those descriptions — the equations, the tables, the figures — and from the primary literature the paper cites, and from nothing else. The reference implementation was never opened, and neither was any mirror, package copy, or documentation site generated from it. That constraint is the point of the exercise rather than an obstacle to it: an implementation that shares no lineage with the original is the only kind that can independently test whether the published claims follow from the published method.
 
 Three habits keep that claim auditable rather than asserted.
 
@@ -62,7 +62,7 @@ The documents fall into three registers, and which one you want depends on what 
 
 | If you want to | Read | It answers |
 | -- | -- | -- |
-| run a model yourself | [Launching a training run](TRAINING.md) | the launch command for each of the three tiers, and what to override |
+| run a model yourself | [Launching a training run](TRAINING.md) | the launch command for each of the four tiers, and what to override |
 | get the data first | [Provisioning the datasets](DATASETS.md) | where COCO 2017 and DOTA-v1.0 come from, what has to be on disk, how each layout is read |
 | know what was measured | [Reproduction report](REPRODUCTION_REPORT.md) | one section per release: what was reproduced, what was assumed, what diverged |
 | judge one model before using it | [Model cards](model_cards/detection.md) | intended and out-of-scope use, limitations, licensing, per task family |

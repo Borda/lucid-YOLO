@@ -50,41 +50,101 @@ def test_license_is_apache2_rejects_other_licenses(tmp_path: Path) -> None:
     assert audit.check_license_is_apache2(tmp_path) == ["LICENSE is not the Apache License, Version 2.0"]
 
 
-def test_notice_attribution_accepts_a_complete_notice(tmp_path: Path) -> None:
-    """A NOTICE carrying every required fragment passes without a violation."""
-    (tmp_path / "NOTICE").write_text(
-        "Redmon, arXiv:1506.02640, not affiliated with, endorsed by, or derived from Ultralytics, Apache License\n",
-        encoding="utf-8",
-    )
-    assert audit.check_notice_attribution(tmp_path) == []
+class TestNoticeAttribution:
+    """``check_notice_attribution`` over a synthetic NOTICE.
+
+    Grouped once WP-175 added the paper-phrase case: the three cases share one subject
+    and the flat-group audit refuses a third sibling at module level.
+    """
+
+    def test_accepts_a_complete_notice(self, tmp_path: Path) -> None:
+        """A NOTICE carrying every required fragment passes without a violation.
+
+        The fixture is the shape the live file has after WP-175 corrected it: the four
+        legal fragments plus the nominative paper phrase.
+        """
+        (tmp_path / "NOTICE").write_text(
+            "Redmon, arXiv:1506.02640, not affiliated with, endorsed by, or derived from Ultralytics, "
+            f"Apache License, {audit.PAPER_PHRASE}\n",
+            encoding="utf-8",
+        )
+        assert audit.check_notice_attribution(tmp_path) == []
+
+    def test_names_each_missing_fragment(self, tmp_path: Path) -> None:
+        """Every missing NOTICE fragment is reported, one violation per fragment.
+
+        A NOTICE stripped of everything relevant is the worst case, and the assertion is
+        on the whole list rather than its length so a fragment cannot be dropped from the
+        required set without a test noticing.
+        """
+        (tmp_path / "NOTICE").write_text("Nothing relevant here.\n", encoding="utf-8")
+        violations = audit.check_notice_attribution(tmp_path)
+        assert violations == [
+            "NOTICE missing: Redmon",
+            "NOTICE missing: arXiv:1506.02640",
+            "NOTICE missing: not affiliated with, endorsed by, or derived from Ultralytics",
+            "NOTICE missing: Apache License",
+            f"NOTICE missing: {audit.PAPER_PHRASE}",
+        ]
+
+    def test_rejects_the_vendor_bound_paper_phrase(self, tmp_path: Path) -> None:
+        """A NOTICE naming *the Ultralytics YOLO26 paper* is refused for lacking the nominative form.
+
+        This is the drift WP-161 corrected in the README and explicitly left in ``NOTICE``
+        for a later row. The required fragment is what makes it fail rather than sit
+        unread: ``the YOLO26 paper`` is not a substring of ``the Ultralytics YOLO26
+        paper``, so the vendor-bound sentence satisfies every other fragment and still
+        cannot pass.
+        """
+        (tmp_path / "NOTICE").write_text(
+            "Redmon, arXiv:1506.02640, not affiliated with, endorsed by, or derived from Ultralytics, "
+            "Apache License, methods described in the Ultralytics YOLO26 paper\n",
+            encoding="utf-8",
+        )
+        assert audit.check_notice_attribution(tmp_path) == [f"NOTICE missing: {audit.PAPER_PHRASE}"]
 
 
-def test_notice_attribution_names_each_missing_fragment(tmp_path: Path) -> None:
-    """Every missing NOTICE fragment is reported, one violation per fragment."""
-    (tmp_path / "NOTICE").write_text("Nothing relevant here.\n", encoding="utf-8")
-    violations = audit.check_notice_attribution(tmp_path)
-    assert violations == [
-        "NOTICE missing: Redmon",
-        "NOTICE missing: arXiv:1506.02640",
-        "NOTICE missing: not affiliated with, endorsed by, or derived from Ultralytics",
-        "NOTICE missing: Apache License",
-    ]
+class TestReadmeDisclaimer:
+    """``check_readme_disclaimer`` over a synthetic README."""
 
+    def test_accepts_all_fragments_present(self, tmp_path: Path) -> None:
+        """A README carrying every disclaimer fragment passes without a violation.
 
-def test_readme_disclaimer_accepts_all_fragments_present(tmp_path: Path) -> None:
-    """A README carrying every disclaimer fragment passes without a violation."""
-    (tmp_path / "README.md").write_text(
-        "\n".join(audit.DISCLAIMER_FRAGMENTS) + "\n",
-        encoding="utf-8",
-    )
-    assert audit.check_readme_disclaimer(tmp_path) == []
+        Built from ``DISCLAIMER_FRAGMENTS`` itself, so a fragment added to the audit is
+        covered by this case the moment it is declared.
+        """
+        (tmp_path / "README.md").write_text(
+            "\n".join(audit.DISCLAIMER_FRAGMENTS) + "\n",
+            encoding="utf-8",
+        )
+        assert audit.check_readme_disclaimer(tmp_path) == []
 
+    def test_names_each_missing_fragment(self, tmp_path: Path) -> None:
+        """Every missing README disclaimer fragment is reported, one violation per fragment.
 
-def test_readme_disclaimer_names_each_missing_fragment(tmp_path: Path) -> None:
-    """Every missing README disclaimer fragment is reported, one violation per fragment."""
-    (tmp_path / "README.md").write_text("No disclaimer at all.\n", encoding="utf-8")
-    violations = audit.check_readme_disclaimer(tmp_path)
-    assert len(violations) == len(audit.DISCLAIMER_FRAGMENTS)
+        The empty-README case: one violation per declared fragment and no collapsing of
+        several missing fragments into a single message.
+        """
+        (tmp_path / "README.md").write_text("No disclaimer at all.\n", encoding="utf-8")
+        violations = audit.check_readme_disclaimer(tmp_path)
+        assert len(violations) == len(audit.DISCLAIMER_FRAGMENTS)
+
+    def test_rejects_the_vendor_bound_paper_phrase(self, tmp_path: Path) -> None:
+        """A README with every disclaimer fragment but the vendor-bound paper phrase is refused.
+
+        The same guard on the other file the audit pins: a README whose banner regressed
+        to *the Ultralytics YOLO26 paper* keeps all three legal fragments intact, so
+        before this fragment existed nothing in the gate could tell that banner from the
+        corrected one.
+        """
+        (tmp_path / "README.md").write_text(
+            "\n".join(f for f in audit.DISCLAIMER_FRAGMENTS if f != audit.PAPER_PHRASE)
+            + "\nmethods described in the Ultralytics YOLO26 paper\n",
+            encoding="utf-8",
+        )
+        assert audit.check_readme_disclaimer(tmp_path) == [
+            f"README missing disclaimer fragment: {audit.PAPER_PHRASE!r}"
+        ]
 
 
 def test_spdx_header_accepts_a_headered_file(tmp_path: Path) -> None:

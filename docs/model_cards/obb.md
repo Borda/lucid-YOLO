@@ -14,7 +14,7 @@ Covers the oriented detection model produced by the OBB-smoke tier run, released
 | Box composition | A44: the four ltrb distances give the axis-aligned rectangle, which the predicted `theta` then rotates about its own centre. The composition is minimal and its consequences are recorded under Limitations |
 | Version | Run v10 checkpoint `epoch=49-step=23050.ckpt`, 2026-08-13, trained with `0.3.0.dev5` |
 | License | Apache-2.0 (code and report). Weights derive from DOTA-v1.0 — see Licensing below, which is more restrictive than for the COCO-trained models |
-| Paper | Methods per Ultralytics YOLO26, arXiv:2606.03748. Independent implementation; not affiliated with, endorsed by, or derived from Ultralytics or its codebase |
+| Paper | Methods per the YOLO26 paper, arXiv:2606.03748. Independent implementation; not affiliated with, endorsed by, or derived from Ultralytics or its codebase |
 
 The oriented head is the detector's own dual head with `predict_angle` enabled (`models/build.py`); backbone and neck are unchanged. The task does not merely add a term — it **replaces** two. The dual loss is constructed with `box_gain = 0` and `l1_gain = 0` so its Complete-IoU and axis-aligned L1 are computed for logging and enter no total, and those gains are spent instead on the rotated ProbIoU of the assembled box (A49) and on an L1 retargeted onto that box's own `(cx, cy, w, h)` (A50). A reader of `metrics.csv` should know this: `val/o2o_box` and `val/o2o_l1` are live-looking curves that no gradient followed.
 

@@ -3,8 +3,11 @@ Copyright 2026 Jirka Borovec
 
 This product is an independent, from-scratch implementation of the real-time
 detection, instance-segmentation, and oriented-detection methods described in
-the Ultralytics YOLO26 paper (arXiv:2606.03748), built on PyTorch Lightning
-and licensed under the Apache License, Version 2.0.
+the YOLO26 paper (arXiv:2606.03748), built on PyTorch Lightning and licensed
+under the Apache License, Version 2.0. It also ships a keypoint task composed
+onto the same trunk, whose loss and evaluation protocol are taken from Li et
+al., "Human Pose Regression with Residual Log-Likelihood Estimation"
+(arXiv:2107.11291, ICCV 2021), rather than from the YOLO26 paper.
 
 "YOLO" refers to the family of real-time object detectors originated by
 Joseph Redmon et al., "You Only Look Once: Unified, Real-Time Object

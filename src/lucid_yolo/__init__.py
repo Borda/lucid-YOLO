@@ -2,8 +2,10 @@
 """lucid-yolo: independent PyTorch Lightning reproduction of the YOLO26 methods.
 
 Implements the detection, instance-segmentation, and oriented-detection methods
-published in arXiv:2606.03748 from the papers and their cited primary literature
-only. See docs/PROVENANCE.md and docs/ASSUMPTIONS.md for the clean-room record.
+published in arXiv:2606.03748, plus a keypoint task whose loss and evaluation
+protocol come from arXiv:2107.11291 instead, from the papers and their cited
+primary literature only. See docs/PROVENANCE.md and docs/ASSUMPTIONS.md for the
+clean-room record.
 """
 
 #: Single source of truth for the package version (pyproject reads this attribute

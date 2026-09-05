@@ -24,10 +24,20 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPDX_LINE = "# SPDX-License-Identifier: Apache-2.0"
 
+#: The only form ``docs/PROVENANCE.md`` sec. 3.5 admits for naming the method's source: a
+#: nominative reference to the paper. WP-161 corrected the README's ``the Ultralytics YOLO26
+#: paper`` to this and left the identical drift in ``NOTICE`` for the next row; pinning the
+#: fragment in both required sets is what stops either from drifting back. The leading article
+#: is load-bearing -- ``the YOLO26 paper`` is not a substring of ``the Ultralytics YOLO26
+#: paper``, so requiring it rejects the vendor-bound form without a second, negative check
+#: that would also have to exempt R1's own literal title in ``PROVENANCE.md``.
+PAPER_PHRASE = "the YOLO26 paper"
+
 DISCLAIMER_FRAGMENTS = (
     "independent, from-scratch PyTorch Lightning implementation",
     "not affiliated with, endorsed by, or derived from Ultralytics",
     "No Ultralytics source code, configurations, or model weights were consulted or used",
+    PAPER_PHRASE,
 )
 
 
@@ -60,7 +70,7 @@ def check_notice_attribution(repo_root: Path) -> list[str]:
         ...     _ = (root / "NOTICE").write_text("Nothing relevant here.\\n", encoding="utf-8")
         ...     violations = check_notice_attribution(root)
         ...     len(violations), violations[0]
-        (4, 'NOTICE missing: Redmon')
+        (5, 'NOTICE missing: Redmon')
     """
     notice = (repo_root / "NOTICE").read_text(encoding="utf-8")
     required = (
@@ -68,6 +78,7 @@ def check_notice_attribution(repo_root: Path) -> list[str]:
         "arXiv:1506.02640",
         "not affiliated with, endorsed by, or derived from Ultralytics",
         "Apache License",
+        PAPER_PHRASE,
     )
     return [f"NOTICE missing: {fragment}" for fragment in required if fragment not in notice]
 
@@ -82,7 +93,7 @@ def check_readme_disclaimer(repo_root: Path) -> list[str]:
         ...     root = Path(tmp)
         ...     _ = (root / "README.md").write_text("No disclaimer at all.\\n", encoding="utf-8")
         ...     len(check_readme_disclaimer(root))
-        3
+        4
     """
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
     return [
@@ -127,13 +138,14 @@ def find_violations(repo_root: Path) -> list[str]:
         ...     _ = (root / "LICENSE").write_text("Apache License\\nVersion 2.0\\n", encoding="utf-8")
         ...     _ = (root / "NOTICE").write_text(
         ...         "Redmon, arXiv:1506.02640, not affiliated with, endorsed by, or derived from "
-        ...         "Ultralytics, Apache License\\n",
+        ...         "Ultralytics, Apache License, the YOLO26 paper\\n",
         ...         encoding="utf-8",
         ...     )
         ...     _ = (root / "README.md").write_text(
         ...         "independent, from-scratch PyTorch Lightning implementation\\n"
         ...         "not affiliated with, endorsed by, or derived from Ultralytics\\n"
-        ...         "No Ultralytics source code, configurations, or model weights were consulted or used\\n",
+        ...         "No Ultralytics source code, configurations, or model weights were consulted or used\\n"
+        ...         "the YOLO26 paper\\n",
         ...         encoding="utf-8",
         ...     )
         ...     find_violations(root)

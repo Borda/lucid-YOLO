@@ -1,6 +1,6 @@
 # 🏋️ Launching a training run
 
-Three tiers, one command. `lucid-yolo fit --config <name>.yaml` resolves the name against the configs packaged inside the wheel, so a run needs no checkout — `det_nano_smoke.yaml`, `seg_nano_smoke.yaml` and `obb_nano_smoke.yaml` are all installed with the package.
+Four tiers, one command. `lucid-yolo fit --config <name>.yaml` resolves the name against the configs packaged inside the wheel, so a run needs no checkout — `det_nano_smoke.yaml`, `seg_nano_smoke.yaml`, `obb_nano_smoke.yaml` and `pose_nano_smoke.yaml` are all installed with the package.
 
 What the configs carry is run-level configuration only: schedule, optimizer and loss gains, and placeholder data paths. Topology is named by `variant` and lives in the registry, never in a config file (ADR-001). Every value below that overrides a config is an override *of a placeholder or of a batch-size-dependent value*, not a correction.
 

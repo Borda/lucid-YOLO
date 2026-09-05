@@ -14,7 +14,7 @@ Covers the segmentation model produced by the Seg-smoke tier run, released as `0
 | Mask decode | Assemble, sigmoid, bilinear upsample to the letterboxed input, crop to the predicted box, threshold at 0.5, then nearest-neighbour inverse letterbox (A37) |
 | Version | Run v9 checkpoint `epoch=49-step=46250.ckpt`, 2026-08-10. The package version installed for the run is not recorded in any run artifact |
 | License | Apache-2.0 (code and report). Weights derive from COCO 2017 — see Licensing below |
-| Paper | Methods per Ultralytics YOLO26, arXiv:2606.03748. Independent implementation; not affiliated with, endorsed by, or derived from Ultralytics or its codebase |
+| Paper | Methods per the YOLO26 paper, arXiv:2606.03748. Independent implementation; not affiliated with, endorsed by, or derived from Ultralytics or its codebase |
 
 The segmentation head sits on the detector's own backbone, neck and dual head: the detection objective is unchanged and the two mask terms ride on top of it (A38). An auxiliary semantic branch trains alongside and is absent from the deployed model — `forward` returns `None` in eval mode and `deploy()` does not hold the branch at all (A17), which is why the parameter gate has exactly one convolution to account for.
 

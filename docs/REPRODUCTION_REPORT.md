@@ -2,7 +2,7 @@
 
 A living document (D10): one section lands with each `0.MINOR`, recording what was reproduced, what was assumed, and what diverged. Sections are append-only — a later release corrects an earlier claim by adding to it, never by editing the record away.
 
-Independent, from-scratch implementation of the methods described in the Ultralytics YOLO26 paper (arXiv:2606.03748, [R1]). No Ultralytics source code, configuration, or weights were consulted at any point; see `PROVENANCE.md` for the source allowlist and the audit trail.
+Independent, from-scratch implementation of the methods described in the YOLO26 paper (arXiv:2606.03748, [R1]). No Ultralytics source code, configuration, or weights were consulted at any point; see `PROVENANCE.md` for the source allowlist and the audit trail.
 
 ______________________________________________________________________
 

@@ -200,7 +200,7 @@ A hosted runtime is ephemeral and its local disk goes with it, so the two halves
 
 **The dataset and the tiles stay on the runtime's local disk** (`/content/...`), not on a mounted Drive. Every epoch reads every tile, and Drive is a network filesystem mounted through FUSE — putting the training set there turns each sample fetch into a round trip and starves the loader workers the epoch-recycling path exists to keep busy.
 
-**Checkpoints and logs go the other way**, onto storage that outlives the runtime. That is `--trainer.default_root_dir`, and it belongs to the launch rather than to provisioning: docs/TRAINING.md carries it, along with the three tiers' commands.
+**Checkpoints and logs go the other way**, onto storage that outlives the runtime. That is `--trainer.default_root_dir`, and it belongs to the launch rather than to provisioning: docs/TRAINING.md carries it, along with the four tiers' commands.
 
 ## 📜 License terms, and what they constrain
 
