@@ -6,9 +6,20 @@ datasets on disk: a detection/segmentation set whose annotations carry *both*
 axis-aligned boxes and filled polygons, an oriented-bounding-box set whose
 annotations carry four rotated-box corner points, and a keypoints set whose
 annotations carry animal-silhouette landmarks (WP-121b). Generation is seeded,
-so a fixed seed yields byte-identical output (A26 determinism guarantee); every
-helper is idempotent and skips regeneration when its annotation file already
-exists.
+so a fixed seed yields byte-identical output (A26 determinism guarantee).
+
+Caching:
+    Every helper is idempotent, and the cache it consults is keyed on the whole
+    generation request — the exact ``generate_dataset`` arguments plus the installed
+    ``fuse-augmentations`` release — recorded in a ``.fixture-fingerprint.json``
+    beside the split. Existence of the annotation file is *not* the key: the
+    generated tree is gitignored, so CI is always cold while a contributor's machine
+    is always warm, and an existence-keyed cache meant any change to a seed, an image
+    count, ``DEFAULT_SHAPES`` or the pinned upstream SHA left the warm machine running
+    every fixture-consuming test against the previous scene while CI ran the new one
+    (M-45). A fingerprint mismatch removes the stale set and regenerates it; an absent
+    fingerprint counts as a mismatch, so caches written before this existed refresh
+    once. ``make clean`` clears the whole cache directory.
 
 The detection/segmentation and oriented-box sets pass an explicit geometric-only
 ``shapes=DEFAULT_SHAPES`` rather than relying on the vocabulary default, and the
@@ -41,7 +52,10 @@ Examples:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+import shutil
+from importlib import metadata
+from typing import TYPE_CHECKING, Any
 
 from fuse_augmentations.data import generate_dataset  # type: ignore[import-untyped]
 from fuse_augmentations.data.animals import AnimalShape  # type: ignore[import-untyped]
@@ -80,18 +94,74 @@ _COCO_ANNOTATION = "_annotations.coco.json"
 #: The single split all images land in given ``_SINGLE_SPLIT``.
 _SPLIT = "train"
 
+#: Cache key written beside a generated set, naming everything that determines its
+#: content. Dot-prefixed so it cannot be mistaken for dataset content by the ``*.jpg``
+#: globs and split readers that walk these trees.
+_FINGERPRINT_NAME = ".fixture-fingerprint.json"
 
-def _already_generated(dataset_dir: Path) -> bool:
-    """Return whether ``dataset_dir`` already holds the expected COCO annotation file.
+#: Distribution whose generator produces every fixture here; its identity is part of the
+#: cache key, since a bump changes the scene without changing any argument below.
+_GENERATOR_DIST = "fuse-augmentations"
 
-    Args:
-        dataset_dir: Candidate dataset directory.
+
+def _generator_identity() -> dict[str, str]:
+    """Return the installed generator release, as specifically as the install allows.
+
+    The declared version is not enough on its own: this project pins
+    ``fuse-augmentations`` to a git commit, and a dev version string (``0.12.0.dev0``)
+    does not move when the pinned SHA does. Pip records the commit in the distribution's
+    ``direct_url.json``, so that file is folded in when present, which is what actually
+    makes a SHA bump invalidate the cache.
 
     Returns:
-        ``True`` when the ``train`` split's ``_annotations.coco.json`` exists, so
-        generation can be skipped.
+        A ``version`` entry always, plus a ``direct_url`` entry naming the VCS revision
+        when the distribution was installed from one (absent for a plain PyPI install,
+        where the version alone is exact).
     """
-    return (dataset_dir / _SPLIT / _COCO_ANNOTATION).is_file()
+    identity = {"version": metadata.version(_GENERATOR_DIST)}
+    direct_url = metadata.distribution(_GENERATOR_DIST).read_text("direct_url.json")
+    if direct_url is not None:
+        identity["direct_url"] = direct_url
+    return identity
+
+
+def _fingerprint(spec: dict[str, Any]) -> str:
+    """Render one generation request as its canonical cache key.
+
+    Args:
+        spec: The exact keyword arguments handed to ``generate_dataset``.
+
+    Returns:
+        Sorted-key JSON of ``spec`` plus :func:`_generator_identity`. Values with no JSON
+        form (``SplitRatios``) fall back to ``repr``, which moves with every field they
+        carry; the shape enums are string-valued and serialize as their own names.
+    """
+    return json.dumps({"generator": _generator_identity(), "spec": spec}, sort_keys=True, default=str)
+
+
+def _generate_cached(dataset_dir: Path, spec: dict[str, Any]) -> Path:
+    """Return ``dataset_dir``, generating it unless a matching fingerprint is already there.
+
+    A mismatched or missing fingerprint removes the whole directory before regenerating:
+    a smaller image count than last time would otherwise leave the surplus images behind,
+    and a set that is partly old and partly new is worse than either.
+
+    Args:
+        dataset_dir: Directory the set is generated into (removed when stale).
+        spec: The exact keyword arguments to hand ``generate_dataset``.
+
+    Returns:
+        ``dataset_dir``, holding a set that matches ``spec`` and the installed generator.
+    """
+    fingerprint = _fingerprint(spec)
+    marker = dataset_dir / _FINGERPRINT_NAME
+    annotations = dataset_dir / _SPLIT / _COCO_ANNOTATION
+    if annotations.is_file() and marker.is_file() and marker.read_text(encoding="utf-8") == fingerprint:
+        return dataset_dir
+    shutil.rmtree(dataset_dir, ignore_errors=True)
+    generate_dataset(dataset_dir, **spec)
+    marker.write_text(fingerprint, encoding="utf-8")
+    return dataset_dir
 
 
 def generate_detseg_fixtures(root: Path) -> Path:
@@ -120,21 +190,19 @@ def generate_detseg_fixtures(root: Path) -> Path:
 
         ```
     """
-    dataset_dir = root / "detseg"
-    if _already_generated(dataset_dir):
-        return dataset_dir
-    generate_dataset(
-        dataset_dir,
-        num_images=DETSEG_NUM_IMAGES,
-        fmt="coco",
-        task="segmentation",
-        class_mode="shape",
-        shapes=DEFAULT_SHAPES,
-        split_ratios=_SINGLE_SPLIT,
-        seed=DETSEG_SEED,
-        img_size=_IMG_SIZE,
+    return _generate_cached(
+        root / "detseg",
+        {
+            "num_images": DETSEG_NUM_IMAGES,
+            "fmt": "coco",
+            "task": "segmentation",
+            "class_mode": "shape",
+            "shapes": DEFAULT_SHAPES,
+            "split_ratios": _SINGLE_SPLIT,
+            "seed": DETSEG_SEED,
+            "img_size": _IMG_SIZE,
+        },
     )
-    return dataset_dir
 
 
 def generate_obb_fixtures(root: Path) -> Path:
@@ -163,21 +231,19 @@ def generate_obb_fixtures(root: Path) -> Path:
 
         ```
     """
-    dataset_dir = root / "obb"
-    if _already_generated(dataset_dir):
-        return dataset_dir
-    generate_dataset(
-        dataset_dir,
-        num_images=OBB_NUM_IMAGES,
-        fmt="coco",
-        task="obb",
-        class_mode="shape",
-        shapes=DEFAULT_SHAPES,
-        split_ratios=_SINGLE_SPLIT,
-        seed=OBB_SEED,
-        img_size=_IMG_SIZE,
+    return _generate_cached(
+        root / "obb",
+        {
+            "num_images": OBB_NUM_IMAGES,
+            "fmt": "coco",
+            "task": "obb",
+            "class_mode": "shape",
+            "shapes": DEFAULT_SHAPES,
+            "split_ratios": _SINGLE_SPLIT,
+            "seed": OBB_SEED,
+            "img_size": _IMG_SIZE,
+        },
     )
-    return dataset_dir
 
 
 def generate_keypoints_fixtures(root: Path) -> Path:
@@ -207,18 +273,16 @@ def generate_keypoints_fixtures(root: Path) -> Path:
 
         ```
     """
-    dataset_dir = root / "keypoints"
-    if _already_generated(dataset_dir):
-        return dataset_dir
-    generate_dataset(
-        dataset_dir,
-        num_images=KEYPOINTS_NUM_IMAGES,
-        fmt="coco",
-        task="keypoints",
-        class_mode="shape",
-        shapes=tuple(AnimalShape)[:KEYPOINTS_ANIMAL_COUNT],
-        split_ratios=_SINGLE_SPLIT,
-        seed=KEYPOINTS_SEED,
-        img_size=_IMG_SIZE,
+    return _generate_cached(
+        root / "keypoints",
+        {
+            "num_images": KEYPOINTS_NUM_IMAGES,
+            "fmt": "coco",
+            "task": "keypoints",
+            "class_mode": "shape",
+            "shapes": tuple(AnimalShape)[:KEYPOINTS_ANIMAL_COUNT],
+            "split_ratios": _SINGLE_SPLIT,
+            "seed": KEYPOINTS_SEED,
+            "img_size": _IMG_SIZE,
+        },
     )
-    return dataset_dir

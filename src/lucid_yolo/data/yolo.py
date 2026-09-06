@@ -36,6 +36,22 @@ Output contract:
     construction. ``polygons`` stays empty on both readings, and ``difficult`` is all-``False``:
     the format carries no per-instance flag, which is what A51's default already means.
 
+When a malformed row is found, and by whom (L-31):
+    This reader validates a row **lazily**, at the ``__getitem__`` that needs it, where
+    :mod:`lucid_yolo.data.coco` validates its whole annotation file at construction. The
+    asymmetry is the formats': one COCO split is one JSON, so parsing it early costs one
+    read, while a YOLO split is one text file per image, and opening every one of them at
+    construction would front-load a full pass over the tree onto every run — including the
+    runs that never reach most of it.
+
+    The consequence is real and is not papered over: a tree with one bad row hours into an
+    epoch raises there, not at ``fit`` start. What makes that acceptable is that the
+    whole-tree scan exists as its own step — ``lucid-data check`` parses **every** row of
+    every split through :func:`scan_yolo_label_file`, this module's own grammar, and reports
+    the file and 1-based line of each rejection. It is the pre-flight for ``lucid-yolo fit``
+    (see :mod:`lucid_yolo.data.check`), and running it is how a YOLO root is held to the
+    guarantee the COCO reader gives for free. Skipping it is choosing the late failure.
+
 Provenance:
     R18 for the quadrilateral convention the oriented rows carry and for the long-edge fit they
     are converted by. The format itself was read from a **published dataset export** — the
@@ -268,7 +284,10 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     is the same stem under ``labels_dir``. Labels are parsed per sample rather than at
     construction — one image's text is a handful of rows, so the copy-on-write pressure that
     made the COCO reader precompute (WP-073) does not arise, and reading them here keeps the
-    image's own decoded size as the denormalizing scale.
+    image's own decoded size as the denormalizing scale. A malformed row therefore raises at
+    the ``__getitem__`` that reads it, not at construction; ``lucid-data check`` is the
+    pre-flight that parses every row of the tree up front, and the module docstring states
+    why the two readers differ here.
 
     Args:
         images_dir: Directory holding the split's images.

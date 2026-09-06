@@ -25,6 +25,12 @@ Download behaviour:
       completion (atomic), so a killed run never leaves a truncated ``.zip``.
     * A partial ``.part`` is resumed with an HTTP ``Range`` request when the
       server honours it (``206``); otherwise the transfer cleanly restarts.
+    * Resuming is gated on a ``<archive>.part.json`` sidecar naming the URL the
+      partial was opened for and the total the server declared then. A partial with
+      no sidecar, one naming a different URL, or one already longer than that total
+      is discarded and the transfer restarts: the bytes on disk are only meaningful
+      as a prefix of a known object, and appending to the wrong one produces a file
+      that is corrupt in a way no length check can see.
     * An already-extracted split/annotations tree is skipped without touching the
       network (idempotent), unless ``force`` is set.
 
@@ -32,7 +38,12 @@ Checksum policy:
     The official COCO archives publish no authoritative SHA-256 digests, so none
     are hard-coded here. The computed digest of every downloaded archive is
     printed, and an expected digest may be supplied per archive
-    (``--sha256 '[val2017.zip=<hex>]'``) to enforce a mismatch failure.
+    (``--sha256 '[val2017.zip=<hex>]'``) to enforce a mismatch failure. Enforcement
+    covers the archives a run actually downloads: an already-extracted split is
+    skipped before any transfer, and there is no archive left to hash (the ``.zip``
+    is removed after extraction unless ``--keep_archives`` was set), so a digest
+    supplied for it is reported as *not verified* on stderr — ``--force true``
+    re-downloads and re-checks.
 
 Examples:
     Fetch the validation split plus annotations::
@@ -50,6 +61,7 @@ Examples:
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 import urllib.request
 import zipfile
@@ -82,6 +94,9 @@ ANNOTATIONS_ARCHIVE = "annotations_trainval2017.zip"
 _CHUNK_SIZE = 1 << 20
 #: HTTP status marking a resumed (partial-content) transfer.
 _HTTP_PARTIAL = 206
+#: Suffix of the sidecar recording which URL a ``.part`` file is a prefix of, so a
+#: partial is never resumed on the strength of its byte length alone (L-33).
+_PART_META_SUFFIX = ".part.json"
 #: Bytes-per-megabyte divisor for human-readable progress.
 _BYTES_PER_MB = 1e6
 
@@ -185,21 +200,87 @@ def _stream(response: Any, part: Path, mode: str, already: int, total: int | Non
                 _report_progress(downloaded, total)
 
 
-def _download_to(url: str, dest: Path, *, progress: bool) -> None:
-    """Download ``url`` to ``dest`` atomically, resuming a partial file if any.
+def _read_part_meta(meta: Path) -> dict[str, Any] | None:
+    """Return the sidecar record beside a ``.part``, or ``None`` if unusable.
 
-    A partial ``<dest>.part`` is resumed via an HTTP ``Range`` request; if the
-    server ignores the range (responds ``200``) the transfer restarts cleanly.
-    The completed ``.part`` is renamed onto ``dest`` so an interrupted run never
-    leaves a truncated archive at ``dest``.
+    Args:
+        meta: Sidecar path (``<dest>.part.json``).
+
+    Returns:
+        The decoded record, or ``None`` when the file is absent, unreadable or not a
+        JSON object — every one of which means the partial's provenance is unknown.
+    """
+    try:
+        record = json.loads(meta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def _write_part_meta(meta: Path, url: str, total: int | None) -> None:
+    """Record which URL the ``.part`` beside ``meta`` is a prefix of.
+
+    Args:
+        meta: Sidecar path to write.
+        url: The URL currently being streamed into the partial.
+        total: The full object size the server declared, or ``None`` when it sent no
+            ``Content-Length`` (then only the URL can be checked on resume).
+    """
+    meta.write_text(json.dumps({"url": url, "total": total}), encoding="utf-8")
+
+
+def _resumable_bytes(part: Path, meta: Path, url: str) -> int:
+    """Return how much of ``part`` may be resumed for ``url``, discarding a stranger.
+
+    A ``.part`` is only meaningful as a *prefix of a known object*. Its byte length
+    alone says nothing: a partial left by a different URL, by a remote that has since
+    changed, or by a run whose sidecar never landed would be appended to and renamed
+    into place as a plausible-looking archive that is corrupt in the middle. So a
+    partial is resumed only when the sidecar agrees with the request being made, and
+    is deleted outright otherwise (L-33).
+
+    Args:
+        part: The partial-download file.
+        meta: Its sidecar path.
+        url: The URL about to be requested.
+
+    Returns:
+        The resumable byte count — ``part``'s size when the sidecar vouches for it,
+        otherwise ``0``, having removed the partial and the sidecar.
+    """
+    if not part.exists():
+        meta.unlink(missing_ok=True)
+        return 0
+    size = part.stat().st_size
+    record = _read_part_meta(meta)
+    total = record.get("total") if record is not None else None
+    overrun = isinstance(total, int) and size > total
+    if record is None or record.get("url") != url or overrun:
+        part.unlink()
+        meta.unlink(missing_ok=True)
+        return 0
+    return size
+
+
+def _download_to(url: str, dest: Path, *, progress: bool) -> None:
+    """Download ``url`` to ``dest`` atomically, resuming a vouched-for partial if any.
+
+    A partial ``<dest>.part`` is resumed via an HTTP ``Range`` request when its
+    ``<dest>.part.json`` sidecar names this same ``url`` (see :func:`_resumable_bytes`);
+    if the server ignores the range (responds ``200``) the transfer restarts cleanly.
+    The completed ``.part`` is renamed onto ``dest`` and its sidecar removed, so an
+    interrupted run never leaves a truncated archive at ``dest`` nor a sidecar for a
+    partial that no longer exists.
 
     Args:
         url: Source URL on the official host.
-        dest: Final archive path; the ``.part`` sibling is the scratch file.
+        dest: Final archive path; the ``.part`` sibling is the scratch file and the
+            ``.part.json`` sibling records what that scratch file is a prefix of.
         progress: Whether to emit progress lines to stderr.
     """
     part = dest.with_name(dest.name + ".part")
-    resume_from = part.stat().st_size if part.exists() else 0
+    meta = dest.with_name(dest.name + _PART_META_SUFFIX)
+    resume_from = _resumable_bytes(part, meta, url)
     request = urllib.request.Request(url)
     if resume_from:
         request.add_header("Range", f"bytes={resume_from}-")
@@ -210,10 +291,12 @@ def _download_to(url: str, dest: Path, *, progress: bool) -> None:
         mode = "ab" if resumed else "wb"
         already = resume_from if resumed else 0
         total = _content_total(response, already)
+        _write_part_meta(meta, url, total)
         _stream(response, part, mode, already, total, progress=progress)
     if progress:
         sys.stderr.write("\n")
     part.replace(dest)
+    meta.unlink(missing_ok=True)
 
 
 def _sha256(path: Path) -> str:
@@ -283,7 +366,12 @@ def _process_archive(
     """Download, verify and extract one ``archive`` into ``data_root``.
 
     Skips all work (no network) when the extraction sentinel already exists and
-    ``force`` is not set.
+    ``force`` is not set. A checksum cannot be enforced on that path — the archive it
+    would hash is normally deleted after extraction (``keep_archives`` is off by
+    default), and the extracted tree is not the archive — so a supplied ``expected``
+    is reported as *not verified* rather than silently dropped. Passing an expected
+    digest on a second run is exactly the case an operator means as "confirm what is
+    already here", and answering it with nothing is the failure M-40 named.
 
     Args:
         archive: The archive to process.
@@ -296,6 +384,11 @@ def _process_archive(
     sentinel = data_root / archive.sentinel
     if sentinel.exists() and not force:
         sys.stderr.write(f"skipping {archive.name}: {sentinel} already present\n")
+        if expected is not None:
+            sys.stderr.write(
+                f"checksum not verified: {archive.name} is already extracted; "
+                "pass --force true to re-download and re-verify it\n"
+            )
         return
     zip_path = data_root / archive.name
     _download_to(archive.url, zip_path, progress=progress)
@@ -329,7 +422,10 @@ def download_coco(
             useful split). Duplicates are collapsed and order is preserved.
         annotations: Whether to also fetch the shared annotations archive.
         checksums: Optional per-archive expected SHA-256 digests, keyed by archive
-            file name (e.g. ``{"val2017.zip": "<hex>"}``); a mismatch aborts.
+            file name (e.g. ``{"val2017.zip": "<hex>"}``); a mismatch aborts. Applies to
+            archives fetched *this run* only: an archive whose extraction sentinel already
+            exists is skipped without a download, and its digest is reported as not
+            verified on stderr rather than enforced (pass ``force`` to re-verify).
         force: Re-download and re-extract even when the sentinel already exists.
         keep_archives: Keep the downloaded ``.zip`` files after extraction.
         progress: Emit byte/percent progress to stderr.
@@ -338,7 +434,8 @@ def download_coco(
         The ``data_root`` path (created and populated).
 
     Raises:
-        ValueError: On an unknown split name or a checksum mismatch.
+        ValueError: On an unknown split name, or on a checksum mismatch for an archive
+            actually downloaded by this call (see ``checksums`` for the skipped case).
         OSError: On a network or filesystem failure during transfer/extraction.
 
     Examples:

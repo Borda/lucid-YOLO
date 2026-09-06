@@ -113,7 +113,9 @@ def _layout(
 
     Args:
         tmp_path: Directory the file is written into.
-        windows: One entry per tile, in image-id order.
+        windows: One entry per tile, in image-id order; each record is written under the
+            window's own :attr:`~lucid_yolo.eval.tile_merge.TileWindow.tile_id`, so a
+            fixture's ids and the ids the index reads back are the same statement.
         annotations: Tile annotations, referencing image ids from one.
         provenance: When ``False``, the A53 window keys are omitted, producing the
             ordinary COCO container the merge must decline rather than misread.
@@ -125,7 +127,7 @@ def _layout(
         >>> import json, tempfile
         >>> from pathlib import Path
         >>> with tempfile.TemporaryDirectory() as tmp:
-        ...     out = _layout(Path(tmp), [TileWindow("a.png", (0, 0), (4, 4))], [])
+        ...     out = _layout(Path(tmp), [TileWindow("a.png", (0, 0), (4, 4), 1)], [])
         ...     data = json.loads(out.read_text())
         >>> data["images"][0]["file_name"], data["images"][0]["window"]
         ('tile_0.png', [0, 0, 4, 4])
@@ -133,7 +135,7 @@ def _layout(
     images: list[dict[str, object]] = []
     for index, window in enumerate(windows):
         record: dict[str, object] = {
-            "id": index + 1,
+            "id": window.tile_id,
             "file_name": f"tile_{index}.png",
             "height": window.size[0],
             "width": window.size[1],
@@ -189,8 +191,8 @@ def _two_tile_windows() -> list[TileWindow]:
         [('source.png', (0, 0), (6, 6)), ('source.png', (4, 0), (6, 6))]
     """
     return [
-        TileWindow("source.png", (int(window[0]), int(window[1])), (_PATCH, _PATCH))
-        for window in tile_windows((_PATCH, 10), patch=_PATCH, overlap=_OVERLAP)
+        TileWindow("source.png", (int(window[0]), int(window[1])), (_PATCH, _PATCH), tile_id)
+        for tile_id, window in enumerate(tile_windows((_PATCH, 10), patch=_PATCH, overlap=_OVERLAP), start=1)
     ]
 
 
@@ -209,7 +211,7 @@ class TestCorePartition:
         This is what makes the single-tile equality structural rather than incidental:
         with one core there is nothing an ownership filter can remove.
         """
-        cores = core_bounds([TileWindow("small.png", (0, 0), (4, 4))])
+        cores = core_bounds([TileWindow("small.png", (0, 0), (4, 4), 1)])
         assert cores.tolist() == [[-float("inf"), -float("inf"), float("inf"), float("inf")]]
 
     def test_every_point_is_owned_exactly_once(self) -> None:
@@ -219,8 +221,8 @@ class TestCorePartition:
         forces, whose overlap with its predecessor is wider than the nominal one.
         """
         windows = [
-            TileWindow("wide.png", (int(window[0]), int(window[1])), (_PATCH, _PATCH))
-            for window in tile_windows((11, 11), patch=_PATCH, overlap=_OVERLAP)
+            TileWindow("wide.png", (int(window[0]), int(window[1])), (_PATCH, _PATCH), tile_id)
+            for tile_id, window in enumerate(tile_windows((11, 11), patch=_PATCH, overlap=_OVERLAP), start=1)
         ]
         cores = core_bounds(windows)
         axis = torch.arange(-3.0, 15.0, 0.5)
@@ -242,7 +244,11 @@ class TestCorePartition:
         the shared origin is the rule rather than the exception; the refusal below must
         not reach it. Four windows, two columns by two rows, still own the plane once.
         """
-        windows = [TileWindow("grid.png", (x, y), (6, 6)) for y in (0, 4) for x in (0, 4)]
+        windows = [
+            TileWindow("grid.png", (x, y), (6, 6), 1 + 2 * row + column)
+            for row, y in enumerate((0, 4))
+            for column, x in enumerate((0, 4))
+        ]
         cores = core_bounds(windows)
         axis = torch.arange(-3.0, 13.0, 0.5)
         points = torch.cartesian_prod(axis, axis)
@@ -260,7 +266,7 @@ class TestCorePartition:
         to the other tiling. No tiler this project ships produces it; a hand-written or
         externally produced layout can.
         """
-        windows = [TileWindow("mixed.png", (0, 0), (6, 6)), TileWindow("mixed.png", (0, 0), (6, 9))]
+        windows = [TileWindow("mixed.png", (0, 0), (6, 6), 1), TileWindow("mixed.png", (0, 0), (6, 9), 2)]
 
         with pytest.raises(ValueError, match="share the x origin 0 with different spans"):
             core_bounds(windows)
@@ -384,7 +390,7 @@ class TestSingleTileEquality:
         Returns:
             The container path and the tile's detection block.
         """
-        window = TileWindow("solo.png", (0, 0), (_TILE, _TILE))
+        window = TileWindow("solo.png", (0, 0), (_TILE, _TILE), 1)
         annotations = [
             _annotation(1, [20.0, 20.0, 8.0, 4.0, 0.0]),
             _annotation(1, [40.0, 40.0, 6.0, 3.0, 0.3]),
@@ -563,7 +569,7 @@ class TestCoordinates:
 
     def test_score_zero_padding_rows_never_reach_the_merge(self) -> None:
         """Padding rows inverse-map to a real coordinate; dropping them by score is the guard."""
-        window = TileWindow("a.png", (100, 200), (_TILE, _TILE))
+        window = TileWindow("a.png", (100, 200), (_TILE, _TILE), 1)
         mapped = tile_detections_to_source(_detections([[8.0, 8.0, 4.0, 2.0, 0.0, 0.7, 0.0]], pad=5), window, (64, 64))
         assert mapped["scores"].tolist() == pytest.approx([0.7])
 
@@ -573,14 +579,14 @@ class TestCoordinates:
         The order is the point: the letterbox inverse is the existing exact one and the
         window origin is added afterwards, so nothing here recomputes a pad or a ratio.
         """
-        window = TileWindow("a.png", (10, 20), (32, 64))
+        window = TileWindow("a.png", (10, 20), (32, 64), 1)
         mapped = tile_detections_to_source(_detections([[32.0, 32.0, 8.0, 4.0, 0.25, 0.9, 0.0]]), window, (64, 64))
         assert mapped["rboxes"][0, :2].tolist() == pytest.approx([42.0, 36.0])
         assert mapped["rboxes"][0, 2:].tolist() == pytest.approx([8.0, 4.0, 0.25])
 
     def test_a_source_image_whose_detections_are_all_disowned_still_appears(self, tmp_path: Path) -> None:
         """Predictions and ground truth align by position, so an empty image is an entry."""
-        windows = [*_two_tile_windows(), TileWindow("other.png", (0, 0), (_PATCH, _PATCH))]
+        windows = [*_two_tile_windows(), TileWindow("other.png", (0, 0), (_PATCH, _PATCH), 3)]
         index = load_tile_index(_layout(tmp_path, windows, []))
         assert index is not None
         predictions, ground_truth, names = merge_whole_images(index, [_empty() | {"rboxes": torch.zeros(0, 5)}] * 3)
@@ -619,7 +625,7 @@ class TestPartialSplit:
 
     def test_an_incomplete_trailing_source_image_is_dropped(self, tmp_path: Path) -> None:
         """One tile of a two-tile image would report a recall the pipeline never attempted."""
-        windows = [*_two_tile_windows(), TileWindow("other.png", (0, 0), (_PATCH, _PATCH))]
+        windows = [*_two_tile_windows(), TileWindow("other.png", (0, 0), (_PATCH, _PATCH), 3)]
         index = load_tile_index(_layout(tmp_path, windows, []))
         assert index is not None
         _, _, names = merge_whole_images(index, [_empty() | {"rboxes": torch.zeros(0, 5)}])
@@ -627,7 +633,7 @@ class TestPartialSplit:
 
     def test_a_prefix_ending_on_a_boundary_keeps_its_images(self, tmp_path: Path) -> None:
         """Both tiles of the first image are present, so that image is complete and scored."""
-        windows = [*_two_tile_windows(), TileWindow("other.png", (0, 0), (_PATCH, _PATCH))]
+        windows = [*_two_tile_windows(), TileWindow("other.png", (0, 0), (_PATCH, _PATCH), 3)]
         index = load_tile_index(_layout(tmp_path, windows, []))
         assert index is not None
         _, _, names = merge_whole_images(index, [_empty() | {"rboxes": torch.zeros(0, 5)}] * 2)

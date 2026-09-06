@@ -456,3 +456,71 @@ class TestLetterboxCanvas:
         out_image, _ = affine(_image(), Targets.empty())
 
         assert out_image.shape == (3, out, out)
+
+
+class TestGateStreamSeeding:
+    """The discarded activation gates draw from a stream the caller's seed determines (L-32).
+
+    Upstream draws a per-transform activation gate whether or not it can fail, so this class
+    holds a second generator purely to keep those draws out of the caller's sequence. Left
+    unseeded, that stream was reproducible only because ``torch.Generator()`` happens to
+    start from a fixed constant *and* every gate here sits at ``prob = 1.0`` so its value is
+    thrown away — two premises the code relied on and stated only half of. Seeding it from
+    the caller's generator makes the reproducibility a property of this class instead.
+    """
+
+    def test_a_seeded_caller_seeds_the_gate_stream(self) -> None:
+        """A caller-supplied generator determines the gate stream rather than leaving it default.
+
+        The default ``torch.Generator()`` state is the same constant in every process, so an
+        unseeded gate stream looks reproducible under test while being reproducible for a
+        reason nothing here owns.
+        """
+        affine = RandomAffine(generator=_generator(1234))
+
+        assert affine._gate_stream.initial_seed() != torch.Generator().initial_seed()
+
+    def test_different_caller_seeds_give_different_gate_streams(self) -> None:
+        """Two affines seeded differently draw their gates from different streams.
+
+        Every affine sharing one stream is the shape of the bug this guards: two pipelines
+        built under different seeds would agree on a sequence neither of them chose.
+        """
+        first = RandomAffine(generator=_generator(1))
+        second = RandomAffine(generator=_generator(2))
+
+        assert first._gate_stream.initial_seed() != second._gate_stream.initial_seed()
+
+    def test_the_same_caller_seed_gives_the_same_gate_stream(self) -> None:
+        """Rebuilding an affine at one seed rebuilds the same gate stream.
+
+        The point of seeding it at all is reproducibility, so the property the module
+        docstring claims — one seed determines the whole pipeline — must hold here too.
+        """
+        first = RandomAffine(generator=_generator(7))
+        second = RandomAffine(generator=_generator(7))
+
+        assert first._gate_stream.initial_seed() == second._gate_stream.initial_seed()
+
+    def test_the_gate_stream_is_not_the_callers_own(self) -> None:
+        """The gate draws never come out of the caller's generator.
+
+        This is the property WP-079 was opened by losing: a gate drawn from the caller's
+        stream shifts every subsequent transform's draw, so an upstream change in how many
+        gates exist would silently re-roll the whole augmentation sequence.
+        """
+        caller = _generator(1234)
+        affine = RandomAffine(generator=caller)
+
+        assert affine._gate_stream is not caller
+        assert affine._gate_stream.initial_seed() != caller.initial_seed()
+
+    def test_an_unseeded_caller_leaves_the_gate_stream_anonymous(self) -> None:
+        """With no caller generator there is no seed to derive from, and none is invented.
+
+        A default-constructed affine has nothing to be reproducible *with*; giving its gate
+        stream a fabricated seed would suggest otherwise.
+        """
+        affine = RandomAffine()
+
+        assert affine._gate_stream.initial_seed() == torch.Generator().initial_seed()

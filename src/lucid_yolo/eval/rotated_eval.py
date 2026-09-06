@@ -77,6 +77,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from torch import Tensor
+    from torch.utils.data import DataLoader
 
     from lucid_yolo.data.targets import Targets
     from lucid_yolo.eval.tile_merge import TileWindow
@@ -170,13 +171,17 @@ def score_split(
     ``windows[position]`` pairs a detection with a window by loader position, and a
     wrong pairing is silent by construction: mismatched origins move detections and
     ground truth by different amounts, so the whole-image number simply drops and
-    nothing says why. Passing ``expected_ground_truth`` — the same split's per-tile
-    ground truth read from the annotation file, in index order — makes the pairing
-    checkable: the loader's own target for each tile must carry the identical labels
-    and difficult flags, and it is a different tile if it does not. Both readings drop
-    ``iscrowd`` annotations and fit the box from the four-point ring, so the two agree
-    exactly or the loader is not yielding the split in index order
-    (:func:`_require_matching_tile`).
+    nothing says why. Two things make the pairing checkable rather than argued, and
+    :func:`_require_matching_tile` states which failure each one catches. The window's
+    own :attr:`~lucid_yolo.eval.tile_merge.TileWindow.tile_id` is compared against the
+    val dataset's :attr:`~lucid_yolo.data.coco.CocoDetectionDataset.image_ids` at that
+    position, which asserts the identity outright — including for tiles whose
+    annotation sets are identical, where nothing read off the instances could. And
+    ``expected_ground_truth`` — the same split's per-tile ground truth read from the
+    annotation file, in index order — is compared against the target the loader
+    actually yielded, which is the only reading that can see the loader's own order.
+    A reader publishing no ids (the YOLO one numbers nothing) keeps the second check
+    and skips the first.
 
     Args:
         module: The eval-mode oriented module.
@@ -197,7 +202,8 @@ def score_split(
 
     Raises:
         ValueError: If the module's task is not ``"obb"`` — a detection checkpoint has
-            no angle stem, so there is no oriented number to report — or if the loader
+            no angle stem, so there is no oriented number to report — if the val
+            dataset's image ids are not the ones ``windows`` records, or if the loader
             does not yield the tiles ``expected_ground_truth`` describes, in its order
             and in full.
 
@@ -216,6 +222,7 @@ def score_split(
     ground_truth: list[dict[str, Tensor]] = []
     source_predictions: list[dict[str, Tensor]] = []
     loader = datamodule.val_dataloader()
+    image_ids = _dataset_image_ids(loader)
     with torch.no_grad():
         for batch in tqdm(loader, total=len(loader), desc="eval-obb", unit="batch"):
             images, targets, _ = datamodule.on_after_batch_transfer(batch, 0)
@@ -224,7 +231,7 @@ def score_split(
             detections = o2o_rotated_topk(head_out.o2o_cls, rboxes, k=MAX_DETECTIONS).cpu()
             first = len(predictions)
             for offset, target in enumerate(targets):
-                _require_matching_tile(target, expected_ground_truth, windows, first + offset)
+                _require_matching_tile(target, expected_ground_truth, windows, first + offset, image_ids)
             source_predictions.extend(_to_source(detections, windows, first, img_size))
             predictions.extend(rotated_detections_to_predictions(detections))
             ground_truth.extend(
@@ -251,34 +258,89 @@ def score_split(
     )
 
 
+def _dataset_image_ids(loader: DataLoader[object]) -> tuple[int, ...] | None:
+    """Read the val dataset's own COCO image ids, when the reader publishes any.
+
+    Taken off the loader's ``dataset`` rather than asked of the datamodule, because the
+    dataset is already reachable there and the datamodule has no business growing an
+    accessor for one consumer's check.
+
+    ``None`` is a supported answer, not a degraded one:
+    :class:`~lucid_yolo.data.yolo.YoloDetectionDataset` has no ids to publish — the
+    format numbers nothing, pairing an image to its labels by file stem — and neither
+    does a wrapper such as :class:`~torch.utils.data.Subset`. Those readers keep the
+    annotation-set check below and lose only the id comparison, which is the honest
+    outcome: an identity nobody recorded cannot be asserted.
+
+    Args:
+        loader: The val dataloader the pass iterates.
+
+    Returns:
+        One COCO image id per dataset position, or ``None`` when the reader has none.
+
+    Examples:
+        >>> from types import SimpleNamespace
+        >>> _dataset_image_ids(SimpleNamespace(dataset=SimpleNamespace(image_ids=(3, 7))))
+        (3, 7)
+        >>> _dataset_image_ids(SimpleNamespace(dataset=[])) is None  # a reader with no ids
+        True
+    """
+    image_ids = getattr(loader.dataset, "image_ids", None)
+    return None if image_ids is None else tuple(int(value) for value in image_ids)
+
+
 def _require_matching_tile(
     target: Targets,
     expected: Sequence[Mapping[str, Tensor]] | None,
     windows: Sequence[TileWindow] | None,
     position: int,
+    image_ids: Sequence[int] | None = None,
 ) -> None:
     """Refuse a loader position whose tile is not the one the index describes there.
 
-    The identity carried across the two readings is the tile's own annotation set: the
-    loader parses it through
+    Two comparisons, checking two different couplings, neither of which subsumes the
+    other.
+
+    **The tile's own COCO image id**, when the reader publishes one. The index carries
+    each tile's id on its :class:`~lucid_yolo.eval.tile_merge.TileWindow` and the dataset
+    publishes the id of every one of its positions, so the pairing the merge relies on is
+    *asserted* rather than inferred from whatever annotations happen to sit at a position.
+    This is what closes the case annotations cannot speak to: two tiles carrying
+    byte-identical annotation sets — three of any four empty ones do — are
+    indistinguishable by their instances and distinct by id, so a window index paired to
+    the wrong tiles is refused here even when every annotation set matches.
+
+    **The tile's annotation set**, always. The loader parses it through
     :class:`~lucid_yolo.data.coco.CocoDetectionDataset` and the index through
     :func:`~lucid_yolo.eval.tile_merge.load_tile_index`, both skipping ``iscrowd``
     instances, both fitting the box from the four-point ring, both labelling by sorted
-    category id. So the instance count, the labels in file order and the difficult flags
-    agree exactly for the same tile — and a reordered, re-sorted or truncated loader puts
-    a different tile here, where they generally do not. Coordinates are deliberately not
-    compared: the loader's are letterboxed and the index's are tile-local, and the merge
-    is what maps between them.
+    category id, so the instance count, the labels in file order and the difficult flags
+    agree exactly for the same tile. This is the *only* reading that comes from the
+    yielded batch, and therefore the only one that can see the loader's own iteration
+    order: the ids above compare two orderings read off disk, both of which sit still
+    while a sampler permutes what arrives. A reordered loader is caught here or not at
+    all. Coordinates are deliberately not compared: the loader's are letterboxed and the
+    index's are tile-local, and the merge is what maps between them.
+
+    One case survives both, and is stated rather than argued away: a sampler that
+    permutes two tiles whose annotation sets are identical. The yielded batch carries no
+    id — :class:`~lucid_yolo.data.targets.Targets` holds geometry and nothing else — so
+    no check at this layer can see it, and the ordinary unshuffled val loader this path
+    runs does not do it.
 
     Args:
         target: The loader's :class:`~lucid_yolo.data.targets.Targets` for this position.
-        expected: The index's per-tile ground truth, or ``None`` to skip the check.
-        windows: The index's windows, used only to name the tile in the message.
+        expected: The index's per-tile ground truth, or ``None`` to skip both checks.
+        windows: The index's windows, which carry the id compared against ``image_ids``
+            and name the tile in either message.
         position: The loader position being checked.
+        image_ids: The dataset's own image id per position, or ``None`` for a reader that
+            publishes none (:func:`_dataset_image_ids`), which skips the id comparison.
 
     Raises:
-        ValueError: If the position is past the end of the index, or its labels or
-            difficult flags differ from the index's.
+        ValueError: If the position is past the end of the index, if the index's tile id
+            there is not the dataset's, or if its labels or difficult flags differ from
+            the index's.
 
     Examples:
         >>> from lucid_yolo.data.targets import Targets
@@ -291,6 +353,7 @@ def _require_matching_tile(
             f"the val loader yielded tile {position}, past the {len(expected)} tiles the split's "
             "window index describes; the two are not the same split"
         )
+    _require_matching_id(windows, image_ids, position)
     labels = target.labels.detach().cpu().to(torch.long)
     difficult = target.difficult.detach().cpu().to(torch.bool)
     reference = expected[position]
@@ -298,18 +361,69 @@ def _require_matching_tile(
         difficult, reference["difficult"].to(torch.bool)
     ):
         return
-    where = (
-        ""
-        if windows is None or position >= len(windows)
-        else f" ({windows[position].source_image} at {windows[position].origin})"
-    )
     raise ValueError(
         f"the val loader's tile {position} does not carry the ground truth the window index "
-        f"records for that position{where}: loader labels {labels.tolist()} difficult "
+        f"records for that position{_where(windows, position)}: loader labels {labels.tolist()} difficult "
         f"{difficult.tolist()} against index labels {reference['labels'].tolist()} difficult "
         f"{reference['difficult'].tolist()}. The whole-image merge pairs a tile to its window by "
         "loader position, so a reordered loader would translate detections by the wrong origin"
     )
+
+
+def _require_matching_id(
+    windows: Sequence[TileWindow] | None,
+    image_ids: Sequence[int] | None,
+    position: int,
+) -> None:
+    """Refuse a position where the index's tile id is not the dataset's.
+
+    Args:
+        windows: The index's windows, or ``None`` when no index was supplied.
+        image_ids: The dataset's per-position COCO image ids, or ``None`` when its reader
+            publishes none.
+        position: The position being checked.
+
+    Raises:
+        ValueError: If the two ids differ, naming both and the window the index would
+            have translated that tile's detections by.
+
+    Examples:
+        >>> _require_matching_id(None, (1, 2), 0)  # nothing to compare without an index
+    """
+    if windows is None or image_ids is None or position >= min(len(windows), len(image_ids)):
+        return
+    recorded, actual = windows[position].tile_id, int(image_ids[position])
+    if recorded == actual:
+        return
+    raise ValueError(
+        f"the val dataset's tile {position} has COCO image id {actual}, where the split's window "
+        f"index records id {recorded} at that position{_where(windows, position)}; the whole-image "
+        "merge pairs a tile to its window by position, so it would translate this tile's detections "
+        "by another tile's window origin"
+    )
+
+
+def _where(windows: Sequence[TileWindow] | None, position: int) -> str:
+    """Name the window an index records at one position, for a refusal message.
+
+    Args:
+        windows: The index's windows, or ``None`` when no index was supplied.
+        position: The position to name.
+
+    Returns:
+        A parenthesised source image and origin, or the empty string when there is no
+        window to name.
+
+    Examples:
+        >>> from lucid_yolo.eval.tile_merge import TileWindow
+        >>> _where((TileWindow("a.png", (4, 0), (6, 6), 2),), 0)
+        ' (a.png at (4, 0))'
+        >>> _where(None, 0)
+        ''
+    """
+    if windows is None or position >= len(windows):
+        return ""
+    return f" ({windows[position].source_image} at {windows[position].origin})"
 
 
 def _require_whole_split(scored: int, expected: Sequence[Mapping[str, Tensor]] | None) -> None:

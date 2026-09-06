@@ -54,6 +54,10 @@ class _FakeResponse:
         return False
 
 
+#: The val image archive's URL, spelled once so the resume tests and the fake host agree.
+_VAL_URL = "https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip"
+
+
 def _make_zip(members: dict[str, bytes]) -> bytes:
     """Build an in-memory zip archive from ``member name -> bytes``.
 
@@ -86,27 +90,68 @@ def _val_archive_bytes(num_images: int = 1) -> bytes:
     return _make_zip(members)
 
 
-def _serve(mapping: dict[str, bytes]) -> Any:
+def _serve(mapping: dict[str, bytes], ranges: list[str | None] | None = None) -> Any:
     """Return a fake ``urlopen`` serving ``url -> payload`` with Range resume.
+
+    Args:
+        mapping: URL to full payload bytes.
+        ranges: Optional list the ``Range`` header of each request is appended to
+            (``None`` for a request that sent none), so a test can assert *whether*
+            a transfer resumed rather than only that it finished.
+
+    Returns:
+        A ``urlopen`` stand-in honouring ``Range`` with a ``206``.
 
     Examples:
         >>> class _Req:
         ...     full_url = "https://example.org/x.zip"
         ...     headers: dict[str, str] = {}
-        >>> fake_urlopen = _serve({"https://example.org/x.zip": b"abc"})
+        >>> seen: list[str | None] = []
+        >>> fake_urlopen = _serve({"https://example.org/x.zip": b"abc"}, seen)
         >>> with fake_urlopen(_Req()) as response:
         ...     response.read()
         b'abc'
+        >>> seen
+        [None]
     """
 
     def fake_urlopen(request: Any) -> _FakeResponse:
         url = request.full_url
         payload = mapping[url]
         range_header = request.headers.get("Range")
+        if ranges is not None:
+            ranges.append(range_header)
         resume_from = int(range_header.removeprefix("bytes=").rstrip("-")) if range_header else 0
         return _FakeResponse(payload, resume_from=resume_from)
 
     return fake_urlopen
+
+
+def _seed_partial(root: Path, name: str, content: bytes, *, url: str | None, total: int | None = None) -> None:
+    """Write a ``.part`` for ``name`` under ``root``, with or without its sidecar.
+
+    Args:
+        root: The data root the archive is downloaded into.
+        name: Archive file name, e.g. ``"val2017.zip"``.
+        content: Bytes already on disk.
+        url: URL to record in the sidecar, or ``None`` to write no sidecar at all --
+            which is what an interrupted run from before the sidecar existed, or from
+            an unrelated tool, leaves behind.
+        total: Total size to record in the sidecar.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     _seed_partial(Path(tmp), "a.zip", b"xy", url=None)
+        ...     (Path(tmp) / "a.zip.part").read_bytes()
+        b'xy'
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    (root / f"{name}.part").write_bytes(content)
+    if url is not None:
+        meta = {"url": url, "total": total}
+        (root / f"{name}{dl._PART_META_SUFFIX}").write_text(json.dumps(meta), encoding="utf-8")
 
 
 def _raise_if_called(*_args: object, **_kwargs: object) -> Any:
@@ -384,24 +429,88 @@ class TestDownloadCoco:
         dl.download_coco(root, ["val"], annotations=False, force=True, progress=False)
         assert (root / "val2017" / "000000000000.jpg").is_file()
 
-    def test_resumes_partial_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A ``.part`` file from an interrupted download is resumed, not restarted.
+    def test_resumes_a_partial_its_sidecar_vouches_for(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A ``.part`` whose sidecar names this same URL is resumed, not restarted.
 
         A large COCO archive over a flaky connection is exactly the case this exists
         for; re-fetching the whole file on every retry would make some networks never
-        finish a train-split download at all.
+        finish a train-split download at all. The ``Range`` header is asserted rather
+        than only the finished tree, because a restart also produces a correct tree --
+        it just pays for the whole archive again, which is the thing being avoided.
         """
         payload = _val_archive_bytes()
         root = tmp_path / "coco"
-        root.mkdir()
-        # Seed a partial .part with the first 10 bytes already fetched.
-        (root / "val2017.zip.part").write_bytes(payload[:10])
-        mapping = {"https://s3.amazonaws.com/images.cocodataset.org/zips/val2017.zip": payload}
-        monkeypatch.setattr(urllib.request, "urlopen", _serve(mapping))
+        _seed_partial(root, "val2017.zip", payload[:10], url=_VAL_URL, total=len(payload))
+        ranges: list[str | None] = []
+        monkeypatch.setattr(urllib.request, "urlopen", _serve({_VAL_URL: payload}, ranges))
+
         dl.download_coco(root, ["val"], annotations=False, progress=False)
-        # Resume path reconstructs the full archive and extracts it.
+
+        assert ranges == ["bytes=10-"]
         assert (root / "val2017" / "000000000000.jpg").is_file()
         assert not (root / "val2017.zip.part").exists()
+        assert not (root / f"val2017.zip{dl._PART_META_SUFFIX}").exists()
+
+    def test_discards_a_partial_with_no_sidecar(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A partial nothing vouches for is thrown away and the transfer restarts (L-33).
+
+        The bytes here are not a prefix of the archive at all -- an interrupted run
+        against a different URL, or a stale file from an unrelated tool, leaves exactly
+        this. Resuming on the strength of its length appends the archive's tail to
+        somebody else's head and renames the result into place as ``val2017.zip``, a
+        file that is corrupt in the middle and passes every length check there is.
+        """
+        payload = _val_archive_bytes()
+        root = tmp_path / "coco"
+        _seed_partial(root, "val2017.zip", b"not this archive at all", url=None)
+        ranges: list[str | None] = []
+        monkeypatch.setattr(urllib.request, "urlopen", _serve({_VAL_URL: payload}, ranges))
+
+        dl.download_coco(root, ["val"], annotations=False, keep_archives=True, progress=False)
+
+        assert ranges == [None], "a partial of unknown provenance was resumed"
+        assert (root / "val2017.zip").read_bytes() == payload
+        assert (root / "val2017" / "000000000000.jpg").is_file()
+
+    def test_discards_a_partial_left_by_another_url(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A sidecar naming a different URL invalidates the partial instead of vouching for it.
+
+        The sidecar has to be *checked*, not merely written: a run interrupted while
+        fetching the train archive leaves a partial under its own name, but a changed
+        remote, a redirected host or a hand-edited path all produce a partial whose
+        recorded URL no longer matches the request being made.
+        """
+        payload = _val_archive_bytes()
+        root = tmp_path / "coco"
+        _seed_partial(root, "val2017.zip", payload[:10], url="https://elsewhere.example/val2017.zip", total=99)
+        ranges: list[str | None] = []
+        monkeypatch.setattr(urllib.request, "urlopen", _serve({_VAL_URL: payload}, ranges))
+
+        dl.download_coco(root, ["val"], annotations=False, keep_archives=True, progress=False)
+
+        assert ranges == [None]
+        assert (root / "val2017.zip").read_bytes() == payload
+
+    def test_reports_a_checksum_it_cannot_verify_on_a_skipped_split(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A digest supplied for an already-extracted split says so instead of passing silently (M-40).
+
+        Confirming an already-provisioned tree is the one thing an operator passes
+        ``--sha256`` for on a *second* run, and it is exactly the path that skips before
+        the verifier -- there is no archive left to hash, the zip having been removed
+        after extraction. Saying nothing reads as confirmation of a check that never ran.
+        """
+        root = tmp_path / "coco"
+        (root / "val2017").mkdir(parents=True)
+        monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
+
+        dl.download_coco(root, ["val"], annotations=False, checksums={"val2017.zip": "deadbeef"}, progress=False)
+
+        message = capsys.readouterr().err
+        assert "checksum not verified" in message
+        assert "val2017.zip" in message
+        assert "--force" in message
 
 
 class TestParseChecksums:

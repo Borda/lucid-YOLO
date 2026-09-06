@@ -8,6 +8,13 @@ image bounds, box/polygon agreement, contiguous label remapping, the size-aware
 scale policy, a train/val datamodule smoke (batch stacking + ragged target list),
 seeded determinism, and the importable ``check_data`` layout validator (both the
 matching and the mismatching path, without spawning a subprocess).
+
+Hand-built COCO payloads cover the parsing rules the fixture cannot exercise, since
+its annotations are all single-ring, in-canvas and keypoint-free: which ring a
+multi-ring polygon keeps and where that instance's box then comes from (M-38), the
+per-image nature of that rule, the drop of an instance whose box clamps to no extent
+(L-30), the named error a keypoint run gets from an annotation with no points (L-29),
+and the ``image_ids`` a position-pairing consumer reads identity from.
 """
 
 from __future__ import annotations
@@ -17,6 +24,7 @@ import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
 import torch
@@ -473,6 +481,178 @@ class TestRinglessAnnotations:
             instance_mask_targets(targets, image_size=(8, 8), grid_size=(4, 4))
 
 
+def _write_split(split: Path, payload: dict[str, object], *, side: int = 8) -> Path:
+    """Write one blank image and its ``instances.json`` into ``split``, returning the split.
+
+    Examples:
+        >>> callable(_write_split)  # needs a tmp_path-backed split directory
+        True
+    """
+    split.mkdir(parents=True, exist_ok=True)
+    from torchvision.io import write_png  # noqa: PLC0415 - test-local, the reader does not need it
+
+    for image in cast("list[dict[str, object]]", payload["images"]):
+        write_png(torch.zeros(3, side, side, dtype=torch.uint8), str(split / str(image["file_name"])))
+    (split / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
+    return split
+
+
+class TestMultiRingAnnotations:
+    """A multi-ring COCO polygon keeps one ring, and the box is derived from it (M-38)."""
+
+    def test_the_box_is_the_retained_ring_not_the_annotation_bbox(self, tmp_path: Path) -> None:
+        """A two-lobe object reads as the lobe whose ring survived, box and mask together.
+
+        COCO writes ``bbox`` as the envelope of *every* ring, so an object split by an
+        occluder gets a box spanning both lobes while this reader keeps only the first.
+        Left as it was, the mask branch was supervised to predict emptiness over the
+        second lobe's pixels while they sat inside that instance's own box — the box and
+        the mask described different objects.
+        """
+        payload = {
+            "images": [{"id": 1, "file_name": "lobes.png", "height": 20, "width": 20}],
+            "annotations": [
+                {
+                    "id": 1,
+                    "image_id": 1,
+                    "category_id": 1,
+                    "bbox": [0, 0, 18, 18],
+                    "segmentation": [
+                        [0.0, 0.0, 8.0, 0.0, 8.0, 8.0, 0.0, 8.0],
+                        [10.0, 10.0, 18.0, 10.0, 18.0, 18.0, 10.0, 18.0],
+                    ],
+                }
+            ],
+            "categories": [{"id": 1, "name": "lobed"}],
+        }
+        split = _write_split(tmp_path / "val", payload, side=20)
+
+        _, targets = CocoDetectionDataset(split, split / "instances.json")[0]
+
+        assert targets.boxes.tolist() == [[0.0, 0.0, 8.0, 8.0]]
+        assert torch.equal(boxes_from_polygons(targets.polygons), targets.boxes)
+
+    def test_an_image_with_any_ringless_instance_keeps_its_bbox_boxes(self, tmp_path: Path) -> None:
+        """Where no polygons survive, boxes stay COCO's own ``bbox`` — the rule is per image.
+
+        ``Targets`` holds 0 or N rings, never a mix, so one ringless instance collapses
+        the whole image's ``polygons``. There is then no mask to stay in lock-step with,
+        and the detection reading wants the annotation's own box; deriving one instance's
+        box from a ring the image does not carry would mix two sources inside one image.
+        """
+        payload = {
+            "images": [{"id": 1, "file_name": "mixed.png", "height": 20, "width": 20}],
+            "annotations": [
+                {
+                    "id": 1,
+                    "image_id": 1,
+                    "category_id": 1,
+                    "bbox": [0, 0, 18, 18],
+                    "segmentation": [[0.0, 0.0, 8.0, 0.0, 8.0, 8.0, 0.0, 8.0]],
+                },
+                {"id": 2, "image_id": 1, "category_id": 1, "bbox": [12, 12, 4, 4]},
+            ],
+            "categories": [{"id": 1, "name": "lobed"}],
+        }
+        split = _write_split(tmp_path / "val", payload, side=20)
+
+        _, targets = CocoDetectionDataset(split, split / "instances.json")[0]
+
+        assert targets.polygons == []
+        assert targets.boxes.tolist() == [[0.0, 0.0, 18.0, 18.0], [12.0, 12.0, 16.0, 16.0]]
+
+
+class TestDegenerateBoxes:
+    """An instance whose final box has no extent is dropped at the read (L-30)."""
+
+    def test_a_box_clamped_flat_is_dropped_with_its_whole_instance(self, tmp_path: Path) -> None:
+        """A ``bbox`` outside the canvas clamps to zero width and takes its label and flag with it.
+
+        This is the val/train disagreement the drop closes: the train pipeline's
+        ``instance_keep_mask`` removes such an instance after every warp, while the val
+        path letterboxes and scores it, so the two paths counted different instance sets
+        for the same annotation file.
+        """
+        payload = {
+            "images": [{"id": 1, "file_name": "edge.png", "height": 8, "width": 8}],
+            "annotations": [
+                {"id": 1, "image_id": 1, "category_id": 1, "bbox": [10, 2, 3, 3], "difficult": 1},
+                {"id": 2, "image_id": 1, "category_id": 1, "bbox": [2, 2, 3, 3]},
+            ],
+            "categories": [{"id": 1, "name": "square"}],
+        }
+        split = _write_split(tmp_path / "val", payload)
+
+        _, targets = CocoDetectionDataset(split, split / "instances.json")[0]
+
+        assert targets.boxes.tolist() == [[2.0, 2.0, 5.0, 5.0]]
+        assert targets.difficult.tolist() == [False]
+
+    def test_the_keypoint_channels_are_dropped_in_lock_step(self, tmp_path: Path) -> None:
+        """The surviving instance keeps its own points, not the dropped instance's.
+
+        Keypoints are stacked onto the instance axis after the drop, so a filter that
+        forgot the channel would leave ``keypoints[0]`` describing an instance that no
+        longer has a box — a misalignment no shape check would report.
+        """
+        payload = {
+            "images": [{"id": 1, "file_name": "edge.png", "height": 8, "width": 8}],
+            "annotations": [
+                {"id": 1, "image_id": 1, "category_id": 1, "bbox": [10, 2, 3, 3], "keypoints": [1.0, 1.0, 2]},
+                {"id": 2, "image_id": 1, "category_id": 1, "bbox": [2, 2, 3, 3], "keypoints": [3.0, 4.0, 1]},
+            ],
+            "categories": [{"id": 1, "name": "square", "keypoints": ["apex"]}],
+        }
+        split = _write_split(tmp_path / "val", payload)
+
+        _, targets = CocoDetectionDataset(split, split / "instances.json", keypoints=True)[0]
+
+        assert targets.keypoints is not None and targets.keypoints.tolist() == [[[3.0, 4.0]]]
+        assert targets.keypoint_vis is not None and targets.keypoint_vis.tolist() == [[1]]
+
+
+def test_a_keypoint_run_names_the_image_whose_annotation_has_no_points(tmp_path: Path) -> None:
+    """A missing ``keypoints`` field raises the reader's named error, not a bare ``KeyError`` (L-29).
+
+    Every neighbouring read in the parser is a defaulted ``.get``; this one was a
+    subscript, so a keypoint run pointed at a detection export died with a key name and
+    no file, image or field context to act on.
+    """
+    payload = {
+        "images": [{"id": 1, "file_name": "pointless.png", "height": 8, "width": 8}],
+        "annotations": [{"id": 1, "image_id": 1, "category_id": 1, "bbox": [2, 2, 3, 3]}],
+        "categories": [{"id": 1, "name": "square", "keypoints": ["apex"]}],
+    }
+    split = _write_split(tmp_path / "val", payload)
+
+    with pytest.raises(ValueError, match=r"pointless\.png: keypoints length must be a positive multiple of 3"):
+        CocoDetectionDataset(split, split / "instances.json", keypoints=True)
+
+
+def test_image_ids_name_each_loader_position(tmp_path: Path) -> None:
+    """``image_ids`` publishes the COCO id at each position, in the reader's sorted order.
+
+    The whole-image tile merge pairs a loader position to a window and today infers the
+    tile's identity from the annotations that landed there — two tiles with identical
+    annotation sets are indistinguishable that way. The id is what lets that pairing be
+    asserted, so it has to be readable off the dataset and aligned with ``__getitem__``.
+    """
+    payload = {
+        "images": [
+            {"id": 7, "file_name": "second.png", "height": 8, "width": 8},
+            {"id": 3, "file_name": "first.png", "height": 8, "width": 8},
+        ],
+        "annotations": [],
+        "categories": [{"id": 1, "name": "square"}],
+    }
+    split = _write_split(tmp_path / "val", payload)
+
+    dataset = CocoDetectionDataset(split, split / "instances.json")
+
+    assert dataset.image_ids == (3, 7)
+    assert len(dataset.image_ids) == len(dataset)
+
+
 @pytest.mark.parametrize(
     ("variant", "expected"),
     [
@@ -893,19 +1073,19 @@ def test_an_auto_chosen_worker_count_is_still_capped_for_val(
     datamodule = _datamodule(detseg_fixture_dir, num_workers=None)
     datamodule.setup("fit")
 
-    assert datamodule.val_dataloader().num_workers == dm._val_worker_cap(_SMOKE_IMG_SIZE)
+    assert datamodule.val_dataloader().num_workers == dm._val_worker_target(_SMOKE_IMG_SIZE)
     assert datamodule.val_dataloader().num_workers < datamodule.train_dataloader().num_workers
 
 
-def test_the_val_worker_cap_scales_with_the_letterbox_side() -> None:
+def test_the_val_worker_target_scales_with_the_letterbox_side() -> None:
     """The cap encodes how many workers saturate a letterbox-only loader, which is pixel-bound.
 
     Four was reasoned about 640 px samples, where val work was "a fraction of the train
     pipeline's". At 1024 px the decode is the work, and a constant would starve it.
     """
-    assert dm._val_worker_cap(640) == 4
-    assert dm._val_worker_cap(1024) > dm._val_worker_cap(640)
-    assert dm._val_worker_cap(64) >= 1
+    assert dm._val_worker_target(640) == 4
+    assert dm._val_worker_target(1024) > dm._val_worker_target(640)
+    assert dm._val_worker_target(64) >= 1
 
 
 def test_val_loader_workers_explicit_override(detseg_fixture_dir: Path) -> None:

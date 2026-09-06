@@ -8,8 +8,42 @@ goes through :func:`torchvision.io.read_image` (torchvision is a core dependency
 blueprint sec. 5.9), boxes are converted from COCO ``xywh`` to the project's
 ``xyxy`` convention, category ids are remapped to a contiguous ``int64`` label
 space, and each annotation's first segmentation ring — when present — is parsed
-into a ``(P, 2)`` float32 polygon so the box/polygon/rbox modalities of
-:class:`~lucid_yolo.data.targets.Targets` stay in lock-step.
+into a ``(P, 2)`` float32 polygon.
+
+Which ring, and where the box comes from (WP-014, M-38):
+    A COCO ``segmentation`` may carry **several** rings for one object — a lobe
+    each side of an occluder, a hole's outer and inner boundary. This reader keeps
+    the **first** ring only, because :class:`~lucid_yolo.data.targets.Targets`
+    holds one ring per box: a second ring is neither a second instance (it would
+    double the object's count at the metric) nor concatenable onto the first (the
+    joining edge is a boundary the object does not have).
+
+    So that the retained ring and the box describe *the same* thing, the box is
+    then **derived from that ring** — its envelope — exactly as the oriented path
+    below derives ``boxes`` from the quad rather than reading COCO's ``bbox``.
+    The rule is per image, because ``polygons`` is per image: when every instance
+    of an image keeps a ring, every one of that image's boxes is its own ring's
+    envelope; when any instance has no ring at all, the image's ``polygons``
+    collapse to ``[]`` (there is no mask supervision to stay in lock-step with)
+    and every box is COCO's ``bbox``, which is the field a detection reading wants.
+    Nothing mixes the two sources within one image.
+
+    A ring-derived box is deliberately **not** clamped to the image bounds, again
+    following :func:`_oriented_targets`: clamping would move the box off the ring
+    it was just derived from, which is the desync this rule exists to remove. A
+    ``bbox``-derived box is clamped, as it always was — there is no ring for it to
+    contradict.
+
+Degenerate instances (M-38's sibling, L-30):
+    An instance whose final box has zero width or zero height is dropped at read
+    time, on every reading mode. COCO carries such annotations, and the clamp in
+    :func:`_xywh_to_xyxy` makes more of them out of boxes that lie outside the
+    canvas. They were previously kept, which put the *validation* protocol at odds
+    with the train pipeline — ``instance_keep_mask`` (``data/affine.py``,
+    ``data/mosaic.py``) drops them there, and nothing dropped them on the val path,
+    so the two disagreed about what counts as an instance. Dropping at the read
+    means neither path ever sees one: they are not scored, and they are not
+    trained on.
 
 Crowd / RLE policy:
     COCO carries two kinds of ``segmentation``: a list of flat polygon rings
@@ -185,11 +219,18 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
     to contiguous ``int64`` labels (the mapping is exposed as
     :attr:`category_id_to_label` / :attr:`label_to_category_id`) and annotations
     are grouped by image id. Each ``__getitem__`` decodes its image to a CHW
-    float32 tensor in ``[0, 1]``, converts every kept annotation's ``xywh`` box to
-    ``xyxy`` (clamped to the image bounds), and parses its first segmentation ring
-    into a ``(P, 2)`` polygon. Crowd (``iscrowd=1``) and non-polygon (RLE / empty /
+    float32 tensor in ``[0, 1]`` and returns the targets built at construction:
+    one ``xyxy`` box per kept annotation, and its first segmentation ring as a
+    ``(P, 2)`` polygon. Crowd (``iscrowd=1``) and non-polygon (RLE / empty /
     degenerate) annotations are skipped, so a retained image carries one ring per
     box or an empty target set.
+
+    Where each box comes from is stated once, in the module docstring: an image
+    whose instances all keep a ring gets ring-envelope boxes, so box and mask
+    describe one object; an image with any ringless instance carries no polygons
+    and gets COCO's ``bbox``, clamped to the image bounds. Either way an instance
+    whose box ends up zero-width or zero-height is dropped, matching what the
+    train pipeline's ``instance_keep_mask`` does to one.
 
     An optional single-image ``transforms`` (any
     :class:`~lucid_yolo.data.transforms.GeometricTransform`, e.g.
@@ -260,6 +301,45 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         """Return the number of images in the dataset."""
         return len(self._images)
 
+    @property
+    def image_ids(self) -> tuple[int, ...]:
+        """The COCO image id of each loader position, in ``__getitem__`` order.
+
+        Published because a consumer that pairs this dataset's positions with
+        anything read off the *same* annotation file — the whole-image tile merge
+        (:mod:`lucid_yolo.eval.tile_merge`) pairing a tile to its window, the COCO
+        scorer naming the image an accumulated detection belongs to — otherwise has
+        to infer the identity from the annotations that landed at a position. Two
+        tiles carrying byte-identical annotation sets are indistinguishable that
+        way and are not indistinguishable by id, so the pairing can be asserted
+        rather than argued.
+
+        Returns:
+            One id per position, ascending: records are sorted by image id at
+            construction, which is the order :meth:`__getitem__` indexes.
+
+        Examples:
+            ```pycon
+            >>> import json, tempfile
+            >>> from pathlib import Path
+            >>> payload = {
+            ...     "categories": [{"id": 1}],
+            ...     "images": [
+            ...         {"id": 7, "file_name": "b.png", "height": 4, "width": 4},
+            ...         {"id": 3, "file_name": "a.png", "height": 4, "width": 4},
+            ...     ],
+            ...     "annotations": [],
+            ... }
+            >>> with tempfile.TemporaryDirectory() as tmp:
+            ...     path = Path(tmp) / "instances.json"
+            ...     _ = path.write_text(json.dumps(payload), encoding="utf-8")
+            ...     CocoDetectionDataset(Path(tmp), path).image_ids
+            (3, 7)
+
+            ```
+        """
+        return tuple(record.image_id for record in self._images)
+
     def __getitem__(self, index: int) -> tuple[Tensor, Targets]:
         """Return the ``(image, Targets)`` pair for image ``index``.
 
@@ -303,7 +383,26 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         return cast("Tensor", raw.to(torch.float32) / _UINT8_MAX)
 
     def _build_targets(self, annotations: Sequence[dict[str, object]], record: _ImageRecord) -> Targets:
-        """Assemble the :class:`~lucid_yolo.data.targets.Targets` for one image."""
+        """Assemble the :class:`~lucid_yolo.data.targets.Targets` for one image.
+
+        Every kept annotation contributes one entry to each per-instance channel, in
+        annotation order. The image's geometry is then resolved once by
+        :func:`_resolve_geometry`, which decides whether the boxes come from the rings
+        or from COCO's ``bbox`` and drops the degenerate ones; whatever it drops is
+        dropped from the label, difficult and keypoint channels here, so every channel
+        keeps the same instance axis.
+
+        Args:
+            annotations: This image's annotations, in the file's own order.
+            record: The image's resolved identity and pixel extent.
+
+        Returns:
+            The image's targets, or :meth:`~lucid_yolo.data.targets.Targets.empty` when
+            no annotation survives parsing and the degenerate-box drop.
+
+        Raises:
+            ValueError: If keypoint reading finds instances with differing ``K``.
+        """
         boxes: list[list[float]] = []
         labels: list[int] = []
         polygons: list[Tensor | None] = []
@@ -316,7 +415,7 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
                 continue
             box, label, ring, difficult = parsed
             if self._keypoints:
-                coords, visibility = parse_coco_keypoints(ann["keypoints"], record.file_name)
+                coords, visibility = parse_coco_keypoints(ann.get("keypoints"), record.file_name)
                 keypoint_coords.append(coords)
                 keypoint_visibility.append(visibility)
             boxes.append(box)
@@ -325,34 +424,31 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             flags.append(difficult)
         if not boxes:
             return Targets.empty()
+        box_tensor, resolved_polygons, keep = _resolve_geometry(boxes, polygons)
+        if box_tensor.shape[0] == 0:
+            return Targets.empty()
         label_tensor = torch.tensor(labels, dtype=torch.int64)
         difficult_tensor = torch.tensor(flags, dtype=torch.bool)
-        keypoints_tensor: Tensor | None = None
-        keypoint_vis_tensor: Tensor | None = None
-        if self._keypoints:
-            counts = {int(coords.shape[0]) for coords in keypoint_coords}
-            if len(counts) != 1:
-                raise ValueError(
-                    f"{record.file_name}: keypoint reading needs one K across all instances; "
-                    f"got K values {sorted(counts)}"
-                )
-            keypoints_tensor = torch.stack(keypoint_coords, dim=0)
-            keypoint_vis_tensor = torch.stack(keypoint_visibility, dim=0)
+        if keep is not None:
+            label_tensor, difficult_tensor = label_tensor[keep], difficult_tensor[keep]
+            # Empty outside keypoint mode, where there is nothing per instance to re-index.
+            keypoint_coords = [keypoint_coords[position] for position in keep] if keypoint_coords else []
+            keypoint_visibility = [keypoint_visibility[position] for position in keep] if keypoint_visibility else []
+        keypoints_tensor, keypoint_vis_tensor = self._stack_keypoints(
+            keypoint_coords, keypoint_visibility, record.file_name
+        )
         if self._oriented:
             return _oriented_targets(
-                cast("list[Tensor]", polygons),  # oriented mode never appends None (see _parse_annotation)
+                resolved_polygons,  # oriented mode never appends None (see _parse_annotation)
                 label_tensor,
                 record.file_name,
                 difficult_tensor,
                 keypoints=keypoints_tensor,
                 keypoint_vis=keypoint_vis_tensor,
             )
-        resolved_polygons: list[Tensor] = (
-            [] if any(ring is None for ring in polygons) else cast("list[Tensor]", polygons)
-        )
         if keypoints_tensor is not None and keypoint_vis_tensor is not None:
             return Targets(
-                boxes=torch.tensor(boxes, dtype=torch.float32),
+                boxes=box_tensor,
                 labels=label_tensor,
                 polygons=resolved_polygons,
                 difficult=difficult_tensor,
@@ -360,11 +456,39 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
                 keypoint_vis=keypoint_vis_tensor,
             )
         return Targets(
-            boxes=torch.tensor(boxes, dtype=torch.float32),
+            boxes=box_tensor,
             labels=label_tensor,
             polygons=resolved_polygons,
             difficult=difficult_tensor,
         )
+
+    def _stack_keypoints(
+        self, coords: list[Tensor], visibility: list[Tensor], file_name: str
+    ) -> tuple[Tensor | None, Tensor | None]:
+        """Stack one image's surviving per-instance keypoints onto the instance axis.
+
+        Args:
+            coords: One ``(K, 2)`` float32 coordinate block per surviving instance.
+            visibility: The paired ``(K,)`` int64 visibility blocks.
+            file_name: Image file name, named when the instances disagree about ``K``.
+
+        Returns:
+            The ``((N, K, 2), (N, K))`` pair, or ``(None, None)`` when this reader is
+            not in keypoint mode.
+
+        Raises:
+            ValueError: If the instances do not all declare the same ``K``. The check
+                runs on the survivors, so a degenerate instance dropped by
+                :func:`_resolve_geometry` cannot fail an image it is not part of.
+        """
+        if not self._keypoints:
+            return None, None
+        counts = {int(block.shape[0]) for block in coords}
+        if len(counts) != 1:
+            raise ValueError(
+                f"{file_name}: keypoint reading needs one K across all instances; got K values {sorted(counts)}"
+            )
+        return torch.stack(coords, dim=0), torch.stack(visibility, dim=0)
 
     def _parse_annotation(
         self, ann: dict[str, object], record: _ImageRecord
@@ -384,6 +508,12 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         :class:`~lucid_yolo.data.targets.Targets`'s 0-or-N contract. The
         ``difficult`` flag defaults to ``False``, which is what every file that
         does not carry R18's flag means (A51).
+
+        The box returned here is COCO's ``bbox``. It is not necessarily the box the
+        instance ends up with: :func:`_resolve_geometry` replaces it with the ring's
+        envelope on an image whose rings all survive, and drops the instance outright
+        when the box it settles on has no extent. Deciding either here is impossible —
+        both are properties of the image's whole instance set, not of one annotation.
         """
         if int(cast("int", ann.get("iscrowd", 0))) == 1:
             return None
@@ -408,7 +538,11 @@ def parse_coco_keypoints(keypoints: object, file_name: str) -> tuple[Tensor, Ten
     ground truth from one annotation file.
 
     Args:
-        keypoints: Flat ``[x, y, v, ...]`` annotation value.
+        keypoints: Flat ``[x, y, v, ...]`` annotation value. An annotation carrying no
+            ``keypoints`` field at all arrives as ``None`` and is rejected by the same
+            named error as a malformed one — a keypoint run given a file whose
+            annotations have no points needs to be told which file and which image,
+            not handed a bare ``KeyError`` from a subscript (L-29).
         file_name: Image file name, named when the flat length is invalid.
 
     Returns:
@@ -435,6 +569,60 @@ def parse_coco_keypoints(keypoints: object, file_name: str) -> tuple[Tensor, Ten
         )
     values = torch.tensor(keypoints, dtype=torch.float32).reshape(-1, _KEYPOINT_STRIDE)
     return values[:, :_KEYPOINT_COORDS], values[:, _KEYPOINT_COORDS].to(torch.int64)
+
+
+def _resolve_geometry(
+    raw_boxes: list[list[float]], rings: list[Tensor | None]
+) -> tuple[Tensor, list[Tensor], list[int] | None]:
+    """Resolve one image's boxes and rings, and drop the instances with no extent.
+
+    Two coupled rules, both stated in the module docstring:
+
+    * **Where the boxes come from** (M-38). An image whose instances *all* kept a ring
+      is an image with mask supervision, and its boxes are those rings' envelopes, so
+      ``boxes[i]`` and ``polygons[i]`` describe the same thing even when the annotation
+      carried further rings this reader discarded. An image where any instance kept no
+      ring has no ``polygons`` at all — :class:`~lucid_yolo.data.targets.Targets` holds
+      0 or N of them, never a mix — so its boxes are COCO's own ``bbox``, already
+      clamped to the canvas by :func:`_xywh_to_xyxy`. Ring envelopes are left unclamped
+      on purpose: a clamp would move the box off the ring it was just derived from.
+    * **What a degenerate instance is** (L-30). A final box with zero width or zero
+      height bounds nothing, whichever source it came from. It is dropped here, at the
+      read, so the val protocol and the train pipeline's ``instance_keep_mask`` agree
+      about what an instance is.
+
+    Args:
+        raw_boxes: One clamped ``xyxy`` ``bbox`` per parsed instance, in order.
+        rings: The paired ring per instance, ``None`` where the annotation had none.
+
+    Returns:
+        The ``(boxes, polygons, keep)`` triple, where ``keep`` lists the surviving
+        positions in the caller's own order — or ``None`` when nothing was dropped, so
+        the caller can skip re-indexing every other channel.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> lobe = torch.tensor([[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]])
+        >>> boxes, polygons, keep = _resolve_geometry([[0.0, 0.0, 18.0, 18.0]], [lobe])
+        >>> boxes.tolist(), len(polygons), keep  # the ring's envelope, not the bbox
+        ([[0.0, 0.0, 8.0, 8.0]], 1, None)
+        >>> boxes, polygons, keep = _resolve_geometry([[3.0, 1.0, 3.0, 9.0]], [None])
+        >>> boxes.shape, polygons, keep  # zero width, so nothing survives
+        (torch.Size([0, 4]), [], [])
+
+        ```
+    """
+    polygons: list[Tensor] = [] if any(ring is None for ring in rings) else cast("list[Tensor]", rings)
+    boxes = boxes_from_polygons(polygons) if polygons else torch.tensor(raw_boxes, dtype=torch.float32)
+    extent = (boxes[:, 2] > boxes[:, 0]) & (boxes[:, 3] > boxes[:, 1])
+    if bool(extent.all()):
+        return boxes, polygons, None
+    keep = [int(position) for position in extent.nonzero(as_tuple=True)[0]]
+    # `polygons` is either one ring per instance or empty; the empty case has nothing to
+    # re-index and must stay empty, not become a shorter mismatched list.
+    survivors = [polygons[position] for position in keep] if polygons else []
+    return boxes[extent], survivors, keep
 
 
 def _oriented_targets(
@@ -683,8 +871,11 @@ def _parse_ring(segmentation: object) -> Tensor | None:
     """Parse a COCO ``segmentation`` field into a ``(P, 2)`` float32 ring or ``None``.
 
     Only the first polygon ring of an ordinary (list-typed) segmentation is
-    returned. RLE dicts, empty lists and rings with fewer than three points yield
-    ``None`` so the caller skips the annotation.
+    returned; the module docstring states why a multi-ring annotation cannot keep
+    more than one, and :func:`_resolve_geometry` is what then derives the box from
+    the ring kept here so the two describe the same lobe. RLE dicts, empty lists
+    and rings with fewer than three points yield ``None`` so the caller skips the
+    annotation.
 
     Args:
         segmentation: The annotation's ``segmentation`` value.
@@ -705,6 +896,10 @@ def _parse_ring(segmentation: object) -> Tensor | None:
 
 def _xywh_to_xyxy(bbox: list[float], height: int, width: int) -> list[float]:
     """Convert a COCO ``xywh`` box to ``xyxy``, clamped to the image bounds.
+
+    The clamp can flatten a box: one lying wholly outside the canvas, or touching an
+    edge, comes back with zero width or zero height. :func:`_resolve_geometry` drops
+    such a box rather than letting it reach a target set (L-30).
 
     Args:
         bbox: The COCO ``[x, y, w, h]`` box in pixels.

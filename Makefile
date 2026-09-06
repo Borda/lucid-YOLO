@@ -129,5 +129,10 @@ docs:
 docs-serve:
 	$(PY) -m mkdocs serve
 
+# `tests/fixtures/_generated` is the synthetic micro-dataset cache. It is gitignored, so
+# CI is always cold and a contributor's machine is always warm; leaving it out of `clean`
+# left "start from nothing" meaning two different things on the two (M-45). The cache is
+# self-invalidating on a fingerprint mismatch, so removing it here is a belt to that
+# brace, not the mechanism.
 clean:
-	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache .coverage build dist site src/*.egg-info
+	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache .coverage build dist site src/*.egg-info tests/fixtures/_generated

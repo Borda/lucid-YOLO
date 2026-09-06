@@ -177,21 +177,28 @@ _CORE_VALUES = 4
 
 @dataclass(frozen=True)
 class TileWindow:
-    """Where one tile sat in its source image (A53).
+    """Where one tile sat in its source image (A53), and which tile it is.
 
     Attributes:
         source_image: File name of the source image the tile was cut from.
         origin: The window's ``(x0, y0)`` top-left corner in source-image pixels.
         size: The tile's own ``(height, width)`` in pixels, before any letterbox.
+        tile_id: The tile's own COCO image id, carried so a consumer pairing this
+            window with a loader position can *assert* the pairing rather than infer
+            it from whatever annotations landed there
+            (:func:`~lucid_yolo.eval.rotated_eval._require_matching_tile`). Two tiles
+            holding byte-identical annotation sets are indistinguishable by their
+            annotations and are distinct by id.
 
     Examples:
-        >>> TileWindow("P0007.png", (824, 0), (1024, 1024)).origin
+        >>> TileWindow("P0007.png", (824, 0), (1024, 1024), 7).origin
         (824, 0)
     """
 
     source_image: str
     origin: tuple[int, int]
     size: tuple[int, int]
+    tile_id: int
 
 
 @dataclass(frozen=True)
@@ -205,9 +212,15 @@ class TileIndex:
     the loader; nothing else about the loader is assumed.
 
     It is also checked rather than assumed, at the one place that consumes it:
-    :func:`~lucid_yolo.eval.rotated_eval.score_split` compares each yielded tile's labels
-    and difficult flags against :attr:`ground_truth` at that position, so a loader that
-    reorders, re-sorts or truncates the split is refused instead of translating
+    :func:`~lucid_yolo.eval.rotated_eval.score_split` compares each position's
+    :attr:`TileWindow.tile_id` against the val dataset's own
+    :attr:`~lucid_yolo.data.coco.CocoDetectionDataset.image_ids` at that position, and
+    each yielded tile's labels and difficult flags against :attr:`ground_truth` there.
+    The two catch different things and neither subsumes the other: the ids compare the
+    index against the dataset it is meant to describe, which a re-sorted or differently
+    built reader breaks even when the tiles involved carry identical annotations, while
+    the annotation sets are the only trace of the *loader's* own yield order, which
+    carries no ids. A split that fails either is refused instead of translating
     detections by another tile's window origin.
 
     Attributes:
@@ -302,8 +315,8 @@ def core_bounds(windows: Sequence[TileWindow]) -> Tensor:
 
     Examples:
         >>> tiles = [
-        ...     TileWindow("a.png", (0, 0), (6, 6)),
-        ...     TileWindow("a.png", (4, 0), (6, 6)),
+        ...     TileWindow("a.png", (0, 0), (6, 6), 1),
+        ...     TileWindow("a.png", (4, 0), (6, 6), 2),
         ... ]
         >>> core_bounds(tiles)[:, 0].tolist()  # the shared boundary is the band midpoint
         [-inf, 5.0]
@@ -388,7 +401,7 @@ def tile_detections_to_source(
     Examples:
         >>> import torch
         >>> dets = torch.tensor([[2.0, 2.0, 4.0, 2.0, 0.3, 0.9, 1.0], [0.0] * 7])
-        >>> window = TileWindow("a.png", (100, 200), (4, 4))
+        >>> window = TileWindow("a.png", (100, 200), (4, 4), 1)
         >>> merged = tile_detections_to_source(dets, window, (4, 4))
         >>> merged["rboxes"].tolist()  # identity letterbox, then + (100, 200)
         [[102.0, 202.0, 4.0, 2.0, 0.30000001192092896]]
@@ -438,7 +451,7 @@ def merge_whole_images(
         >>> import torch
         >>> box = torch.tensor([[3.0, 3.0, 2.0, 1.0, 0.0]])
         >>> index = TileIndex(
-        ...     windows=(TileWindow("a.png", (0, 0), (8, 8)),),
+        ...     windows=(TileWindow("a.png", (0, 0), (8, 8), 1),),
         ...     ground_truth=({"rboxes": box, "labels": torch.tensor([0]), "difficult": torch.tensor([False])},),
         ... )
         >>> prediction = {"rboxes": box, "scores": torch.tensor([0.9]), "labels": torch.tensor([0])}
@@ -484,7 +497,7 @@ def _complete_prefix(index: TileIndex, scored: int) -> int:
         the last complete source image before it.
 
     Examples:
-        >>> windows = (TileWindow("a.png", (0, 0), (4, 4)), TileWindow("b.png", (0, 0), (4, 4)))
+        >>> windows = (TileWindow("a.png", (0, 0), (4, 4), 1), TileWindow("b.png", (0, 0), (4, 4), 2))
         >>> index = TileIndex(windows, ({}, {}))
         >>> _complete_prefix(index, 2), _complete_prefix(index, 1)
         (2, 1)
@@ -556,7 +569,7 @@ def _source_ground_truth(index: TileIndex, tile: int) -> dict[str, Tensor]:
         >>> import torch
         >>> box = torch.tensor([[1.0, 2.0, 4.0, 2.0, 0.0]])
         >>> target = {"rboxes": box, "labels": torch.tensor([0]), "difficult": torch.tensor([False])}
-        >>> index = TileIndex((TileWindow("a.png", (10, 20), (4, 4)),), (target,))
+        >>> index = TileIndex((TileWindow("a.png", (10, 20), (4, 4), 1),), (target,))
         >>> _source_ground_truth(index, 0)["rboxes"][0, :2].tolist()
         [11.0, 22.0]
     """
@@ -641,8 +654,9 @@ def _window(record: Mapping[str, object]) -> TileWindow:
         ValueError: If ``window`` is not four values.
 
     Examples:
-        >>> _window({"source_image": "a.png", "window": [1, 2, 5, 6], "height": 4, "width": 4}).origin
-        (1, 2)
+        >>> record = {"id": 3, "source_image": "a.png", "window": [1, 2, 5, 6], "height": 4, "width": 4}
+        >>> _window(record).origin, _window(record).tile_id
+        ((1, 2), 3)
     """
     window = record["window"]
     if not isinstance(window, list) or len(window) != _WINDOW_VALUES:
@@ -651,6 +665,7 @@ def _window(record: Mapping[str, object]) -> TileWindow:
         source_image=str(record["source_image"]),
         origin=(int(window[0]), int(window[1])),
         size=(int(record["height"]), int(record["width"])),  # type: ignore[call-overload]
+        tile_id=int(record["id"]),  # type: ignore[call-overload]
     )
 
 

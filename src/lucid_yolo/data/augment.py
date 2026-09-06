@@ -54,8 +54,6 @@ __all__ = ["FlipParams", "HSVJitter", "HSVParams", "HorizontalFlip", "hsv_to_rgb
 
 #: Channel count of an RGB / HSV image (leading dimension of a CHW tensor).
 _RGB_CHANNELS = 3
-#: Small positive floor used when a hue/saturation divisor would otherwise be zero.
-_EPS = 1e-12
 
 
 def _uniform(low: float, high: float, generator: torch.Generator | None) -> float:

@@ -14,7 +14,9 @@ lucid-data download --data_root /data/coco --splits '[train,val]'  # adds the 18
 lucid-data check    --data_root /data/coco
 ```
 
-Transfers stream to a `.part` file and are renamed on completion, so a killed run resumes rather than leaving a truncated archive, and an already-extracted split is skipped without touching the network. The official archives publish no authoritative SHA-256 digests, so none are hard-coded; the computed digest of every archive is printed, and an expected one may be enforced per archive with `--sha256`.
+Transfers stream to a `.part` file and are renamed on completion, so a killed run resumes rather than leaving a truncated archive, and an already-extracted split is skipped without touching the network. A `.part` carries a sidecar naming the URL and the expected total size; a partial that disagrees with it, or that has no sidecar at all, is discarded and the transfer restarts rather than resuming into a file of unknown provenance. The official archives publish no authoritative SHA-256 digests, so none are hard-coded; the computed digest of every archive is printed, and an expected one may be enforced per archive with `--sha256`.
+
+`--sha256` enforces on what a run downloads. A split that is already extracted is skipped before any transfer, and the `.zip` it would hash is gone (removed after extraction unless `--keep_archives` was set), so a digest supplied for it prints `checksum not verified: … already extracted` instead of being checked — `--force true` re-downloads and re-verifies.
 
 ## 🛰️ DOTA-v1.0 (R18)
 

@@ -15,17 +15,19 @@ COCO one does: segmentation mask targets, refused, and copy-paste, suppressed.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
 import pytest
 import torch
+from torch import Tensor
 from torchvision.io import write_png
 
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.layout import DATA_YAML_NAME, DatasetLayout
 from lucid_yolo.data.yolo import YoloDetectionDataset
-from lucid_yolo.ptl.datamodule import DetectionDataModule, unpack_batch
+from lucid_yolo.ptl.datamodule import DetectionDataModule, PackedTargets, unpack_batch
 
 #: Fixture image size, deliberately non-square so an x/y transposition cannot pass unnoticed.
 _WIDTH = 64
@@ -42,6 +44,8 @@ _DETECTION_ROW = "0 0.5 0.5 0.5 0.25"
 _ORIENTED_ROW = "1 0.25 0.375 0.75 0.375 0.75 0.625 0.25 0.625"
 #: Variant whose policy has the strongest copy-paste probability, so a suppression shows.
 _COPY_PASTE_VARIANT = "x"
+#: Pipeline seed the determinism runs are built at; arbitrary, but fixed so a failure is one.
+_DETERMINISM_SEED = 20260904
 
 
 def _write_image(path: Path) -> None:
@@ -417,3 +421,115 @@ class TestYoloBatches:
 
         assert images.shape == (2, 3, _IMG_SIZE, _IMG_SIZE)
         assert all(target.boxes.shape[0] == 1 for target in targets)
+
+
+def _train_epochs(data_root: Path, global_seed: int, epochs: int = 2) -> list[list[tuple[Tensor, PackedTargets]]]:
+    """Drive a freshly-built datamodule's training loader for ``epochs`` and return the transport batches.
+
+    The global RNG is seeded to ``global_seed`` *before* construction on purpose: the claim
+    under test is that the pipeline's own ``seed`` determines the epoch, so a run under a
+    different ambient torch state must produce the same bytes.
+
+    Args:
+        data_root: A COCO root to build both splits from.
+        global_seed: Ambient ``torch.manual_seed`` value, deliberately varied between runs.
+        epochs: How many passes over the loader to collect.
+
+    Returns:
+        One list of ``(uint8 images, PackedTargets)`` batches per epoch, in the transport
+        form the collate emits — before ``on_after_batch_transfer`` restores floats.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     epochs = _train_epochs(_write_coco_root(Path(tmp)), 0, epochs=1)
+        ...     len(epochs), epochs[0][0][0].dtype
+        (1, torch.uint8)
+    """
+    torch.manual_seed(global_seed)
+    datamodule = _datamodule(
+        data_root, batch_size=1, variant=_COPY_PASTE_VARIANT, seed=_DETERMINISM_SEED, mask_targets=False
+    )
+    datamodule.setup("fit")
+    loader = datamodule.train_dataloader()
+    return [list(loader) for _ in range(epochs)]
+
+
+def _assert_batches_identical(left: tuple[Tensor, PackedTargets], right: tuple[Tensor, PackedTargets]) -> None:
+    """Assert two transport batches agree tensor for tensor.
+
+    Args:
+        left: One run's batch.
+        right: The other run's batch at the same position.
+
+    Raises:
+        AssertionError: On the first image or target tensor that differs.
+
+    Examples:
+        >>> import torch
+        >>> from lucid_yolo.ptl.datamodule import pack_targets
+        >>> from lucid_yolo.data.targets import Targets
+        >>> packed = pack_targets([Targets.empty()])
+        >>> _assert_batches_identical((torch.zeros(1), packed), (torch.zeros(1), packed))
+    """
+    left_images, left_targets = left
+    right_images, right_targets = right
+    assert torch.equal(left_images, right_images), "the transported images differ between runs"
+    for field in dataclasses.fields(left_targets):
+        got = getattr(left_targets, field.name)
+        want = getattr(right_targets, field.name)
+        if got is None or want is None:
+            assert got is want, f"{field.name} is present in one run and absent in the other"
+            continue
+        assert torch.equal(got, want), f"{field.name} differs between runs"
+
+
+class TestTrainingDeterminism:
+    """One seed and a deterministic access order reproduce an epoch byte for byte (M-39).
+
+    The module docstring and :class:`_TrainPipeline` both claim this, and every test that
+    resembled a check pinned one transform in isolation. The property that actually breaks
+    is the composed one: six stateful transforms drawing from a single generator in a fixed
+    order, where ``_maybe_mixup`` and ``_maybe_copy_paste`` consume a *variable* number of
+    draws depending on their own outcome, so a reordered or added draw shifts everything
+    after it. The ``x`` variant is used because its scale policy gives mixup and copy-paste
+    non-zero probabilities — under the nano policy those branches never fire and the
+    variable-draw path is never exercised.
+    """
+
+    def test_two_runs_at_one_seed_produce_identical_epochs(self, tmp_path: Path) -> None:
+        """The whole training loader replays byte for byte across two independent builds.
+
+        Both runs are driven for two epochs under deliberately different ambient torch
+        seeds. The second epoch is the sharper half: the pipeline's generator has advanced
+        by a full pass, so it agrees only if every draw of the first epoch was consumed in
+        the same order and the same number.
+        """
+        data_root = _write_coco_root(tmp_path)
+
+        first = _train_epochs(data_root, global_seed=0)
+        second = _train_epochs(data_root, global_seed=999)
+
+        assert [len(epoch) for epoch in first] == [len(epoch) for epoch in second]
+        for left_epoch, right_epoch in zip(first, second, strict=True):
+            for left, right in zip(left_epoch, right_epoch, strict=True):
+                _assert_batches_identical(left, right)
+
+    def test_a_different_seed_produces_a_different_epoch(self, tmp_path: Path) -> None:
+        """The seed is what determines the epoch, not merely something the pipeline stores.
+
+        Without this, a pipeline that ignored its seed entirely — returning the same
+        augmented batch under every configuration — would satisfy the test above perfectly.
+        """
+        data_root = _write_coco_root(tmp_path)
+        torch.manual_seed(0)
+        datamodule = _datamodule(data_root, batch_size=1, variant=_COPY_PASTE_VARIANT, seed=_DETERMINISM_SEED)
+        other = _datamodule(data_root, batch_size=1, variant=_COPY_PASTE_VARIANT, seed=_DETERMINISM_SEED + 1)
+        datamodule.setup("fit")
+        other.setup("fit")
+
+        images = next(iter(datamodule.train_dataloader()))[0]
+        other_images = next(iter(other.train_dataloader()))[0]
+
+        assert not torch.equal(images, other_images)

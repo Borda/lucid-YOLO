@@ -121,6 +121,10 @@ _POINT_DIM = 2
 #: Fill in the validated form ``build_segments`` takes: a tuple, length one for a scalar
 #: broadcast across channels. Requires ``padding_mode="zeros"`` (WP-154b).
 _FILL = (_DEFAULT_PAD_VALUE,)
+#: XOR salt separating the discarded-gate stream's seed from the caller's own, so the two
+#: streams are decorrelated while both remain a function of the one seed the caller set.
+#: An arbitrary constant -- nothing downstream reads a gate value (L-32).
+_GATE_SEED_SALT = 0x9E3779B97F4A7C15
 
 
 def _uniform(low: float, high: float, generator: torch.Generator | None) -> float:
@@ -532,13 +536,20 @@ class RandomAffine:
         self.min_visibility = float(min_visibility)
         self.allow_upscale = bool(allow_upscale)
         self.letterbox = None if letterbox is None else Letterbox(letterbox, allow_upscale=allow_upscale)
-        # A second, deliberately anonymous generator. Upstream's segment draws a per-sample
-        # activation gate for every transform it holds, unconditionally -- at `prob = 1.0`
-        # the draw is made and then ignored. That draw must not come from `generator`, which
-        # would shift the caller's sequence and break the property WP-079 was opened by
-        # losing, nor from the global stream, which every other transform shares. Nothing
-        # about the output depends on it, which is why it is never seeded.
+        # A second generator, private to the discarded activation gates. Upstream's segment
+        # draws a per-sample activation gate for every transform it holds, unconditionally --
+        # at `prob = 1.0` the draw is made and then ignored. That draw must not come from
+        # `generator`, which would shift the caller's sequence and break the property WP-079
+        # was opened by losing, nor from the global stream, which every other transform
+        # shares. It is seeded off the caller's generator so that a caller who seeds gets a
+        # reproducible gate stream too, and two affines under different seeds get different
+        # ones. Left unseeded it was reproducible only by the conjunction of two premises the
+        # code never stated -- that every gate sits at `prob = 1.0` so its value is discarded,
+        # *and* that `torch.Generator()`'s unseeded state is a fixed constant rather than
+        # entropy. Both hold today; neither is this class's to rely on (L-32).
         self._gate_stream = torch.Generator()
+        if generator is not None:
+            self._gate_stream.manual_seed(generator.initial_seed() ^ _GATE_SEED_SALT)
         self.last_params: AffineParams | None = None
         self.last_matrix: Tensor | None = None
 

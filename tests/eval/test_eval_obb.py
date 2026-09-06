@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 from lucid_yolo.data import tiles as build
 from lucid_yolo.data.layout import resolve_split
@@ -199,11 +199,17 @@ def test_the_report_names_both_figures_rather_than_quoting_one(tiled_root: Path,
 class TestMergePairing:
     """Which window a tile's detections are translated by is checked against the loader (M-13).
 
-    The merge indexes ``windows[first + position]``, so a loader that yields the split in
-    any order other than the index's translates every tile's detections by another tile's
-    origin. That failure is silent by construction — detections and ground truth move by
-    different amounts, so the whole-image figure simply drops — which is why the pairing
-    is asserted here rather than left to the prose that used to state it.
+    The merge indexes ``windows[first + position]``, so an index paired to the wrong
+    tiles — or a loader that yields the split in any order other than the index's —
+    translates every tile's detections by another tile's origin. That failure is silent
+    by construction: detections and ground truth move by different amounts, so the
+    whole-image figure simply drops.
+
+    Two checks answer it and the cases below separate them. The tile's own COCO image id
+    asserts the index-to-dataset pairing outright, including for tiles whose annotation
+    sets are byte-identical, where nothing read off the instances could tell them apart.
+    The annotation sets are the only reading taken from the yielded batch, so they are
+    the only thing that can see the loader's own iteration order.
     """
 
     @staticmethod
@@ -267,6 +273,65 @@ class TestMergePairing:
                 windows=index.windows,
                 expected_ground_truth=index.ground_truth,
             )
+
+    def test_two_tiles_with_identical_annotations_swapped_are_refused(self, tiled_root: Path) -> None:
+        """Windows swapped between two tiles carrying the same annotation set are refused by id.
+
+        This is the pairing failure the annotation-set comparison cannot see. Three of this
+        layout's four tiles hold no instances at all, so their labels and difficult flags
+        are byte-identical: exchanging two of their windows leaves every annotation-set
+        comparison satisfied while every detection of both tiles is translated by the other
+        one's origin. The tiles' own COCO image ids differ, and that is what refuses it.
+        """
+        index = self._index(tiled_root)
+        assert index.ground_truth[1]["labels"].tolist() == index.ground_truth[2]["labels"].tolist()
+        assert index.ground_truth[1]["difficult"].tolist() == index.ground_truth[2]["difficult"].tolist()
+        windows = list(index.windows)
+        windows[1], windows[2] = windows[2], windows[1]
+
+        with pytest.raises(ValueError, match="COCO image id"):
+            evaluate.score_split(
+                self._module(),
+                _datamodule(tiled_root),
+                torch.device("cpu"),
+                img_size=IMG_SIZE,
+                windows=tuple(windows),
+                expected_ground_truth=index.ground_truth,
+            )
+
+    def test_a_reader_publishing_no_image_ids_still_scores_the_split(
+        self, tiled_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A dataset with no COCO ids keeps the annotation-set check and skips the id one.
+
+        The id comparison must not become a requirement the whole-image path imposes on
+        every reader: :class:`~lucid_yolo.data.yolo.YoloDetectionDataset` numbers nothing,
+        pairing an image to its labels by file stem, so a split it read would have no ids
+        to offer. ``Subset`` stands in for such a reader here — it wraps the same tiles in
+        the same order and publishes no ``image_ids`` — and the pass must complete on the
+        remaining check rather than refuse for want of an identity nobody recorded.
+        """
+        datamodule = _datamodule(tiled_root)
+        index = self._index(tiled_root)
+        original = datamodule.val_dataloader()  # type: ignore[attr-defined]
+        unnumbered = Subset(original.dataset, list(range(len(original.dataset))))
+        assert not hasattr(unnumbered, "image_ids")
+        monkeypatch.setattr(
+            datamodule,
+            "val_dataloader",
+            lambda: DataLoader(unnumbered, batch_size=2, collate_fn=original.collate_fn),
+        )
+
+        scoring = evaluate.score_split(
+            self._module(),
+            datamodule,
+            torch.device("cpu"),
+            img_size=IMG_SIZE,
+            windows=index.windows,
+            expected_ground_truth=index.ground_truth,
+        )
+
+        assert scoring.tiles == 4
 
     def test_a_loader_that_drops_its_last_batch_is_refused(
         self, tiled_root: Path, monkeypatch: pytest.MonkeyPatch

@@ -164,16 +164,20 @@ _FLIP_PROB = 0.5
 _PREFETCH_FACTOR = 2
 
 
-#: Validation-loader worker cap at :data:`_VAL_REFERENCE_SIDE` (WP-073), applied only
-#: when the train worker count was **auto-chosen** (WP-102). Val samples are
-#: letterbox-only, so few workers saturate them, while inheriting a large train count
-#: doubles the resident worker-process population every epoch boundary (train workers
-#: are persistent) — the observed Colab host-OOM trigger on long runs.
+#: Workers that saturate a letterbox-only validation loader at :data:`_VAL_REFERENCE_SIDE`
+#: (WP-073) — a throughput target, not a memory ceiling, and it is only ever *applied* as a
+#: bound because the alternative it replaces (inheriting an auto-chosen train count) is
+#: larger. Val samples are letterbox-only, so few workers saturate them, while inheriting a
+#: large train count doubles the resident worker-process population every epoch boundary
+#: (train workers are persistent) — the observed Colab host-OOM trigger on long runs. The
+#: memory side of the question is :func:`_shm_capped_workers`, which is a ceiling.
 _VAL_MAX_WORKERS = 4
-#: Letterbox side the cap above was reasoned about. Decode cost scales with the pixel
-#: count, so the cap scales with it too: the constant encodes "how many workers saturate
-#: a letterbox-only loader", and that number is not the same at 1024 px as at 640 px,
-#: where "a fraction of the train pipeline's work" stopped being true (WP-102).
+#: Letterbox side the target above was measured at. Decode cost scales with the pixel count,
+#: so the target scales with it too — *up*, not down: the constant encodes "how many workers
+#: saturate a letterbox-only loader", and a 1024 px sample costs more decode per worker, so
+#: it takes more of them, which is where "a fraction of the train pipeline's work" stopped
+#: being true at 640 (WP-102). This is why :func:`_val_worker_target` grows with ``img_size``
+#: while a ceiling would shrink.
 _VAL_REFERENCE_SIDE = 640
 
 
@@ -218,8 +222,15 @@ def _shm_capped_workers(workers: int, batch_size: int, img_size: int, prefetch: 
     return max(1, min(workers, budget // max(1, prefetch * batch_bytes)))
 
 
-def _val_worker_cap(img_size: int) -> int:
-    """Return the auto-chosen validation worker ceiling for a given letterbox side.
+def _val_worker_target(img_size: int) -> int:
+    """Return the worker count that saturates a letterbox-only val loader at ``img_size``.
+
+    This is a *target*, not a ceiling: it grows with the pixel count, because decode cost
+    per sample does, so a larger letterbox side takes more workers to keep the loader fed.
+    A ceiling would move the other way. The caller
+    (:meth:`DetectionDataModule._resolve_val_workers`) applies it as an upper bound only
+    because the number it is bounding — an auto-chosen train worker count — is the larger
+    of the two; the memory-driven ceiling is :func:`_shm_capped_workers`.
 
     Args:
         img_size: Square letterbox side of every emitted sample.
@@ -229,7 +240,7 @@ def _val_worker_cap(img_size: int) -> int:
         :data:`_VAL_REFERENCE_SIDE`, at least 1.
 
     Examples:
-        >>> _val_worker_cap(640), _val_worker_cap(1024)
+        >>> _val_worker_target(640), _val_worker_target(1024)
         (4, 10)
     """
     scale = (img_size / _VAL_REFERENCE_SIDE) ** 2
@@ -929,7 +940,7 @@ class DetectionDataModule(LightningDataModule):
         val_num_workers: Worker count for the validation loader only, capped by
             nothing — the flag an operator states to spend the whole machine on
             validation. ``None`` (default) resolves to an auto-chosen
-            ``num_workers`` capped by :func:`_val_worker_cap` (WP-073, WP-102), and
+            ``num_workers`` bounded by :func:`_val_worker_target` (WP-073, WP-102), and
             to a *named* ``num_workers`` bounded by the in-flight memory budget of
             :meth:`_val_loader_workers` (WP-103) — letterbox-only val samples need
             few workers, and both worker populations are resident at the epoch
@@ -1180,7 +1191,7 @@ class DetectionDataModule(LightningDataModule):
             return int(requested)
         if not workers_were_chosen_here:
             return self._num_workers
-        return min(self._num_workers, _val_worker_cap(self._img_size))
+        return min(self._num_workers, _val_worker_target(self._img_size))
 
     def _val_loader_workers(self) -> int:
         """Return the worker count this validation loader may actually start (WP-103).
