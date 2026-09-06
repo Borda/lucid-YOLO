@@ -77,6 +77,32 @@ def test_repeats_scale_with_depth(depth: float, expected_repeats: int) -> None:
     assert len(backbone.attn_p5.blocks) == expected_repeats, "C2PSA PSABlock count must track depth"
 
 
+@pytest.mark.parametrize(
+    ("depth", "expected_repeats"),
+    [
+        pytest.param(0.75, 2, id="1.5-ties-to-even-2"),
+        pytest.param(1.25, 2, id="2.5-ties-to-even-2-not-up-to-3"),
+        pytest.param(1.75, 4, id="3.5-ties-to-even-4"),
+    ],
+)
+def test_a_half_integer_repeat_count_ties_to_even(depth: float, expected_repeats: int) -> None:
+    """Depth scaling rounds half-integers to the nearer even count, not upward.
+
+    ``_scale_repeats`` uses Python's built-in ``round``, which is banker's rounding, and
+    the tie rule was previously unstated anywhere: a reader assuming half-up would expect
+    ``depth=1.25`` to give three inner units and get two. No published variant reaches a
+    tie -- all five pair ``base_repeats=2`` with ``depth`` in ``{0.5, 1.0}`` -- so this
+    pins the behaviour a caller passing its own multiplier meets, and pins it as
+    documented rather than as discovered. It characterizes the existing rule; it does not
+    fail on the code before the docstring that describes it.
+    """
+    backbone = DetectionBackbone(depth=depth, width=0.25, max_channels=1024)
+
+    for stage in (backbone.stage_p2, backbone.stage_p3, backbone.stage_p4, backbone.stage_p5):
+        assert len(stage.blocks) == expected_repeats, "a half-integer product must tie to even"
+    assert len(backbone.attn_p5.blocks) == expected_repeats, "C2PSA must take the same tie rule"
+
+
 def test_forward_small_input_clean() -> None:
     """A stride-32-divisible small input flows through cleanly in eval mode."""
     backbone = DetectionBackbone(depth=0.50, width=0.25, max_channels=1024).eval()

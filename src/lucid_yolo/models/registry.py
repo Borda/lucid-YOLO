@@ -21,6 +21,11 @@ Provenance: R3 Fig. 1, R1 Table 7. Assumptions: A3.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import MappingProxyType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = ["VARIANTS", "ScaleSpec", "scale_spec"]
 
@@ -44,14 +49,26 @@ class ScaleSpec:
     max_channels: int
 
 
-#: The five published variants keyed by name (blueprint sec. 5.1 / R3 Fig. 1).
-VARIANTS: dict[str, ScaleSpec] = {
+#: The five published rows themselves, writable only from inside this module.
+#: :data:`VARIANTS` is the view every other module reads.
+_VARIANTS: dict[str, ScaleSpec] = {
     "n": ScaleSpec(depth=0.50, width=0.25, max_channels=1024),
     "s": ScaleSpec(depth=0.50, width=0.50, max_channels=1024),
     "m": ScaleSpec(depth=0.50, width=1.00, max_channels=512),
     "l": ScaleSpec(depth=1.00, width=1.00, max_channels=512),
     "x": ScaleSpec(depth=1.00, width=1.50, max_channels=512),
 }
+
+#: The five published variants keyed by name (blueprint sec. 5.1 / R3 Fig. 1).
+#:
+#: A read-only view, not the dict itself. This module's own claim is that it is "the one
+#: place the multipliers live", and a plain ``dict`` here made that a courtesy: any
+#: importer could rebind ``VARIANTS["n"]`` and every model built afterwards — in that
+#: process, including the ones the fidelity gate measures — would silently scale by the
+#: new row. ``MappingProxyType`` makes the claim structural; ``ScaleSpec`` is already
+#: frozen, so the rows behind the view cannot be edited in place either. Reading is
+#: unchanged: subscript, iteration, ``in`` and ``len`` all work as they did.
+VARIANTS: Mapping[str, ScaleSpec] = MappingProxyType(_VARIANTS)
 
 
 def scale_spec(variant: str) -> ScaleSpec:

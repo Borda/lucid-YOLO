@@ -39,8 +39,15 @@ from planted import (
 
 from lucid_yolo.assign.grid import HEAD_STRIDES, make_anchor_points
 from lucid_yolo.cli import predict as predict_cli
+from lucid_yolo.decode.nms_path import NMSDecoder
+from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.models.heads.detect import DualHeadOutput
-from lucid_yolo.predict import DECODE_PATHS, predict_image
+from lucid_yolo.predict import (
+    _TASK_ENTRY_POINTS,
+    DECODE_PATHS,
+    _wrong_task_message,
+    predict_image,
+)
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
@@ -163,3 +170,68 @@ def test_the_report_is_written_into_a_directory_that_does_not_exist_yet(
     assert payload["masks"] is None  # a detector says so, rather than omitting the key
     assert isinstance(payload["detections"], list)
     assert str(image_file) in capsys.readouterr().out
+
+
+class TestTaskRefusalMessages:
+    """Every entry point's refusal names every other entry point (audit L-14)."""
+
+    @pytest.mark.parametrize(
+        "handled",
+        [pytest.param(task, id=task) for task in ("detect", "segment", "obb", "keypoints")],
+    )
+    def test_a_refusal_names_all_three_siblings(self, handled: str) -> None:
+        """Each task's refusal message names the other three entry points, not a subset.
+
+        Three of the four messages were written by hand when only three tasks existed and
+        each named the two siblings of its own era; WP-152 added a fourth entry point
+        without revisiting them, so a caller holding a pose checkpoint and calling
+        ``predict_image`` was told about segmentation and orientation and not about the
+        function they actually wanted. Composing every message from one table is what
+        makes a message naming a subset unrepresentable rather than merely unlikely.
+        """
+        message = _wrong_task_message(handled, "whatever-the-checkpoint-says")
+        siblings = [task for task in _TASK_ENTRY_POINTS if task != handled]
+
+        assert _TASK_ENTRY_POINTS[handled][0] in message, "the message names the function called"
+        for sibling in siblings:
+            assert _TASK_ENTRY_POINTS[sibling][0] in message, f"{sibling}'s entry point is unnamed"
+
+    def test_a_refusal_names_the_task_the_checkpoint_actually_carries(self) -> None:
+        """The message reports the checkpoint's own task, which is what the caller has to act on.
+
+        Naming the siblings is only half of a redirection: the caller also needs to know
+        which of them is theirs, and the only place that is written is the task the
+        checkpoint reported.
+        """
+        message = _wrong_task_message("detect", "keypoints")
+
+        assert "'keypoints'" in message
+        assert "predict_keypoints" in message
+
+
+class TestDecoderIndexDtype:
+    """Both decode paths hand back the same index dtype (audit L-19)."""
+
+    @pytest.mark.parametrize(
+        "decoder",
+        [pytest.param("e2e", id="e2e"), pytest.param("nms", id="nms")],
+    )
+    def test_anchor_indices_are_long_on_both_paths(self, decoder: str) -> None:
+        """``decode_with_indices`` returns a long tensor whichever path produced it.
+
+        Both decoders document a *long* tensor, and both deliver one -- but only the
+        keypoint consumer used to cast the result to ``torch.int64`` before gathering,
+        while its mask-path sibling gathered by the same indices with no cast at all. Two
+        spellings of one contract read as two contracts. This pins the contract from the
+        consumer's side, so dropping the redundant cast is safe and stays safe; it
+        characterizes existing behaviour rather than failing on the code before the fix.
+        """
+        points, strides = make_anchor_points([(2, 2)], [8])
+        cls_logits = torch.full((1, 4, NUM_CLASSES), ABSENT_LOGIT)
+        cls_logits[0, 1, PLANTED_LABEL] = PRESENT_LOGIT
+        raw_ltrb = torch.full((1, 4, 4), 0.25)
+        chosen = TopKDecoder(k=3) if decoder == "e2e" else NMSDecoder(conf_threshold=0.5, max_det=3)
+
+        _, anchor_index = chosen.decode_with_indices(cls_logits, raw_ltrb, points, strides)
+
+        assert anchor_index.dtype == torch.int64, "index_select requires a long index"

@@ -24,6 +24,30 @@ Reproducibility contract:
     mode would abort the run. A config or CLI flag can still override it
     explicitly.
 
+Config inheritance, and what it can hide:
+    Every run subcommand (``fit``/``validate``/``test``/``predict``) is given
+    ``det_nano_smoke.yaml`` as a ``default_config_files`` entry. That file is **always**
+    loaded, including when the caller passes ``--config`` of their own: jsonargparse
+    merges per key, so a user config overrides the keys it states and **inherits** every
+    key it omits from the detection smoke recipe. This is what makes a short config
+    possible, and it is also the sharp edge — a config is not read in isolation, and a
+    key left out is not a key left at its library default.
+
+    ``model.task`` is the case worth naming. A config meant for pose or segmentation
+    that omits it does not fail; it inherits ``detect`` and trains a detector under the
+    file's name, with the point or mask branches never built. All four packaged non-
+    detection recipes (``pose_``/``obb_``/``seg_``) therefore set ``task`` explicitly,
+    and a config written against them should be read as stating everything it needs
+    rather than as a patch on top of this one.
+
+    The default is not dropped, and dropping it would not close the hole: ``task`` also
+    carries ``"detect"`` as its constructor default in
+    :class:`~lucid_yolo.ptl.module.DetectionLitModule`, so a config omitting it silently
+    gets a detector with or without the merge. The value of the packaged default is that
+    ``lucid-yolo fit`` runs at all with no config; the guard against the silent case is
+    that a task-specific config states its own task, which the packaged ones do and the
+    fully resolved ``config.yaml`` every run writes records for the reader.
+
 Variant link (ADR-001):
     The module constructor takes the three raw compound-scaling multipliers
     (``depth``/``width``/``max_channels``) rather than a variant name, so that the
@@ -108,8 +132,13 @@ def default_determinism() -> bool | str:
 #: Default scale variant when a config omits ``variant`` (the n-scale debug row, D3).
 _DEFAULT_VARIANT = "n"
 
-#: Packaged config loaded as the parser's defaults when no ``--config`` is given
-#: (the Det-smoke reference recipe); any user config or CLI flag overrides per key.
+#: Packaged config loaded as the parser's defaults for every run subcommand (the
+#: Det-smoke reference recipe); any user config or CLI flag overrides **per key**.
+#:
+#: Not "when no ``--config`` is given" — it is loaded either way, and a user config is
+#: merged on top of it rather than in place of it. A key the user's file omits is
+#: therefore inherited from a *detection* recipe, ``model.task`` being the case that
+#: costs the most; the module docstring's "Config inheritance" section works through it.
 _DEFAULT_CONFIG = "det_nano_smoke"
 
 #: Default progress-bar flavour. ``tqdm`` — not Lightning's rich-when-available

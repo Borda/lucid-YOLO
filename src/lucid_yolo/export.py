@@ -27,29 +27,46 @@ so an exporter must either receive them or constant-fold them; baking makes a
 graph's only input the image, which is what a deployment consumer expects, at the
 cost of the graph being specific to the ``canvas`` it was built for.
 
+**One exported file answers for exactly one input shape, batch included.** The
+canvas is fixed by the baked buffers, and the batch axis is fixed too:
+:func:`export_graph` passes no ``dynamic_axes``, so the emitted graph declares the
+static ``(B, 3, H, W)`` of the example it was traced on — ``B = 1`` unless a caller
+supplies its own example. A consumer needing a second canvas or a second batch size
+exports a second file rather than re-binding an axis of this one. Everything
+downstream of the trace is built for that: the decoders answer with a fixed
+``k``-row output precisely so no shape depends on how many objects an image holds.
+
 **A segmentation graph cannot filter its padding rows the way
-:func:`~lucid_yolo.predict.predict_segmentation` does.** That function drops rows
-whose anchor index is :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX` before
-gathering mask coefficients, because a caller looking at one picture wants a mask
-per object and a boolean filter is free to shrink the output. :class:`SegmentExportGraph`
-cannot do the same: a traced graph's output shape is fixed at trace time, so every
-one of its :attr:`~lucid_yolo.decode.topk_e2e.TopKDecoder.k` rows is gathered,
-padding rows included. Gathering a padding row's coefficients only works because
-the padding index is a valid (if meaningless) position in the coefficient tensor —
-which is true exactly when the anchor count exceeds ``k`` and no padding row is
-ever produced. A caller building a graph for a canvas whose anchor count is at or
-below ``k`` gets a padding row whose anchor index is
-:data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX` (``-1``), and gathering at ``-1``
-raises rather than silently misassembling a mask. This is the same constraint
-:mod:`tests.models.test_onnx_export`'s 128-pixel canvas is chosen to satisfy (336
-anchors above the 300 cap); it is restated here because this module has callers
-that fixture does not.
+:func:`~lucid_yolo.predict.predict_segmentation` does, so it refuses a canvas that
+would produce any.** That function drops rows whose anchor index is
+:data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX` before gathering mask
+coefficients, because a caller looking at one picture wants a mask per object and a
+boolean filter is free to shrink the output. :class:`SegmentExportGraph` cannot do
+the same: a traced graph's output shape is fixed at trace time, so every one of its
+:attr:`~lucid_yolo.decode.topk_e2e.TopKDecoder.k` rows is gathered, padding rows
+included. Gathering a padding row's coefficients only works because the padding
+index is a valid (if meaningless) position in the coefficient tensor — which is
+true exactly when the anchor count reaches ``k`` and no padding row is ever
+produced. Below that, the padding index is
+:data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX` (``-1``) and the gather raises
+rather than silently misassembling a mask, so
+:class:`SegmentExportGraph` checks the anchor count in ``__init__`` and rejects the
+canvas there, naming the count and the cap. The alternative — clamping the padding
+index and zeroing its gathered row, the way
+:func:`~lucid_yolo.eval.coco_eval.gather_keypoints` does for
+:class:`KeypointExportGraph` — would widen the supported canvases at the cost of a
+second copy of that padding rule living here; nothing asks for a sub-``k``
+segmentation canvas today, and a refusal that names the constraint is the cheaper
+honest answer. This is the same constraint :mod:`tests.models.test_onnx_export`'s
+128-pixel canvas is chosen to satisfy (336 anchors above the 300 cap); it is
+restated here because this module has callers that fixture does not.
 
 Provenance: R1 sec. 3.2.1, R3 sec. 4. Assumptions: A9, A23, A37, A45.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
@@ -67,12 +84,25 @@ if TYPE_CHECKING:
     from torch import Tensor
 
 __all__ = [
+    "ONNX_OPSET",
     "DetectExportGraph",
     "E2EExportGraph",
     "KeypointExportGraph",
     "OrientedExportGraph",
     "SegmentExportGraph",
+    "export_graph",
 ]
+
+#: ONNX opset every graph in this module is exported at. Pinned rather than left to
+#: :func:`torch.onnx.export`'s default (20 under torch 2.13) because the export gate
+#: asserts op *types*, not an opset: a torch upgrade that moves the default would change
+#: the emitted graph — different decompositions, a different IR version, a different
+#: minimum runtime — while every assertion in :mod:`tests.models.test_onnx_export` kept
+#: passing. Pinning makes that change a one-line edit with a visible diff instead. The
+#: value is 17 because it is the last opset at IR version 8, the version the ONNX
+#: runtimes and accelerator toolchains have accepted longest, and every op these four
+#: graphs emit exists there.
+ONNX_OPSET = 17
 
 
 class E2EExportGraph(nn.Module):
@@ -96,8 +126,23 @@ class E2EExportGraph(nn.Module):
             every stride in :data:`~lucid_yolo.assign.grid.HEAD_STRIDES`. Baked
             into the anchor buffers, so the graph this constructs answers only
             for images of this exact size.
-        device: Device the anchor buffers are built on. Defaults to CPU, the
-            device :func:`torch.onnx.export` traces a graph from.
+        device: Device the anchor buffers are built on *and* ``deployed`` is moved
+            to, so the two halves of the graph cannot end up on different devices —
+            buffers built on an accelerator while the wrapped model stayed wherever
+            the caller left it is a failure at the first forward, not at
+            construction. The move is in place, as
+            :func:`~lucid_yolo.predict.predict_image` moves the module it is handed:
+            a caller reusing ``deployed`` afterwards gets it on this device.
+            Defaults to CPU, the device :func:`torch.onnx.export` traces a graph
+            from.
+
+    Raises:
+        ValueError: If either ``canvas`` side is not positive and divisible by every
+            stride, per :func:`~lucid_yolo.assign.grid.require_grid_canvas`, which
+            :func:`~lucid_yolo.assign.grid.anchor_grid` applies as the buffers are
+            built. The divisibility this class documents is therefore checked here
+            rather than left to the caller: a canvas of 100 px would otherwise get
+            96 px worth of anchors and pair every prediction with the wrong pixel.
 
     Examples:
         >>> import torch
@@ -114,7 +159,7 @@ class E2EExportGraph(nn.Module):
     def __init__(self, deployed: nn.Module, canvas: tuple[int, int], device: torch.device | None = None) -> None:
         super().__init__()
         run_on = torch.device("cpu") if device is None else device
-        self.deployed = deployed
+        self.deployed = deployed.to(run_on)
         self.canvas = canvas
         points, strides = anchor_grid(canvas, run_on)
         self.register_buffer("anchor_points", points)
@@ -171,6 +216,26 @@ class SegmentExportGraph(E2EExportGraph):
     necessary divergence the module docstring explains: every one of the ``k``
     rows is gathered, padding rows included, because the output shape is fixed.
 
+    That divergence is what narrows this graph's supported canvases below its base
+    class's, so the narrowing is checked where it can still be reported as a
+    canvas choice: a canvas yielding fewer anchors than ``k`` is refused in
+    ``__init__``. Left unchecked it surfaces at the first forward — and therefore
+    mid-trace during :func:`export_graph`, since the exporter traces eagerly — as
+    ``index -1 is out of bounds``, which names neither the canvas nor the cap.
+
+    Args:
+        deployed: The ``deploy()`` view of a
+            :class:`~lucid_yolo.models.build.Segmenter`, as
+            :class:`E2EExportGraph` describes.
+        canvas: Input canvas ``(height, width)`` in pixels, additionally required to
+            yield at least ``k`` anchors.
+        device: Device the buffers are built on and ``deployed`` is moved to, as
+            :class:`E2EExportGraph` describes.
+
+    Raises:
+        ValueError: If ``canvas`` fails :class:`E2EExportGraph`'s divisibility
+            requirement, or yields fewer anchors than the decoder's ``k``.
+
     Examples:
         >>> import torch
         >>> from lucid_yolo.models.build import Segmenter
@@ -180,7 +245,20 @@ class SegmentExportGraph(E2EExportGraph):
         ...     detections, masks = graph(torch.zeros(1, 3, 128, 128))
         >>> detections.shape, masks.shape  # (B, k, 6) beside (B, k, H, W)
         (torch.Size([1, 300, 6]), torch.Size([1, 300, 128, 128]))
+        >>> SegmentExportGraph(deployed, canvas=(64, 64))  # 84 anchors, below k
+        Traceback (most recent call last):
+            ...
+        ValueError: canvas (64, 64) yields 84 anchors, below the 300-detection cap; padding rows have no coefficients
     """
+
+    def __init__(self, deployed: nn.Module, canvas: tuple[int, int], device: torch.device | None = None) -> None:
+        super().__init__(deployed, canvas, device)
+        anchors = int(self.anchor_points.shape[0])
+        if anchors < self.decoder.k:
+            raise ValueError(
+                f"canvas {canvas} yields {anchors} anchors, below the {self.decoder.k}-detection cap; "
+                f"padding rows have no coefficients"
+            )
 
     def forward(self, image: Tensor) -> tuple[Tensor, Tensor]:
         """Decode an image batch into fixed-size A9 detections and their masks.
@@ -297,3 +375,63 @@ class KeypointExportGraph(E2EExportGraph):
         detections, anchor_index = self.decoder.decode_with_indices(cls, box, self.anchor_points, self.strides)
         dense_points = decode_keypoints(raw_points, self.anchor_points, self.strides)
         return detections, gather_keypoints(dense_points, anchor_index)
+
+
+def export_graph(
+    graph: E2EExportGraph,
+    path: str | Path,
+    *,
+    example: Tensor | None = None,
+    opset_version: int = ONNX_OPSET,
+) -> Path:
+    """Write one export graph to an ONNX file at a pinned opset.
+
+    The shipped counterpart to the four graph classes above: they compose the decode,
+    this emits the file. It exists so the opset is pinned *somewhere a consumer runs*
+    rather than left to whatever :func:`torch.onnx.export`'s default is on the torch a
+    given machine installed — see :data:`ONNX_OPSET` for what that pin buys. The
+    export gate calls this function rather than :func:`torch.onnx.export` directly, so
+    the graph an operator gets is the graph the gate certified.
+
+    The emitted file is static in every axis: no ``dynamic_axes`` is passed, so it
+    answers for exactly the shape of ``example`` — the canvas ``graph`` baked into its
+    buffers, and that example's batch. A consumer needing a second shape exports a
+    second file.
+
+    Args:
+        graph: A built task graph — :class:`DetectExportGraph`,
+            :class:`SegmentExportGraph`, :class:`OrientedExportGraph` or
+            :class:`KeypointExportGraph` — in eval mode.
+        path: Destination ``.onnx`` file. Its parent directory must exist.
+        example: Input the graph is traced on, of shape ``(B, 3, H, W)`` matching
+            ``graph.canvas``. Defaults to a single zero image on the graph's own
+            device, which is enough: the graph has no data-dependent control flow, so
+            the trace records the same ops whatever the values are.
+        opset_version: ONNX opset the graph is emitted at. Defaults to
+            :data:`ONNX_OPSET`; a caller pinned to a different runtime overrides it,
+            and the gate's op assertions then no longer speak for the result.
+
+    Returns:
+        The written path.
+
+    Examples:
+        >>> import tempfile
+        >>> import torch
+        >>> from pathlib import Path
+        >>> from lucid_yolo.models.build import Detector
+        >>> deployed = Detector("n", num_classes=4).eval().deploy().eval()
+        >>> graph = DetectExportGraph(deployed, canvas=(64, 64)).eval()
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     written = export_graph(graph, Path(tmp) / "detect.onnx")
+        ...     written.is_file()
+        True
+    """
+    destination = Path(path)
+    traced_on = torch.zeros(1, 3, *graph.canvas, device=graph.anchor_points.device) if example is None else example
+    with torch.no_grad():
+        # The legacy TorchScript exporter: `dynamo=True` (the torch 2.13 default) needs
+        # `onnxscript`, and the legacy path emits a fully static graph here with no
+        # extra dependency. It warns that it is deprecated; when it is removed, this is
+        # the line that changes, and `onnxscript` joins the dev group.
+        torch.onnx.export(graph, (traced_on,), str(destination), dynamo=False, opset_version=opset_version)
+    return destination

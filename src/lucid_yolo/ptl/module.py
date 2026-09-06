@@ -652,9 +652,14 @@ class DetectionLitModule(LightningModule):
             ``keypoint_gain``, leaving every detection term as it was.
             Defaults to ``"detect"``.
         num_keypoints: Point count ``K`` both head branches predict under
-            ``task="keypoints"``; **required** for that task and ignored otherwise.
-            It has no default on purpose — ``K`` describes the dataset's annotation
-            schema, not the method (the module docstring argues the case).
+            ``task="keypoints"``; **required** for that task and refused for every
+            other one. It has no default on purpose — ``K`` describes the dataset's
+            annotation schema, not the method (the module docstring argues the case).
+            The two directions are both errors on purpose: a missing count under
+            ``"keypoints"`` has nothing to guess, and a count under any other task
+            names a schema the head builds no stem for, so the module would train
+            no points while ``save_hyperparameters`` recorded ``K`` for a reader to
+            trust later.
         lr: Base learning rate for MuSGD (``lr0``; the A8 schedule decays from
             it). Defaults to ``0.01``.
         lrf: Final LR fraction of the A8 linear decay — the LR ends at
@@ -734,8 +739,9 @@ class DetectionLitModule(LightningModule):
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
             ``"keypoints"``, if ``rotated_iou_form`` is not a known rotated-IoU form,
-            if ``keypoint_loss`` is not a known keypoint objective, or if
-            ``task="keypoints"`` was asked for without a ``num_keypoints``.
+            if ``keypoint_loss`` is not a known keypoint objective, if
+            ``task="keypoints"`` was asked for without a ``num_keypoints``, or if a
+            ``num_keypoints`` was given for a task that builds no point stem.
 
     Examples:
         >>> import torch
@@ -788,6 +794,13 @@ class DetectionLitModule(LightningModule):
             raise ValueError(
                 "task='keypoints' needs an explicit num_keypoints: the point count is a property of the "
                 "dataset's annotation schema (COCO person is 17), so there is no default to fall back on"
+            )
+        if task != "keypoints" and num_keypoints is not None:
+            raise ValueError(
+                f"num_keypoints={num_keypoints} is meaningless for task={task!r}: only the 'keypoints' "
+                f"task builds the point stem, so this module would predict no points at all while "
+                f"save_hyperparameters records a point schema its checkpoint cannot honour. Set "
+                f"task='keypoints' to train points, or drop num_keypoints"
             )
         self.save_hyperparameters()
         self._task = task

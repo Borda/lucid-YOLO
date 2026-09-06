@@ -807,16 +807,31 @@ class _DeployedSegmenter(nn.Module):
         return branch.cls, branch.box, branch.coeff, prototypes
 
 
-def build_segmenter(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> Segmenter:
+def build_segmenter(
+    variant: str, num_classes: int = _DEFAULT_NUM_CLASSES, num_coeffs: int = DEFAULT_NUM_COEFFS
+) -> Segmenter:
     """Build a :class:`Segmenter` for a named scale variant.
+
+    ``num_coeffs`` is forwarded rather than fixed. :class:`Segmenter` has always
+    accepted it, and a builder that dropped it made the class's own third argument
+    unreachable through the function the package exports for building one — a caller
+    wanting a narrower coefficient width had to bypass the builder and instantiate the
+    class, which is precisely the seam builders exist to remove.
+
+    The default is unchanged, so every model this function built before is the model it
+    builds now, byte-identical state dict included; the WP-023 parameter and FLOP
+    goldens read the default path and do not move.
 
     Args:
         variant: Scale name (``"n"``/``"s"``/``"m"``/``"l"``/``"x"``).
         num_classes: Number of object classes. Defaults to 80 (COCO).
+        num_coeffs: Mask-coefficient width ``K`` (A14), shared by the head's
+            coefficient stems and the prototype stack — one prototype per
+            coefficient. Defaults to :data:`DEFAULT_NUM_COEFFS`.
 
     Returns:
-        The assembled :class:`Segmenter` module, with the default A14
-        coefficient width ``K`` shared by the head and the prototype stack.
+        The assembled :class:`Segmenter` module, its head and prototype stack both
+        built at ``num_coeffs``.
 
     Raises:
         KeyError: If ``variant`` is not one of the five published names.
@@ -827,8 +842,14 @@ def build_segmenter(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> Se
         ('s', 80, 32)
         >>> model.protonet.num_prototypes  # one prototype per coefficient
         32
+
+        A narrower coefficient width reaches both halves of Eq. 7 together:
+
+        >>> narrow = build_segmenter("n", num_classes=4, num_coeffs=16)
+        >>> narrow.num_coeffs, narrow.protonet.num_prototypes
+        (16, 16)
     """
-    return Segmenter(variant, num_classes)
+    return Segmenter(variant, num_classes, num_coeffs)
 
 
 def count_params(module: nn.Module) -> int:

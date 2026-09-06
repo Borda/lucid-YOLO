@@ -165,6 +165,37 @@ class TestEdgeCases:
 
         assert torch.equal(matrix, original)
 
+    def test_float64_is_not_demoted_to_float32(self) -> None:
+        """A float64 input keeps float64 arithmetic instead of being computed at fp32.
+
+        The iteration used to cast every input to float32 unconditionally, then return
+        the fp32 answer wearing the caller's dtype. A magnitude float64 holds and float32
+        does not makes that visible rather than merely imprecise: ``1e200`` overflows the
+        fp32 range, so the normalization divided infinity by infinity and every entry
+        came back NaN under a ``torch.float64`` dtype that claimed otherwise.
+        """
+        matrix = torch.eye(4, dtype=torch.float64) * 1e200
+
+        result = orthogonalize(matrix)
+
+        assert result.dtype == torch.float64
+        assert torch.isfinite(result).all()
+
+    def test_float16_still_promotes_to_float32(self) -> None:
+        """A half-precision input is computed at float32, which is the A5/AMP gate.
+
+        The float64 fix promotes rather than pins, so this is the half it must not have
+        broken: fp16 is narrower than float32 and the iteration's ``x @ x.T`` products
+        overflow its range readily, which is why the promotion existed at all. The
+        returned dtype is still the caller's.
+        """
+        matrix = torch.randn(32, 64).to(torch.float16)
+
+        result = orthogonalize(matrix)
+
+        assert result.dtype == torch.float16
+        assert torch.isfinite(result).all()
+
 
 class TestInputValidation:
     """Non-2D inputs and step counts that run no iteration are rejected."""

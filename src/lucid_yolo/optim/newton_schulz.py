@@ -29,9 +29,28 @@ def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
     Runs the quintic Newton-Schulz iteration (R7, R8) for ``steps`` iterations.
     The input is first scaled to unit Frobenius norm so the iteration converges;
     tall inputs (more rows than columns) are transposed to the wide orientation
-    to halve the cost of the ``X @ X^T`` product, then transposed back. All
-    arithmetic runs in float32 regardless of the input dtype (A5/Phase-4 gate:
-    fp32 under AMP), and the result is cast back to the input dtype.
+    to halve the cost of the ``X @ X^T`` product, then transposed back.
+
+    Arithmetic runs at ``promote_types(matrix.dtype, float32)`` — float32 or wider,
+    never narrower — and the result is cast back to the input dtype. That keeps the
+    A5/Phase-4 gate intact where it applies: an fp16 or bf16 momentum buffer under AMP
+    still promotes up to float32, which is the case the gate is about. What it no longer
+    does is *demote*: a float64 caller used to have its iteration run at fp32 and the
+    fp32 answer returned to it as a float64 tensor, so the dtype it read back overstated
+    the precision it got, and an input whose magnitude exceeds the fp32 range (``1e200``,
+    say) overflowed to infinity and returned NaNs.
+
+    Scale-invariance has one floor. The initial normalization divides by
+    ``‖M‖_F + eps`` rather than by ``‖M‖_F``, so it is exactly scale-invariant only
+    while ``‖M‖_F >> eps``. Below roughly ``1e-7`` — the default ``eps`` — the added
+    constant is a growing fraction of the divisor, the normalized matrix comes out
+    short of unit norm, and the iteration lands off the fixed point it converges to
+    elsewhere: at ``‖M‖_F = 1e-8`` the largest singular value of the result overshoots
+    by about 7%. This is the published R8 formula and the behaviour is left as it
+    stands; the floor is recorded because a caller orthogonalizing a near-zero
+    momentum buffer is the one who meets it. A genuinely zero matrix is unaffected —
+    ``eps`` is what makes it return zeros instead of NaNs, which is the reason it is
+    there.
 
     The input is never mutated in place, and no gradient context is entered here
     -- the caller (the optimizer) is expected to wrap the call in
@@ -42,7 +61,9 @@ def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
         matrix: A 2D tensor of any floating-point dtype.
         steps: Number of Newton-Schulz iterations to run (default 5, per A5).
         eps: Small constant added to the Frobenius norm before the initial
-            normalization to avoid division by zero on a zero matrix.
+            normalization to avoid division by zero on a zero matrix. It is also
+            the scale floor described above: normalization is scale-invariant only
+            for ``‖matrix‖_F`` well above this value.
 
     Returns:
         A tensor with the same shape and dtype as ``matrix`` whose singular
@@ -78,6 +99,13 @@ def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
         Traceback (most recent call last):
             ...
         ValueError: orthogonalize needs steps >= 1 to iterate, got steps=0
+
+        A float64 caller keeps float64 arithmetic, so a magnitude fp32 cannot hold
+        survives the iteration instead of overflowing to NaN:
+
+        >>> big = torch.eye(4, dtype=torch.float64) * 1e200
+        >>> bool(torch.isfinite(orthogonalize(big)).all())
+        True
     """
     if matrix.ndim != 2:
         msg = f"orthogonalize expects a 2D matrix, got a {matrix.ndim}D tensor"
@@ -90,9 +118,11 @@ def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
     in_dtype = matrix.dtype
     a, b, c = _COEFFS
 
-    # fp32 throughout; the division below always allocates a fresh tensor, so the
-    # input is never written to in place even when ``.to`` returns it unchanged.
-    x = matrix.to(torch.float32)
+    # fp32 or the input's own dtype, whichever is wider: promote fp16/bf16 up to fp32
+    # (the A5 AMP gate) without demoting fp64 down to it. The division below always
+    # allocates a fresh tensor, so the input is never written to in place even when
+    # ``.to`` returns it unchanged.
+    x = matrix.to(torch.promote_types(in_dtype, torch.float32))
 
     # Iterate on the wide orientation: transpose tall matrices so ``x @ x.T`` acts
     # on the smaller ``min(rows, cols)`` dimension.

@@ -20,7 +20,8 @@ import torch
 from torch import Tensor, nn
 
 from lucid_yolo.assign.grid import make_anchor_points
-from lucid_yolo.models import Segmenter, assemble_masks, count_flops, count_params
+from lucid_yolo.models import Segmenter, assemble_masks, build_segmenter, count_flops, count_params
+from lucid_yolo.models.build import DEFAULT_NUM_COEFFS
 from lucid_yolo.models.heads import SemanticAux
 
 #: Smallest variant — the wiring is scale-independent, so the cheapest one proves it.
@@ -247,3 +248,32 @@ def test_flop_counting_traces_both_the_full_and_deployed_models() -> None:
     assert full > 0.0
     assert deployed > 0.0
     assert full > deployed, "the training-only branches must cost something"
+
+
+def test_builder_forwards_a_non_default_coefficient_width() -> None:
+    """``build_segmenter`` reaches the ``num_coeffs`` its own class accepts.
+
+    The builder used to call ``Segmenter(variant, num_classes)`` and drop the third
+    argument, so the exported way to build a segmenter could only ever produce the A14
+    default width -- a caller wanting a narrower one had to bypass the builder and
+    instantiate the class, which is the seam a builder exists to remove. Both halves of
+    Eq. 7 have to move together: a head emitting ``K`` coefficients against a prototype
+    stack of a different count cannot contract at all.
+    """
+    model = build_segmenter(_VARIANT, num_classes=_NUM_CLASSES, num_coeffs=_NUM_COEFFS)
+
+    assert model.num_coeffs == _NUM_COEFFS
+    assert model.protonet.num_prototypes == _NUM_COEFFS, "one prototype per coefficient"
+
+
+def test_builder_default_coefficient_width_is_unchanged() -> None:
+    """Omitting ``num_coeffs`` still builds the A14 default the frozen goldens measure.
+
+    The forwarding above added a parameter with a default rather than changing one, and
+    this is the half that keeps ``tests/models/test_param_flops.py`` meaningful: the
+    model this function builds with two arguments must be the model it built before.
+    """
+    model = build_segmenter(_VARIANT, num_classes=_NUM_CLASSES)
+
+    assert model.num_coeffs == DEFAULT_NUM_COEFFS
+    assert model.protonet.num_prototypes == DEFAULT_NUM_COEFFS

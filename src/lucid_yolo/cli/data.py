@@ -53,6 +53,14 @@ if TYPE_CHECKING:
 
 __all__ = ["SUBCOMMANDS", "build_parser", "main"]
 
+#: The flag name :func:`build_parser` gives every subparser, and the one key
+#: :func:`main` drops before calling the operation. jsonargparse's ``"config"`` action
+#: consumes it while parsing and spreads the file's contents across the real arguments;
+#: the namespace entry it leaves behind names the file that was read, which no operation
+#: function takes. The action is named by string rather than by importing
+#: ``ActionConfigFile``, which jsonargparse does not export from its package root.
+_CONFIG_FLAG = "config"
+
 #: Subcommand name to the function that implements it. The parser is built from these
 #: signatures, so adding an operation is one entry here and one typed function.
 SUBCOMMANDS: dict[str, Callable[..., int]] = {
@@ -82,6 +90,13 @@ def build_parser() -> ArgumentParser:
         # The summary line only: the full docstring would print its Examples section,
         # doctest directives and all, into the subcommand's help.
         subparser = ArgumentParser(description=_summary(function))
+        # Every command takes `--config` (AGENTS.md sec. 2). The other three commands get
+        # it for free: `lucid-yolo` is a LightningCLI and `lucid-eval`/`lucid-predict` go
+        # through `auto_cli`, both of which add an `ActionConfigFile` themselves. This
+        # parser is built by hand, and `add_subcommands` adds nothing to a subparser, so
+        # the flag has to be asked for here -- per subparser, because that is the level
+        # the arguments a config file would set actually live at.
+        subparser.add_argument(f"--{_CONFIG_FLAG}", action="config")
         subparser.add_function_arguments(function)
         subcommands.add_subcommand(name, subparser, help=_summary(function))
     return parser
@@ -104,7 +119,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     config = build_parser().parse_args(argv)
     command = str(config.command)
-    return SUBCOMMANDS[command](**config[command].as_dict())
+    arguments = config[command].as_dict()
+    # `ActionConfigFile` has already applied the file's contents to the real arguments by
+    # the time parsing returns; what stays in the namespace is a record of which file was
+    # read, and no operation function has a parameter for it. Splatting it through would
+    # make every subcommand a TypeError -- including the ones invoked without `--config`,
+    # whose namespace carries the key with `None` in it.
+    arguments.pop(_CONFIG_FLAG, None)
+    return SUBCOMMANDS[command](**arguments)
 
 
 def _summary(function: Callable[..., int]) -> str:

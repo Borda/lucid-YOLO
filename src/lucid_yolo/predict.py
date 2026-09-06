@@ -41,6 +41,23 @@ checker, which can only see the union. The split is the one
 :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward_segmentation` already make one
 layer down, for the same reason.
 
+Module ownership:
+    All four entry points **mutate the module they are given**. Each runs
+    ``module.to(run_on).eval()`` before its forward pass, which moves the parameters and
+    buffers of the caller's own object and switches its training flag — both in place,
+    both still in effect after the function returns. A caller who hands over a CUDA
+    module and passes ``device=torch.device("cpu")`` gets its detections and a module
+    left on the CPU; a caller who was mid-training and reuses the module afterwards
+    finds it in eval mode, with batch-norm reading its running statistics instead of the
+    batch's.
+
+    This is deliberate and not worth copying around: a module is the large object in the
+    call and the normal caller — :mod:`lucid_yolo.cli.predict` — loads it, predicts, and
+    drops it, so a defensive :func:`copy.deepcopy` would double peak memory for every
+    such caller to protect one who has another use for the object. It is recorded here
+    because it is invisible at the call site. A caller who does need the module back
+    unchanged copies it, or restores it with ``module.to(previous_device).train()``.
+
 Assumptions:
     Labels come out as **contiguous class indices**, not dataset category ids. The
     evaluator maps them back through the annotation file's category order, and a single
@@ -156,6 +173,62 @@ _OBB_TASK = "obb"
 #: The task :func:`predict_keypoints` serves.
 _KEYPOINTS_TASK = "keypoints"
 
+#: Each task's entry point and what that entry point answers with, in the wording its
+#: siblings' refusals quote. One row per task, and every refusal below is composed from
+#: the rows it does *not* own, so a message cannot name a subset of its siblings.
+#:
+#: This is the table because the hand-written form failed exactly once and silently.
+#: Three of these functions predate the fourth; each was written naming the two siblings
+#: that existed then, and WP-152 added ``predict_keypoints`` — whose own message names
+#: all three — without revisiting the three that now had a sibling they never mentioned.
+#: A reader holding a pose checkpoint and calling :func:`predict_image` was told about
+#: segmentation and orientation and not about the function they wanted. A fifth task is
+#: one row here and appears in all four messages at once.
+_TASK_ENTRY_POINTS: dict[str, tuple[str, str]] = {
+    _DETECT_TASK: ("predict_image", "answers with axis-aligned corners and nothing beside them"),
+    _SEGMENT_TASK: ("predict_segmentation", "returns each object's instance mask beside its box"),
+    _OBB_TASK: ("predict_oriented", "returns rotated boxes, a centre and two extents and an angle"),
+    _KEYPOINTS_TASK: ("predict_keypoints", "returns a point set row-aligned with each box"),
+}
+
+
+def _wrong_task_message(handled: str, found: str) -> str:
+    """Compose the refusal one entry point raises for a checkpoint of another task.
+
+    The message names the function that was called, the task it serves, the task the
+    checkpoint actually carries, and **every** other entry point with what it answers
+    with — built from :data:`_TASK_ENTRY_POINTS` rather than written out, so no message
+    can go stale when a task is added. The point of naming all of them is that the
+    caller's next move is in the message: they are holding a checkpoint and want the
+    function that reads it.
+
+    Args:
+        handled: The task the calling entry point serves.
+        found: The task the checkpoint actually carries.
+
+    Returns:
+        The refusal text, ready to hand to :class:`ValueError`.
+
+    Examples:
+        >>> print(_wrong_task_message("detect", "keypoints"))  # doctest: +NORMALIZE_WHITESPACE
+        predict_image handles task='detect'; this checkpoint's task is 'keypoints'.
+        Each task has its own entry point: a 'segment' checkpoint goes through
+        predict_segmentation, which returns each object's instance mask beside its box;
+        a 'obb' checkpoint goes through predict_oriented, which returns rotated boxes,
+        a centre and two extents and an angle; a 'keypoints' checkpoint goes through
+        predict_keypoints, which returns a point set row-aligned with each box.
+    """
+    own_function = _TASK_ENTRY_POINTS[handled][0]
+    siblings = "; ".join(
+        f"a {task!r} checkpoint goes through {function}, which {answers}"
+        for task, (function, answers) in _TASK_ENTRY_POINTS.items()
+        if task != handled
+    )
+    return (
+        f"{own_function} handles task={handled!r}; this checkpoint's task is {found!r}. "
+        f"Each task has its own entry point: {siblings}."
+    )
+
 
 def _check_predict_arguments(decoder: DecodePath, conf_threshold: float, img_size: int) -> None:
     """Refuse the three argument values every entry point below would otherwise answer plausibly for.
@@ -214,6 +287,7 @@ def predict_image(
     Args:
         module: An eval-mode ``detect`` module, as
             :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
+            **Mutated in place** — see the module docstring's *Module ownership*.
         image: Path to the image file to read.
         img_size: Letterbox side the model sees. Defaults to ``640`` (R1 sec. 4.4).
         decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one
@@ -239,12 +313,7 @@ def predict_image(
         True
     """
     if module.task != _DETECT_TASK:
-        raise ValueError(
-            f"predict_image handles task={_DETECT_TASK!r}; this checkpoint's task is {module.task!r}. "
-            f"A segmentation checkpoint goes through predict_segmentation, which returns its masks "
-            f"beside its boxes, and an oriented one through predict_oriented, which returns rotated "
-            f"boxes rather than the axis-aligned corners this function's tuple carries."
-        )
+        raise ValueError(_wrong_task_message(_DETECT_TASK, module.task))
     _check_predict_arguments(decoder, conf_threshold, img_size)
     run_on = torch.device("cpu") if device is None else device
     letterbox = Letterbox(img_size)
@@ -333,6 +402,7 @@ def predict_segmentation(
     Args:
         module: An eval-mode ``segment`` module, as
             :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
+            **Mutated in place** — see the module docstring's *Module ownership*.
         image: Path to the image file to read.
         img_size: Letterbox side the model sees. Defaults to ``640`` (R1 sec. 4.4).
         decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one
@@ -359,11 +429,7 @@ def predict_segmentation(
         True
     """
     if module.task != _SEGMENT_TASK:
-        raise ValueError(
-            f"predict_segmentation handles task={_SEGMENT_TASK!r}; this checkpoint's task is {module.task!r}. "
-            f"A detection checkpoint goes through predict_image, which has no masks to return, and an "
-            f"oriented one through predict_oriented, which has an angle instead of them."
-        )
+        raise ValueError(_wrong_task_message(_SEGMENT_TASK, module.task))
     _check_predict_arguments(decoder, conf_threshold, img_size)
     run_on = torch.device("cpu") if device is None else device
     letterbox = Letterbox(img_size)
@@ -510,6 +576,7 @@ def predict_oriented(
     Args:
         module: An eval-mode ``obb`` module, as
             :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
+            **Mutated in place** — see the module docstring's *Module ownership*.
         image: Path to the image file to read.
         img_size: Letterbox side the model sees. Defaults to
             :data:`DEFAULT_ORIENTED_IMG_SIZE`, the 1024 px the oriented tier trains at
@@ -543,12 +610,7 @@ def predict_oriented(
         True
     """
     if module.task != _OBB_TASK:
-        raise ValueError(
-            f"predict_oriented handles task={_OBB_TASK!r}; this checkpoint's task is {module.task!r}. "
-            f"A detection checkpoint goes through predict_image and a segmentation one through "
-            f"predict_segmentation; both answer with axis-aligned corners, which is what a head "
-            f"without an angle stem can say."
-        )
+        raise ValueError(_wrong_task_message(_OBB_TASK, module.task))
     _check_predict_arguments(decoder, conf_threshold, img_size)
     run_on = torch.device("cpu") if device is None else device
     letterbox = Letterbox(img_size)
@@ -692,6 +754,7 @@ def predict_keypoints(
     Args:
         module: An eval-mode ``keypoints`` module, as
             :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
+            **Mutated in place** — see the module docstring's *Module ownership*.
         image: Path to the image file to read.
         img_size: Letterbox side the model sees. Defaults to ``640`` (R1 sec. 4.4).
         decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one
@@ -721,12 +784,7 @@ def predict_keypoints(
         ```
     """
     if module.task != _KEYPOINTS_TASK:
-        raise ValueError(
-            f"predict_keypoints handles task={_KEYPOINTS_TASK!r}; this checkpoint's task is {module.task!r}. "
-            f"A detection checkpoint goes through predict_image, which has no points to return, a "
-            f"segmentation one through predict_segmentation, which has masks instead of them, and an "
-            f"oriented one through predict_oriented, which has an angle."
-        )
+        raise ValueError(_wrong_task_message(_KEYPOINTS_TASK, module.task))
     _check_predict_arguments(decoder, conf_threshold, img_size)
     run_on = torch.device("cpu") if device is None else device
     letterbox = Letterbox(img_size)
@@ -749,7 +807,12 @@ def predict_keypoints(
     keep = (detections[0, :, SCORE_COLUMN] > conf_threshold) & (anchor_index[0] >= 0)
     kept = detections[0][keep]
     dense_points = decode_keypoints(raw_points, anchor_points, strides)
-    canvas_points = dense_points[0].index_select(0, anchor_index[0][keep].to(torch.int64))
+    # No dtype cast on the index: both decoders' `decode_with_indices` document a *long*
+    # tensor, so the cast this line used to carry was a no-op that only the keypoint path
+    # had — its mask-path sibling in `_canvas_masks` gathers by the same indices with no
+    # cast at all. Two spellings of one contract invite the reader to believe the paths
+    # differ; they do not.
+    canvas_points = dense_points[0].index_select(0, anchor_index[0][keep])
     mapped = to_letterboxed_original(
         kept.unsqueeze(0).cpu(), orig_size=orig_size, letterboxed_size=canvas, allow_upscale=letterbox.allow_upscale
     )

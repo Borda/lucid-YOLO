@@ -407,9 +407,80 @@ def predict(
         # Created rather than required, for the reason `detect_eval.run` states: the
         # forward pass is the expensive part and this file is its only durable form.
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(payload, indent=2) + "\n")
+        output.write_text(_report_json(payload))
         print(f"report -> {output}")
     return 0
+
+
+def _refuse_non_finite(value: object, where: str) -> None:
+    """Raise if any float anywhere in a payload is ``NaN`` or an infinity.
+
+    Args:
+        value: The payload or any node inside it.
+        where: Dotted path of ``value`` within the report, used in the message so the
+            offending field is named rather than merely reported to exist.
+
+    Raises:
+        ValueError: If ``value`` is, or contains, a non-finite float.
+
+    Examples:
+        >>> _refuse_non_finite({"detections": [{"score": 0.9}]}, "report")  # finite: returns nothing
+        >>> _refuse_non_finite({"detections": [{"score": float("nan")}]}, "report")
+        Traceback (most recent call last):
+            ...
+        ValueError: report.detections[0].score is nan, which JSON cannot represent...
+    """
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(
+                f"{where} is {value}, which JSON cannot represent. A non-finite geometry or score "
+                f"means the checkpoint produced one, and writing the report anyway would hide that "
+                f"behind a file no strict parser can read. Investigate the checkpoint rather than "
+                f"the report."
+            )
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _refuse_non_finite(item, f"{where}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _refuse_non_finite(item, f"{where}[{index}]")
+
+
+def _report_json(payload: dict[str, object]) -> str:
+    """Serialize a report payload, refusing anything JSON cannot represent.
+
+    **The boundary refuses rather than sanitises.** ``NaN`` and ``Infinity`` are not
+    JSON: :func:`json.dumps` emits them as bare tokens by default, which Python's own
+    :func:`json.loads` accepts and a strict parser — every browser, ``jq``, most other
+    languages' standard libraries — rejects, so the report reads as valid until someone
+    outside Python opens it. Substituting ``null`` or ``0.0`` instead would produce a
+    file that parses everywhere and quietly misstates a detection's geometry, which is
+    the worse of the two failures: a run that produced a non-finite box did something
+    the caller needs to know about, and a report is the wrong place to absorb it.
+
+    Two layers, deliberately. :func:`_refuse_non_finite` walks the payload so the error
+    names the field; ``allow_nan=False`` then backs it up at the encoder, so a numeric
+    field added to a record later is refused even if the walk has not been taught about
+    its container.
+
+    Args:
+        payload: The report object, as :func:`predict` assembles it.
+
+    Returns:
+        The serialized report, newline-terminated, ready to write.
+
+    Raises:
+        ValueError: If any numeric field in ``payload`` is ``NaN`` or an infinity.
+
+    Examples:
+        >>> print(_report_json({"image": "a.jpg", "detections": []}), end="")
+        {
+          "image": "a.jpg",
+          "detections": []
+        }
+    """
+    _refuse_non_finite(payload, "report")
+    return json.dumps(payload, indent=2, allow_nan=False) + "\n"
 
 
 def _to_records(detections: Tensor) -> list[DetectionRecord]:

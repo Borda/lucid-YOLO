@@ -59,6 +59,16 @@ and ``(1, 300, 7)`` with no padding rows — the same regime as the 640 px produ
 input, where 8400 anchors sit above the same cap. Every compared row is a real
 detection.
 
+Two things the gate deliberately does not leave to a default. The **opset** is
+:data:`~lucid_yolo.export.ONNX_OPSET`, applied by
+:func:`~lucid_yolo.export.export_graph` — the same call an operator makes, so what is
+certified here is what ships, and a torch upgrade that moved the exporter's default
+opset cannot change the emitted graph while these assertions keep passing. The **scale**
+is not only ``n``: detection is exported at ``s`` as well, because a gate that ran one
+scale would pass on a graph whose shapes happened to be right for one set of channel
+widths — the ``n`` widths are the smallest the registry defines and are the likeliest to
+coincide with a hard-coded one.
+
 Provenance: R1 sec. 3.2.1, R3 sec. 4. Assumptions: A9, A23, A37, A45.
 """
 
@@ -80,11 +90,13 @@ from lucid_yolo.eval.checkpoint import load_eval_module
 from lucid_yolo.eval.coco_eval import gather_keypoints
 from lucid_yolo.eval.segment_decode import decode_instance_masks
 from lucid_yolo.export import (
+    ONNX_OPSET,
     DetectExportGraph,
     E2EExportGraph,
     KeypointExportGraph,
     OrientedExportGraph,
     SegmentExportGraph,
+    export_graph,
 )
 from lucid_yolo.models.build import Detector, KeypointDetector, OrientedDetector, Segmenter
 from lucid_yolo.models.heads.keypoint import decode_keypoints
@@ -102,8 +114,22 @@ _CANVAS = (128, 128)
 _DET_CAP = 300
 
 _NUM_CLASSES = 4
+
+#: Model scale every task is exported at.
 _VARIANT = "n"
-_TASKS = ("detect", "segment", "obb", "keypoints")
+
+#: The ``(task, variant)`` pairs the gate exports: all four tasks at the default scale,
+#: plus detection at a second one. The second scale is what keeps the shape assertions
+#: from being satisfiable by a graph built for one set of channel widths (see the module
+#: docstring); it rides on detection because the decode it exercises is the one the other
+#: three build on.
+_EXPORT_CASES = (
+    pytest.param(("detect", _VARIANT), id="detect-n"),
+    pytest.param(("segment", _VARIANT), id="segment-n"),
+    pytest.param(("obb", _VARIANT), id="obb-n"),
+    pytest.param(("keypoints", _VARIANT), id="keypoints-n"),
+    pytest.param(("detect", "s"), id="detect-s"),
+)
 
 #: Point count K the keypoint task is exported at. Deliberately not COCO's 17: K is a
 #: constructor argument, and a gate that only ever ran at 17 would not catch a shape
@@ -145,6 +171,7 @@ class _Exported:
 
     Attributes:
         task: One of ``"detect"``, ``"segment"``, ``"obb"``, ``"keypoints"``.
+        variant: The registry scale the model was built at.
         path: The written ``.onnx`` file.
         image: The input the graph was exported and compared on.
         reference: Eager outputs of the checkpoint-loaded module, decoded through the
@@ -153,6 +180,7 @@ class _Exported:
     """
 
     task: str
+    variant: str
     path: Path
     image: Tensor
     reference: list[Tensor]
@@ -172,12 +200,21 @@ _GRAPHS: dict[str, type[E2EExportGraph]] = {
 def _discriminative(module: DetectionLitModule) -> DetectionLitModule:
     """Make an untrained module produce a decidable ranking and non-empty boxes.
 
-    Three edits, each answering a specific degeneracy the module docstring describes:
+    Four edits, each answering a specific degeneracy the module docstring describes:
     the BatchNorm running statistics are calibrated by forward passes in train mode (no
     gradients, no optimizer — this is not training); the classification stems are
     rescaled to :data:`_TARGET_LOGIT_STD` after their prior bias is cleared, so scores
-    separate instead of collapsing onto one float32 value; and the box stems are biased
-    positive so decoded boxes have interiors.
+    separate instead of collapsing onto one float32 value; those stems are then
+    re-biased to centre the logits on zero; and the box stems are biased positive so
+    decoded boxes have interiors.
+
+    The centring is what makes the calibration scale-independent, which is the whole
+    point of exporting a second scale. A spread is not enough on its own: at ``s`` the
+    same std-2.0 logits sit around a mean of 1.6, every one of the 336 anchors clears
+    the sigmoid's saturating shoulder, and 300 scores land inside a 0.016-wide band —
+    row-to-row gaps of the same order as the two backends' own float32 disagreement,
+    which is a ranking decided by noise. Centring puts the spread where the sigmoid is
+    steep, at every scale.
 
     Args:
         module: A freshly constructed module, modified in place.
@@ -215,16 +252,20 @@ def _discriminative(module: DetectionLitModule) -> DetectionLitModule:
         factor = _TARGET_LOGIT_STD / float(module(probe).o2o_cls.std())
         for stem in module.head.o2o.cls_stems:
             stem[-1].weight.mul_(factor)
+        centre = float(module(probe).o2o_cls.mean())
+        for stem in module.head.o2o.cls_stems:
+            stem[-1].bias.fill_(-centre)
         for stem in module.head.o2o.box_stems:
             stem[-1].bias.fill_(_BOX_BIAS)
     return module
 
 
-def _checkpoint_module(task: str, tmp: Path) -> DetectionLitModule:
-    """Write a Lightning checkpoint for ``task`` and load it back the way an operator does.
+def _checkpoint_module(task: str, variant: str, tmp: Path) -> DetectionLitModule:
+    """Write a Lightning checkpoint for ``task`` at ``variant`` and load it back the way an operator does.
 
     Args:
         task: One of ``"detect"``, ``"segment"``, ``"obb"``, ``"keypoints"``.
+        variant: Registry scale the module is built at.
         tmp: Directory the ``.ckpt`` is written into.
 
     Returns:
@@ -237,13 +278,13 @@ def _checkpoint_module(task: str, tmp: Path) -> DetectionLitModule:
         <torch._C.Generator object at ...>
         >>> with tempfile.TemporaryDirectory() as tmp:
         ...     tmp_path = Path(tmp)
-        ...     module = _checkpoint_module("detect", tmp_path)
+        ...     module = _checkpoint_module("detect", _VARIANT, tmp_path)
         ...     (tmp_path / "detect.ckpt").is_file()
         True
         >>> module.training
         False
     """
-    spec = scale_spec(_VARIANT)
+    spec = scale_spec(variant)
     built = _discriminative(
         DetectionLitModule(
             depth=spec.depth,
@@ -270,7 +311,7 @@ def _checkpoint_module(task: str, tmp: Path) -> DetectionLitModule:
     return loaded
 
 
-def _deployed(module: DetectionLitModule, task: str) -> nn.Module:
+def _deployed(module: DetectionLitModule, task: str, variant: str) -> nn.Module:
     """Move the checkpoint's weights into the task's model and return its deploy view.
 
     The Lightning module keeps ``backbone``/``neck``/``head`` as flat attributes
@@ -281,6 +322,7 @@ def _deployed(module: DetectionLitModule, task: str) -> nn.Module:
     Args:
         module: The checkpoint-loaded module.
         task: One of ``"detect"``, ``"segment"``, ``"obb"``, ``"keypoints"``.
+        variant: Registry scale the model is built at, matching ``module``'s.
 
     Returns:
         The eval-mode ``deploy()`` view, sharing the checkpoint's weights.
@@ -291,15 +333,15 @@ def _deployed(module: DetectionLitModule, task: str) -> nn.Module:
         >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
         <torch._C.Generator object at ...>
         >>> with tempfile.TemporaryDirectory() as tmp:
-        ...     module = _checkpoint_module("detect", Path(tmp))
-        >>> deployed = _deployed(module, "detect")
+        ...     module = _checkpoint_module("detect", _VARIANT, Path(tmp))
+        >>> deployed = _deployed(module, "detect", _VARIANT)
         >>> deployed.training
         False
     """
     model = (
-        KeypointDetector(_VARIANT, num_classes=_NUM_CLASSES, num_keypoints=_NUM_KEYPOINTS)
+        KeypointDetector(variant, num_classes=_NUM_CLASSES, num_keypoints=_NUM_KEYPOINTS)
         if task == "keypoints"
-        else _MODELS[task](_VARIANT, num_classes=_NUM_CLASSES)
+        else _MODELS[task](variant, num_classes=_NUM_CLASSES)
     )
     missing, _ = model.load_state_dict(module.state_dict(), strict=False)
     assert not missing, f"deployed {task} model has parameters the checkpoint did not supply: {missing}"
@@ -324,7 +366,7 @@ def _eager_reference(module: DetectionLitModule, task: str, image: Tensor) -> li
         >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
         <torch._C.Generator object at ...>
         >>> with tempfile.TemporaryDirectory() as tmp:
-        ...     module = _checkpoint_module("detect", Path(tmp))
+        ...     module = _checkpoint_module("detect", _VARIANT, Path(tmp))
         >>> image = torch.rand(1, 3, *_CANVAS, generator=torch.Generator().manual_seed(7))
         >>> reference = _eager_reference(module, "detect", image)
         >>> len(reference)
@@ -431,6 +473,30 @@ def _static_shape(value: onnx.ValueInfoProto) -> tuple[int, ...]:
     return tuple(dims)
 
 
+def _default_opset(model: onnx.ModelProto) -> int:
+    """Return the opset version the model imports for the default ONNX domain.
+
+    Args:
+        model: The loaded ONNX model.
+
+    Returns:
+        The imported version of the default domain (spelled ``""`` or ``"ai.onnx"``).
+
+    Raises:
+        AssertionError: If the default domain is not imported exactly once.
+
+    Examples:
+        >>> from onnx import helper
+        >>> graph = helper.make_graph([], "g", [], [])
+        >>> model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+        >>> _default_opset(model)
+        17
+    """
+    versions = [imported.version for imported in model.opset_import if imported.domain in {"", "ai.onnx"}]
+    assert len(versions) == 1, f"expected one default-domain opset import, got {versions}"
+    return int(versions[0])
+
+
 def _paired(rows: np.ndarray) -> np.ndarray:
     """Order detection rows so two backends pair them identically.
 
@@ -455,35 +521,32 @@ def _paired(rows: np.ndarray) -> np.ndarray:
     return np.lexsort(tuple(keys[:, column] for column in reversed(range(keys.shape[1]))))
 
 
-@pytest.fixture(params=_TASKS, scope="module")
+@pytest.fixture(params=_EXPORT_CASES, scope="module")
 def exported(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory) -> _Exported:
-    """Export one task's E2E graph from a checkpoint and keep its eager reference."""
-    task = str(request.param)
-    tmp = tmp_path_factory.mktemp(f"onnx_{task}")
+    """Export one ``(task, variant)`` case's E2E graph from a checkpoint and keep its eager reference."""
+    task, variant = request.param
+    tmp = tmp_path_factory.mktemp(f"onnx_{task}_{variant}")
     torch.manual_seed(0)
 
-    module = _checkpoint_module(task, tmp)
-    graph = _GRAPHS[task](_deployed(module, task), canvas=_CANVAS).eval()
+    module = _checkpoint_module(task, variant, tmp)
+    graph = _GRAPHS[task](_deployed(module, task, variant), canvas=_CANVAS).eval()
     image = torch.rand(1, 3, *_CANVAS, generator=torch.Generator().manual_seed(7))
     reference = _eager_reference(module, task, image)
 
-    path = tmp / f"{task}.onnx"
-    with torch.no_grad():
-        # The legacy TorchScript exporter: `dynamo=True` (the torch 2.13 default) needs
-        # `onnxscript`, and the legacy path emits a fully static graph here with no
-        # extra dependency. It warns that it is deprecated; when it is removed, this is
-        # the line that changes, and `onnxscript` joins the dev group.
-        torch.onnx.export(graph, (image,), str(path), dynamo=False)
-    return _Exported(task=task, path=path, image=image, reference=reference)
+    # Exported through the shipped entry point rather than a `torch.onnx.export` call of
+    # this file's own, so the opset the gate certifies is the opset an operator gets.
+    path = export_graph(graph, tmp / f"{task}.onnx", example=image)
+    return _Exported(task=task, variant=variant, path=path, image=image, reference=reference)
 
 
 def test_e2e_graph_ops(exported: _Exported) -> None:
-    """The exported E2E graph carries no suppression, does carry the ops it must, and is static.
+    """The exported E2E graph carries no suppression, does carry the ops it must, is static, and is at the pinned opset.
 
     The absence of ``NonMaxSuppression`` is R1's deployment claim for the one-to-one
     branch. It is asserted beside the presence of ``TopK`` — the ranking that stands in
     for suppression — because an absence in a graph that never got as far as decoding
-    would be free.
+    would be free. The opset assertion is what stops all of the above from silently
+    describing a different graph after a torch upgrade moves the exporter's default.
     """
     model = onnx.load(str(exported.path))
     onnx.checker.check_model(model, full_check=True)
@@ -502,6 +565,11 @@ def test_e2e_graph_ops(exported: _Exported) -> None:
     assert len(model.graph.input) == 1, f"expected the image alone as input, got {len(model.graph.input)}"
     assert _static_shape(model.graph.input[0]) == (1, 3, *_CANVAS)
 
+    assert _default_opset(model) == ONNX_OPSET, (
+        f"the {exported.task} graph was emitted at opset {_default_opset(model)}, not the pinned "
+        f"{ONNX_OPSET}; the op assertions above certify one opset and this is which"
+    )
+
     columns = 7 if exported.task == "obb" else 6
     assert _static_shape(model.graph.output[0]) == (1, _DET_CAP, columns)
     if exported.task == "segment":
@@ -515,8 +583,9 @@ def test_e2e_export_matches_checkpoint(exported: _Exported) -> None:
 
     Run under onnxruntime and compared against the eager decode of the module
     :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returned, on the decoded
-    detection tuple rather than on raw logits. Rows are paired canonically first: score
-    ties are genuine and the two backends may order them differently without either
+    detection tuple rather than on raw logits. Each side's own descending-score order is
+    checked before anything is re-sorted, then rows are paired canonically: score ties
+    are genuine and the two backends may order tied rows differently without either
     being wrong.
     """
     session = ort.InferenceSession(str(exported.path), providers=["CPUExecutionProvider"])
@@ -533,6 +602,15 @@ def test_e2e_export_matches_checkpoint(exported: _Exported) -> None:
     assert np.ptp(scores) > 0.05, f"{exported.task} scores span only {np.ptp(scores):.3g}; ranking is degenerate"
     widths = reference[:, 2] - reference[:, 0] if box_columns == 4 else reference[:, 2]
     assert (widths > 0).all(), f"{exported.task} produced boxes without interiors; masks would be empty"
+
+    # Descending score is the decoders' documented row order and the only ordering a
+    # consumer reading "the top detection" can rely on. It is asserted here rather than
+    # after `_paired`, which re-sorts both sides canonically and would pair a shuffled
+    # graph's rows up perfectly with the checkpoint's. Exact, no tolerance: each backend
+    # emits its own top-k in its own sorted order, so a violation is a real one.
+    candidate_scores = candidate[:, score_column]
+    assert np.all(np.diff(scores) <= 0), f"{exported.task}: the checkpoint's scores are not descending"
+    assert np.all(np.diff(candidate_scores) <= 0), f"{exported.task}: the exported graph's scores are not descending"
 
     order_reference, order_candidate = _paired(reference), _paired(candidate)
     ranked_reference, ranked_candidate = reference[order_reference], candidate[order_candidate]
@@ -578,3 +656,53 @@ def test_e2e_export_matches_checkpoint(exported: _Exported) -> None:
             atol=_BOX_ATOL,
             err_msg="keypoints: exported point coordinates differ from the checkpoint's",
         )
+
+
+class TestGraphConstruction:
+    """What an export graph accepts and refuses before anything is traced.
+
+    The graphs above are exercised on the one canvas the gate exports at. These pin the
+    edges of the contract that canvas sits inside: which canvases are refused, and where
+    the wrapped model ends up.
+    """
+
+    def test_rejects_a_canvas_the_head_cannot_tile(self) -> None:
+        """A canvas not divisible by every head stride is refused at construction.
+
+        100 px is the case the divisibility rule exists for: floor division would hand
+        back a 96 px grid, and every prediction would be paired with the wrong pixel with
+        no error anywhere. The graph inherits the refusal from ``anchor_grid``, which is
+        what makes it a construction-time failure rather than a silently wrong export.
+        """
+        deployed = Detector(_VARIANT, num_classes=_NUM_CLASSES).eval().deploy().eval()
+
+        with pytest.raises(ValueError, match="divisible by every head stride"):
+            DetectExportGraph(deployed, canvas=(100, 100))
+
+    def test_segment_rejects_a_canvas_below_the_detection_cap(self) -> None:
+        """A segmentation canvas yielding fewer anchors than ``k`` is refused at construction.
+
+        64 px yields 84 anchors against a 300-row output, so the decode emits padding rows
+        carrying anchor index -1 and the mask-coefficient gather has no valid position to
+        read. Left to the forward pass the failure is ``index -1 is out of bounds``, raised
+        mid-trace during export, naming neither the canvas nor the cap.
+        """
+        deployed = Segmenter(_VARIANT, num_classes=_NUM_CLASSES).eval().deploy().eval()
+
+        with pytest.raises(ValueError, match=r"84 anchors, below the 300-detection cap"):
+            SegmentExportGraph(deployed, canvas=(64, 64))
+
+    def test_moves_the_wrapped_model_onto_the_requested_device(self) -> None:
+        """``device`` places the wrapped model, not only the anchor buffers.
+
+        Buffers built on the requested device while the model stayed where the caller left
+        it is a graph that constructs cleanly and fails at its first forward with a device
+        mismatch. The meta device stands in for an accelerator here: it is available
+        everywhere, and nothing has to execute for the placement to be observable.
+        """
+        deployed = Detector(_VARIANT, num_classes=_NUM_CLASSES).eval().deploy().eval()
+
+        graph = DetectExportGraph(deployed, canvas=_CANVAS, device=torch.device("meta"))
+
+        assert graph.anchor_points.device.type == "meta"
+        assert next(graph.deployed.parameters()).device.type == "meta"

@@ -220,19 +220,21 @@ class TestHeadConstruction:
         assert flow_parameters
         assert flow_parameters <= set(module.state_dict())
 
-    def test_other_tasks_stay_keypoint_free(self) -> None:
-        """A detection module builds no point stems and no flow, even given a ``num_keypoints``.
+    def test_other_tasks_refuse_a_point_count(self) -> None:
+        """A non-keypoint task refuses ``num_keypoints`` rather than storing and ignoring it.
 
         ``num_keypoints`` names a property of the *dataset*, and a config that carried it
-        over from a pose run must not quietly grow stems on a detection model — that would
-        move the state-dict keys and stop the accepted checkpoints loading.
+        over from a pose run used to be accepted in silence: no point stems were built —
+        which is right, and is what the accepted checkpoints depend on — but
+        ``save_hyperparameters`` still recorded a ``K`` the head has no stem to predict,
+        leaving a later reader a documented point schema and no points (audit L-25). The
+        refusal keeps the state-dict guarantee and drops the silence; the shape half is
+        pinned by ``test_state_dict_is_the_detection_state_dict_plus_the_point_stems_and_flow``.
         """
-        module = DetectionLitModule(
-            depth=0.34, width=0.25, max_channels=256, num_classes=_NUM_CLASSES, num_keypoints=_NUM_KEYPOINTS
-        )
-
-        assert module.head.o2o.keypoint_stems is None
-        assert module.rle_loss is None
+        with pytest.raises(ValueError, match="meaningless for task='detect'"):
+            DetectionLitModule(
+                depth=0.34, width=0.25, max_channels=256, num_classes=_NUM_CLASSES, num_keypoints=_NUM_KEYPOINTS
+            )
 
     def test_the_task_requires_an_explicit_point_count(self) -> None:
         """``task="keypoints"`` without ``num_keypoints`` is refused at construction.

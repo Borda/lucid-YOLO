@@ -39,6 +39,7 @@ from lucid_yolo.assign.grid import HEAD_STRIDES
 from lucid_yolo.cli import data as data_cli
 from lucid_yolo.cli import eval as eval_cli
 from lucid_yolo.cli import predict as predict_cli
+from lucid_yolo.cli import train as train_cli
 from lucid_yolo.data import download
 from lucid_yolo.predict import KeypointPrediction, SegmentedPrediction
 from lucid_yolo.ptl.module import DetectionLitModule
@@ -369,3 +370,144 @@ def test_the_per_task_defaults_are_themselves_usable_values() -> None:
     assert eval_cli.DEFAULT_IMG_SIZE.keys() == eval_cli.DEFAULT_BATCH_SIZE.keys()
     assert {side % max(HEAD_STRIDES) for side in eval_cli.DEFAULT_IMG_SIZE.values()} == {0}
     assert min(eval_cli.DEFAULT_BATCH_SIZE.values()) >= 1
+
+
+class TestDataCommandConfigFlag:
+    """``lucid-data`` honours ``--config`` on every subcommand (audit M-10)."""
+
+    def test_a_config_file_supplies_a_subcommands_arguments(self, tmp_path: Path) -> None:
+        """Values in a ``--config`` YAML land on the subcommand's own arguments.
+
+        ``AGENTS.md`` sec. 2 states that every command takes ``--config``, and three of
+        the four got one for free -- ``lucid-yolo`` from ``LightningCLI``, ``lucid-eval``
+        and ``lucid-predict`` from ``auto_cli``. This parser is built by hand and
+        ``add_subcommands`` adds nothing to a subparser, so ``lucid-data check --config
+        anything.yaml`` exited 2 with "unrecognized arguments" while the documentation
+        said otherwise.
+        """
+        config = tmp_path / "check.yaml"
+        config.write_text("data_root: /data/from_config\ndataset: dota\n")
+
+        parsed = data_cli.build_parser().parse_args(["check", "--config", str(config)])
+
+        assert parsed.check.data_root == Path("/data/from_config"), "annotated Path, so jsonargparse coerces"
+        assert parsed.check.dataset == "dota"
+
+    @pytest.mark.parametrize(
+        "subcommand",
+        [pytest.param(name, id=name) for name in ("download", "check", "build-tiles")],
+    )
+    def test_every_subcommand_advertises_the_flag(self, subcommand: str) -> None:
+        """All three subcommands carry ``--config``, not just the one that was tested first.
+
+        The claim in ``AGENTS.md`` is about commands, and a fix applied to one subparser
+        would satisfy a single-case test while leaving the other two exactly as they were.
+        """
+        parser = data_cli.build_parser()
+
+        actions = parser._subcommands_action._name_parser_map[subcommand]._actions
+
+        assert any("--config" in getattr(action, "option_strings", []) for action in actions)
+
+    def test_the_config_key_does_not_reach_the_operation_function(self, tmp_path: Path) -> None:
+        """``main`` drops the ``config`` namespace key before splatting into the operation.
+
+        This is the half a parse-level assertion cannot see. ``main`` calls
+        ``SUBCOMMANDS[command](**config[command].as_dict())``, and ``ActionConfigFile``
+        leaves a ``config`` entry in that namespace naming the file it read -- a
+        parameter no operation function has. Left in, every invocation becomes a
+        ``TypeError``, including the ones with no ``--config`` on the command line, whose
+        namespace carries the key holding ``None``.
+        """
+        config = tmp_path / "check.yaml"
+        config.write_text(f"data_root: {tmp_path / 'absent'}\n")
+
+        exit_code = data_cli.main(["check", "--config", str(config)])
+
+        assert exit_code == 1, "the root does not exist, so the check fails -- but it ran"
+
+    def test_an_invocation_without_a_config_still_runs(self, tmp_path: Path) -> None:
+        """Omitting ``--config`` is unaffected by the key the flag adds to the namespace.
+
+        The ``None``-valued key is present whether or not the flag was typed, so this is
+        the case that would break silently if the drop were conditional on the flag.
+        """
+        exit_code = data_cli.main(["check", "--data_root", str(tmp_path / "absent")])
+
+        assert exit_code == 1
+
+
+class TestPredictReportSerialisation:
+    """The prediction report refuses what JSON cannot represent (audit M-18)."""
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            pytest.param(float("nan"), id="nan"),
+            pytest.param(float("inf"), id="inf"),
+            pytest.param(float("-inf"), id="-inf"),
+        ],
+    )
+    def test_a_non_finite_number_anywhere_is_refused(self, bad: float) -> None:
+        """A ``NaN`` or infinity in any record raises instead of being written out.
+
+        ``json.dumps`` emits these as the bare tokens ``NaN``/``Infinity``, which Python's
+        own ``json.loads`` accepts and every strict parser -- browsers, ``jq``, most other
+        languages' standard libraries -- rejects. The report therefore looked valid until
+        somebody outside Python opened it. Refusing rather than substituting is the
+        deliberate half: a run that produced a non-finite box did something the caller
+        needs to know about.
+        """
+        payload = {"image": "a.png", "detections": [{"box": [0.0, 0.0, bad, 1.0], "score": 0.9, "label": 0}]}
+
+        with pytest.raises(ValueError, match=r"detections\[0\]\.box\[2\]"):
+            predict_cli._report_json(payload)
+
+    def test_the_message_names_the_offending_field(self) -> None:
+        """The refusal points at the field, not merely at the report.
+
+        A report holds up to ``max_det`` records of several numeric fields each; "this
+        file contains a NaN" leaves the caller to find it by hand, and the walk exists
+        precisely so it does not have to.
+        """
+        payload = {"detections": [{"score": 0.5}, {"score": float("nan")}]}
+
+        with pytest.raises(ValueError, match=r"report\.detections\[1\]\.score"):
+            predict_cli._report_json(payload)
+
+    def test_a_finite_report_serialises_unchanged(self) -> None:
+        """The guard costs the normal path nothing -- a clean payload round-trips.
+
+        Without this the refusals above would pass against a serializer that rejected
+        every payload, which two error-path tests cannot distinguish on their own.
+        """
+        payload = {"image": "a.png", "detections": [{"box": [1.0, 2.0, 3.0, 4.0], "score": 0.9, "label": 3}]}
+
+        text = predict_cli._report_json(payload)
+
+        assert json.loads(text) == payload
+        assert text.endswith("\n")
+
+
+class TestPackagedConfigInheritance:
+    """What a user config inherits from the packaged default (audit L-37)."""
+
+    def test_every_packaged_non_detection_config_states_its_own_task(self) -> None:
+        """The recipes that are not detection all set ``model.task`` explicitly.
+
+        ``det_nano_smoke.yaml`` is a ``default_config_files`` entry for every run
+        subcommand, so it is loaded even when the caller passes ``--config`` of their own
+        and jsonargparse merges per key: a config that omits ``model.task`` inherits
+        ``detect`` and trains a detector under the file's name, with the point or mask
+        branches never built. Dropping the packaged default would not close that hole --
+        ``task`` also defaults to ``"detect"`` on the module constructor -- so the guard
+        is that a task-specific config states its task, and this pins that it does. The
+        inheritance itself is documented in ``lucid_yolo.cli.train``'s module docstring.
+        """
+        config_dir = Path(train_cli.__file__).resolve().parent.parent / "configs"
+        non_detection = sorted(p for p in config_dir.glob("*.yaml") if not p.name.startswith("det_"))
+
+        stated = {path.name: "task:" in path.read_text() for path in non_detection}
+
+        assert non_detection, "the packaged config directory must be found for this to mean anything"
+        assert all(stated.values()), f"a non-detection recipe omits its own task: {stated}"

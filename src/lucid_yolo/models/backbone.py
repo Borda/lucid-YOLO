@@ -59,6 +59,18 @@ def _scale_channels(base_channels: int, width: float, max_channels: int) -> int:
 def _scale_repeats(base_repeats: int, depth: float) -> int:
     """Return the depth-scaled inner-unit repeat count, floored at one.
 
+    The rounding is Python's built-in :func:`round`, which is **banker's rounding**:
+    a product landing exactly on a half-integer goes to the nearer *even* count, not
+    upward. ``base_repeats * depth == 1.5`` gives 2 and ``== 2.5`` gives 2 as well.
+    That tie rule is stated here rather than replaced because it is unreachable from
+    the registry — every published variant pairs ``base_repeats=2`` with
+    ``depth`` in ``{0.5, 1.0}``, so the products are 1.0 and 2.0 and no tie is ever
+    taken. A caller constructing :class:`DetectionBackbone` with a raw multiplier of
+    its own (``depth=1.25``, say) is the only way to reach one, and such a stack is
+    outside the five rows the WP-023 parameter and FLOP goldens pin. Switching to
+    ``math.floor(x + 0.5)`` would round half-integers up and change that caller's
+    layer counts, so the rule is documented, not moved.
+
     Args:
         base_repeats: Unscaled inner-unit count of a CSP stage.
         depth: Depth multiplier ``d`` of the variant (blueprint sec. 5.1).
@@ -71,6 +83,13 @@ def _scale_repeats(base_repeats: int, depth: float) -> int:
         >>> _scale_repeats(2, 0.5)  # n/s/m-scale
         1
         >>> _scale_repeats(2, 1.0)  # l/x-scale
+        2
+
+        Both halves of the tie rule, on multipliers no published variant uses:
+
+        >>> _scale_repeats(2, 0.75)  # 1.5 ties to the even 2
+        2
+        >>> _scale_repeats(2, 1.25)  # 2.5 ties to the even 2, not up to 3
         2
     """
     return max(1, round(base_repeats * depth))
