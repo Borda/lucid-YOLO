@@ -13,6 +13,7 @@ pattern ``scripts/_tests/test_check_goldens.py`` uses.
 """
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -21,6 +22,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 HARNESS_PATH = REPO_ROOT / "scripts" / "check_goldens.py"
 PRODUCERS_PATH = REPO_ROOT / "scripts" / "golden_producers.py"
 GOLDEN = REPO_ROOT / "goldens" / "optim_toy.json"
+
+#: Largest share of the MuSGD-over-SGD step margin the two step bands may jointly admit.
+#: A fifth leaves the recorded advantage legible through the worst pair of readings the
+#: golden accepts; the bands this replaced admitted 70% of it.
+_MAX_BAND_SHARE_OF_MARGIN = 0.2
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -67,3 +73,33 @@ def test_golden_file_current() -> None:
     result = harness.check_golden(GOLDEN)
 
     assert result.passed, harness.format_result(result, harness.DEFAULT_GOLDENS_DIR)
+
+
+def test_golden_bands_cannot_swallow_the_claim() -> None:
+    """The stored values carry the MuSGD-beats-SGD claim, by a margin wider than their own bands.
+
+    Every other test here re-runs the producer, so together they can only establish that
+    the producer is deterministic and currently agrees with the file. None of them reads
+    the file as data, which is how the bands drifted to a third of their own values
+    unnoticed: at the old tolerance of 15 steps against a stored 47 and 90, the two arms
+    could have converged to 62 and 75 and the golden would still have passed while the
+    claim it exists to defend -- that MuSGD gets there in fewer steps -- had shrunk from a
+    43-step margin to 13.
+
+    The assertion is deliberately not "the bands do not overlap", which those old bands
+    also satisfied (62 < 75) and which would therefore have caught nothing. What matters
+    is the share of the margin the bands consume: 30 steps of admitted drift against a
+    43-step advantage left 70% of the effect inside the tolerance, and a golden whose
+    band swallows its own effect reports only that the producer still runs.
+    """
+    stored = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    values, bands = stored["values"], stored["tolerances"]
+
+    margin = values["steps_to_threshold_sgd"] - values["steps_to_threshold_musgd"]
+    admitted = bands["steps_to_threshold_musgd"] + bands["steps_to_threshold_sgd"]
+
+    assert margin > 0, "the stored values do not show MuSGD reaching the threshold first"
+    assert admitted <= _MAX_BAND_SHARE_OF_MARGIN * margin, (
+        f"the two bands admit {admitted} steps of drift against a {margin}-step margin: "
+        f"a passing golden no longer implies the advantage it exists to record"
+    )

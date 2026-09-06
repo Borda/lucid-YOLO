@@ -106,6 +106,22 @@ _CLOSE_MOSAIC_EPOCHS = 1
 #: records the same libm-rounding divergence for the fixture checksums). It is set an
 #: order of magnitude below the regressions it must catch: WP-078 moved Det-smoke mAP by
 #: 36% relative, which on this gate would be a swing of ~0.3, six times the band.
+#:
+#: What it is *not* validated against, stated because the band's whole justification is
+#: the cross-accelerator case: no training run of this gate has ever happened on a second
+#: device, so the divergence this absorbs has never been measured. The one cross-accelerator
+#: datum this project holds -- oriented evaluation agreeing between MPS and CUDA to 1e-4 --
+#: does not bound it: that is a fixed checkpoint scored twice, while this trains for six
+#: epochs, where a kernel difference moves the gradients and compounds through the whole
+#: trajectory rather than appearing once at the end.
+#:
+#: The cost of the band being loose is on record. At WP-167's re-freeze the NMS mAP50-95
+#: moved 0.882337 to 0.870817 and passed silently; the same run absorbed a 0.026 shift on
+#: the oriented overfit gate. A band wide enough to hide the movement it was sized for is
+#: the defect ``clamped_tolerance`` fixes at the floor end, and this is its other end.
+#: Narrowing it needs the measurement that does not exist yet: this gate trained on two
+#: accelerators, several times each, with the spread between them read off the results.
+#: Until then the number stays where a measurement put it rather than where a guess would.
 _MAP_TOLERANCE = 0.05
 
 #: Held-out NMS mAP50-95 — the discriminating metric of the three, with headroom in

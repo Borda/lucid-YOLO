@@ -1,11 +1,11 @@
 {
   "producer": "scripts.golden_producers:seg_params_flops",
   "tolerances": {
-    "n_gflops": 0.045,
-    "s_gflops": 0.1748,
-    "m_gflops": 0.6136,
-    "l_gflops": 0.7244,
-    "x_gflops": 1.6229
+    "n_gflops": 0.001,
+    "s_gflops": 0.001,
+    "m_gflops": 0.001,
+    "l_gflops": 0.001,
+    "x_gflops": 0.001
   },
   "values": {
     "n_params": 2717284.0,

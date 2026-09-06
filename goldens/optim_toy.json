@@ -1,10 +1,10 @@
 {
   "producer": "scripts.golden_producers:optim_toy",
   "tolerances": {
-    "steps_to_threshold_musgd": 15.0,
-    "steps_to_threshold_sgd": 15.0,
-    "final_loss_musgd": 0.005,
-    "final_loss_sgd": 0.005
+    "steps_to_threshold_musgd": 1.0,
+    "steps_to_threshold_sgd": 1.0,
+    "final_loss_musgd": 0.0005,
+    "final_loss_sgd": 0.0005
   },
   "values": {
     "steps_to_threshold_musgd": 47.0,

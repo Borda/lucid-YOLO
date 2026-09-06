@@ -754,7 +754,18 @@ _DET_IMG_SIZE = 640
 
 #: Decimal places the per-variant GFLOP values are rounded to before freezing;
 #: fvcore's MAC trace is deterministic, so this only trims float noise below the
-#: golden's 0.5%-of-value tolerance.
+#: golden's band. That band is a small absolute constant rather than a fraction of
+#: each value: a MAC trace is a count, so it reproduces exactly, and sizing the band
+#: as a percentage made the largest models the least guarded -- the oriented ``x``
+#: row admitted 2.63 GFLOPs of drift, more than the whole ``n`` detector costs.
+#: Measured across all forty stored metrics before the change, every one reproduced
+#: with a delta of exactly zero.
+#: The band itself lives in each golden's own ``tolerances`` block (they are hand-held,
+#: not written by ``freeze-goldens``) and is ``0.001`` GFLOPs for every variant of every
+#: task. Not zero, though the trace reproduces exactly: the stored values are rounded
+#: here, so a band just above that quantum keeps a re-freeze on another machine from
+#: tripping on formatting alone, while staying far below any real architectural change --
+#: a single convolution channel at the shallowest stride moves GFLOPs by orders more.
 _DET_GFLOP_DECIMALS = 4
 
 
