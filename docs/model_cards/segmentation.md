@@ -73,10 +73,12 @@ No latency figures are published. Throughput is hardware-dependent and the proje
 - **Masks are cropped to the predicted box.** A wrong box truncates its mask by construction; mask errors and box errors are not independent.
 - **80 COCO categories only.** No open-vocabulary capability; anything outside those categories is either missed or misclassified as the nearest one.
 - **640×640 letterboxed.** Untested at other resolutions or aspect extremes.
-- **One benchmark, one seed, one scale.** No variance estimate across seeds, no cross-dataset generalization measurement (RF100-VL is planned, WP-074/075).
+- **One benchmark, one seed, one scale, one device.** No variance estimate across seeds, and no cross-dataset generalization measurement at all: the RF100-VL tier that would have supplied one (WP-074/075) was **dropped on 2026-08-18** over an unresolved per-dataset licence question, so nothing replaces it and none is scheduled. Training has also never spanned more than a single accelerator. This task's metrics are torchmetrics metrics that do synchronise across ranks, so a multi-device run is not obstructed the way the oriented and keypoint tiers are — but unobstructed is an untested inheritance from Lightning, not a result this project has.
 - **No robustness evaluation** — weather, blur, occlusion, adversarial or distribution-shift behavior is entirely uncharacterized.
 - **No raw-weight evaluation** for this run, so the EMA contribution is unmeasured here.
 - **Not bitwise reproducible across platforms** (A26): libm last-bit rounding differs across OS and architecture; the goldens assert structural metrics with tolerance, not byte hashes.
+- **`deterministic: true` above is what the run *requests*, not uniformly what it gets.** `default_determinism` (`cli/train.py`) resolves it to `"warn_only"` whenever MPS is the auto-picked accelerator, because MPS ships no deterministic kernel for some backwards this model hits; CPU and CUDA keep strict `True`. An Apple-silicon run is reproducible only up to those kernels, and says so in warnings rather than by failing.
+- **The seed reproduces a run only at the same worker count.** `--data.num_workers 0` replays the augmentation stream byte for byte; with workers each is re-seeded per worker and per epoch from the loader's own generator (WP-079). Both are fully determined by `seed`, but they are *different* streams — a run at 32 workers does not reproduce the same seed at 0 workers, or at 16.
 
 ## 🤝 Ethical considerations
 
@@ -86,7 +88,7 @@ Failure modes are unbounded in the sense that matters — no calibration study e
 
 ## 📜 Licensing and provenance
 
-Code and this report: Apache-2.0. Weights derive from COCO 2017; publication follows the dataset's terms and the release policy in D10.
+Code and this report: Apache-2.0. Weights derive from COCO 2017; no trained weights are published (D14).
 
 **Clean-room statement.** No file, configuration, weight, or code fragment from any Ultralytics repository, package, documentation site, or released checkpoint was opened, downloaded, imported, or consulted at any point in this project's history. Every design input traces to a paper, its cited primary literature, a registered assumption, or — for diagnosis only, never copying — a permissively licensed independent implementation registered under D13/ADR-004. The audit trail is `PROVENANCE.md`; the standing prohibitions are `AGENTS.md` sec. 7.
 

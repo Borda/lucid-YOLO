@@ -88,7 +88,7 @@ is a property of their machine rather than a defect in this file.
 Examples:
     Run against the active environment (exit 1 on violation)::
 
-        python scripts/audit_licenses.py
+        python scripts/lint/audit_licenses.py
 """
 
 from __future__ import annotations

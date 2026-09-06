@@ -4,7 +4,14 @@ Anywhere the papers underdetermine the implementation, the chosen assumption, it
 
 **Adding a row also raises the floor.** `_ASSUMPTION_FLOOR` in `scripts/lint/audit_docs_present.py` counts the rows this register is allowed to hold and never fall below; the `docs-present` hook reports a shrink against it. It is a ratchet: raise it to the new row count in the same commit that adds the row, never lower it. `_DECISION_FLOOR` (`DECISIONS.md`) and `_WP_FLOOR` (`ROADMAP.md`) work the same way and want the same edit. The floor sat at 26 against 73 rows until WP-168, which is 47 rows of slack — a register can only be certified by a number somebody keeps current.
 
-Status legend: `open` = code not yet landed · `active` = in the codebase · `validated` = validation plan executed and passed · `revised` = superseded (revision history kept inline).
+Status legend, **rewritten 2026-09-06 to describe what the column actually holds** — the previous wording defined `revised` as "superseded" and `validated` as "validation plan executed and passed", and the register contradicts both:
+
+- `open` — the assumption governs, and the evidence that would settle it is not in yet: either the code has not landed, or the validation it names needs a run nobody has done. Not "unused": most `open` rows are shipping code.
+- `active` — in the codebase, with its validation plan run as far as an offline gate can take it.
+- `validated` — reserved for the rows whose validation was a *measurement against an independent oracle or a paired run*, rather than a unit test that pins the choice. It is a strong claim and only a handful of rows carry it.
+- `revised` — the assumption's **value** changed after code shipped against the old one, and the row is the current one either way. It does **not** mean superseded: the sole row carrying it is in force today. Most revisions do not use this status at all — a revised row usually keeps `active` or `open` and records the change inline, dated, in its own Assumption cell.
+
+Two consequences of that last point, both load-bearing when reading the column: **a row's status does not tell you whether it has been revised** (several `active` and `open` rows carry dated inline revisions, and several say VALIDATED inline while staying `active`), and **the four statuses are not a lifecycle** — nothing progresses `open → active → validated` on a schedule. Read the Assumption and Validation cells; the status is a coarse filter, not a summary. Counts are deliberately not stated here: they move with every row that lands, and a tally written into prose is the thing that goes stale — `scripts/lint/audit_docs_present.py` is what counts the register, and it counts rows rather than statuses.
 
 | ID | Gap in papers | Assumption | Public source | Validation | Status |
 | -- | -- | -- | -- | -- | -- |

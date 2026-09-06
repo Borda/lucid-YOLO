@@ -29,7 +29,9 @@ Usage::
     python scripts/absolutize_readme.py --revert       # restore the committed file
 
 ``make dist-pypi TAG=v0.4.0`` does both around a build, reverting whether or not the
-build succeeded.
+build succeeded. The distribution is not publishable to PyPI under D20's direct-reference
+pin; the rewrite exists for the long description's links, which are broken for any reader
+meeting the package outside this repository.
 """
 
 from __future__ import annotations

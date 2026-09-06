@@ -92,10 +92,17 @@ markdown_extensions:
           format: !!python/name:pymdownx.superfences.fence_code_format
 
 validation:
+  # Verified against mkdocs 1.6's own defaults (mkdocs/config/defaults.py), not
+  # assumed: four of the six settings below are raised from `info` to `warn` —
+  # nav `omitted_files`, and links `absolute_links`, `unrecognized_links`,
+  # `anchors`. `omitted_files` is the one that motivated this block: a page
+  # missing from the nav is reachable only by search or by guessing its URL,
+  # which for a register nobody knows exists is indistinguishable from not
+  # publishing it. The two `not_found` settings already default to `warn` and are
+  # restated rather than raised, so the whole policy reads in one place and an
+  # upstream defaults change cannot quietly relax it. Every `warn` here becomes an
+  # error under `mkdocs build --strict`, which is what `make docs` runs.
   nav:
-    # Both raised from their defaults so --strict fails on them. A page missing from
-    # the nav is reachable only by search or by guessing its URL, which for a register
-    # nobody knows exists is indistinguishable from not publishing it.
     omitted_files: warn
     not_found: warn
   links:

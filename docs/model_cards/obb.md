@@ -18,7 +18,9 @@ Covers the oriented detection model produced by the OBB-smoke tier run, released
 
 The oriented head is the detector's own dual head with `predict_angle` enabled (`models/build.py`); backbone and neck are unchanged. The task does not merely add a term — it **replaces** two. The dual loss is constructed with `box_gain = 0` and `l1_gain = 0` so its Complete-IoU and axis-aligned L1 are computed for logging and enter no total, and those gains are spent instead on the rotated ProbIoU of the assembled box (A49) and on an L1 retargeted onto that box's own `(cx, cy, w, h)` (A50). A reader of `metrics.csv` should know this: `val/o2o_box` and `val/o2o_l1` are live-looking curves that no gradient followed.
 
-Parameter and FLOP fidelity is gated rather than asserted, but against a weaker reference than the other two tasks: [R1] publishes no oriented parameter table, so `test_param_flops.py` holds the oriented scales against this project's own frozen goldens. Those numbers pin the topology against drift; they do not corroborate it against the paper.
+Parameter and FLOP fidelity is gated rather than asserted, and against [R1]'s own published oriented numbers: `test_param_flops.py::test_obb_vs_tableS11` holds all five scales to **R1 Table S11** — measured at 1024 px over DOTA's 15 categories, unlike the 640 px / 80-class protocol of the detection and segmentation gates — within ±3.5% params and ±5% FLOPs. A frozen golden runs beside it as a drift lock.
+
+**The tolerance is wider than detection's ±2% and segmentation's ±3%, and that is the finding rather than slack.** The angle-stem width is inferred, not published: `// 3` undershoots the implied angle-branch increment at m/l/x, `// 2` lands there but overshoots `s`, and Table S11 rounds params to 0.1 M, so `n` and `s` cannot discriminate between the two rules at all while `x` does so decisively and selects `// 2`. The gate therefore admits a rule chosen where the evidence is sharp, at the cost of the scales where it is not. **A20 stays open, and this is not a claim of Table S11 parity.** The FLOP side has less room than the number suggests: `n` sits 0.16 points from failing at +4.84%.
 
 ## 🧭 Intended use
 
@@ -63,7 +65,7 @@ EMA is worth `+0.0047` mAP50-95 and `+0.0102` mAP50 here — small, positive, an
 
 **Every number here is per tile.** Detections from overlapping tiles are not merged back onto whole images, because on an NMS-free path two tiles that both detect one object have nothing to suppress the duplicate, so the merge needs a policy decided rather than inherited (WP-064). A per-tile score never pays the duplicate-detection cost whole-image evaluation charges, so **these figures are not comparable to published DOTA results**, which are whole-image. That is a property of the measurement, not a caveat about its precision.
 
-The same checkpoint scores 0.2914 / 0.5242 on Apple MPS and 0.2914 / 0.5243 on CUDA — agreement to four decimals across two accelerators and two operators, which is stronger evidence about the evaluator than about the model.
+The same checkpoint scores 0.2914 / 0.5242 on Apple MPS and 0.2914 / 0.5243 on CUDA — agreement to four decimals across two accelerators and two operators, which is stronger evidence about the evaluator than about the model. **This is the only two-device measurement anywhere in the project, and it is an evaluation.** Training has run on one device every time; nothing here says a training run ports across accelerators. For this task that is enforced rather than merely untried: `lucid-yolo fit` **refuses `task: obb` on more than one process** at setup, because `val/rotated_mAP` accumulates plain Python lists nothing gathers across ranks and a per-rank average precision cannot be averaged back into the split's.
 
 ## ⚠️ Limitations
 
@@ -75,7 +77,11 @@ The same checkpoint scores 0.2914 / 0.5242 on Apple MPS and 0.2914 / 0.5243 on C
 
 **Long-tailed classes.** The reported mean is over classes with at least one non-difficult ground truth; rare categories rest on few instances, and the aggregate hides that spread.
 
-**Smoke tier.** 50 epochs at the smallest scale against the paper's 500/600-epoch schedules, one seed, one benchmark.
+**Smoke tier.** 50 epochs at the smallest scale against the paper's 500/600-epoch schedules, one seed, one benchmark, one device.
+
+**ProbIoU's exposure is aspect ratio, and it is a conditioning property of the formula rather than a precision detail of this implementation.** Written literally, ProbIoU's summed-covariance determinant is a difference of nearly equal products, and that cancellation gets worse as a box gets thinner: evaluated in float32 the literal form holds 1.5e-5 relative at 1:1, 2.2e-5 at 10:1, 1.6e-3 at 100:1, and at 1000:1 returns `NaN` for part of a randomized sweep, its determinant having gone negative before the logarithm. Scale is *not* the axis — the quantity is exactly scale-invariant. `losses/probiou.py` evaluates a cancellation-free algebraic rearrangement instead and holds 1.7e-6 to 2.9e-6 at every ratio from 1:1 to 1000:1, so this model does not pay that cost. Anyone re-deriving ProbIoU from the published equations, porting it, or comparing against a literal implementation inherits it in full, and DOTA's bridges and harbours are exactly the boxes that reach those ratios.
+
+**Determinism and seeding are narrower than the recipe row reads.** `deterministic: true` is what the run requests; `default_determinism` (`cli/train.py`) resolves it to `"warn_only"` under MPS, which ships no deterministic kernel for some backwards this model hits. And the seed reproduces a run only at the same `--data.num_workers`: 0 workers replays one stream byte for byte, `N` workers replays a different one re-seeded per worker and per epoch (WP-079). Both are determined by `seed`; they are not the same stream, and 32 workers does not reproduce 0.
 
 ## 📜 Licensing
 

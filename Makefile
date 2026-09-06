@@ -104,7 +104,10 @@ build:
 	rm -rf dist
 	$(PY) -m build
 
-# The build whose artifacts are meant for PyPI. TAG names the tag the README's links are
+# Named for where the artifacts are shaped to go, not for where they can be sent: D20's git
+# pin makes this distribution unpublishable to PyPI. What the rewrite still buys is a long
+# description whose links resolve for a reader outside the repository.
+# TAG names the tag the README's links are
 # pinned to, and is the flag that makes this a release build rather than a local one; the
 # rewrite is reverted whether the build succeeds or fails, so the tree is left as found.
 dist-pypi:

@@ -1,192 +1,198 @@
+# Ignore rules for lucid-yolo, grouped by what produces the artifact.
+#
+# The upstream github/gitignore Python template was merged in and then sorted
+# alphabetically at some point, which detached every explanatory comment from the
+# pattern it explained and hoisted the lot into one block at the top of the file.
+# The grouping below restores the association: patterns sit under the section that
+# creates them, sorted within their section only. No rule was added or removed in
+# that reorganization — `git check-ignore` answers exactly what it answered before.
+#
+# A commented-out pattern is one the upstream template ships commented out; it is
+# kept in that state here and is NOT in effect. Reproduced rather than deleted so
+# the template's own advice stays readable beside what this repository actually does.
 
-#   Abstra is an AI-powered process automation framework.
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   For a library or package, you might want to ignore these files since the code is
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   Ignore directories containing user credentials, local state, and settings.
-#   JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#   Learn more at https://abstra.io/docs
-#   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   Usually these files are written by a python script from a template
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file.  For a more nuclear
-#   and can be added to the global gitignore or merged into this file. However, if you prefer,
-#   be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#   before PyInstaller builds the exe, so as to inject date/other infos into it.
-#   commonly ignored for libraries.
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#   in the .venv directory. It is recommended not to include this directory in version control.
-#   install all needed dependencies.
-#   intended to run in multiple environments; otherwise, check them in:
-#   option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.
-#   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   you could uncomment the following to ignore the entire vscode folder
-# .python-version
-# .vscode/
-# AI coding artifacts
-# Abstra
-# ActiveMQ
-# Byte-compiled / optimized / DLL files
-# C extensions
-# Celery stuff
-# Cython debug symbols
-# Distribution / packaging
-# Django stuff:
-# Environments
-# Flask stuff:
-# Generated synthetic test fixtures (WP-007, A26) — regenerated on demand, never committed
-# IPython
-# Installer logs
-# Jupyter Notebook
-# Marimo
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-# Pipfile.lock
-# PyBuilder
-# PyCharm
-# PyInstaller
-# PyPI configuration file
-# Pyre type checker
-# RabbitMQ
-# Redis
-# Rope project settings
-# Ruff stuff:
-# SageMath parsed files
-# Scrapy stuff:
-# Sphinx documentation
-# Spyder project settings
-# Streamlit
-# Temporary file for partial code execution
-# Translations
-# UV
-# Unit test / coverage reports
-# Visual Studio Code
-# mkdocs documentation
-# mypy
-# pdm
-# pdm.lock
-# pdm.toml
-# pipenv
-# pixi
-# pixi.lock
-# poetry
-# poetry.lock
-# poetry.toml
-# pyenv
-# pytype static type analyzer
-uv.lock
+# --- Python bytecode and C extensions -------------------------------------
 *$py.class
-*.aof
-*.cover
+*.py[codz]
+*.so
+__pycache__/
+
+# --- Distribution and packaging -------------------------------------------
 *.egg
 *.egg-info/
-*.log
 *.manifest
-*.mo
-*.pid
-*.pot
-*.py.cover
-*.py[codz]
-*.rdb
-*.sage.py
-*.so
 *.spec
-.Python
-.abstra/
-.cache
-.claude/state/
-.coverage
-.coverage.*
-.developments/
-.dmypy.json
 .eggs/
-.env
-.envrc
-.hypothesis/
-.idea/
-.junie/
-.claude/agent-memory/
 .installed.cfg
-.ipynb_checkpoints
-.mypy_cache/
-.notes/
-.nox/
-.pdm-build/
-.pdm-python
-.pixi
-.plans/
+# PyBuilder
 .pybuilder/
-.pypirc
-.pyre/
-.pytest_cache/
-.pytype/
-.experiments/
-.reports/
-.ropeproject
-.ruff_cache/
-.scrapy
-.spyderproject
-.spyproject
-.streamlit/secrets.toml
-.temp/
-.tox/
-.venv
-.webassets-cache
-/site
-ENV/
 MANIFEST
-__marimo__/
-__pycache__/
-__pypackages__/
-activemq-data/
 build/
-celerybeat-schedule
-celerybeat.pid
-cover/
-coverage.xml
-cython_debug/
-db.sqlite3
-db.sqlite3-journal
 develop-eggs/
 dist/
-dmypy.json
-docs/_build/
 downloads/
 eggs/
-env.bak/
-env/
-htmlcov/
-instance/
-ipython_config.py
 lib/
 lib64/
-lightning_logs/
-local_settings.py
-marimo/_lsp/
-marimo/_static/
-mnesia/
-nosetests.xml
 parts/
-pip-delete-this-directory.txt
-pip-log.txt
-profile_default/
-rabbitmq-data/
-rabbitmq/
 sdist/
 share/python-wheels/
 target/
-tempCodeRunnerFile.py
-tests/fixtures/_generated/
 var/
+wheels/
+
+# PyInstaller: usually written by a python script from a template before
+# PyInstaller builds the exe, so as to inject date/other infos into it.
+# (the *.manifest / *.spec entries above)
+
+# --- Installer and PyPI ----------------------------------------------------
+# PyPI configuration file
+.pypirc
+pip-delete-this-directory.txt
+pip-log.txt
+
+# --- Environments and interpreter managers ---------------------------------
+# .python-version (upstream ships this commented out; left commented — no such
+# file exists in this repository, which pins its interpreter in `make setup`)
+.Python
+.env
+.envrc
+.venv
+ENV/
+env.bak/
+env/
 venv.bak/
 venv/
-wheels/
-.DS_Store
+
+# --- Dependency locks ------------------------------------------------------
+# The upstream template's advice for each of these is to COMMIT the lock file.
+# This repository ignores uv.lock and leaves the rest commented out; the entries
+# are kept side by side so the divergence is visible rather than implicit.
+# Pipfile.lock
+# pdm.lock
+# pixi.lock
+# poetry.lock
+# poetry.toml
+# pdm.toml — pdm recommends committing project-wide config while excluding .pdm-python
+uv.lock
+
+# --- Package managers that create their own trees --------------------------
+# pdm — https://pdm-project.org/en/latest/usage/project/#working-with-version-control
+.pdm-build/
+.pdm-python
+# pixi creates a virtual environment in .pixi, as venv does in .venv
+.pixi
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
+__pypackages__/
+
+# --- Test, coverage and type-checker caches --------------------------------
+*.cover
+*.py.cover
+.coverage
+.coverage.*
+.dmypy.json
+.hypothesis/
+.mypy_cache/
+.nox/
+.pytest_cache/
+.pytype/
+.ruff_cache/
+.tox/
+cover/
+coverage.xml
+dmypy.json
+htmlcov/
+nosetests.xml
+
+# --- This project's own generated artifacts --------------------------------
+# Generated synthetic test fixtures (WP-007, A26) — regenerated on demand, never committed
+tests/fixtures/_generated/
+lightning_logs/
 results/
+
+# --- Documentation builds --------------------------------------------------
+# mkdocs writes site/; Sphinx writes docs/_build/
+/site
+docs/_build/
+
+# --- Editors, IDEs and OS ---------------------------------------------------
+# JetBrains: the maintained template is Global/JetBrains.gitignore; the nuclear
+# option below ignores the whole folder.
+.idea/
+.junie/
+# Visual Studio Code: the maintained template is Global/VisualStudioCode.gitignore.
+# Uncomment to ignore the entire vscode folder.
+# .vscode/
+.DS_Store
+.ropeproject
+.spyderproject
+.spyproject
+# Temporary file for partial code execution
+tempCodeRunnerFile.py
+
+# --- AI coding artifacts ----------------------------------------------------
+.claude/agent-memory/
+.claude/state/
+.developments/
+.experiments/
+.notes/
+.plans/
+.reports/
+.temp/
+
+# --- Caches -----------------------------------------------------------------
+.cache
+.webassets-cache
+
+# --- Notebooks and REPLs ----------------------------------------------------
+.ipynb_checkpoints
+ipython_config.py
+profile_default/
+
+# --- Marimo -----------------------------------------------------------------
+__marimo__/
+marimo/_lsp/
+marimo/_static/
+
+# --- Web frameworks ---------------------------------------------------------
+# Django
+db.sqlite3
+db.sqlite3-journal
+local_settings.py
+# Flask
+instance/
+# Scrapy
+.scrapy
+# Streamlit
+.streamlit/secrets.toml
+
+# --- Task queues and brokers ------------------------------------------------
+# Celery
+celerybeat-schedule
+celerybeat.pid
+# ActiveMQ
+activemq-data/
+# RabbitMQ
+mnesia/
+rabbitmq-data/
+rabbitmq/
+# Redis
+*.aof
+*.rdb
+*.pid
+
+# --- Translations -----------------------------------------------------------
+*.mo
+*.pot
+
+# --- Miscellaneous ----------------------------------------------------------
+# Abstra — AI-powered process automation framework; learn more at https://abstra.io/docs
+# Ignores directories containing user credentials, local state, and settings.
+.abstra/
+*.log
+# Cython debug symbols
+cython_debug/
+# Pyre type checker
+.pyre/
+# SageMath parsed files
+*.sage.py

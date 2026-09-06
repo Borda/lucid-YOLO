@@ -29,8 +29,9 @@ Why one package:
     :mod:`lucid_yolo.eval.rotated_eval`).
 
 Why jsonargparse:
-    ``lucid-yolo`` is a LightningCLI, which is jsonargparse underneath, so the other two
-    commands use it directly rather than argparse. Flags and help text are then derived
+    ``lucid-yolo`` is a LightningCLI, which is jsonargparse underneath, so the other
+    three commands — ``lucid-data``, ``lucid-eval`` and ``lucid-predict`` — use it
+    directly rather than argparse. Flags and help text are then derived
     from the function signatures and their Google docstrings — one description per
     argument, in the docstring the API already required — and every command accepts
     ``--config`` for free, which is how a tier run records what it was given. The

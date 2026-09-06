@@ -54,7 +54,14 @@ Numerics
 
     - ProbIoU is exactly scale invariant — the same pair scaled from 1e3 to 1e6 px gives
       bit-comparable results — so sheer magnitude is not the problem WP-057's shoelace
-      had. **Aspect ratio** is. Over a randomized 1024 px sweep the form here holds
+      had. **Aspect ratio** is, and it is a conditioning property of the formula rather
+      than a precision shortfall of any one implementation: as a box thins, the two
+      products whose difference is the summed-covariance determinant approach each other,
+      so the *written* expression loses relative accuracy no matter how carefully it is
+      evaluated at a given precision. The rearrangement above removes this project's
+      exposure by never forming that difference; it does not make the published form
+      well-conditioned, so a re-derivation, a port, or a comparison against a literal
+      implementation inherits the numbers below in full. Over a randomized 1024 px sweep the form here holds
       1.7e-6 to 2.9e-6 relative at every ratio from 1:1 to 1000:1, while the literal one
       goes 1.5e-5 at 1:1, 2.2e-5 at 10:1, 1.6e-3 at 100:1, and at 1000:1 returns ``NaN``
       for part of the sweep, its summed determinant having cancelled to a negative value

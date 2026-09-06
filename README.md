@@ -13,7 +13,7 @@ A paper describes a method; a repository ships an implementation; and the gap be
 This project rebuilds the methods from the papers alone, deliberately without reading any existing implementation of them, and writes down every point where the papers ran out of instructions. What comes out is three things at once:
 
 - **A test of the claims.** If the NMS-free head really costs 0.6–0.8 AP, an independent implementation should measure something close to that. [It measures 1.11.](#detection--coco-2017-val-5000-images)
-- **A map of the underdetermined.** 73 numbered assumptions — the mask crop frame, the angle convention, the head's initialization bias — each one a place where two faithful implementations could legitimately diverge. See [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
+- **A map of the underdetermined.** A register of numbered assumptions — the mask crop frame, the angle convention, the head's initialization bias — each one a place where two faithful implementations could legitimately diverge. It grows with every work package that meets a new gap, so [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) is the count as well as the content.
 - **A codebase you can read.** No config DSL between you and the architecture, one mechanism per module, and every module citing the equation it implements.
 
 **Non-goals**, stated so nothing here is mistaken for them: matching the paper's headline accuracy (that needs a training budget this project does not have), shipping weights for production use, or being faster than the reference implementation. What is claimed is fidelity of *method*, with the evidence attached.
@@ -23,7 +23,7 @@ This project rebuilds the methods from the papers alone, deliberately without re
 | You are | Start here | What you get |
 | -- | -- | -- |
 | **A student entering computer vision** | [How a modern YOLO works](#how-a-modern-yolo-works) | One readable path from image to detections, with each block, loss and decode step in its own typed module — no config DSL to decode first |
-| **An applied ML engineer** | [Quickstart](#quickstart) | Four commands: train, evaluate, predict, draw. Lightning underneath, so your callbacks, loggers and accelerators work as they already do |
+| **An applied ML engineer** | [Quickstart](#quickstart) | The four commands the wheel installs — `lucid-data`, `lucid-yolo`, `lucid-eval`, `lucid-predict` — cover a whole tier. Lightning underneath, so your callbacks and loggers work as they already do; on accelerators, read the single-device caveat under [what was reproduced](#what-was-reproduced) first |
 | **A researcher reproducing results** | [What was reproduced](#what-was-reproduced) | Exact recipes, the run behind every number, the criteria each tier had to clear, and the deviations from the paper stated as deviations |
 | **A researcher building on top** | [Customizing it](#customizing-it) | Five scales over one topology, losses and assigners as separate modules, and a frozen-golden gate that tells you when a change moved something it should not have |
 
@@ -59,15 +59,21 @@ Four tasks, one trunk:
 | **Oriented detection** | one angle per detection, and boxes that turn | `[cx, cy, w, h, theta, score, class]` — a rotated rectangle, not an upright one |
 | **Keypoints** | `K` points per detection, and a normalizing flow that learns what a plausible error looks like instead of assuming it | the detection row, plus `K` `(x, y)` points |
 
-The fourth is **keypoints, not pose**: `K` is a constructor argument the way the class count is, and nothing in the head, the loss or the decode path knows what a point means. Human pose is the instantiation the shipped checkpoint trained on; the wiring gate runs a 7-point synthetic symbol schema instead. It is also the one task not drawn from the YOLO26 paper: the loss and evaluation protocol come from RLE (arXiv:2107.11291), composed onto the same trunk, and no paper on the allowlist publishes a keypoint architecture or parameter table to check this head against.
+The fourth is **keypoints, not pose**: `K` is a constructor argument the way the class count is, and nothing in the head, the loss or the decode path knows what a point means. Human pose is the instantiation the keypoint tier trained on — no checkpoint ships (D14), so that names a run rather than a downloadable artifact; the wiring gate runs a 7-point synthetic symbol schema instead.
 
-Every module names the equation it implements and the assumption it rests on. `docs/ASSUMPTIONS.md` is the list of every place where the papers did not determine an answer and this project had to choose one — 73 of them, each with what was chosen, why, and what would falsify it.
+**A `K`-generic head is not an arbitrary-schema OKS protocol, and the count is where the genericity stops.** Scoring a schema needs two things `K` does not supply: a per-point sigma vector, and the left/right pairs a horizontal flip must swap. R12 publishes exactly one sigma table, the 17 human-anatomy values derived from annotator variance, and this project ships that table plus a single uniform fallback for schemas that have no annotator to measure (A67) — not a way to derive sigmas for a schema in general. The flip pairs are read off the annotation file's own keypoint *names* (`_build_keypoint_flip_pairs`, `data/coco.py`), so a COCO file that names its points gets them and a YOLO root never does. Train any `K` you like; scoring a new schema is a modelling decision you make, not one the head hands you.
+
+Keypoints are also the one task not drawn from the YOLO26 paper: the loss and evaluation protocol come from RLE (arXiv:2107.11291), composed onto the same trunk, and no paper on the allowlist publishes a keypoint architecture or parameter table to check this head against.
+
+Every module names the equation it implements and the assumption it rests on. `docs/ASSUMPTIONS.md` is the list of every place where the papers did not determine an answer and this project had to choose one, each row carrying what was chosen, why, and what would falsify it.
 
 <a id="what-was-reproduced"></a>
 
 ## 📊 What was reproduced
 
 Four tiers have been trained and accepted — detection, instance segmentation, oriented detection and keypoints — each at the **n scale for 50 epochs on one GPU**. That is a smoke tier: enough to show a mechanism works end to end, far short of the paper's own training budget. Read every number below as "this implementation, trained small" — not as a claim about the paper's headline table.
+
+**One device, every time.** *One* GPU is literal: no run in this project's history has trained across more than a single device, so no distributed strategy — DDP, FSDP, multi-node — has ever been exercised here, and none of the recipes below was tuned under one. What follows differs by task, and the difference is not cosmetic. **Oriented detection and keypoints are refused outright on more than one process**, at setup rather than partway through a validation: their epoch metrics accumulate plain Python lists that nothing gathers across ranks, so each rank would score its own shard and log it as the split's number, and average precision cannot be averaged back (docs/TRAINING.md, *Oriented and keypoint runs are single-device*). Detection and segmentation carry torchmetrics metrics that do synchronise across ranks, so they are unobstructed — but "unobstructed" is an untested inheritance from Lightning, not a claim this project has evidence for. The only measurement anywhere here across two accelerators is an *evaluation*: the OBB checkpoint scores 0.2914/0.5242 on Apple MPS against 0.2914/0.5243 on CUDA, which says something about the evaluator and nothing about training portability.
 
 ### Detection — COCO 2017 val, 5000 images
 
@@ -119,8 +125,17 @@ The ratio is bounded above by construction — every mask starts from a box this
 ### What is gated rather than claimed
 
 - **Architecture fidelity**: parameter and FLOP counts for all five scales are held against the paper's own tables, as a test, on every commit — detection against Table 7 within ±2% params (n: 2.4M/5.4G through x: 55.7M/193.9G), instance segmentation against Table S9 within ±3%, oriented detection against Table S11 within ±3.5% at 1024 px on DOTA's 15 classes, and all three within ±5% FLOPs. The oriented tolerance is wider because it is where the angle-stem width is inferred rather than published, and it is stated as such rather than as parity (A20 stays open). Keypoints are the one task with no published table to check — none of the papers describes a keypoint architecture at all — so that head is held against this project's own frozen goldens instead.
-- **Regression**: 34 frozen golden metric files, one set per released minor from 0.2 through 0.7, re-verified beside the 9 live ones on every run of `make gate` — a later release may never silently regress an earlier one's numbers.
+- **Regression**: one frozen set of golden metric files per released minor, from the first release that had goldens to the current one, re-verified beside the live set on every run of `make gate` — a later release may never silently regress an earlier one's numbers.
 - **The suite**: every test offline — no network, no dataset, no GPU required, and the doctests in `src/` and `scripts/` run with it.
+
+### What a green gate does not say
+
+`make gate` is a *structural* gate, and reading it as a quality signal is the mistake this section exists to prevent.
+
+- **No accuracy number is pinned by it.** The learned-quality floors — the overfit-100 wiring gates whose figures appear in the model cards — live in `goldens/gpu/`, which `scripts/check_goldens.py` deliberately excludes from default discovery. `make gate` never passes `--include-gpu`. Green means the architecture, the assignment cases, the optimizer toy problem and the frozen release goldens all still reproduce; it means nothing whatsoever about whether the models detect anything. The audit that produced 0.8.0 is the demonstration: an assigner objective annihilated at `4.12e-09` while every offline golden passed.
+- **The accelerator half runs elsewhere, and only if armed.** `make gate-gpu` is what runs the marked GPU/data tests and the `goldens/gpu/` floors. Its schedule is `.github/workflows/gate-gpu.yml` (nightly plus manual dispatch), and that job carries `if: vars.GPU_RUNNER_LABEL != ''`: with the repository variable unset — its state on a fork, and on any checkout without a self-hosted CUDA runner — the job resolves to a **visible skipped job**, not a run. A green Actions tab is compatible with the accelerator gate having never executed.
+- **Its fixtures are synthetic by policy.** Every offline test runs against micro-datasets generated by `fuse-augmentations`, never against COCO or DOTA (A26 / D12b). That is deliberate — the suite is offline by design — but it means the gate exercises the code paths on data this project drew, so a defect that only real annotations elicit is out of its reach. Real data enters only at tier acceptance.
+- **Determinism is not uniform across accelerators.** Runs request `deterministic: true`, but `default_determinism` (`cli/train.py`) downgrades that to `warn_only` whenever MPS is the auto-picked accelerator, because MPS ships no deterministic kernel for some backwards used here. CPU and CUDA keep strict determinism; an Apple-silicon run does not, and the difference is silent apart from the warnings.
 
 Full write-ups with the exact commands as run, the failures along the way, and what each tier does *not* claim: **docs/REPRODUCTION_REPORT.md**. Per-task model cards, including intended use and limitations: **docs/model_cards/**.
 
@@ -182,13 +197,13 @@ The architecture is **typed Python, not a config file** (docs/DECISIONS.md, ADR-
 | How detections are decoded | `decode/` | The end-to-end top-k path, the NMS path, and the rotated variants |
 | Your own dataset | `--data.data_root` | COCO-JSON and YOLO-txt layouts are both read, and the layout is probed rather than declared |
 
-Then run `make gate`. It runs the linters, the type checker, the full offline suite and the frozen goldens — so a change that quietly moved a number you were not editing fails in about two minutes rather than in a training run tomorrow.
+Then run `make gate`. It runs the linters, the type checker, the full offline suite and the frozen goldens — so a change that quietly moved a number you were not editing fails in about two minutes rather than in a training run tomorrow. What it will not tell you is whether the change made the models worse: no learned-quality figure is inside it, and [what a green gate does not say](#what-a-green-gate-does-not-say) is worth reading before trusting one.
 
 ## ⚖️ The decisions that shape it
 
 Seven choices explain most of what this repository looks like. Each one is argued in `docs/DECISIONS.md`, and each has evidence behind it rather than only a preference.
 
-**No reference implementation is ever read.** A reproduction that consults the original tests nothing — it inherits the answers, including the ones the paper never gave. So the source list is an allowlist: the papers, and a handful of permissively licensed implementations admitted for diagnostics only, each named with the decision that admitted it ([`PROVENANCE.md`](docs/PROVENANCE.md), D13 / ADR-004). Commit messages cite sources by id, and a hook rejects a commit whose citation does not resolve.
+**The implementation being reproduced is never read.** A reproduction that consults the original tests nothing — it inherits the answers, including the ones the paper never gave. So the source list is an allowlist: the papers, and a handful of permissively licensed implementations admitted for diagnostics only, each named with the decision that admitted it ([`PROVENANCE.md`](docs/PROVENANCE.md), D13 / ADR-004). Commit messages cite sources by id, and a hook rejects a commit whose citation does not resolve.
 
 **The architecture is typed Python, never a config file** ([ADR-001](docs/DECISIONS.md)). A YAML topology moves every structural error from the type checker to the first forward pass, and makes "what changed" a diff of strings. Here, five scale rows multiply depth, width and max-channels over one topology, and the run configs carry only schedule, optimizer and loss gains. Evidence that it holds: parameter and FLOP counts for all five scales are gated against the paper's table on every commit.
 
@@ -226,9 +241,12 @@ Current release: **0.8.0** — the audit remediations, and the gates that should
 ## 🧰 Development
 
 ```bash
-make setup   # venv + editable install + pre-commit hooks
-make gate    # lint + types + tests + golden regression: the merge gate
+make setup    # venv + editable install + pre-commit hooks
+make gate     # lint + types + offline tests + frozen-golden regression: the merge gate
+make gate-gpu # the other half: accelerator-marked tests and the goldens/gpu/ quality floors
 ```
+
+`make gate` is the merge bar and it is entirely offline — no accelerator, no dataset, no network. `make gate-gpu` is the half it cannot run, and it needs a machine with an accelerator; in CI it runs on the nightly `gate-gpu.yml` schedule, which stays a skipped job until the `GPU_RUNNER_LABEL` repository variable names a self-hosted runner.
 
 Contributions follow the same contract the rest of the work does: `AGENTS.md` first, one logical change per commit, `make gate` green, and the source of every design claim cited by id.
 

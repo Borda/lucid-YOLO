@@ -18,6 +18,25 @@ Transfers stream to a `.part` file and are renamed on completion, so a killed ru
 
 `--sha256` enforces on what a run downloads. A split that is already extracted is skipped before any transfer, and the `.zip` it would hash is gone (removed after extraction unless `--keep_archives` was set), so a digest supplied for it prints `checksum not verified: … already extracted` instead of being checked — `--force true` re-downloads and re-verifies.
 
+### The keypoint tier needs a second annotation file, and must be told so
+
+Three of the four tiers read `annotations/instances_{split}2017.json`. The keypoint tier does not: it trains and scores on **`annotations/person_keypoints_{split}2017.json`**, the `person`-only 17-point human-pose annotations.
+
+Nothing extra has to be downloaded. `person_keypoints_train2017.json` and `person_keypoints_val2017.json` ship inside `annotations_trainval2017.zip` — the same archive `lucid-data download` already fetches — and land beside the `instances_` files in `annotations/`.
+
+What *is* required is naming them. `lucid_yolo.data.layout` resolves only the `instances_` spelling, in every one of its `CANDIDATES` rows, so the keypoint config carries two overrides that are **mandatory rather than optional**, unlike every other tier's `data:` block:
+
+```yaml
+data:
+  data_root: /data/coco
+  train_ann_file: /data/coco/annotations/person_keypoints_train2017.json
+  val_ann_file: /data/coco/annotations/person_keypoints_val2017.json
+```
+
+Those two lines are already in `pose_nano_smoke.yaml` as placeholders; point them at your own root before launching. Leaving them at the placeholder paths, or dropping them, leaves the layout probe to resolve the `instances_` files, whose annotations carry no `keypoints` field — `parse_coco_keypoints` rejects that by name, reporting the file and image rather than raising a bare `KeyError` (L-29). It fails at dataset construction, not silently, but it fails after you have queued the run.
+
+`lucid-data check` validates the layout, which is the `instances_` question; it does not verify that the keypoint annotation files are present or readable. Confirm both paths exist before spending GPU hours on the tier.
+
 ## 🛰️ DOTA-v1.0 (R18)
 
 **Manual, and it stays manual.** The distribution has no equivalent of `images.cocodataset.org`: the dataset page offers Google Drive and Baidu Drive folders, which are interactive pages rather than archive URLs. A folder link cannot be resolved to a stable file URL without rendering JavaScript, the Drive large-file path adds a confirmation interstitial, and Baidu Drive requires an account. A downloader written against any of that is a scraper of someone else's UI, which breaks silently and off-repository. So `lucid-data download` covers COCO only, and DOTA provisioning is an operator step.

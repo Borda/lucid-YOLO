@@ -3,8 +3,10 @@
 
 Implements the detection, instance-segmentation, and oriented-detection methods
 published in arXiv:2606.03748, plus a keypoint task whose loss and evaluation
-protocol come from arXiv:2107.11291 instead, from the papers and their cited
-primary literature only. See docs/PROVENANCE.md and docs/ASSUMPTIONS.md for the
+protocol come from arXiv:2107.11291 instead. Every method input is a paper, its
+cited primary literature, or a recorded assumption; a small set of permissively
+licensed implementations is admitted for diagnostic reading only, never copied
+(D13 / ADR-004). See docs/PROVENANCE.md and docs/ASSUMPTIONS.md for the
 clean-room record.
 """
 

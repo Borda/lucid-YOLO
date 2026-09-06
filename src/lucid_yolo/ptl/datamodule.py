@@ -60,6 +60,17 @@ Multi-image augmentation composition:
     seeded *per worker and per epoch* by :func:`_init_worker` (WP-079) — a fresh
     stream each time, still fully determined by ``seed``.
 
+    **Reproducibility is a function of** ``(seed, num_workers)`` **jointly, not of**
+    ``seed`` **alone.** Both regimes above are deterministic, and they are
+    deterministically *different*: at ``num_workers=0`` every draw comes from the
+    parent generator in index order, while at ``num_workers=N`` torch derives each
+    worker's seed as ``base_seed + worker_id`` from the loader's own generator at
+    every iterator creation, so the augmentation parameters a given sample receives
+    depend on which worker happened to own its index. A run at 32 workers therefore
+    does **not** reproduce the same seed at 0 workers, and does not reproduce it at
+    16 either. Reproducing a published run means matching its worker count as well
+    as its seed; the tier recipes in ``docs/TRAINING.md`` state both for that reason.
+
 Batch contract:
     Two forms, split by the DataLoader worker boundary:
 

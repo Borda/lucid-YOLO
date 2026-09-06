@@ -103,6 +103,14 @@ Two differences from the COCO tiers, forced by the data rather than chosen:
 
 `lucid-yolo fit` refuses `task: obb` and `task: keypoints` on more than one process, and says so at setup rather than partway through the first validation. Their epoch metrics — `val/rotated_mAP` and `val/oks_mAP` — accumulate plain Python lists that nothing gathers, so each rank would score its own shard and log it as the split's number. Average precision ranks every detection of the split against every other by confidence, so per-rank values cannot be averaged back into the right one; a wrong number that looks plausible is worse than a refusal. Leave `trainer.devices` at `1` for these two tasks, or pick a bigger accelerator rather than more of them. Detection and segmentation are unaffected: their metrics are torchmetrics metrics and synchronise across ranks.
 
+## 🎲 What `deterministic: true` and `seed` actually pin
+
+Every tier config sets `deterministic: true` and seed 0. Two boundaries sit inside that, and neither fails loudly.
+
+**On MPS it is not strict.** `default_determinism` (`lucid_yolo/cli/train.py`) resolves the trainer's `deterministic` flag to `"warn_only"` whenever MPS is the auto-picked accelerator, because MPS ships no deterministic implementation for some backward kernels this model reaches — `index_put_with_accumulate`, hit by the assignment and loss backward — and strict `True` aborts mid-step there. Every op with a deterministic kernel stays deterministic; the rest downgrade to a warning. CPU and CUDA keep strict `True`. So an Apple-silicon run under D12c is reproducible only up to those kernels, and says so in the log rather than by failing.
+
+**The worker count is part of the seed.** A seeded run is byte-identical only against another run at the *same* `--data.num_workers`. At `0` the pipeline draws every augmentation parameter from one generator in the parent process, in index order. With workers each is re-seeded per worker and per epoch from the loader's own generator (WP-079), which is what keeps per-epoch diversity alive. Both streams are fully determined by `seed` and they are **different streams**: the recipes above run at 32 workers, and rerunning one at 0 workers, or at 16, reproduces the schedule and not the sample-by-sample augmentation. Reproducing a published run means matching its worker count as well as its seed, which is why every command above states one.
+
 ## 🔐 What `--checkpoint` will deserialize
 
 Every command above reads its checkpoint through one loader, and that loader reads the file twice in a fixed order. The first read is restricted — `torch.load(..., weights_only=True)` — and refuses anything the file names outside torch's allowlist while the pickle stream is still being parsed, so a checkpoint carrying an arbitrary reducer is rejected before that reducer runs. Only a file that survives that read is handed to Lightning.
