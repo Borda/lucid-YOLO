@@ -241,8 +241,12 @@ def check_assumption_ids_contiguous(docs_dir: Path, repo_root: Path) -> list[str
         >>> with tempfile.TemporaryDirectory() as tmp:
         ...     docs = Path(tmp)
         ...     _ = (docs / "ASSUMPTIONS.md").write_text("| A1 | ... |\\n| A3 | ... |\\n", encoding="utf-8")
-        ...     check_assumption_ids_contiguous(docs, docs)
-        ['non-contiguous assumption ids: [1, 3]', 'assumptions shrank below 73 rows: 2']
+        ...     violations = check_assumption_ids_contiguous(docs, docs)
+        ...     violations == [
+        ...         "non-contiguous assumption ids: [1, 3]",
+        ...         f"assumptions shrank below {_ASSUMPTION_FLOOR} rows: 2",
+        ...     ]
+        True
     """
     text = (docs_dir / "ASSUMPTIONS.md").read_text(encoding="utf-8")
     ids = [int(m) for m in re.findall(r"^\| A(\d+) \|", text, flags=re.MULTILINE)]
@@ -316,8 +320,9 @@ def check_roadmap_wp_ids_unique_and_complete(docs_dir: Path, repo_root: Path) ->
         >>> with tempfile.TemporaryDirectory() as tmp:
         ...     docs = Path(tmp)
         ...     _ = (docs / "ROADMAP.md").write_text("| 001 | ... |\\n| 002 | ... |\\n", encoding="utf-8")
-        ...     check_roadmap_wp_ids_unique_and_complete(docs, docs)
-        ['roadmap shrank below 176 work packages: 2']
+        ...     violations = check_roadmap_wp_ids_unique_and_complete(docs, docs)
+        ...     violations == [f"roadmap shrank below {_WP_FLOOR} work packages: 2"]
+        True
     """
     text = (docs_dir / "ROADMAP.md").read_text(encoding="utf-8")
     ids = [int(m) for m in re.findall(r"^\| (\d{3}) \|", text, flags=re.MULTILINE)]
@@ -499,7 +504,7 @@ def check_decisions_ids(docs_dir: Path, repo_root: Path) -> list[str]:
         ...     docs = Path(tmp)
         ...     _ = (docs / "DECISIONS.md").write_text("| D1 | ... |\\n", encoding="utf-8")
         ...     violations = check_decisions_ids(docs, docs)
-        ...     violations[0].startswith("decisions shrank below 20 rows")
+        ...     violations[0].startswith(f"decisions shrank below {_DECISION_FLOOR} rows")
         True
     """
     text = (docs_dir / "DECISIONS.md").read_text(encoding="utf-8")
