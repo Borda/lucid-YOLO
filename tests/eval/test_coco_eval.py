@@ -37,6 +37,7 @@ ground truth is a target dict rather than a ``COCO`` object.
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import TYPE_CHECKING
 
@@ -46,12 +47,13 @@ from torch import Tensor
 from torchmetrics.detection import MeanAveragePrecision
 from torchvision.io import ImageReadMode, read_image
 
+from lucid_yolo.cli import eval as cli_eval
 from lucid_yolo.data.coco import CocoDetectionDataset
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode import NMSDecoder, TopKDecoder
 from lucid_yolo.eval import DualPathEvaluator, coco_eval, detections_to_predictions, evaluate_bbox
-from lucid_yolo.eval.coco_eval import _METRIC_KEYS, _RECALL_GRID
+from lucid_yolo.eval.coco_eval import _METRIC_KEYS, COCO_RECALL_GRID
 from lucid_yolo.models.heads.detect import DualHeadOutput
 from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -609,11 +611,11 @@ class TestRecallGridBoundary:
         """
         default = torch.linspace(0.0, 1.00, round(1.00 / 0.01) + 1).tolist()
 
-        overshoot = {index for index in range(len(_RECALL_GRID)) if default[index] > _RECALL_GRID[index]}
+        overshoot = {index for index in range(len(COCO_RECALL_GRID)) if default[index] > COCO_RECALL_GRID[index]}
 
         assert len(overshoot) == 36
         assert {14, 28, 65, 78, 84} <= overshoot  # the five indices parametrized above
-        assert not any(value > index / 100 for index, value in enumerate(_RECALL_GRID))
+        assert not any(value > index / 100 for index, value in enumerate(COCO_RECALL_GRID))
 
     def test_guard_fires_when_the_metric_stops_honouring_rec_thresholds(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A metric that accepts ``rec_thresholds`` and ignores it must fail loudly, not silently.
@@ -778,14 +780,72 @@ class TestHotcocoIsUsableHere:
         assert probe == (True, None), f"hotcoco is a hard dependency but is unusable here: {probe[1]}"
 
 
+class TestBackendDefaults:
+    """The library default and the CLI default are different, and the prose says so (audit M-01).
+
+    Two docstrings in this project used to describe hotcoco as opt-in without
+    qualification, while ``lucid-eval`` --- the only shipped caller --- defaults to
+    ``auto`` and takes hotcoco whenever it is usable. Both defaults are pinned here
+    so a later change to either one makes the corrected prose fail rather than go
+    stale a second time. Nothing here needs hotcoco installed: the availability
+    probe is substituted, which is also the only way to exercise both arms of the
+    ``auto`` rule on one machine.
+    """
+
+    def test_the_library_default_is_faster_coco_eval(self) -> None:
+        """Constructing the evaluator without naming a backend scores with ``faster_coco_eval``.
+
+        This is the conservative half of the claim: a caller who predates WP-138,
+        or who never read it, gets the report this project always produced.
+        """
+        default = inspect.signature(DualPathEvaluator.__init__).parameters["backend"].default
+
+        assert default == "faster_coco_eval"
+
+    def test_the_cli_default_is_auto(self) -> None:
+        """``lucid-eval`` defaults ``--eval_backend`` to ``auto``, not to the library default.
+
+        The half the prose used to omit. ``auto`` is a resolution rule rather than
+        an engine, so the two tests below say what it resolves to.
+        """
+        default = inspect.signature(cli_eval.evaluate).parameters["eval_backend"].default
+
+        assert default == "auto"
+
+    def test_auto_takes_hotcoco_when_hotcoco_is_usable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With a usable hotcoco, ``auto`` resolves to hotcoco -- silently, and with no reason recorded.
+
+        This is why a ``lucid-eval`` report on a normal host is a hotcoco report:
+        the caller opted into nothing.
+        """
+        monkeypatch.setattr(cli_eval, "hotcoco_available", lambda: (True, None))
+
+        assert cli_eval._resolve_eval_backend("auto") == ("hotcoco", None)
+
+    def test_auto_falls_back_and_records_why(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An unusable hotcoco sends ``auto`` back to ``faster_coco_eval``, carrying the reason.
+
+        The fallback is what stops the CLI default being a flat "the default is
+        hotcoco": on a host without a working wheel the same command scores with
+        the other engine, and the report says which.
+        """
+        monkeypatch.setattr(cli_eval, "hotcoco_available", lambda: (False, "no wheel for this platform"))
+
+        assert cli_eval._resolve_eval_backend("auto") == ("faster_coco_eval", "no wheel for this platform")
+
+
 @pytest.mark.skipif(not coco_eval.hotcoco_available()[0], reason="hotcoco not installed or not usable here")
 class TestHotcocoParity:
     """Hotcoco's streaming scorer must report exactly what faster_coco_eval's does (WP-138).
 
-    hotcoco is opt-in (``DualPathEvaluator(..., backend="hotcoco")``), never the
-    silent default of the library path — a caller who does not ask for it gets
-    exactly the ``faster_coco_eval`` report this project has always produced. The
-    contract this class exists to pin is narrower and stricter: given the
+    hotcoco is opt-in *at the library boundary* — ``DualPathEvaluator()`` with no
+    ``backend`` scores with ``faster_coco_eval``, exactly the report this project
+    has always produced. It is **not** opt-in at the shipped command line:
+    ``lucid-eval`` defaults ``--eval_backend`` to ``auto``, which takes hotcoco
+    whenever hotcoco is usable on the host. So on any machine that can run it, the
+    tool's reports are hotcoco reports unless the caller says otherwise, and this
+    class is what stands behind them rather than a nicety for an opt-in path. The
+    contract it pins is narrower and stricter: given the
     *identical* accumulated predictions and targets, the two engines must not
     merely agree in spirit, they must report the same numbers under the same
     key names, because a report's ``eval_backend`` field is metadata about how

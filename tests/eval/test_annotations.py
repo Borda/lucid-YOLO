@@ -187,6 +187,114 @@ def test_keypoint_load_refuses_an_annotation_file_with_no_points(tmp_path: Path)
         load_eval_annotations(ann_file, with_keypoints=True)
 
 
+def test_masks_and_keypoints_requested_together_reach_the_same_target(tmp_path: Path) -> None:
+    """Both opt-ins compose: one load with both flags carries the mask *and* the points.
+
+    The two options are documented as independent, and asking for both selects the
+    lazy mask path — which is where the keypoint flag used to stop, so the OKS keys
+    vanished from a target that still looked complete to everything reading its boxes.
+    The values are compared against the eager keypoints-only load of the same file, so
+    a target that grew the keys but filled them from somewhere else fails too.
+    """
+    payload = _payload()
+    payload["annotations"] = [
+        {
+            "image_id": 1,
+            "bbox": [1.0, 2.0, 3.0, 4.0],
+            "category_id": 3,
+            "num_keypoints": 1,
+            "keypoints": [1.0, 2.0, 2, 3.0, 4.0, 1, 0.0, 0.0, 0],
+            "segmentation": [[1, 2, 4, 2, 4, 6, 1, 6]],
+        }
+    ]
+    ann_file = tmp_path / "person_keypoints.json"
+    ann_file.write_text(json.dumps(payload))
+
+    _, combined, _ = load_eval_annotations(ann_file, with_masks=True, with_keypoints=True)
+
+    _, points_only, _ = load_eval_annotations(ann_file, with_keypoints=True)
+    both = _TARGET_KEYS | {"masks", "keypoints", "visibility", "num_keypoints"}
+    assert set(combined[1]) == both
+    assert set(combined[2]) == both  # the unannotated image carries the same key set
+    assert combined[1]["masks"].shape == (1, 6, 10)
+    assert torch.equal(combined[1]["keypoints"], points_only[1]["keypoints"])
+    assert torch.equal(combined[1]["visibility"], points_only[1]["visibility"])
+    assert torch.equal(combined[1]["num_keypoints"], points_only[1]["num_keypoints"])
+
+
+@pytest.mark.parametrize(
+    ("annotation", "message"),
+    [
+        pytest.param(
+            {"id": 4, "image_id": 1, "bbox": [float("nan"), 1.0, 2.0, 2.0], "category_id": 3},
+            "annotation 4 of image 1: bbox must be finite",
+            id="nan-coordinate",
+        ),
+        pytest.param(
+            {"id": 4, "image_id": 1, "bbox": [float("inf"), 1.0, 2.0, 2.0], "category_id": 3},
+            "annotation 4 of image 1: bbox must be finite",
+            id="infinite-coordinate",
+        ),
+        pytest.param(
+            {"id": 5, "image_id": 1, "bbox": [1.0, 1.0, 2.0, 2.0], "category_id": 3, "area": -1.0},
+            "annotation 5 of image 1: area must be finite and non-negative",
+            id="negative-area",
+        ),
+        pytest.param(
+            {"id": 6, "image_id": 1, "bbox": [1.0, 1.0, 2.0, 2.0], "category_id": 3, "iscrowd": 2},
+            "annotation 6 of image 1: iscrowd must be 0 or 1",
+            id="out-of-domain-crowd",
+        ),
+    ],
+)
+def test_malformed_numeric_metadata_is_refused_naming_the_annotation(
+    annotation: dict[str, object], message: str
+) -> None:
+    """Each out-of-domain numeric field is refused on its own, naming image, annotation and value.
+
+    Carried through instead, every one of these makes both scorers report ``-1`` for
+    every summary — an evaluation run consumed for an undefined metric report with
+    nothing in it pointing back at the annotation that caused it. The three fields are
+    exercised separately because a combined fixture cannot say which one was diagnosed.
+    """
+    with pytest.raises(ValueError, match=message):
+        annotations_to_target([annotation])
+
+
+def test_legal_but_unusual_metadata_still_loads() -> None:
+    """Off-image coordinates, a zero area and the crowd flag are input, not malformed input.
+
+    The refusal above must land on values with no reading at all, not on the three
+    things a real COCO export legitimately contains: a box whose origin sits outside
+    the image, an ``area`` of zero a protocol may assign a hairline instance, and
+    ``iscrowd = 1``, which is the crowd-ignore rule this reader exists to preserve.
+    """
+    target = annotations_to_target(
+        [{"id": 1, "image_id": 1, "bbox": [-5.0, -5.0, 2.0, 2.0], "category_id": 3, "area": 0.0, "iscrowd": 1}]
+    )
+
+    assert target["boxes"].tolist() == [[-5.0, -5.0, -3.0, -3.0]]
+    assert target["area"].tolist() == [0.0]
+    assert target["iscrowd"].tolist() == [1]
+
+
+def test_the_lazy_path_refuses_malformed_metadata_at_load_not_mid_run(tmp_path: Path) -> None:
+    """A masked load validates the whole file up front rather than at first lookup.
+
+    :class:`~lucid_yolo.eval.annotations.LazyTargets` builds nothing until the
+    evaluator asks for an image, so without this pass the same refusal would arrive
+    part-way through a scoring run that has already spent its minutes — which is the
+    cost the malformed file was meant to avoid in the first place.
+    """
+    payload = _payload()
+    payload["annotations"] = [{"id": 9, "image_id": 1, "bbox": [1.0, 1.0, 2.0, 2.0], "category_id": 3, "iscrowd": 2}]
+    ann_file = tmp_path / "instances.json"
+    ann_file.write_text(json.dumps(payload))
+
+    with pytest.raises(ValueError, match="annotation 9 of image 1: iscrowd must be 0 or 1"):
+        load_eval_annotations(ann_file, with_masks=True)
+
+
 def test_load_sorts_images_by_id(tmp_path: Path) -> None:
     """Images are returned in ascending id order regardless of their order in the file."""
     ann_file = tmp_path / "instances.json"

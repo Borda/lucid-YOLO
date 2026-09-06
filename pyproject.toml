@@ -30,7 +30,15 @@ dependencies = [
   # docstrings the help text is built from.
   "jsonargparse[signatures]>=4.28",
   "torchvision>=0.19",
-  "torchmetrics>=1.9",
+  # Capped, unlike the other torch-family pins, because `ptl/coco_backend.py` overrides
+  # `CocoBackend._get_coco_format` and assigns to `MeanAveragePrecision._coco_backend` --
+  # two private surfaces a minor may rename, drop or relocate without notice. The override
+  # delegates and `build_mean_average_precision` now refuses to construct against a
+  # torchmetrics whose `CocoBackend` has no `_get_coco_format`, so a rename fails loudly;
+  # a *relocated* score attachment would not, which is what the ceiling is for. Tested
+  # range: 1.9.0 only -- the version installed and gated here. Lift the ceiling by running
+  # `tests/ptl/test_coco_backend.py` against the new minor, not by editing this line.
+  "torchmetrics>=1.9,<1.10",
   "faster-coco-eval>=1.7",
   # `lucid-eval`'s bbox/segm scoring engine by default (WP-138) -- faster-coco-eval
   # stays required too: keypoints' OKS scoring, module.py's training-loop val/mAP,

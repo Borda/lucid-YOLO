@@ -69,7 +69,7 @@ builds it with a float32 ``torch.linspace``, which overshoots ``k/100`` at 36 of
 indices, so a class whose attained recall lands exactly on one of those boundaries forfeits
 that point and ``1/101`` of its average precision — always downward, never up. That is not
 an exotic case: a class with 5, 10, 20, 25, 50 or 100 ground truths lands on a grid point
-at *every* recall it can attain, and 20-36% of those are forfeited. :data:`_RECALL_GRID`
+at *every* recall it can attain, and 20-36% of those are forfeited. :data:`COCO_RECALL_GRID`
 supplies the correctly rounded hundredths instead, through the metric's own documented
 ``rec_thresholds`` argument, which makes this instrument agree exactly with the oriented one
 (:func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map`) at the boundaries where they used
@@ -108,6 +108,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "COCO_KEYPOINT_OKS_SIGMAS",
+    "COCO_RECALL_GRID",
     "SYMBOL_KEYPOINT_OKS_SIGMA",
     "DualPathEvaluator",
     "detections_to_predictions",
@@ -153,6 +154,12 @@ _RECALL_POINTS = 101
 
 #: The COCO recall grid as **correctly rounded** hundredths (WP-092, A46).
 #:
+#: Public, unlike the other protocol constants below it, because the training loop's
+#: epoch metrics are built outside this module
+#: (:mod:`~lucid_yolo.ptl.module` via :func:`~lucid_yolo.ptl.coco_backend.build_mean_average_precision`)
+#: and must integrate on this same grid: two figures reported under one metric name and
+#: summed over two different recall grids are two different statistics (audit M-03).
+#:
 #: Passed to the metric rather than left to its default, because torchmetrics builds this
 #: grid with a **float32** ``torch.linspace`` and widens the result to Python floats: at 36
 #: of the 101 indices the stored threshold is then strictly greater than the ``k/100`` it
@@ -177,11 +184,11 @@ _RECALL_POINTS = 101
 #: be given in practice. ``tests/eval/test_coco_eval.py::TestRecallGridBoundary`` pins the
 #: agreement at the boundaries, and the 36-index defect itself, so a torchmetrics that
 #: fixes its own grid is noticed rather than silently worked around forever.
-_RECALL_GRID: tuple[float, ...] = tuple(index / (_RECALL_POINTS - 1) for index in range(_RECALL_POINTS))
+COCO_RECALL_GRID: tuple[float, ...] = tuple(index / (_RECALL_POINTS - 1) for index in range(_RECALL_POINTS))
 
 #: COCO's own canonical detection-count thresholds (R12) for the box and mask
 #: protocols, stated explicitly rather than left to either engine's default — the
-#: same reasoning as :data:`_RECALL_GRID`, and given to *both* engines for the same
+#: same reasoning as :data:`COCO_RECALL_GRID`, and given to *both* engines for the same
 #: reason the recall grid is: a statistic whose detection cap depends on which
 #: backend computed it is not the same statistic under one name. Equal to what
 #: torchmetrics and hotcoco both default to today, but a citable,
@@ -809,7 +816,7 @@ def _new_metric(iou_type: str | tuple[str, ...]) -> MeanAveragePrecision:
     The single place the metric is configured, so the backend, the box format, the
     recall grid, the detection cap and the detection-cap warning setting cannot
     differ between the one-shot entry points and the streaming one
-    :class:`DualPathEvaluator` drives. Passing :data:`_RECALL_GRID` here is
+    :class:`DualPathEvaluator` drives. Passing :data:`COCO_RECALL_GRID` here is
     therefore what gives ``bbox``, ``segm``, the combined pass and the streaming
     path one definition of average precision rather than four; passing
     :data:`_MAX_DETS` is the same argument one level out, since that constant is
@@ -840,10 +847,10 @@ def _new_metric(iou_type: str | tuple[str, ...]) -> MeanAveragePrecision:
         backend="faster_coco_eval",
         box_format="xyxy",
         iou_type=iou_type,  # type: ignore[arg-type]
-        rec_thresholds=list(_RECALL_GRID),
+        rec_thresholds=list(COCO_RECALL_GRID),
         max_detection_thresholds=list(_MAX_DETS),
     )
-    if tuple(metric.rec_thresholds) != _RECALL_GRID:
+    if tuple(metric.rec_thresholds) != COCO_RECALL_GRID:
         raise RuntimeError(
             "MeanAveragePrecision did not honour the rec_thresholds it was given, so its "
             "recall grid is not the exact one this module requires (A46). Refusing to "
@@ -1047,7 +1054,7 @@ def _hotcoco_stats(preds: list[dict[str, object]], gt: Mapping[str, object], iou
     predictions = ground_truth.loadRes(preds)
     evaluator = HotcocoEval(ground_truth, predictions, iou_type=iou_type)
     params = evaluator.params
-    params.rec_thrs = list(_RECALL_GRID)
+    params.rec_thrs = list(COCO_RECALL_GRID)
     params.max_dets = list(_MAX_DETS)
     evaluator.params = params
     evaluator.evaluate()
@@ -1511,9 +1518,29 @@ class DualPathEvaluator:
         self._letterbox = letterbox
         self._strides = strides
         self._keypoint_sigmas = tuple(keypoint_sigmas)
-        #: Box/mask scoring engine, kept conservative by default (WP-138) so every
-        #: existing caller and test means exactly what it meant before this WP —
-        #: a CLI caller opts in explicitly (``lucid-eval --eval_backend hotcoco``).
+        #: Box/mask scoring engine. The **library** default is conservative (WP-138):
+        #: constructing this class without naming a backend scores with
+        #: ``faster_coco_eval``, so every caller and test that predates that WP means
+        #: exactly what it meant before. The **CLI** default is not the same thing and
+        #: should not be read as one — ``lucid-eval`` defaults ``--eval_backend`` to
+        #: ``auto``, which resolves to ``hotcoco`` whenever hotcoco is usable on the
+        #: host and records a reason when it falls back
+        #: (:func:`~lucid_yolo.cli.eval._resolve_eval_backend`). So the shipped tool's
+        #: reports are hotcoco reports on any host that can run hotcoco, and the
+        #: engine that produced one is read from the report's own ``eval_backend``
+        #: field rather than assumed.
+        #:
+        #: What licenses that, and what it does not cover.
+        #: ``tests/eval/test_coco_eval.py::TestHotcocoParity`` holds the two engines to
+        #: the same numbers — ``1e-6`` absolute, on CPU — for the 12 :data:`_METRIC_KEYS`
+        #: box statistics, the 24 box+mask statistics, targets carrying their own
+        #: ``iscrowd`` and ``area`` through the box pass *and* the mask pass (WP-166),
+        #: the never-updated all-zero case, and one end-to-end
+        #: :meth:`evaluate` run over a real fixture. Not covered by any comparison:
+        #: the per-class entries this module drops from its report
+        #: (``map_per_class``, ``mar_100_per_class``, ``classes``), and any device other
+        #: than CPU — the parity evidence is CPU-only, so an accelerator run is
+        #: unverified rather than known-equal.
         #: OKS keypoint scoring is untouched either way: it stays hand-driven
         #: ``faster_coco_eval`` (A73), the same choice rf-detr PR 1402 itself made
         #: ("Keypoint evaluation uses its own OKS path and is untouched").

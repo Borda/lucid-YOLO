@@ -176,6 +176,7 @@ from lucid_yolo.decode.common import BOX_CORNERS, SCORE_COLUMN
 from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.eval.coco_eval import (
     COCO_KEYPOINT_OKS_SIGMAS,
+    COCO_RECALL_GRID,
     SYMBOL_KEYPOINT_OKS_SIGMA,
     evaluate_keypoints,
     gather_keypoints,
@@ -864,9 +865,20 @@ class DetectionLitModule(LightningModule):
         #: module's ``state_dict`` — and older checkpoints — are unaffected. Both
         #: metrics come from :func:`~lucid_yolo.ptl.coco_backend.build_mean_average_precision`,
         #: which is the stock metric with its epoch-to-COCO conversion reading
-        #: scores once per image rather than once per detection (WP-165).
+        #: scores once per image rather than once per detection (WP-165). Both also
+        #: take :data:`~lucid_yolo.eval.coco_eval.COCO_RECALL_GRID` rather than
+        #: torchmetrics' own float32 ``linspace``, for the reason that constant
+        #: states and because the alternative is worse than a small bias: the report
+        #: path pins the grid, so leaving it unpinned here would have the epoch
+        #: figure and the acceptance figure integrate over different recall points
+        #: while both were logged as ``mAP`` (audit M-03). The two remain proxies of
+        #: each other for the reasons at :meth:`on_validation_epoch_end` — different
+        #: coordinate frame, different detection cap — but no longer for a third,
+        #: silent, arithmetic reason.
         self._val_decoder = TopKDecoder()
-        self._val_map = build_mean_average_precision(backend="faster_coco_eval", box_format="xyxy")
+        self._val_map = build_mean_average_precision(
+            backend="faster_coco_eval", box_format="xyxy", rec_thresholds=list(COCO_RECALL_GRID)
+        )
         self._val_map.warn_on_many_detections = False
 
         #: Epoch mask mAP, for ``"segment"`` only (WP-087). A second metric rather
@@ -878,7 +890,11 @@ class DetectionLitModule(LightningModule):
         #: inputs are self-consistent. ``None`` for a detection module, whose
         #: validation must not pay for mask machinery it has no branch for.
         self._val_segm = (
-            build_mean_average_precision(backend="faster_coco_eval", iou_type="segm") if task == "segment" else None
+            build_mean_average_precision(
+                backend="faster_coco_eval", iou_type="segm", rec_thresholds=list(COCO_RECALL_GRID)
+            )
+            if task == "segment"
+            else None
         )
         if self._val_segm is not None:
             self._val_segm.warn_on_many_detections = False

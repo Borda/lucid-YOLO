@@ -235,6 +235,36 @@ class TestCorePartition:
         assert in_core(on_boundary, cores[0]).tolist() == [False]
         assert in_core(on_boundary, cores[1]).tolist() == [True]
 
+    def test_a_grid_row_sharing_one_origin_still_partitions(self) -> None:
+        """Two windows at the same x origin and the same width are the ordinary grid case.
+
+        A uniform tiler emits one x origin per column and reuses it down every row, so
+        the shared origin is the rule rather than the exception; the refusal below must
+        not reach it. Four windows, two columns by two rows, still own the plane once.
+        """
+        windows = [TileWindow("grid.png", (x, y), (6, 6)) for y in (0, 4) for x in (0, 4)]
+        cores = core_bounds(windows)
+        axis = torch.arange(-3.0, 13.0, 0.5)
+        points = torch.cartesian_prod(axis, axis)
+
+        owners = torch.stack([in_core(points, core) for core in cores])
+
+        assert owners.sum(dim=0).unique().tolist() == [1]
+
+    def test_two_windows_sharing_an_origin_with_different_spans_are_refused(self) -> None:
+        """An origin needing two boundaries is refused, not silently partitioned by one of them.
+
+        The cores are keyed on the window start, so a start carrying two different ends
+        loses one of them and the axis is then partitioned by whichever span was read
+        last — every detection between the two ends judged against a boundary belonging
+        to the other tiling. No tiler this project ships produces it; a hand-written or
+        externally produced layout can.
+        """
+        windows = [TileWindow("mixed.png", (0, 0), (6, 6)), TileWindow("mixed.png", (0, 0), (6, 9))]
+
+        with pytest.raises(ValueError, match="share the x origin 0 with different spans"):
+            core_bounds(windows)
+
 
 class TestTileIndex:
     """Reading the A53 window provenance back out of a tiled container."""

@@ -31,6 +31,20 @@ beyond the survivors carry ``score == 0`` and are ignored by a score-filtering
 evaluation loop. :func:`torchvision.ops.batched_nms` returns the kept indices in
 descending score order, so the score column comes out non-increasing.
 
+Descending order is the whole of that guarantee: **ties are unordered here**.
+``batched_nms`` sorts internally with no documented stability, and step 1's
+``confidence.max(dim=-1)`` picks between two exactly equal class scores by the same
+unspecified rule, so which of two equal-scoring rows lands first — and which class an
+exactly-tied anchor is labelled — is an implementation detail that may differ by
+device, by torch version, and between this path and a rerun of it. The rotated twin
+does state a tie order (:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder`
+sorts with ``stable=True``, so equal scores keep anchor order): the two decoders
+therefore differ in tie-breaking as well as in the overlap measure, and only the
+latter difference is deliberate. Row order alone does not move mAP, which reads each
+detection's score rather than its position; a tied run straddling the ``max_det``
+truncation, or a tied class argmax, can move it, since those decide *which* rows
+survive rather than merely where they sit.
+
 Provenance: R1 sec. 3.2.1, R3 sec. 4. Assumptions: A9.
 """
 

@@ -74,10 +74,11 @@ from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from torch import Tensor
 
+    from lucid_yolo.data.targets import Targets
     from lucid_yolo.eval.tile_merge import TileWindow
     from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -154,6 +155,7 @@ def score_split(
     img_size: int,
     limit: int = 0,
     windows: Sequence[TileWindow] | None = None,
+    expected_ground_truth: Sequence[Mapping[str, Tensor]] | None = None,
 ) -> SplitScoring:
     """Run the one-to-one branch over the split, scoring per tile and mapping to source.
 
@@ -163,6 +165,18 @@ def score_split(
     pre-letterbox size and its window origin. The two readings come from the same
     detections, so a difference between the reported figures is the merge and nothing
     else.
+
+    **The window a tile's detections are translated by is checked, not assumed.**
+    ``windows[position]`` pairs a detection with a window by loader position, and a
+    wrong pairing is silent by construction: mismatched origins move detections and
+    ground truth by different amounts, so the whole-image number simply drops and
+    nothing says why. Passing ``expected_ground_truth`` — the same split's per-tile
+    ground truth read from the annotation file, in index order — makes the pairing
+    checkable: the loader's own target for each tile must carry the identical labels
+    and difficult flags, and it is a different tile if it does not. Both readings drop
+    ``iscrowd`` annotations and fit the box from the four-point ring, so the two agree
+    exactly or the loader is not yielding the split in index order
+    (:func:`_require_matching_tile`).
 
     Args:
         module: The eval-mode oriented module.
@@ -174,13 +188,18 @@ def score_split(
             yields images in ascending COCO image id, which is the order
             :func:`~lucid_yolo.eval.tile_merge.load_tile_index` returns). ``None`` skips
             the source-coordinate mapping entirely.
+        expected_ground_truth: The same index's per-tile ground truth, aligned with
+            ``windows``. ``None`` (the default) leaves the pairing unchecked, which is
+            what a caller supplying no ``windows`` needs.
 
     Returns:
         The :class:`SplitScoring`.
 
     Raises:
         ValueError: If the module's task is not ``"obb"`` — a detection checkpoint has
-            no angle stem, so there is no oriented number to report.
+            no angle stem, so there is no oriented number to report — or if the loader
+            does not yield the tiles ``expected_ground_truth`` describes, in its order
+            and in full.
 
     Examples:
         >>> from lucid_yolo.ptl.module import DetectionLitModule
@@ -203,7 +222,10 @@ def score_split(
             head_out = module(images.to(device))
             rboxes = decode_rboxes(head_out.o2o_box, head_out.o2o_angle, anchor_points, strides)
             detections = o2o_rotated_topk(head_out.o2o_cls, rboxes, k=MAX_DETECTIONS).cpu()
-            source_predictions.extend(_to_source(detections, windows, len(predictions), img_size))
+            first = len(predictions)
+            for offset, target in enumerate(targets):
+                _require_matching_tile(target, expected_ground_truth, windows, first + offset)
+            source_predictions.extend(_to_source(detections, windows, first, img_size))
             predictions.extend(rotated_detections_to_predictions(detections))
             ground_truth.extend(
                 {
@@ -215,6 +237,8 @@ def score_split(
             )
             if limit and len(predictions) >= limit:
                 break
+    if not limit:
+        _require_whole_split(len(ground_truth), expected_ground_truth)
     if limit:
         predictions, ground_truth = predictions[:limit], ground_truth[:limit]
         source_predictions = source_predictions[:limit]
@@ -225,6 +249,92 @@ def score_split(
         instances=instances,
         source_predictions=source_predictions,
     )
+
+
+def _require_matching_tile(
+    target: Targets,
+    expected: Sequence[Mapping[str, Tensor]] | None,
+    windows: Sequence[TileWindow] | None,
+    position: int,
+) -> None:
+    """Refuse a loader position whose tile is not the one the index describes there.
+
+    The identity carried across the two readings is the tile's own annotation set: the
+    loader parses it through
+    :class:`~lucid_yolo.data.coco.CocoDetectionDataset` and the index through
+    :func:`~lucid_yolo.eval.tile_merge.load_tile_index`, both skipping ``iscrowd``
+    instances, both fitting the box from the four-point ring, both labelling by sorted
+    category id. So the instance count, the labels in file order and the difficult flags
+    agree exactly for the same tile — and a reordered, re-sorted or truncated loader puts
+    a different tile here, where they generally do not. Coordinates are deliberately not
+    compared: the loader's are letterboxed and the index's are tile-local, and the merge
+    is what maps between them.
+
+    Args:
+        target: The loader's :class:`~lucid_yolo.data.targets.Targets` for this position.
+        expected: The index's per-tile ground truth, or ``None`` to skip the check.
+        windows: The index's windows, used only to name the tile in the message.
+        position: The loader position being checked.
+
+    Raises:
+        ValueError: If the position is past the end of the index, or its labels or
+            difficult flags differ from the index's.
+
+    Examples:
+        >>> from lucid_yolo.data.targets import Targets
+        >>> _require_matching_tile(Targets.empty(), None, None, 0)  # unchecked without an index
+    """
+    if expected is None:
+        return
+    if position >= len(expected):
+        raise ValueError(
+            f"the val loader yielded tile {position}, past the {len(expected)} tiles the split's "
+            "window index describes; the two are not the same split"
+        )
+    labels = target.labels.detach().cpu().to(torch.long)
+    difficult = target.difficult.detach().cpu().to(torch.bool)
+    reference = expected[position]
+    if torch.equal(labels, reference["labels"].to(torch.long)) and torch.equal(
+        difficult, reference["difficult"].to(torch.bool)
+    ):
+        return
+    where = (
+        ""
+        if windows is None or position >= len(windows)
+        else f" ({windows[position].source_image} at {windows[position].origin})"
+    )
+    raise ValueError(
+        f"the val loader's tile {position} does not carry the ground truth the window index "
+        f"records for that position{where}: loader labels {labels.tolist()} difficult "
+        f"{difficult.tolist()} against index labels {reference['labels'].tolist()} difficult "
+        f"{reference['difficult'].tolist()}. The whole-image merge pairs a tile to its window by "
+        "loader position, so a reordered loader would translate detections by the wrong origin"
+    )
+
+
+def _require_whole_split(scored: int, expected: Sequence[Mapping[str, Tensor]] | None) -> None:
+    """Refuse an unlimited pass that scored fewer tiles than the index describes.
+
+    The per-position check cannot see a tile the loader never yielded — a dropped last
+    batch shortens the pass without disturbing any pairing before it — so the count is
+    checked once at the end. Only for ``limit == 0``: a limited pass is a prefix on
+    purpose.
+
+    Args:
+        scored: Tiles the pass actually scored.
+        expected: The index's per-tile ground truth, or ``None`` to skip the check.
+
+    Raises:
+        ValueError: If the counts differ.
+
+    Examples:
+        >>> _require_whole_split(3, None)  # unchecked without an index
+    """
+    if expected is not None and scored != len(expected):
+        raise ValueError(
+            f"the val loader yielded {scored} tiles for a split whose window index describes "
+            f"{len(expected)}; the whole-image merge needs every tile of the split"
+        )
 
 
 def _to_source(
@@ -305,6 +415,7 @@ def run(
             img_size=img_size,
             limit=limit,
             windows=None if index is None else index.windows,
+            expected_ground_truth=None if index is None else index.ground_truth,
         )
     except ValueError as error:
         print(f"FAIL: {error}")

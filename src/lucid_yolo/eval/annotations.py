@@ -12,6 +12,16 @@ and the small/medium/large breakdown stay faithful; degenerate boxes (non-list
 ``bbox``, wrong arity, non-positive extent) are dropped rather than propagated as
 zero-area targets.
 
+Numeric metadata outside the COCO domain is **refused**, not carried
+(:func:`_require_valid_metadata`): a non-finite box coordinate, a non-finite or
+negative ``area``, or an ``iscrowd`` that is neither ``0`` nor ``1`` raises naming the
+image and annotation id. That is a different class from the degenerate boxes above —
+a dropped degenerate box is an annotation this reader can read and decline, whereas
+these values have no reading at all, and both scorers answer ``-1`` for every summary
+when one reaches them, which is an undefined metric report with nothing in it pointing
+at the annotation that caused it. Unusual-but-legal input keeps working: coordinates
+off the image edge, ``area = 0``, and ``iscrowd = 1`` are all untouched.
+
 Instance **masks** (WP-053b) are opt-in: pass an ``image_size`` to
 :func:`annotations_to_target` (or ``with_masks=True`` to
 :func:`load_eval_annotations`) and every target additionally carries a ``(M, H,
@@ -45,6 +55,7 @@ Provenance: R12 (COCO annotation format), R1 sec. 4.4. Assumptions: A9, A10.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping  # runtime import: LazyTargets subclasses it
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -59,7 +70,7 @@ from lucid_yolo.data.coco import parse_coco_keypoints
 from lucid_yolo.data.targets import Targets
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
     from pathlib import Path
 
     from lucid_yolo.data.letterbox import Letterbox
@@ -142,6 +153,74 @@ def empty_target(image_size: tuple[int, int] | None = None, with_keypoints: bool
     return target
 
 
+def _require_valid_metadata(annotation: dict[str, object], bbox: Sequence[float]) -> None:
+    """Refuse one annotation whose numeric metadata falls outside the COCO domain.
+
+    Three fields, each with a domain the format states and the metric relies on: the
+    box coordinates must be finite, ``area`` must be finite and non-negative, and
+    ``iscrowd`` must be ``0`` or ``1``. A value outside them is not scored to a wrong
+    number — both backends answer ``-1`` for *every* summary — so it is refused here,
+    at the one place that reads the annotation and still knows which one it is.
+
+    Legal-but-unusual values are deliberately untouched: a coordinate off the image
+    edge is a normal COCO occurrence, ``area = 0`` is what a protocol may assign a
+    hairline instance, and ``iscrowd = 1`` is the crowd flag itself.
+
+    Args:
+        annotation: The raw annotation dict, read only for its ids and its ``area``
+            and ``iscrowd`` fields.
+        bbox: That annotation's ``bbox`` already parsed to floats, of any length —
+            the arity filter is the caller's, and a wrongly sized box still has
+            coordinates worth checking.
+
+    Raises:
+        ValueError: If a coordinate or the area is non-finite, the area is negative,
+            or ``iscrowd`` is outside ``{0, 1}``. The message names the image id, the
+            annotation id, the field and the value.
+
+    Examples:
+        >>> _require_valid_metadata({"id": 3, "image_id": 7, "iscrowd": 1}, [1.0, 2.0, 3.0, 4.0])
+        >>> _require_valid_metadata({"id": 3, "image_id": 7}, [float("nan"), 2.0, 3.0, 4.0])
+        Traceback (most recent call last):
+        ValueError: annotation 3 of image 7: bbox must be finite; got [nan, 2.0, 3.0, 4.0]
+    """
+    where = f"annotation {annotation.get('id', '?')} of image {annotation.get('image_id', '?')}"
+    if not all(math.isfinite(value) for value in bbox):
+        raise ValueError(f"{where}: bbox must be finite; got {list(bbox)}")
+    raw_area = annotation.get("area")
+    if raw_area is not None:
+        area = float(cast("float", raw_area))
+        if not math.isfinite(area) or area < 0.0:
+            raise ValueError(f"{where}: area must be finite and non-negative; got {raw_area!r}")
+    crowd = annotation.get("iscrowd", 0)
+    if crowd not in (0, 1):
+        raise ValueError(f"{where}: iscrowd must be 0 or 1; got {crowd!r}")
+
+
+def _require_valid_annotations(annotations: Iterable[dict[str, object]]) -> None:
+    """Run :func:`_require_valid_metadata` over a whole file's annotations.
+
+    The eager path validates while it builds its targets, so it refuses a malformed
+    file at load. :class:`LazyTargets` builds nothing until the evaluator looks an
+    image up, which would move the same refusal to the middle of a scoring run — this
+    is the one cheap pass that keeps both paths failing at the same moment.
+
+    Args:
+        annotations: Every annotation record of the file, in any order.
+
+    Raises:
+        ValueError: From :func:`_require_valid_metadata`, on the first bad record.
+
+    Examples:
+        >>> _require_valid_annotations([{"id": 1, "image_id": 2, "bbox": [0.0, 0.0, 1.0, 1.0]}])
+    """
+    for annotation in annotations:
+        raw_bbox = annotation.get("bbox")
+        if not isinstance(raw_bbox, list):
+            continue
+        _require_valid_metadata(annotation, [float(value) for value in raw_bbox])
+
+
 def annotations_to_target(
     annotations: Sequence[dict[str, object]],
     image_size: tuple[int, int] | None = None,
@@ -179,6 +258,12 @@ def annotations_to_target(
         keypoint entries when ``with_keypoints`` is set;
         :func:`empty_target` when nothing survives filtering.
 
+    Raises:
+        ValueError: If an annotation's box coordinates or ``area`` are non-finite, its
+            ``area`` is negative, or its ``iscrowd`` is outside ``{0, 1}``
+            (:func:`_require_valid_metadata`). Distinct from the degenerate-box filter
+            above, which drops rather than refuses.
+
     Examples:
         >>> target = annotations_to_target([{"bbox": [1.0, 2.0, 3.0, 4.0], "category_id": 5}])
         >>> target["boxes"].tolist(), target["labels"].tolist()
@@ -207,6 +292,9 @@ def annotations_to_target(
         if not isinstance(raw_bbox, list):
             continue
         bbox = [float(value) for value in raw_bbox]
+        # Before the extent filter, not after: a NaN width fails every comparison, so
+        # `bbox[2] <= 0` is False for it and the malformed box would pass as a good one.
+        _require_valid_metadata(annotation, bbox)
         if len(bbox) != _XYWH_LEN or bbox[2] <= 0 or bbox[3] <= 0:
             continue
         x, y, width, height = bbox
@@ -296,10 +384,18 @@ class LazyTargets(Mapping[int, dict[str, Tensor]]):
     Lookups are not memoised. A repeated lookup re-decodes rather than growing the
     footprint this class exists to bound; the evaluator visits each image once.
 
+    The keypoint option composes with this rather than being lost to it: masks are why
+    the mapping is lazy, and ``with_keypoints`` decides what each looked-up target
+    additionally carries, so a caller asking for both gets both. The two options are
+    documented as independent, and a target that quietly dropped its points would reach
+    an OKS consumer looking complete.
+
     Attributes:
         grouped: Raw COCO annotations per image id; a missing id means an image
             with no annotations, which still gets an :func:`empty_target`.
         sizes: Original ``(height, width)`` per image id, the grid masks decode onto.
+        with_keypoints: Whether each looked-up target also carries ``keypoints``,
+            ``visibility`` and ``num_keypoints``.
 
     Examples:
         >>> polygon = {"bbox": [1.0, 2.0, 3.0, 4.0], "category_id": 5, "segmentation": [[1, 2, 4, 2, 4, 6, 1, 6]]}
@@ -308,21 +404,31 @@ class LazyTargets(Mapping[int, dict[str, Tensor]]):
         ([7, 9], (1, 8, 8))
         >>> tuple(targets[9]["masks"].shape)  # an image with no annotations
         (0, 8, 8)
+        >>> posed = dict(polygon, keypoints=[1, 2, 2, 3, 4, 0], num_keypoints=1)
+        >>> both = LazyTargets({7: [posed]}, {7: (8, 8), 9: (8, 8)}, with_keypoints=True)
+        >>> sorted(both[7])  # masks and points, on one target
+        ['area', 'boxes', 'iscrowd', 'keypoints', 'labels', 'masks', 'num_keypoints', 'visibility']
+        >>> sorted(both[9])  # and on an image with no annotations
+        ['area', 'boxes', 'iscrowd', 'keypoints', 'labels', 'masks', 'num_keypoints', 'visibility']
     """
 
     def __init__(
         self,
         grouped: Mapping[int, Sequence[dict[str, object]]],
         sizes: Mapping[int, tuple[int, int]],
+        with_keypoints: bool = False,
     ) -> None:
         self._grouped = grouped
         self._sizes = sizes
+        self._with_keypoints = bool(with_keypoints)
 
     def __getitem__(self, image_id: int) -> dict[str, Tensor]:
         """Return the target of ``image_id``, decoding its masks now."""
         size = self._sizes[image_id]
         annotations = self._grouped.get(image_id)
-        return annotations_to_target(annotations, size) if annotations else empty_target(size)
+        if not annotations:
+            return empty_target(size, with_keypoints=self._with_keypoints)
+        return annotations_to_target(annotations, size, with_keypoints=self._with_keypoints)
 
     def __iter__(self) -> Iterator[int]:
         """Iterate the image ids, in the order the annotation file's images were sorted."""
@@ -357,9 +463,11 @@ def load_eval_annotations(
         with_keypoints: When ``True``, every target additionally carries the
             ``keypoints``, ``visibility`` and ``num_keypoints`` entries
             :func:`annotations_to_target` parses — the ground truth the OKS protocol
-            scores against, read off a ``person_keypoints`` file. Stays eager rather
-            than lazy: a whole split's points are a few megabytes, where its masks are
-            gigabytes, so the argument for :class:`LazyTargets` does not carry over.
+            scores against, read off a ``person_keypoints`` file. Independent of
+            ``with_masks``: on its own it needs no laziness, since a whole split's
+            points are a few megabytes where its masks are gigabytes, and combined with
+            ``with_masks`` it rides the :class:`LazyTargets` lookup that the masks
+            require. Either way the entries are on every target.
 
     Returns:
         A triple of the image records sorted by ascending image id, the per-image-id
@@ -367,6 +475,12 @@ def load_eval_annotations(
         map. The ground truth is a plain ``dict`` for the detection default and a
         :class:`LazyTargets` when ``with_masks`` is set; both satisfy the evaluator's
         ``Mapping`` contract.
+
+    Raises:
+        ValueError: If any annotation's numeric metadata is outside the COCO domain
+            (:func:`_require_valid_metadata`). Refused here rather than at first
+            lookup, so the lazy and eager paths fail at the same moment — the load —
+            instead of part-way through a scoring run.
 
     Examples:
         >>> images, targets, label_map = load_eval_annotations(ann_file)  # needs a COCO file  # doctest: +SKIP
@@ -393,7 +507,8 @@ def load_eval_annotations(
         grouped.setdefault(int(annotation["image_id"]), []).append(annotation)
     if with_masks:
         sizes = {image.image_id: (image.height, image.width) for image in images}
-        return images, LazyTargets(grouped, sizes), label_to_category
+        _require_valid_annotations(payload["annotations"])
+        return images, LazyTargets(grouped, sizes, with_keypoints=with_keypoints), label_to_category
     targets: dict[int, dict[str, Tensor]] = {
         image.image_id: empty_target(with_keypoints=with_keypoints) for image in images
     }

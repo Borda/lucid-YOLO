@@ -12,7 +12,9 @@ two per image for everything else.
 The parameter is already optional upstream (``scores=None`` builds annotations
 without a ``score`` key), so the whole per-annotation read can be skipped and the
 scores attached afterwards from one ``tolist()`` per image. The result is the same
-document: the same annotations, in the same order, carrying the same float values.
+document: the same annotations, in the same order, carrying the same float values --
+and refusing the same inputs, because upstream's per-score type check travels with
+the value it guards rather than being dropped as the price of the hoist.
 
 **What this costs, and why it is contained here.** ``_get_coco_format`` is private,
 and overriding a private method means upstream can change what it produces without
@@ -91,6 +93,11 @@ class _HoistedScoreBackend(CocoBackend):
             Upstream's document, with a ``score`` on every annotation when
             ``scores`` was given.
 
+        Raises:
+            ValueError: If a score is not a ``float`` once converted — upstream's
+                own check, in upstream's own words, since a document that accepts
+                what upstream refuses is not the same document.
+
         Examples:
             >>> import torch
             >>> backend = _HoistedScoreBackend("faster_coco_eval")
@@ -121,7 +128,20 @@ class _HoistedScoreBackend(CocoBackend):
         for image_id in range(len(labels)):
             if masks is not None and boxes is None and len(masks[image_id]) == 0:
                 continue  # upstream contributes no annotations for this image
-            flattened.extend(float(score) for score in scores[image_id].cpu().tolist())
+            for element, score in enumerate(scores[image_id].cpu().tolist()):
+                # Upstream's own per-score type check, reproduced rather than coerced.
+                # `tolist()` returns the tensor's dtype as a Python scalar, so an integral
+                # score tensor arrives here as `int`; upstream raises on it and a `float()`
+                # here would have accepted it silently, which is a difference in the
+                # *document* -- the one thing this override promises not to make. Checking
+                # the already-converted element costs no per-annotation tensor work, so the
+                # hoist this class exists for is intact.
+                if not isinstance(score, float):
+                    raise ValueError(
+                        f"Invalid input score of sample {image_id}, element {element}"
+                        f" (expected value of type float, got type {type(score)})"
+                    )
+                flattened.append(score)
         for annotation, score in zip(document["annotations"], flattened, strict=True):
             annotation["score"] = score
         return document
@@ -135,12 +155,24 @@ def build_mean_average_precision(**kwargs: Any) -> MeanAveragePrecision:
     place this project reaches into ``torchmetrics``' internals, which is why it is
     a factory rather than two lines repeated at each metric the module builds.
 
+    The private surface is checked before it is used, rather than trusted. A
+    ``torchmetrics`` that renames or drops ``CocoBackend._get_coco_format`` leaves
+    the override defining a method upstream no longer calls: every conversion would
+    then run unhoisted and score-less, and the metric would keep reporting success.
+    ``pyproject.toml`` caps the dependency below the next minor for that reason; this
+    check is what makes a lifted cap fail at construction, naming the cause, instead
+    of at a silently wrong number.
+
     Args:
         **kwargs: Passed to :class:`~torchmetrics.detection.MeanAveragePrecision`
             unchanged.
 
     Returns:
         The metric, with its COCO backend replaced by the hoisted-score subclass.
+
+    Raises:
+        RuntimeError: If the installed ``torchmetrics`` no longer defines
+            ``CocoBackend._get_coco_format``, the method this module overrides.
 
     Examples:
         >>> metric = build_mean_average_precision(backend="faster_coco_eval", box_format="xyxy")
@@ -149,6 +181,14 @@ def build_mean_average_precision(**kwargs: Any) -> MeanAveragePrecision:
         >>> metric._coco_backend.backend  # the requested backend is preserved
         'faster_coco_eval'
     """
+    if not hasattr(CocoBackend, "_get_coco_format"):
+        raise RuntimeError(
+            "torchmetrics' CocoBackend no longer defines _get_coco_format, the private method "
+            "lucid_yolo.ptl.coco_backend overrides, so the hoisted-score conversion would never "
+            "be called and every epoch metric would be scored by an unknown path. Pin "
+            "torchmetrics to a version that defines it (the pyproject ceiling exists for this), "
+            "or rewrite _HoistedScoreBackend against the new surface."
+        )
     metric = MeanAveragePrecision(**kwargs)
     metric._coco_backend = _HoistedScoreBackend(metric._coco_backend.backend)
     return metric

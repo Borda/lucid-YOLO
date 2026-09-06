@@ -204,6 +204,12 @@ class TileIndex:
     ``i``-th. That positional correspondence is the whole coupling between this module and
     the loader; nothing else about the loader is assumed.
 
+    It is also checked rather than assumed, at the one place that consumes it:
+    :func:`~lucid_yolo.eval.rotated_eval.score_split` compares each yielded tile's labels
+    and difficult flags against :attr:`ground_truth` at that position, so a loader that
+    reorders, re-sorts or truncates the split is refused instead of translating
+    detections by another tile's window origin.
+
     Attributes:
         windows: One :class:`TileWindow` per tile.
         ground_truth: One ``{"rboxes", "labels", "difficult"}`` dict per tile, in
@@ -288,7 +294,11 @@ def core_bounds(windows: Sequence[TileWindow]) -> Tensor:
         The low bounds are inclusive and the high bounds exclusive (:func:`in_core`).
 
     Raises:
-        ValueError: If ``windows`` is empty.
+        ValueError: If ``windows`` is empty, or if two of them share an origin on one
+            axis while spanning different lengths along it — a tiling this rule cannot
+            partition (:func:`_axis_cores`), refused rather than mis-partitioned. Two
+            windows sharing an origin *and* a span are the ordinary uniform-tiler case
+            and are unaffected.
 
     Examples:
         >>> tiles = [
@@ -304,8 +314,8 @@ def core_bounds(windows: Sequence[TileWindow]) -> Tensor:
     """
     if not windows:
         raise ValueError("core_bounds needs at least one window")
-    horizontal = _axis_cores({window.origin[0]: window.origin[0] + window.size[1] for window in windows})
-    vertical = _axis_cores({window.origin[1]: window.origin[1] + window.size[0] for window in windows})
+    horizontal = _axis_cores([(window.origin[0], window.origin[0] + window.size[1]) for window in windows], "x")
+    vertical = _axis_cores([(window.origin[1], window.origin[1] + window.size[0]) for window in windows], "y")
     rows: list[list[float]] = []
     for window in windows:
         x_low, x_high = horizontal[window.origin[0]]
@@ -573,23 +583,47 @@ def _translate(rboxes: Tensor, origin: tuple[int, int]) -> Tensor:
     return rboxes + offset
 
 
-def _axis_cores(spans: dict[int, int]) -> dict[int, tuple[float, float]]:
+def _axis_cores(spans: Sequence[tuple[int, int]], axis: str) -> dict[int, tuple[float, float]]:
     """Place one axis's core boundaries at the midpoints of the overlap bands.
 
+    The intervals are keyed on the window **start**, which is what makes the boundary a
+    property of the strip rather than of the individual tile — every tile of a row shares
+    one horizontal strip, and a uniform tiler emits exactly that. Two windows sharing a
+    start with *different* ends are a different tiling: one strip start would then need
+    two boundaries, and keying on the start alone would silently keep whichever span was
+    read last and partition the axis by it. That is refused rather than approximated.
+
     Args:
-        spans: Each distinct window start on this axis mapped to its end.
+        spans: One ``(start, end)`` pair per window on this axis, repeats included.
+        axis: ``"x"`` or ``"y"``, named in the refusal message.
 
     Returns:
-        Each start mapped to its ``(low, high)`` core interval; the first low and the last
-        high are infinite, so the intervals tile the whole axis.
+        Each distinct start mapped to its ``(low, high)`` core interval; the first low
+        and the last high are infinite, so the intervals tile the whole axis.
+
+    Raises:
+        ValueError: If two windows share a start on this axis but end differently.
 
     Examples:
-        >>> _axis_cores({0: 6, 4: 10})  # windows [0, 6) and [4, 10) overlap on [4, 6)
+        >>> _axis_cores([(0, 6), (4, 10)], "x")  # windows [0, 6) and [4, 10) overlap on [4, 6)
         {0: (-inf, 5.0), 4: (5.0, inf)}
+        >>> _axis_cores([(0, 6), (0, 6)], "x")  # a shared strip is the uniform-tiler case
+        {0: (-inf, inf)}
+        >>> _axis_cores([(0, 6), (0, 9)], "x")
+        Traceback (most recent call last):
+        ValueError: two windows share the x origin 0 with different spans (end 6 and end 9); ...
     """
-    ordered = sorted(spans)
+    ends: dict[int, int] = {}
+    for start, end in spans:
+        kept = ends.setdefault(start, end)
+        if kept != end:
+            raise ValueError(
+                f"two windows share the {axis} origin {start} with different spans "
+                f"(end {kept} and end {end}); core_bounds cannot partition that tiling"
+            )
+    ordered = sorted(ends)
     boundaries = [-math.inf]
-    boundaries += [(start + spans[previous]) / 2.0 for previous, start in pairwise(ordered)]
+    boundaries += [(start + ends[previous]) / 2.0 for previous, start in pairwise(ordered)]
     boundaries.append(math.inf)
     return {start: (boundaries[index], boundaries[index + 1]) for index, start in enumerate(ordered)}
 

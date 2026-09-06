@@ -12,6 +12,12 @@ and they carry upstream's one skip -- an image with no masks contributes no
 annotations when the document has no boxes either -- which the override has to
 reproduce to keep the scores aligned with the annotations. Ground truth passes
 ``scores=None`` and must come back with no ``score`` key at all.
+
+Two later concerns share this file because they are about how the epoch metrics are
+*built* rather than about what the training loop does with them: that the private
+upstream surface the override depends on is checked before it is used (audit M-07),
+and that both metrics the module constructs integrate on the report path's exact
+recall grid rather than torchmetrics' float32 default (audit M-03).
 """
 
 from __future__ import annotations
@@ -21,7 +27,9 @@ import torch
 from torchmetrics.detection import MeanAveragePrecision
 from torchmetrics.detection.helpers import CocoBackend
 
+from lucid_yolo.eval.coco_eval import COCO_RECALL_GRID
 from lucid_yolo.ptl.coco_backend import _HoistedScoreBackend, build_mean_average_precision
+from lucid_yolo.ptl.module import DetectionLitModule
 
 #: The backend both classes are constructed under, matching what the module builds.
 _BACKEND = "faster_coco_eval"
@@ -143,3 +151,106 @@ def test_the_metric_reports_the_value_the_stock_metric_reports() -> None:
 
     assert stock_result.keys() == hoisted_result.keys()
     assert all(torch.equal(stock_result[key], hoisted_result[key]) for key in stock_result)
+
+
+class TestScoreTypeValidation:
+    """The hoist must refuse exactly the scores upstream refuses (audit L-38)."""
+
+    def test_an_integral_score_raises_upstream_s_message(self) -> None:
+        """A non-float score tensor is rejected with the stock backend's own wording.
+
+        Upstream reads each score individually and raises when the converted value
+        is not a ``float``; the hoisted conversion reads a whole image at once, and
+        an ``int`` element there once passed through a ``float()`` coercion. That
+        made this override's document *accept* an input the stock one rejects --
+        the one difference it promises never to make -- so the check travels with
+        the hoist rather than being spent on it.
+        """
+        labels = [torch.tensor([0, 1])]
+        boxes = [_boxes(2)]
+        integral_scores = [torch.tensor([1, 0])]
+
+        with pytest.raises(ValueError, match="expected value of type float") as hoisted_error:
+            _HoistedScoreBackend(_BACKEND)._get_coco_format(
+                labels=labels, all_labels=[0, 1], boxes=boxes, scores=integral_scores
+            )
+
+        with pytest.raises(ValueError) as stock_error:
+            CocoBackend(_BACKEND)._get_coco_format(
+                labels=labels, all_labels=[0, 1], boxes=boxes, scores=integral_scores
+            )
+        assert str(hoisted_error.value) == str(stock_error.value)
+
+    def test_float_scores_still_reach_every_annotation(self) -> None:
+        """The normal path is unchanged: float scores land on the annotations in order.
+
+        The guard above sits inside the flattening loop, so this pins that it
+        rejects only the type it is aimed at rather than narrowing what the
+        conversion accepts.
+        """
+        labels = [torch.tensor([0, 1]), torch.tensor([1])]
+        boxes = [_boxes(2), _boxes(1)]
+        scores = [torch.tensor([0.9, 0.5]), torch.tensor([0.25])]
+
+        document = _HoistedScoreBackend(_BACKEND)._get_coco_format(
+            labels=labels, all_labels=[0, 1], boxes=boxes, scores=scores
+        )
+
+        assert [annotation["score"] for annotation in document["annotations"]] == pytest.approx([0.9, 0.5, 0.25])
+
+
+class TestPrivateSurfaceCanary:
+    """The factory refuses a ``torchmetrics`` whose private surface has moved (audit M-07)."""
+
+    def test_a_missing_get_coco_format_fails_at_construction(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Losing upstream's ``_get_coco_format`` raises here instead of silently unhooking.
+
+        The override defines the method itself, so a rename upstream leaves the
+        subclass defining something nobody calls: every conversion would run
+        upstream's own path and the metric would keep reporting success. The
+        ``pyproject.toml`` ceiling stops that version arriving by accident; this is
+        what happens if the ceiling is lifted without reading the override.
+        """
+        monkeypatch.delattr(CocoBackend, "_get_coco_format")
+
+        with pytest.raises(RuntimeError, match="no longer defines _get_coco_format"):
+            build_mean_average_precision(backend=_BACKEND)
+
+
+class TestEpochMetricRecallGrid:
+    """The training loop's epoch metrics integrate on the report path's grid (audit M-03)."""
+
+    def test_the_factory_forwards_rec_thresholds(self) -> None:
+        """``rec_thresholds`` passes through the factory to the metric unchanged.
+
+        The factory takes ``**kwargs``, so nothing structurally guarantees a
+        constructor argument survives the backend swap; this pins that it does,
+        which is what the two module assertions below rest on.
+        """
+        metric = build_mean_average_precision(backend=_BACKEND, rec_thresholds=list(COCO_RECALL_GRID))
+
+        assert tuple(metric.rec_thresholds) == COCO_RECALL_GRID
+
+    def test_the_box_metric_uses_the_exact_hundredths_grid(self) -> None:
+        """``val/mAP`` integrates over :data:`COCO_RECALL_GRID`, not torchmetrics' float32 default.
+
+        The acceptance path pins that grid (``coco_eval._new_metric``) precisely to
+        remove a downward-only bias at 36 of the 101 recall points. Left unpinned
+        here, the epoch figure and the acceptance figure would be summed over
+        different recall points while both were logged as ``mAP``.
+        """
+        module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=2)
+
+        assert tuple(module._val_map.rec_thresholds) == COCO_RECALL_GRID
+
+    def test_the_mask_metric_uses_the_exact_hundredths_grid(self) -> None:
+        """``val/segm_mAP`` is built on the same grid as the box metric.
+
+        The mask metric is constructed separately -- different ``iou_type``, its own
+        call -- so it is its own chance to drift from the grid the box metric and
+        the report path share.
+        """
+        module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=2, task="segment")
+
+        assert module._val_segm is not None
+        assert tuple(module._val_segm.rec_thresholds) == COCO_RECALL_GRID

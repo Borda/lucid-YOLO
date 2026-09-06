@@ -23,10 +23,13 @@ from pathlib import Path
 
 import pytest
 import torch
+from torch.utils.data import DataLoader
 
 from lucid_yolo.data import tiles as build
+from lucid_yolo.data.layout import resolve_split
 from lucid_yolo.eval import rotated_eval as evaluate
 from lucid_yolo.eval.dota_eval import evaluate_rotated_map
+from lucid_yolo.eval.tile_merge import TileIndex, load_tile_index
 from lucid_yolo.ptl.module import DetectionLitModule
 
 #: Letterbox side and tile side used throughout: divisible by the level-32 stride.
@@ -191,6 +194,104 @@ def test_the_report_names_both_figures_rather_than_quoting_one(tiled_root: Path,
     assert payload["whole_image"]["source_images"] == 1  # type: ignore[call-overload,index]
     assert payload["whole_image"]["max_detections"] is None  # type: ignore[call-overload,index]
     assert 0.0 <= payload["whole_image"]["metrics"]["map_50"] <= 1.0  # type: ignore[call-overload,index]
+
+
+class TestMergePairing:
+    """Which window a tile's detections are translated by is checked against the loader (M-13).
+
+    The merge indexes ``windows[first + position]``, so a loader that yields the split in
+    any order other than the index's translates every tile's detections by another tile's
+    origin. That failure is silent by construction — detections and ground truth move by
+    different amounts, so the whole-image figure simply drops — which is why the pairing
+    is asserted here rather than left to the prose that used to state it.
+    """
+
+    @staticmethod
+    def _index(root: Path) -> TileIndex:
+        """The split's tile index, which every test in this group scores against."""
+        index = load_tile_index(resolve_split(root, "val")[1])
+        assert index is not None
+        return index
+
+    @staticmethod
+    def _module() -> DetectionLitModule:
+        """An oriented module; what it detects is irrelevant to the pairing."""
+        return DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+
+    def test_the_loader_in_index_order_is_accepted(self, tiled_root: Path) -> None:
+        """The ordinary unshuffled val loader satisfies the check and scores the whole split.
+
+        The refusals below are only worth having if the real path passes them, so the
+        untouched loader is scored with the same index the reorder tests corrupt.
+        """
+        index = self._index(tiled_root)
+
+        scoring = evaluate.score_split(
+            self._module(),
+            _datamodule(tiled_root),
+            torch.device("cpu"),
+            img_size=IMG_SIZE,
+            windows=index.windows,
+            expected_ground_truth=index.ground_truth,
+        )
+
+        assert scoring.tiles == 4
+        assert len(scoring.source_predictions) == 4
+
+    def test_a_reordered_loader_is_refused_rather_than_merged_by_position(
+        self, tiled_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A loader yielding the split back-to-front is refused, naming the position and tile.
+
+        This is the mechanism the finding describes: a shuffle, a different sort or any
+        other loader change reorders the tiles while the merge keeps indexing windows by
+        position. Reversing the sampler reproduces it exactly.
+        """
+        datamodule = _datamodule(tiled_root)
+        index = self._index(tiled_root)
+        original = datamodule.val_dataloader()  # type: ignore[attr-defined]
+        reversed_loader = DataLoader(
+            original.dataset,
+            batch_size=2,
+            sampler=list(reversed(range(len(original.dataset)))),
+            collate_fn=original.collate_fn,
+        )
+        monkeypatch.setattr(datamodule, "val_dataloader", lambda: reversed_loader)
+
+        with pytest.raises(ValueError, match="does not carry the ground truth the window index"):
+            evaluate.score_split(
+                self._module(),
+                datamodule,
+                torch.device("cpu"),
+                img_size=IMG_SIZE,
+                windows=index.windows,
+                expected_ground_truth=index.ground_truth,
+            )
+
+    def test_a_loader_that_drops_its_last_batch_is_refused(
+        self, tiled_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A short pass over a full split is refused, because the merge needs every tile.
+
+        A dropped last batch disturbs no pairing before it, so the per-tile check cannot
+        see it: the tiles that did arrive are all correctly paired and the source image is
+        merged from a subset of itself, reporting a recall the pipeline never attempted.
+        """
+        datamodule = _datamodule(tiled_root)
+        index = self._index(tiled_root)
+        original = datamodule.val_dataloader()  # type: ignore[attr-defined]
+        short_loader = DataLoader(original.dataset, batch_size=3, drop_last=True, collate_fn=original.collate_fn)
+        monkeypatch.setattr(datamodule, "val_dataloader", lambda: short_loader)
+
+        with pytest.raises(ValueError, match="yielded 3 tiles for a split whose window index describes 4"):
+            evaluate.score_split(
+                self._module(),
+                datamodule,
+                torch.device("cpu"),
+                img_size=IMG_SIZE,
+                windows=index.windows,
+                expected_ground_truth=index.ground_truth,
+            )
 
 
 def test_a_layout_without_window_provenance_reports_no_whole_image_figure(tiled_root: Path, tmp_path: Path) -> None:
