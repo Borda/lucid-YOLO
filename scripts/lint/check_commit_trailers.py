@@ -4,17 +4,34 @@
 Enforces the commit format defined in ``AGENTS.md`` sec. 5: a Conventional
 Commits subject plus mandatory ``WP:``/``Provenance:``/``Assumptions:``/``Gate:``
 trailers, with every provenance source id resolvable against the allowlist in
-``docs/PROVENANCE.md``. Hash-sign and at-sign characters may only appear in the
+``docs/PROVENANCE.md`` and every assumption id against the register in
+``docs/ASSUMPTIONS.md``. Hash-sign and at-sign characters may only appear in the
 co-author trailers that follow the ``---`` separator.
+
+Three rules are worth stating here because each is a decision rather than a shape:
+
+* **Denial is a value.** ``Provenance: none`` is accepted the way ``WP: none`` and
+  ``Assumptions: none`` already are, and it may carry its explanation --
+  ``none (implementation efficiency; R1 silent on target rasterisation)``. A value
+  opening with ``none`` is read as *denying* provenance, so an id inside its
+  explanation is a reference and never a citation: it must still resolve, but it
+  cannot satisfy the requirement to name a source. Reading such a line as "cites R1"
+  is the opposite of what it says.
+* **Only the allowlist admits.** Source ids are read from the ``Source allowlist``
+  section of ``docs/PROVENANCE.md`` and never from its ``Placeholders`` table, whose
+  rows share the same shape. A withdrawn or citation-only row is refused by name
+  rather than reported as unknown.
+* **Assumption ids are resolved, not shape-checked.** ``A999`` matching ``^A\\d+$``
+  is not evidence that the register holds a row for it.
 
 Examples:
     Validate a single message file (exit 1 on any violation)::
 
-        python scripts/check_commit_trailers.py --file .git/COMMIT_EDITMSG
+        python scripts/lint/check_commit_trailers.py --file .git/COMMIT_EDITMSG
 
     Validate every non-merge commit in a range::
 
-        python scripts/check_commit_trailers.py --range origin/main..HEAD
+        python scripts/lint/check_commit_trailers.py --range origin/main..HEAD
 """
 
 from __future__ import annotations
@@ -23,6 +40,7 @@ import argparse
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 #: Conventional-commit subject: allowed type, optional lowercase scope, ": " then text.
@@ -53,9 +71,20 @@ SOURCE_ID_RE = re.compile(r"\bR(\d+)\b")
 #: A single assumption id (e.g. ``A9``).
 ASSUMPTION_ID_RE = re.compile(r"^A\d+$")
 #: Provenance table row in ``docs/PROVENANCE.md`` (e.g. ``| R1 | ...``).
-PROVENANCE_ROW_RE = re.compile(r"^\| R(\d+) \|", re.MULTILINE)
+PROVENANCE_ROW_RE = re.compile(r"^\| R(\d+) \|")
+#: Assumption table row in ``docs/ASSUMPTIONS.md`` (e.g. ``| A9 | ...``).
+ASSUMPTION_ROW_RE = re.compile(r"^\| A(\d+) \|")
+#: Any markdown heading, with its level and its text.
+HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+#: A trailer value that opens by denying the thing it names, e.g. ``none (…)``.
+DENIAL_RE = re.compile(r"^none\b", re.IGNORECASE)
 #: Co-author separator: a line containing only dashes.
 SEPARATOR_RE = re.compile(r"^---\s*$", re.MULTILINE)
+
+#: Heading text (lowercased, emoji-tolerant) marking the section whose rows admit a
+#: source, and the subsection inside it whose rows do not.
+_ALLOWLIST_HEADING = "source allowlist"
+_PLACEHOLDER_HEADING = "placeholders"
 
 #: The repository this checker belongs to, resolved from the file rather than from the
 #: process. Every path and every ``git`` call below is anchored here. Read from the
@@ -67,24 +96,96 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: Default location of the provenance allowlist.
 DEFAULT_PROVENANCE = REPO_ROOT / "docs" / "PROVENANCE.md"
+#: Default location of the assumption register.
+DEFAULT_ASSUMPTIONS = REPO_ROOT / "docs" / "ASSUMPTIONS.md"
 
 
-def load_provenance_ids(path: Path) -> set[int]:
-    """Parse the numeric source ids declared in the provenance allowlist.
+@dataclass(frozen=True, slots=True)
+class Registers:
+    """The three id populations a commit message is validated against.
+
+    Attributes:
+        sources: Source ids a message may cite -- the ``Source allowlist`` section's
+            rows, minus its ``Placeholders`` table.
+        placeholders: Source ids the allowlist declares and refuses to admit: a
+            withdrawn row, or one registered as legal evidence rather than as an
+            implementation source. Carried separately from ``sources`` so a message
+            naming one is refused as *inadmissible* rather than as *unknown* -- the
+            two are different mistakes and only one of them is a typo.
+        assumptions: Assumption ids the register holds a row for.
+    """
+
+    sources: frozenset[int]
+    placeholders: frozenset[int]
+    assumptions: frozenset[int]
+
+
+def _rows_by_section(text: str, row_re: re.Pattern[str]) -> list[tuple[str, str, int]]:
+    """Every ``row_re`` match in ``text`` as ``(section, subsection, id)``, headings lowercased.
 
     Args:
-        path: Path to ``docs/PROVENANCE.md``.
+        text: The markdown document to walk.
+        row_re: A table-row matcher whose first group is the numeric id.
 
     Returns:
-        The set of integers ``N`` for every ``| RN |`` table row.
+        One triple per matching row, in file order; a row above any heading carries
+        empty strings for both heading levels.
 
     Examples:
-        >>> ids = load_provenance_ids(DEFAULT_PROVENANCE)
-        >>> 1 in ids
-        True
+        >>> _rows_by_section("## Allow\\n| R1 |\\n### Placeholders\\n| R2 |\\n", PROVENANCE_ROW_RE)
+        [('allow', '', 1), ('allow', 'placeholders', 2)]
     """
-    text = path.read_text(encoding="utf-8")
-    return {int(match) for match in PROVENANCE_ROW_RE.findall(text)}
+    rows: list[tuple[str, str, int]] = []
+    section = subsection = ""
+    for line in text.splitlines():
+        heading = HEADING_RE.match(line)
+        if heading is not None:
+            level, title = len(heading.group(1)), heading.group(2).strip().lower()
+            if level <= 2:
+                section, subsection = title, ""
+            else:
+                subsection = title
+            continue
+        row = row_re.match(line)
+        if row is not None:
+            rows.append((section, subsection, int(row.group(1))))
+    return rows
+
+
+def load_registers(provenance: Path = DEFAULT_PROVENANCE, assumptions: Path = DEFAULT_ASSUMPTIONS) -> Registers:
+    """Parse the source allowlist and the assumption register into resolvable id sets.
+
+    The allowlist is read by section rather than file-wide: ``docs/PROVENANCE.md``'s
+    ``Placeholders`` table uses the same ``| RN |`` row shape as the admitting
+    sections, so a file-wide scan hands back the withdrawn rows as valid ids.
+
+    Args:
+        provenance: Path to ``docs/PROVENANCE.md``.
+        assumptions: Path to ``docs/ASSUMPTIONS.md``.
+
+    Returns:
+        The admissible source ids, the declared-but-inadmissible ones, and the
+        registered assumption ids.
+
+    Examples:
+        >>> registers = load_registers()
+        >>> 1 in registers.sources, 15 in registers.sources, 15 in registers.placeholders
+        (True, False, True)
+        >>> 9 in registers.assumptions, 999 in registers.assumptions
+        (True, False)
+    """
+    rows = _rows_by_section(provenance.read_text(encoding="utf-8"), PROVENANCE_ROW_RE)
+    admitted = {row for section, subsection, row in rows if _ALLOWLIST_HEADING in section and not subsection}
+    admitted |= {
+        row
+        for section, subsection, row in rows
+        if _ALLOWLIST_HEADING in section and subsection and _PLACEHOLDER_HEADING not in subsection
+    }
+    refused = {
+        row for section, subsection, row in rows if _ALLOWLIST_HEADING in section and _PLACEHOLDER_HEADING in subsection
+    }
+    registered = {row for _, _, row in _rows_by_section(assumptions.read_text(encoding="utf-8"), ASSUMPTION_ROW_RE)}
+    return Registers(frozenset(admitted - refused), frozenset(refused), frozenset(registered))
 
 
 def _text_before_separator(message: str) -> str:
@@ -124,20 +225,28 @@ def _check_subject(subject: str) -> list[str]:
     return violations
 
 
-def _check_assumptions(value: str) -> list[str]:
-    """Validate the value of an ``Assumptions:`` trailer.
+def _check_assumptions(value: str, registered: frozenset[int]) -> list[str]:
+    """Validate the value of an ``Assumptions:`` trailer against the register.
+
+    Shape and membership are separate failures: ``A9x`` is a malformed id, ``A999``
+    is a well-formed id naming no row. Only the second needed adding -- an id that
+    matches ``^A\\d+$`` and resolves to nothing cites a row the register does not
+    hold, which is the same defect ``Provenance:`` has always refused.
 
     Args:
         value: The text following ``Assumptions:``.
+        registered: Assumption ids declared in ``docs/ASSUMPTIONS.md``.
 
     Returns:
-        A list with one violation when malformed; empty when valid.
+        A list of violation strings; empty when every id is well-formed and registered.
 
     Examples:
-        >>> _check_assumptions("A9, A14")
+        >>> _check_assumptions("A9, A14", frozenset({9, 14}))
         []
-        >>> _check_assumptions("none")
+        >>> _check_assumptions("none", frozenset())
         []
+        >>> _check_assumptions("A999", frozenset({9}))
+        ["unregistered assumption ids (not in docs/ASSUMPTIONS.md): ['A999']"]
     """
     text = value.strip()
     if text == "none":
@@ -146,60 +255,103 @@ def _check_assumptions(value: str) -> list[str]:
     bad = [token for token in tokens if not ASSUMPTION_ID_RE.match(token)]
     if bad:
         return [f"invalid assumption ids (expect A<digits> or literal 'none'): {bad}"]
+    unknown = [token for token in tokens if int(token[1:]) not in registered]
+    if unknown:
+        return [f"unregistered assumption ids (not in docs/ASSUMPTIONS.md): {unknown}"]
     return []
 
 
-def _check_provenance(body: str, valid_ids: set[int]) -> list[str]:
+def _check_source_ids(ids: list[int], registers: Registers) -> list[str]:
+    """Violations for source ids the allowlist does not admit, by why it does not.
+
+    Args:
+        ids: Numeric source ids read off a ``Provenance:`` value.
+        registers: The parsed allowlist and register.
+
+    Returns:
+        At most two violations -- one naming the inadmissible ids, one the unknown.
+
+    Examples:
+        >>> registers = Registers(frozenset({1}), frozenset({15}), frozenset())
+        >>> for violation in _check_source_ids([15, 99], registers):
+        ...     print(violation)
+        inadmissible provenance ids (declared, not admitted, in docs/PROVENANCE.md): ['R15']
+        unknown provenance ids (not in docs/PROVENANCE.md): ['R99']
+    """
+    violations = []
+    refused = sorted({found for found in ids if found in registers.placeholders})
+    if refused:
+        violations.append(
+            "inadmissible provenance ids (declared, not admitted, in docs/PROVENANCE.md): "
+            f"{[f'R{found}' for found in refused]}"
+        )
+    unknown = sorted({found for found in ids if found not in registers.sources and found not in registers.placeholders})
+    if unknown:
+        violations.append(f"unknown provenance ids (not in docs/PROVENANCE.md): {[f'R{found}' for found in unknown]}")
+    return violations
+
+
+def _check_provenance(body: str, registers: Registers) -> list[str]:
     """Validate the ``Provenance:`` trailer against the allowlist.
+
+    A value opening with ``none`` denies provenance and is accepted as such, the way
+    ``WP: none`` is: it may carry an explanation, and an id inside that explanation
+    is a reference rather than a citation -- resolved, but never counted as the
+    source the trailer was asked to name.
 
     Args:
         body: The message text preceding the co-author separator.
-        valid_ids: Source ids declared in ``docs/PROVENANCE.md``.
+        registers: The parsed allowlist and register.
 
     Returns:
         A list of violation strings; empty when the trailer is valid.
 
     Examples:
-        >>> _check_provenance("Provenance: R1 3.2.1, R6", {1, 6})
+        >>> registers = Registers(frozenset({1, 6}), frozenset({15}), frozenset())
+        >>> _check_provenance("Provenance: R1 3.2.1, R6", registers)
         []
+        >>> _check_provenance("Provenance: none (R1 is silent here)", registers)
+        []
+        >>> _check_provenance("Provenance: none (R15 is silent here)", registers)
+        ["inadmissible provenance ids (declared, not admitted, in docs/PROVENANCE.md): ['R15']"]
     """
     match = PROVENANCE_RE.search(body)
     if not match:
         return ["missing 'Provenance:' trailer"]
-    ids = [int(found) for found in SOURCE_ID_RE.findall(match.group(1))]
+    value = match.group(1).strip()
+    ids = [int(found) for found in SOURCE_ID_RE.findall(value)]
+    if DENIAL_RE.match(value):
+        return _check_source_ids(ids, registers)
     if not ids:
-        return ["'Provenance:' trailer lists no source id"]
-    unknown = sorted({found for found in ids if found not in valid_ids})
-    if unknown:
-        return [f"unknown provenance ids (not in docs/PROVENANCE.md): {[f'R{found}' for found in unknown]}"]
-    return []
+        return ["'Provenance:' trailer lists no source id (expect R<digits>, or 'none' to deny one)"]
+    return _check_source_ids(ids, registers)
 
 
-def _check_trailers(body: str, valid_ids: set[int]) -> list[str]:
+def _check_trailers(body: str, registers: Registers) -> list[str]:
     """Validate the mandatory ``WP``/``Provenance``/``Assumptions``/``Gate`` trailers.
 
     Args:
         body: The message text preceding the co-author separator.
-        valid_ids: Source ids declared in ``docs/PROVENANCE.md``.
+        registers: The parsed allowlist and register.
 
     Returns:
         A list of violation strings; empty when every trailer is valid.
 
     Examples:
         >>> body = "WP: 22\\nProvenance: R1\\nAssumptions: none\\nGate: t.py::x"
-        >>> _check_trailers(body, {1})
+        >>> _check_trailers(body, Registers(frozenset({1}), frozenset(), frozenset()))
         []
     """
     violations: list[str] = []
     wp = WP_RE.findall(body)
     if len(wp) != 1:
         violations.append(f"expected exactly one 'WP: <digits>' or 'WP: none' trailer, found {len(wp)}")
-    violations += _check_provenance(body, valid_ids)
+    violations += _check_provenance(body, registers)
     assumptions = ASSUMPTIONS_RE.search(body)
     if not assumptions:
         violations.append("missing 'Assumptions:' trailer")
     else:
-        violations += _check_assumptions(assumptions.group(1))
+        violations += _check_assumptions(assumptions.group(1), registers.assumptions)
     gate = GATE_RE.search(body)
     if not gate or not gate.group(1).strip():
         violations.append("missing or empty 'Gate:' trailer")
@@ -222,27 +374,31 @@ def _check_forbidden_chars(body: str) -> list[str]:
     return [f"forbidden character {char!r} appears before the '---' separator" for char in ("#", "@") if char in body]
 
 
-def validate_message(message: str, valid_ids: set[int]) -> list[str]:
+def validate_message(message: str, registers: Registers) -> list[str]:
     """Validate one commit message against the full contract.
 
     Args:
         message: The full commit message text.
-        valid_ids: Source ids declared in ``docs/PROVENANCE.md``.
+        registers: The parsed allowlist and register.
 
     Returns:
         A list of violation strings; empty when the message is valid.
 
     Examples:
         >>> msg = "feat(x): y\\n\\nWP: 1\\nProvenance: R1\\nAssumptions: none\\nGate: t::x"
-        >>> validate_message(msg, {1})
+        >>> validate_message(msg, Registers(frozenset({1}), frozenset(), frozenset()))
         []
     """
     before = _text_before_separator(message)
     subject = message.splitlines()[0] if message.strip() else ""
     violations = _check_subject(subject)
-    violations += _check_trailers(before, valid_ids)
+    violations += _check_trailers(before, registers)
     violations += _check_forbidden_chars(before)
     return violations
+
+
+class UnresolvableRange(RuntimeError):
+    """A git range this repository cannot resolve, such as one naming an absent base ref."""
 
 
 def _commit_shas(commit_range: str) -> list[str]:
@@ -253,14 +409,25 @@ def _commit_shas(commit_range: str) -> list[str]:
 
     Returns:
         Full commit hashes; empty when the range selects nothing.
+
+    Raises:
+        UnresolvableRange: When git cannot resolve the range. A shallow checkout has no
+            ``refs/remotes/origin/main``, so the default range exits 128 -- which used to
+            reach the caller as a traceback, a checker crashing rather than reporting.
+            CI fetches full history for the jobs that run this; a contributor cloning
+            shallowly, or working in a fork whose remote is named otherwise, still lands
+            here and is owed a sentence naming the fix rather than a stack trace.
     """
     result = subprocess.run(
         ["git", "log", "--no-merges", "--format=%H", commit_range],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
     )
+    if result.returncode != 0:
+        detail = result.stderr.strip().splitlines()
+        raise UnresolvableRange(detail[0] if detail else f"git could not resolve {commit_range!r}")
     return [line for line in result.stdout.splitlines() if line]
 
 
@@ -316,8 +483,8 @@ def main(argv: list[str] | None = None) -> int:
     Examples:
         Command-line usage (exit status is the process return code)::
 
-            $ python scripts/check_commit_trailers.py --file .git/COMMIT_EDITMSG
-            $ python scripts/check_commit_trailers.py --range origin/main..HEAD
+            $ python scripts/lint/check_commit_trailers.py --file .git/COMMIT_EDITMSG
+            $ python scripts/lint/check_commit_trailers.py --range origin/main..HEAD
     """
     parser = argparse.ArgumentParser(description="Validate provenance-carrying commit messages.")
     target = parser.add_mutually_exclusive_group(required=True)
@@ -329,16 +496,28 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_PROVENANCE,
         help=f"path to the provenance allowlist (default: {DEFAULT_PROVENANCE})",
     )
+    parser.add_argument(
+        "--assumptions",
+        type=Path,
+        default=DEFAULT_ASSUMPTIONS,
+        help=f"path to the assumption register (default: {DEFAULT_ASSUMPTIONS})",
+    )
     args = parser.parse_args(argv)
 
-    valid_ids = load_provenance_ids(args.provenance)
+    registers = load_registers(args.provenance, args.assumptions)
     reports: list[tuple[str, list[str]]] = []
     if args.file is not None:
         message = args.file.read_text(encoding="utf-8")
-        reports.append((str(args.file), validate_message(message, valid_ids)))
+        reports.append((str(args.file), validate_message(message, registers)))
     else:
-        for sha in _commit_shas(args.commit_range):
-            reports.append((sha[:12], validate_message(_commit_message(sha), valid_ids)))
+        try:
+            shas = _commit_shas(args.commit_range)
+        except UnresolvableRange as unresolvable:
+            print(f"commit-trailer check FAILED: cannot resolve range {args.commit_range!r}: {unresolvable}")
+            print("  fetch the base ref first -- a shallow clone has no origin/main to measure against")
+            return 1
+        for sha in shas:
+            reports.append((sha[:12], validate_message(_commit_message(sha), registers)))
     return _report(reports)
 
 

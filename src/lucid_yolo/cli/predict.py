@@ -565,7 +565,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         The command's exit code.
 
     Examples:
-        >>> main(["--help"])  # doctest: +SKIP
+        >>> main(["--help"])  # argparse exits the process on --help  # doctest: +SKIP
         0
     """
     return int(auto_cli(predict, args=None if argv is None else list(argv), as_positional=False))

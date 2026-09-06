@@ -369,8 +369,8 @@ def load_eval_annotations(
         ``Mapping`` contract.
 
     Examples:
-        >>> images, targets, label_map = load_eval_annotations(ann_file)  # doctest: +SKIP
-        >>> len(images) == len(targets)  # doctest: +SKIP
+        >>> images, targets, label_map = load_eval_annotations(ann_file)  # needs a COCO file  # doctest: +SKIP
+        >>> len(images) == len(targets)  # needs a COCO file  # doctest: +SKIP
         True
     """
     payload = json.loads(ann_file.read_text())
@@ -423,8 +423,8 @@ def read_letterboxed_image(path: Path, letterbox: Letterbox) -> tuple[Tensor, tu
         predictions back onto (A10).
 
     Examples:
-        >>> image, orig_size = read_letterboxed_image(path, letterbox)  # doctest: +SKIP
-        >>> image.shape[0]  # doctest: +SKIP
+        >>> image, orig_size = read_letterboxed_image(path, letterbox)  # needs an image file  # doctest: +SKIP
+        >>> image.shape[0]  # needs an image file  # doctest: +SKIP
         3
     """
     raw = read_image(str(path), ImageReadMode.RGB)
@@ -456,8 +456,8 @@ def letterboxed_batches(
         dataloader contract.
 
     Examples:
-        >>> for batch, ids, sizes in letterboxed_batches(images, path, letterbox, 8):  # doctest: +SKIP
-        ...     batch.shape[0] == len(ids) == len(sizes)  # doctest: +SKIP
+        >>> for batch, ids, sizes in letterboxed_batches(images, path, letterbox, 8):  # needs images  # doctest: +SKIP
+        ...     batch.shape[0] == len(ids) == len(sizes)  # needs images  # doctest: +SKIP
         True
     """
     for start in range(0, len(images), batch_size):

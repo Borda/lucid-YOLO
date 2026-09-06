@@ -42,19 +42,36 @@ DEFAULT_SCRIPTS_TESTS_DIR = REPO_ROOT / "scripts" / "_tests"
 #: two-member group is common even among genuinely descriptive, unrelated test names.
 _MIN_GROUP_SIZE = 3
 #: Token-prefix length used as the grouping key, e.g. ``("check", "data")``.
-_PREFIX_TOKENS = 2
+#:
+#: Two rather than one, and the difference is measured rather than assumed. At length
+#: one the contiguous-subsequence confirmation below matches any callee merely
+#: *containing* the token, which over the live tree returns 16 groups keyed on prose
+#: fragments -- ``the``, ``every``, ``load`` -- exactly the false-positive class this
+#: module's discriminator exists to exclude. Length three finds nothing length two
+#: does not, and provably cannot: a three-token prefix that is a contiguous
+#: subsequence of a callee has a two-token prefix that is one too, so its group is
+#: always a subset of the shorter key's. Length one remains reachable through
+#: ``--prefix-tokens``, where the stricter whole-callee rule applies to it.
+DEFAULT_PREFIX_TOKENS = 2
 
 
 def _name_tokens(identifier: str) -> tuple[str, ...]:
-    """Split a snake_case identifier into its non-empty underscore-delimited tokens.
+    """Split a snake_case identifier into its lowercased, non-empty tokens.
+
+    Case-folded because the two sides being compared are spelled by different
+    conventions: a test name is snake_case by pytest's collection rule, while the
+    thing it calls may be a class (``C3k2``) or any other CapWords callee. Comparing
+    them as written means a class-named subject can never confirm its own group.
 
     Examples:
         >>> _name_tokens("_plan_archives")
         ('plan', 'archives')
         >>> _name_tokens("o2o_rotated_topk")
         ('o2o', 'rotated', 'topk')
+        >>> _name_tokens("C3k2")
+        ('c3k2',)
     """
-    return tuple(token for token in identifier.split("_") if token)
+    return tuple(token.lower() for token in identifier.split("_") if token)
 
 
 def _call_target_tokens(tree: ast.Module) -> list[tuple[str, ...]]:
@@ -90,6 +107,27 @@ def _is_contiguous_subsequence(candidate: tuple[str, ...], target: tuple[str, ..
     return any(target[i : i + span] == candidate for i in range(len(target) - span + 1))
 
 
+def _confirms(prefix: tuple[str, ...], target: tuple[str, ...]) -> bool:
+    """True if ``target`` is a callee the ``prefix`` can be said to name.
+
+    A single-token prefix must name the **whole** callee rather than appear inside
+    one. Containment is a usable signal at two tokens and noise at one: ``the`` is
+    contained in ``check_the_gfm_table_extension_is_declared``, which would confirm
+    every ``test_the_*`` sentence this suite's house style writes.
+
+    Examples:
+        >>> _confirms(("fusion",), ("fusion",))
+        True
+        >>> _confirms(("the",), ("check", "the", "nav"))
+        False
+        >>> _confirms(("check", "data"), ("check", "data", "root"))
+        True
+    """
+    if len(prefix) == 1:
+        return prefix == target
+    return _is_contiguous_subsequence(prefix, target)
+
+
 def module_level_test_names(tree: ast.Module) -> list[str]:
     """Names of ``tree``'s module-level (not-yet-classed) ``test_`` functions, in order.
 
@@ -105,12 +143,19 @@ def module_level_test_names(tree: ast.Module) -> list[str]:
     ]
 
 
-def find_flat_groups(path: Path) -> dict[str, list[str]]:
+def find_flat_groups(path: Path, prefix_tokens: int = DEFAULT_PREFIX_TOKENS) -> dict[str, list[str]]:
     """Confirmed flat groups in ``path``: ``{"prefix_tokens": [test names]}``, size >= 3.
 
     A group is confirmed only when its shared prefix also names something the file calls
     (see the module docstring); an unconfirmed shared prefix -- house-style prose sharing a
     topic noun -- is not reported, however many names share it.
+
+    Args:
+        path: Test file to parse.
+        prefix_tokens: Length of the shared token prefix used as the grouping key.
+
+    Returns:
+        One entry per confirmed group, keyed by the prefix rejoined with underscores.
 
     Examples:
         >>> import tempfile
@@ -132,21 +177,28 @@ def find_flat_groups(path: Path) -> dict[str, list[str]]:
     candidates: dict[tuple[str, ...], list[str]] = defaultdict(list)
     for name in module_level_test_names(tree):
         tokens = _name_tokens(name)[1:]  # drop the leading "test" token
-        if len(tokens) < _PREFIX_TOKENS:
+        if len(tokens) < prefix_tokens:
             continue
-        candidates[tokens[:_PREFIX_TOKENS]].append(name)
+        candidates[tokens[:prefix_tokens]].append(name)
 
     confirmed = {}
     for prefix, members in candidates.items():
         if len(members) < _MIN_GROUP_SIZE:
             continue
-        if any(_is_contiguous_subsequence(prefix, target) for target in call_targets):
+        if any(_confirms(prefix, target) for target in call_targets):
             confirmed["_".join(prefix)] = members
     return confirmed
 
 
-def find_all_flat_groups(tests_dir: Path) -> list[str]:
+def find_all_flat_groups(tests_dir: Path, prefix_tokens: int = DEFAULT_PREFIX_TOKENS) -> list[str]:
     """Every ``file::prefix (n tests)`` flat group still outside a class under ``tests_dir``.
+
+    Args:
+        tests_dir: Directory walked recursively for ``test_*.py``.
+        prefix_tokens: Length of the shared token prefix used as the grouping key.
+
+    Returns:
+        One finding per confirmed group, file order then prefix order.
 
     Examples:
         >>> import tempfile
@@ -160,7 +212,7 @@ def find_all_flat_groups(tests_dir: Path) -> list[str]:
     """
     findings = []
     for path in sorted(tests_dir.rglob("test_*.py")):
-        for prefix, members in sorted(find_flat_groups(path).items()):
+        for prefix, members in sorted(find_flat_groups(path, prefix_tokens).items()):
             relative = path.relative_to(tests_dir.parent)
             findings.append(f"{relative}::{prefix} ({len(members)} tests)")
     return findings
@@ -184,10 +236,16 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help=f"directory to scan; repeatable (default: {DEFAULT_TESTS_DIR}, {DEFAULT_SCRIPTS_TESTS_DIR})",
     )
+    parser.add_argument(
+        "--prefix-tokens",
+        type=int,
+        default=DEFAULT_PREFIX_TOKENS,
+        help=f"shared token-prefix length used as the grouping key (default: {DEFAULT_PREFIX_TOKENS})",
+    )
     args = parser.parse_args(argv)
     tests_dirs = args.tests_dirs if args.tests_dirs is not None else [DEFAULT_TESTS_DIR, DEFAULT_SCRIPTS_TESTS_DIR]
 
-    findings = [item for tests_dir in tests_dirs for item in find_all_flat_groups(tests_dir)]
+    findings = [item for tests_dir in tests_dirs for item in find_all_flat_groups(tests_dir, args.prefix_tokens)]
     if findings:
         print(f"flat-test-group audit FAILED: {len(findings)} group(s) still outside a class")
         for item in findings:

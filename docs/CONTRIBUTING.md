@@ -36,6 +36,8 @@ git commit -s -m "fix(data): ..."
 
 The line must name you and reach you: `Signed-off-by: Ada Lovelace <ada@example.com>`. It means you agree to the [Developer Certificate of Origin](https://developercertificate.org/) — that you wrote the patch, or have the right to pass it on. CI checks every commit in the pull request, not just the last one, and the check is a file in this repository rather than a third-party app, so it survives whatever happens to that service.
 
+The sign-off is checked **on pull requests and nowhere else**, and there is deliberately no local `commit-msg` hook for it — unlike the provenance trailers, which have one. The reason is history: this repository's own commits predate the requirement and carry no sign-off, so a local hook would refuse to let a contributor rebase, amend or cherry-pick any of them, and a push to `main` has no contributor range to check in the first place. What the rule governs is what is *submitted*, which is exactly the range the `dco` job reads. The practical consequence for you is that a missing `-s` surfaces in CI rather than at commit time, so it is worth making `-s` automatic in your own clone — Git has no config switch that adds it (`format.signOff` applies to `git format-patch`, not to `git commit`), so an alias such as `git config alias.ci "commit -s"` is the usual way — rather than discovering a fifteen-commit branch needs a rebase.
+
 ## 📐 When a change needs a work package
 
 Most of this repository's history is one work package per commit: a numbered row in [`ROADMAP.md`](ROADMAP.md), a definition of done, a green gate, and a commit carrying provenance trailers. That contract is a **reproduction instrument, not a permanent process** (D18), and it has an end condition.

@@ -1379,6 +1379,18 @@ def gather_keypoints(keypoints: Tensor, anchor_index: Tensor) -> Tensor:
 
     Returns:
         Point coordinates of shape ``(B, N, K, 2)``, padding rows all zero.
+
+    Examples:
+        >>> keypoints = torch.arange(12.0).reshape(1, 3, 2, 2)
+        >>> gathered = gather_keypoints(keypoints, torch.tensor([[2, -1]]))
+        >>> gathered.shape
+        torch.Size([1, 2, 2, 2])
+        >>> gathered[0, 0]
+        tensor([[ 8.,  9.],
+                [10., 11.]])
+        >>> gathered[0, 1]
+        tensor([[0., 0.],
+                [0., 0.]])
     """
     real = anchor_index >= 0
     trailing = keypoints.shape[-2:]

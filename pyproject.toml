@@ -239,6 +239,14 @@ branch = true
 
 [tool.coverage.report]
 show_missing = true
+# `docs/ROADMAP.md` WP-004 lists coverage as part of the PR gate, and `make test` has always
+# reported it -- but reporting a number enforces nothing, so the gate stayed green at any
+# coverage (L-59). Measured 97.21% on 2026-09-06 (6212 statements, 113 missed, branch
+# coverage on). The floor is set at the integer just below that rather than at the measured
+# figure: 97 leaves a fifth of a point of slack, which an ordinary refactor moving a few
+# statements would trip, and a gate that fails for reasons unrelated to test quality is one
+# people learn to re-run rather than read. Raise it when the measured number clears 98.
+fail_under = 96
 
 [tool.docformatter]
 # PEP 257 normalization only: quote placement, the blank line before a closing triple

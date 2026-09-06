@@ -299,6 +299,13 @@ def check_split(name: str, images_dir: Path, annotation_file: Path, expected_ima
 
     Returns:
         A :class:`SplitCheck` capturing the counts and any problems found.
+
+    Examples:
+        >>> check = check_split("val", Path("/no/such/images"), Path("/no/such/ann.json"), 2)
+        >>> check.ok, check.found_images, check.annotation_images
+        (False, -1, -1)
+        >>> check.problems[0]
+        'images directory missing: /no/such/images'
     """
     problems: list[str] = []
     found = _count_images(images_dir)
@@ -803,6 +810,16 @@ def format_report(result: DataCheck, data_root: Path) -> str:
 
     Returns:
         A multi-line report string ending in an overall PASS/FAIL verdict.
+
+    Examples:
+        >>> print(format_report(DataCheck(splits=[]), Path("/data/coco")))
+        check-data: /data/coco
+        PASS: dataset layout valid
+        >>> failed = DataCheck(splits=[], problems=["train2017: 0 images on disk"])
+        >>> print(format_report(failed, Path("/data/coco")))
+        check-data: /data/coco
+          FAIL train2017: 0 images on disk
+        FAIL: dataset layout invalid
     """
     lines = [f"check-data: {data_root}"]
     for split in result.splits:

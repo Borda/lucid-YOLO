@@ -9,9 +9,18 @@ against the freshly computed one within a per-metric absolute tolerance. A
 metric absent from ``tolerances`` (or given tolerance ``0.0``) must match
 exactly.
 
+The comparison runs in both directions on a live golden: a stored metric the producer
+no longer emits fails, and so does a metric the producer emits that the golden does not
+store. A golden pins its producer's *output*, so a metric nobody hand-added to the file
+is an unguarded number rather than an absent one, and the gate reported ``PASS`` with
+the old metric count while it stayed that way (M-44).
+
 Frozen files travel the identical comparison path, so a release's frozen goldens
 staying green *is* the frozen-golden regression: current code must still satisfy
-every value snapshotted at every past release.
+every value snapshotted at every past release. They are exempt from the unpinned-metric
+half alone — a past release pinned the metrics that existed then — and from the producer
+run itself when byte-identical to a live sibling that has already run it, which is what
+keeps a sweep from recomputing the same seven producers up to six times (:func:`check_all`).
 
 The ``goldens/gpu/`` subtree is **not** part of the default discovery: those
 goldens' producers retrain a model on an accelerator over a generated dataset, so
@@ -48,8 +57,10 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
+import math
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -74,10 +85,15 @@ class GoldenError(Exception):
 class MetricComparison:
     """Outcome of comparing one stored metric against its recomputed value.
 
+    Two directions of absence are recorded with a ``nan`` on the missing side, and
+    both are failures: ``actual`` is ``nan`` when the golden pins a metric the producer
+    no longer emits, and ``expected`` is ``nan`` when the producer emits a metric the
+    golden does not pin. :func:`format_result` reads the two apart.
+
     Attributes:
         metric: The metric name.
-        expected: The value stored in the golden file.
-        actual: The freshly recomputed value.
+        expected: The value stored in the golden file, or ``nan`` when unpinned.
+        actual: The freshly recomputed value, or ``nan`` when the producer omitted it.
         tolerance: The absolute tolerance applied (``0.0`` means exact).
         passed: Whether ``expected`` and ``actual`` agree within ``tolerance``.
     """
@@ -99,12 +115,15 @@ class GoldenResult:
         comparisons: Per-metric comparisons (empty when ``error`` is set).
         error: A failure message when the file is malformed or its producer
             failed, otherwise ``None``.
+        reused: ``True`` when the producer was not run for this file because a
+            byte-identical live golden had already run it (see :func:`check_all`).
     """
 
     path: Path
     passed: bool
     comparisons: list[MetricComparison]
     error: str | None = None
+    reused: bool = False
 
 
 def discover_goldens(goldens_dir: Path) -> list[Path]:
@@ -250,6 +269,8 @@ def _compare_values(
     expected: dict[str, float],
     actual: dict[str, float],
     tolerances: dict[str, float],
+    *,
+    require_all_pinned: bool,
 ) -> list[MetricComparison]:
     """Compare stored ``expected`` metrics against recomputed ``actual`` values.
 
@@ -257,13 +278,23 @@ def _compare_values(
     exactly; otherwise the absolute difference must not exceed the tolerance. A
     metric missing from ``actual`` is recorded as a failed comparison.
 
+    With ``require_all_pinned``, a metric the producer emits that the golden does
+    *not* store is also a failed comparison (WP-005 pins a producer's output, so an
+    unpinned metric is an unguarded number, not an absent one — M-44). Frozen
+    snapshots pass ``False``: a past release pinned the metrics that existed then,
+    and holding it to today's set would fail every prior snapshot on every metric
+    addition.
+
     Args:
         expected: Metric values stored in the golden file.
         actual: Metric values freshly produced.
         tolerances: Per-metric absolute tolerances.
+        require_all_pinned: Report metrics present in ``actual`` but absent from
+            ``expected`` as failures.
 
     Returns:
-        One :class:`MetricComparison` per stored metric.
+        One :class:`MetricComparison` per stored metric, then one per unpinned
+        produced metric when ``require_all_pinned``.
     """
     comparisons: list[MetricComparison] = []
     for metric, exp in expected.items():
@@ -274,18 +305,44 @@ def _compare_values(
         act = float(actual[metric])
         passed = act == float(exp) if tol == 0.0 else abs(act - float(exp)) <= tol
         comparisons.append(MetricComparison(metric, float(exp), act, tol, passed))
+    if require_all_pinned:
+        for metric in sorted(set(actual) - set(expected)):
+            comparisons.append(MetricComparison(metric, float("nan"), float(actual[metric]), 0.0, passed=False))
     return comparisons
 
 
-def check_golden(path: Path) -> GoldenResult:
+def _digest(path: Path) -> str:
+    """Return the SHA-256 hex digest of a golden file's bytes.
+
+    The short-circuit key in :func:`check_all`: byte-equality is what makes reusing
+    one file's producer run for another sound, since identical bytes carry an
+    identical producer spec.
+
+    Args:
+        path: The golden file to hash.
+
+    Returns:
+        The 64-character lowercase hex digest.
+    """
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def check_golden(path: Path, *, cache: dict[str, dict[str, float]] | None = None) -> GoldenResult:
     """Load, run, and compare a single golden file.
 
     Args:
         path: The golden file path.
+        cache: Optional producer-output cache keyed by the golden file's SHA-256, as
+            maintained by :func:`check_all`. A file whose digest is already present
+            reuses that output instead of re-running the producer; a *live* file
+            whose digest is absent records its output there. Frozen files never
+            write to the cache, so a frozen snapshot is only ever short-circuited by
+            a live golden it is byte-identical to.
 
     Returns:
         A :class:`GoldenResult`; ``error`` is set (and ``passed`` is ``False``)
         when the file is malformed or its producer cannot be resolved or run.
+        ``reused`` reports whether the producer run was taken from ``cache``.
 
     Examples:
         ```pycon
@@ -295,22 +352,29 @@ def check_golden(path: Path) -> GoldenResult:
 
         ```
     """
+    frozen = "frozen" in path.parts
+    reused = False
     try:
         spec, tolerances, values, freezable = _parse_golden(path)
-        if not freezable and "frozen" in path.parts:
+        if not freezable and frozen:
             raise GoldenError(
                 "golden is 'freezable': false but found under goldens/frozen/ — a non-freezable "
                 "golden can never satisfy 'current code still satisfies every frozen value' once "
                 "its producer's external dependency moves, so it must never be committed there"
             )
-        producer = resolve_producer(spec)
-        actual = producer()
+        key = _digest(path)
+        if cache is not None and key in cache:
+            actual, reused = cache[key], True
+        else:
+            actual = resolve_producer(spec)()
+            if cache is not None and not frozen:
+                cache[key] = actual
     except GoldenError as exc:
         return GoldenResult(path, passed=False, comparisons=[], error=str(exc))
     except Exception as exc:
         return GoldenResult(path, passed=False, comparisons=[], error=f"producer raised {type(exc).__name__}: {exc}")
-    comparisons = _compare_values(values, actual, tolerances)
-    return GoldenResult(path, passed=all(c.passed for c in comparisons), comparisons=comparisons)
+    comparisons = _compare_values(values, actual, tolerances, require_all_pinned=not frozen)
+    return GoldenResult(path, passed=all(c.passed for c in comparisons), comparisons=comparisons, reused=reused)
 
 
 def check_all(goldens_dir: Path = DEFAULT_GOLDENS_DIR, include_gpu: bool = False) -> list[GoldenResult]:
@@ -320,6 +384,16 @@ def check_all(goldens_dir: Path = DEFAULT_GOLDENS_DIR, include_gpu: bool = False
     a run on a machine with no accelerator and no generated dataset stays green.
     With ``include_gpu`` the ``gpu/`` subtree is appended — those producers retrain a
     model on the local accelerator (see :func:`discover_gpu_goldens`).
+
+    A release freeze copies live goldens verbatim, so most frozen files are byte-identical
+    to a live sibling — 41 of this repository's 50 offline goldens are, which had the seven
+    freezable producers recomputed up to six times per sweep. Live goldens are therefore
+    checked first and their producer output recorded against the file's SHA-256; a frozen
+    file whose bytes match one of them reuses that output rather than re-running an
+    identical computation, and is reported with ``reused``. Byte-equality is the whole
+    safety argument, so a frozen file that differs from its live sibling, or has none,
+    takes the full path — as does every parse, ``freezable`` and tolerance check, which
+    still run per file (M-41).
 
     Args:
         goldens_dir: The directory to scan (defaults to ``<repo>/goldens``).
@@ -340,7 +414,27 @@ def check_all(goldens_dir: Path = DEFAULT_GOLDENS_DIR, include_gpu: bool = False
     paths = discover_goldens(goldens_dir)
     if include_gpu:
         paths = paths + discover_gpu_goldens(goldens_dir)
-    return [check_golden(path) for path in paths]
+    cache: dict[str, dict[str, float]] = {}
+    live = [path for path in paths if "frozen" not in path.parts]
+    results = {path: check_golden(path, cache=cache) for path in live}
+    results.update({path: check_golden(path, cache=cache) for path in paths if path not in results})
+    return [results[path] for path in paths]
+
+
+def _failure_detail(failed: MetricComparison) -> str:
+    """Describe one failed comparison, reading the two ``nan`` directions apart.
+
+    Args:
+        failed: The comparison to describe.
+
+    Returns:
+        A one-line description naming the metric and what went wrong with it.
+    """
+    if math.isnan(failed.expected):
+        return f"{failed.metric}: produced {failed.actual} but the golden pins no such metric"
+    if math.isnan(failed.actual):
+        return f"{failed.metric}: pinned at {failed.expected} but the producer no longer emits it"
+    return f"{failed.metric}: expected {failed.expected}, got {failed.actual} (tol {failed.tolerance})"
 
 
 def format_result(result: GoldenResult, goldens_dir: Path) -> str:
@@ -351,7 +445,8 @@ def format_result(result: GoldenResult, goldens_dir: Path) -> str:
         goldens_dir: Base directory used to shorten the reported path.
 
     Returns:
-        A human-readable status line; failures append the first offending detail.
+        A human-readable status line; a pass whose producer run was reused is marked
+        ``SAME as live``, and failures append the first offending detail.
     """
     try:
         shown = result.path.relative_to(goldens_dir)
@@ -360,10 +455,9 @@ def format_result(result: GoldenResult, goldens_dir: Path) -> str:
     if result.error is not None:
         return f"FAIL {shown} — {result.error}"
     if result.passed:
-        return f"PASS {shown} — {len(result.comparisons)} metric(s)"
-    failed = next(c for c in result.comparisons if not c.passed)
-    detail = f"{failed.metric}: expected {failed.expected}, got {failed.actual} (tol {failed.tolerance})"
-    return f"FAIL {shown} — {detail}"
+        same = "SAME as live, " if result.reused else ""
+        return f"PASS {shown} — {same}{len(result.comparisons)} metric(s)"
+    return f"FAIL {shown} — {_failure_detail(next(c for c in result.comparisons if not c.passed))}"
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,20 +1,34 @@
 # SPDX-License-Identifier: Apache-2.0
 name: Release
 
-# Fires only on a 0.x version tag (ADR-002 — no 1.0 is ever tagged). The guard
-# below re-runs the full gate and refuses the tag if it is red, if the tag is
-# not a v0.MINOR.PATCH string, or if CHANGELOG.md lacks its version section.
+# Fires on a 0.x version tag (ADR-002 — no 1.0 is ever tagged). The guard below
+# re-runs the full gate and refuses the tag if it is red, if the tag is not a
+# v0.MINOR.PATCH string, or if CHANGELOG.md lacks its version section.
 #
 # Golden freezing (`make freeze-goldens MINOR=0.N`) is performed by the release
 # work-package commit itself, not by this workflow — the frozen snapshot must be
 # reviewed and committed before the tag is pushed. Publication to PyPI is a
 # [PRINCIPAL] decision and is deliberately absent here: this workflow only builds and
 # uploads the distributions as inspectable artifacts.
-
+#
+# `workflow_dispatch` exists because until it was added, nothing had ever run this
+# file. Six releases shipped with zero tags, so the guard, the README rewrite and the
+# build were unexecuted code that the first real tag would have executed all at
+# once, on the day it mattered most. A manual run rehearses that path against the
+# tag naming the release the checked-out tree already *is*: the metadata checks
+# read the working tree, so an input naming any other version fails the rehearsal
+# on the version check before reaching the steps it exists to exercise. A rehearsal
+# publishes nothing and certifies nothing — it proves the wiring runs.
 on:
   push:
     tags:
       - "v0.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to rehearse against, e.g. v0.8.0 — must match the checked-out tree's __version__"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -26,8 +40,24 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # The tag reaches every step through the environment and never through the
+    # source of a `run:` script. `git check-ref-format` permits `;`, `$`, backtick
+    # and parentheses in a tag name, and `v0.1.0;<command>` matches the trigger
+    # above; interpolated into a shell string that is a command, and the guard's
+    # own version regex would run after the shell had already expanded it. Passed
+    # as `"${TAG}"` it stays one literal argument and fails validation instead.
+    # This is the pattern `lint.yml` already states for the two PR SHAs.
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      # Full history: the guard re-runs `make gate`, whose pre-commit pass includes
+      # the `commit-trailers-history` hook and its `origin/main..HEAD` range. A
+      # single-commit checkout of a tag creates no `refs/remotes/origin/main`, so
+      # that range exits 128 and the gate goes red on a missing ref rather than on
+      # anything about the release.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -39,19 +69,34 @@ jobs:
         run: |
           uv venv --python 3.11 .venv
           uv pip install --python .venv/bin/python -e . --group dev --group typing
+      # The certifying invocation, on a tag push only: no `--metadata-only`, so the
+      # gate runs here, once, from outside itself. This is the caller the pre-commit
+      # hook's metadata-only mode exists to make possible.
       - name: Release guard (re-runs the full gate)
-        run: .venv/bin/python scripts/release_guard.py --tag "${{ github.ref_name }}"
+        if: github.event_name == 'push'
+        run: .venv/bin/python scripts/release_guard.py --tag "${TAG}"
+      # The rehearsal's guard: the same five metadata checks, no gate. `lint.yml` and
+      # `ci-tests.yml` already run the gate over this commit, and spending it a third
+      # time is what would stop a rehearsal from reaching the two steps below — which
+      # are the whole reason to run one.
+      - name: Release guard (metadata only — rehearsal, certifies nothing)
+        if: github.event_name == 'workflow_dispatch'
+        run: .venv/bin/python scripts/release_guard.py --tag "${TAG}" --metadata-only
       # README.md is the PyPI long description, and PyPI resolves its relative links
       # against pypi.org: every figure is a broken image and every docs link a 404
       # unless they are pinned to this tag first. The checkout is disposable, so the
       # rewrite is not reverted.
       - name: Pin README links to the tag being released
-        run: .venv/bin/python scripts/absolutize_readme.py --ref "${{ github.ref_name }}"
+        run: .venv/bin/python scripts/absolutize_readme.py --ref "${TAG}"
       - name: Build sdist and wheel
         run: uv build --out-dir dist
+      # A rehearsal's distributions are named apart from a tag push's: they are built
+      # from whatever the dispatch branch holds, which is not the tree a tag names,
+      # and an artifact that cannot be told from a release build is one that will
+      # eventually be treated as one.
       - name: Upload distributions as artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: lucid-yolo-${{ github.ref_name }}
+          name: lucid-yolo-${{ env.TAG }}${{ github.event_name == 'workflow_dispatch' && '-rehearsal' || '' }}
           path: dist/*
           if-no-files-found: error

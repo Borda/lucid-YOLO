@@ -24,6 +24,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPDX_LINE = "# SPDX-License-Identifier: Apache-2.0"
 
+#: The Apache appendix's own placeholder for the copyright line, left in the file by
+#: anyone who copies the template and stops at the terms. It sits ~5 kB in, past the
+#: window a "is this Apache 2.0" head-read looks at, so the check that reads the head
+#: structurally cannot see it -- which is the whole reason it survived here.
+COPYRIGHT_PLACEHOLDER = "Copyright [yyyy] [name of copyright owner]"
+
+#: Trees whose ``*.py`` files must open with the SPDX line. ``src/`` alone was never a
+#: stated scope, only the one the glob happened to name; ``scripts/`` and ``tests/``
+#: already carry the header on every file, so widening the glob pins what is already
+#: true rather than asking for new work.
+HEADER_DIRS = ("src", "scripts", "tests")
+
 #: The only form ``docs/PROVENANCE.md`` sec. 3.5 admits for naming the method's source: a
 #: nominative reference to the paper. WP-161 corrected the README's ``the Ultralytics YOLO26
 #: paper`` to this and left the identical drift in ``NOTICE`` for the next row; pinning the
@@ -42,7 +54,14 @@ DISCLAIMER_FRAGMENTS = (
 
 
 def check_license_is_apache2(repo_root: Path) -> list[str]:
-    """Violations if ``LICENSE`` is not the Apache License, Version 2.0.
+    """Violations if ``LICENSE`` is not Apache 2.0, or still carries the template placeholder.
+
+    Two checks over one file because they read the same document for opposite
+    reasons: the first asks whether this is the licence claimed everywhere else, and
+    reads the head, where the title is. The second asks whether the licence was
+    *applied* or merely copied, and has to read the whole file -- the appendix's
+    ``Copyright [yyyy] [name of copyright owner]`` sits far outside any head window,
+    which is how it survived every run of the first check.
 
     Examples:
         >>> import tempfile
@@ -52,11 +71,23 @@ def check_license_is_apache2(repo_root: Path) -> list[str]:
         ...     _ = (root / "LICENSE").write_text("MIT License\\n", encoding="utf-8")
         ...     check_license_is_apache2(root)
         ['LICENSE is not the Apache License, Version 2.0']
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     _ = (root / "LICENSE").write_text(
+        ...         "Apache License\\nVersion 2.0\\n" + " " * 400 + COPYRIGHT_PLACEHOLDER + "\\n",
+        ...         encoding="utf-8",
+        ...     )
+        ...     check_license_is_apache2(root)
+        ['LICENSE still carries the Apache appendix placeholder: Copyright [yyyy] [name of copyright owner]']
     """
-    head = (repo_root / "LICENSE").read_text(encoding="utf-8")[:200]
-    if "Apache License" in head and "Version 2.0" in head:
-        return []
-    return ["LICENSE is not the Apache License, Version 2.0"]
+    text = (repo_root / "LICENSE").read_text(encoding="utf-8")
+    violations = []
+    head = text[:200]
+    if "Apache License" not in head or "Version 2.0" not in head:
+        violations.append("LICENSE is not the Apache License, Version 2.0")
+    if COPYRIGHT_PLACEHOLDER in text:
+        violations.append(f"LICENSE still carries the Apache appendix placeholder: {COPYRIGHT_PLACEHOLDER}")
+    return violations
 
 
 def check_notice_attribution(repo_root: Path) -> list[str]:
@@ -103,8 +134,35 @@ def check_readme_disclaimer(repo_root: Path) -> list[str]:
     ]
 
 
+def _carries_spdx_header(text: str) -> bool:
+    """True if ``text`` opens with the SPDX line, a shebang permitted ahead of it.
+
+    A shebang has to be the first line to work at all, so a runnable script cannot
+    put the SPDX line first and remain runnable. Reading only line one calls the
+    repository's two executable scripts unlicensed while they carry the header on
+    line two, which is what the header-scope finding read as two missing headers.
+
+    Examples:
+        >>> _carries_spdx_header(SPDX_LINE + "\\nimport os\\n")
+        True
+        >>> _carries_spdx_header("#!/usr/bin/env python\\n" + SPDX_LINE + "\\n")
+        True
+        >>> _carries_spdx_header("import os\\n")
+        False
+    """
+    lines = text.splitlines()
+    if lines and lines[0].startswith("#!"):
+        lines = lines[1:]
+    return bool(lines) and lines[0].startswith(SPDX_LINE)
+
+
 def check_source_files_carry_spdx_header(repo_root: Path) -> list[str]:
-    """Violations for every ``src/**/*.py`` file missing the leading SPDX line.
+    """Violations for every ``*.py`` file under :data:`HEADER_DIRS` missing the SPDX line.
+
+    Scope is the three trees this repository actually writes Python into, not ``src/``
+    alone: the header is a per-file legal marker and a file that travels -- a script
+    pasted into a notebook, a test vendored into a bug report -- carries it or does
+    not, whether or not it ships in the wheel.
 
     Examples:
         >>> import tempfile
@@ -119,8 +177,9 @@ def check_source_files_carry_spdx_header(repo_root: Path) -> list[str]:
     """
     missing = [
         str(path.relative_to(repo_root))
-        for path in sorted((repo_root / "src").rglob("*.py"))
-        if not path.read_text(encoding="utf-8").startswith(SPDX_LINE)
+        for name in HEADER_DIRS
+        for path in sorted((repo_root / name).rglob("*.py"))
+        if not _carries_spdx_header(path.read_text(encoding="utf-8"))
     ]
     if not missing:
         return []
@@ -168,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         Process exit code: ``0`` clean, ``1`` when any check finds a violation.
     """
-    parser = argparse.ArgumentParser(description="Audit LICENSE/NOTICE/README/src for license hygiene.")
+    parser = argparse.ArgumentParser(description="Audit LICENSE/NOTICE/README and per-file SPDX headers.")
     parser.add_argument(
         "--repo-root",
         type=Path,
@@ -183,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         for item in violations:
             print(f"  - {item}")
         return 1
-    print("license-headers-audit clean: LICENSE, NOTICE, README, and src/ headers all check out")
+    print(f"license-headers-audit clean: LICENSE, NOTICE, README, and {'/, '.join(HEADER_DIRS)}/ headers all check out")
     return 0
 
 

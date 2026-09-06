@@ -473,7 +473,7 @@ def download_dataset(
 
     Examples:
         ```pycon
-        >>> download_dataset(Path("/data/coco"), ["val"])  # doctest: +SKIP
+        >>> download_dataset(Path("/data/coco"), ["val"])  # downloads gigabytes  # doctest: +SKIP
         0
 
         ```

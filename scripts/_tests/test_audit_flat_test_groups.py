@@ -103,6 +103,80 @@ class TestFindFlatGroups:
         assert audit.find_flat_groups(sample) == {}
 
 
+class TestCaseFoldingAndPrefixLength:
+    """The grouping key is case-folded, and its length is a choice rather than a constant."""
+
+    def test_a_class_named_subject_confirms_its_own_group(self, tmp_path: Path) -> None:
+        """`test_c3k2_*` confirms against the `C3k2` it calls, which case-sensitivity blocked.
+
+        The two sides are spelled by different conventions -- pytest forces the test
+        name to snake_case while the callee is CapWords -- so comparing them as
+        written means a class-named subject can never match its own tests.
+        """
+        sample = tmp_path / "test_sample.py"
+        sample.write_text(
+            "from mod import C3k2\n"
+            "def test_c3k2_shapes(): C3k2(1)\n"
+            "def test_c3k2_depth(): C3k2(2)\n"
+            "def test_c3k2_width(): C3k2(3)\n",
+            encoding="utf-8",
+        )
+
+        groups = audit.find_flat_groups(sample, prefix_tokens=1)
+
+        assert groups == {"c3k2": ["test_c3k2_shapes", "test_c3k2_depth", "test_c3k2_width"]}
+
+    def test_a_one_token_prefix_must_name_the_whole_callee(self, tmp_path: Path) -> None:
+        """A single token merely contained in a callee confirms nothing.
+
+        Containment is a usable signal at two tokens and noise at one: over the live
+        tree the containment rule at length one returns 16 groups keyed on prose
+        fragments, every one of them the false positive this discriminator exists to
+        exclude.
+        """
+        sample = tmp_path / "test_sample.py"
+        sample.write_text(
+            "from mod import check_the_nav\n"
+            "def test_the_nav_lists_a(): check_the_nav(1)\n"
+            "def test_the_nav_lists_b(): check_the_nav(2)\n"
+            "def test_the_nav_lists_c(): check_the_nav(3)\n",
+            encoding="utf-8",
+        )
+
+        assert audit.find_flat_groups(sample, prefix_tokens=1) == {}
+
+    def test_a_one_token_subject_is_unreachable_at_the_default_length(self, tmp_path: Path) -> None:
+        """The default of two is what makes the length worth exposing at all.
+
+        The same file that groups at length one returns nothing at length two,
+        because a one-token subject has no two-token prefix to key on.
+        """
+        sample = tmp_path / "test_sample.py"
+        sample.write_text(
+            "from mod import fusion\n"
+            "def test_fusion_a(): fusion(1)\n"
+            "def test_fusion_b(): fusion(2)\n"
+            "def test_fusion_c(): fusion(3)\n",
+            encoding="utf-8",
+        )
+
+        assert audit.find_flat_groups(sample, prefix_tokens=1) != {}
+        assert audit.find_flat_groups(sample) == {}
+
+    def test_the_cli_carries_the_prefix_length_through(self, tmp_path: Path) -> None:
+        """`--prefix-tokens` reaches the walk, so the option is not decorative."""
+        (tmp_path / "test_sample.py").write_text(
+            "from mod import fusion\n"
+            "def test_fusion_a(): fusion(1)\n"
+            "def test_fusion_b(): fusion(2)\n"
+            "def test_fusion_c(): fusion(3)\n",
+            encoding="utf-8",
+        )
+
+        assert audit.main(["--tests-dir", str(tmp_path)]) == 0
+        assert audit.main(["--tests-dir", str(tmp_path), "--prefix-tokens", "1"]) == 1
+
+
 def test_main_returns_nonzero_when_a_flat_group_survives(tmp_path: Path) -> None:
     """The CLI exit code is 1 when a confirmed flat group is still outside a class."""
     (tmp_path / "test_sample.py").write_text(

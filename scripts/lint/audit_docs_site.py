@@ -158,6 +158,12 @@ def check_the_repo_url_matches_the_declared_homepage(mkdocs_yml: Path, pyproject
     the project was renamed, GitHub kept redirecting the HTML URLs, and nothing failed
     until a raw URL -- which does not redirect -- was generated from the stale value.
 
+    ``repo_name`` is checked in the same pass because it is a *separate* key holding
+    the same fact in a shorter spelling: Material renders it as the header link's
+    label, so a rename that updates the URL and leaves the label behind puts the old
+    slug on every page of the site while every link still resolves. Nothing else in
+    the repository reads it, which is exactly why nothing else would notice.
+
     Examples:
         >>> import tempfile
         >>> with tempfile.TemporaryDirectory() as tmp:
@@ -168,14 +174,29 @@ def check_the_repo_url_matches_the_declared_homepage(mkdocs_yml: Path, pyproject
         ...     _ = pyproject.write_text('Homepage = "https://example.com/b"\\n', encoding="utf-8")
         ...     check_the_repo_url_matches_the_declared_homepage(mkdocs_yml, pyproject)
         ["repo_url 'https://example.com/a' does not match pyproject.toml Homepage 'https://example.com/b'"]
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     mkdocs_yml = root / "mkdocs.yml"
+        ...     _ = mkdocs_yml.write_text(
+        ...         "repo_url: https://github.com/Borda/a\\nrepo_name: Borda/old-name\\n", encoding="utf-8"
+        ...     )
+        ...     pyproject = root / "pyproject.toml"
+        ...     _ = pyproject.write_text('Homepage = "https://github.com/Borda/a"\\n', encoding="utf-8")
+        ...     check_the_repo_url_matches_the_declared_homepage(mkdocs_yml, pyproject)
+        ["repo_name 'Borda/old-name' does not name the repo_url slug 'Borda/a'"]
     """
     text = pyproject.read_text(encoding="utf-8")
     homepage = re.search(r'^Homepage\s*=\s*"([^"]+)"', text, flags=re.MULTILINE)
     if not homepage:
         return ["pyproject.toml declares no Homepage"]
-    repo_url = _config(mkdocs_yml)["repo_url"]
+    config = _config(mkdocs_yml)
+    repo_url = config["repo_url"]
     if repo_url.rstrip("/") != homepage.group(1).rstrip("/"):
         return [f"repo_url {repo_url!r} does not match pyproject.toml Homepage {homepage.group(1)!r}"]
+    repo_name = config.get("repo_name")
+    slug = "/".join(repo_url.rstrip("/").split("/")[-2:])
+    if repo_name is not None and repo_name != slug:
+        return [f"repo_name {repo_name!r} does not name the repo_url slug {slug!r}"]
     return []
 
 

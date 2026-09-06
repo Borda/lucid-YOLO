@@ -22,7 +22,16 @@ jobs:
     env:
       UV_TORCH_BACKEND: "cpu"
     steps:
+      # Full history, for the same reason the `dco` and `trailers` jobs below ask
+      # for it: `pre-commit run --all-files` includes `commit-trailers-history`,
+      # whose entry is `--range origin/main..HEAD`. The default single-commit
+      # checkout creates no `refs/remotes/origin/main`, so that range does not
+      # resolve and the hook exits 128 with a Git error — the job would fail
+      # before linting a line, and the failure would name a missing ref rather
+      # than anything about the submission.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"

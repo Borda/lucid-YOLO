@@ -115,6 +115,55 @@ def test_the_repo_url_matches_the_declared_homepage_flags_a_mismatch(tmp_path: P
     ]
 
 
+class TestRepoName:
+    """`repo_name` holds the same fact as `repo_url` in a second spelling, so it drifts."""
+
+    def test_a_stale_repo_name_is_flagged(self, tmp_path: Path) -> None:
+        """A `repo_name` naming a different slug than `repo_url` fails.
+
+        This is the surface a rename leaves behind: Material renders `repo_name` as
+        the header link's label on every page, so the old slug stays visible site-wide
+        while every link still resolves and no build step reports anything.
+        """
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text(
+            "repo_url: https://github.com/Borda/lit-YOLOs\nrepo_name: Borda/lucid-YOLO\n", encoding="utf-8"
+        )
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('Homepage = "https://github.com/Borda/lit-YOLOs"\n', encoding="utf-8")
+
+        violations = audit.check_the_repo_url_matches_the_declared_homepage(mkdocs_yml, pyproject)
+
+        assert violations == ["repo_name 'Borda/lucid-YOLO' does not name the repo_url slug 'Borda/lit-YOLOs'"]
+
+    def test_a_matching_repo_name_passes(self, tmp_path: Path) -> None:
+        """The slug taken from the URL's last two segments is what `repo_name` must equal."""
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text(
+            "repo_url: https://github.com/Borda/lucid-YOLO\nrepo_name: Borda/lucid-YOLO\n", encoding="utf-8"
+        )
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('Homepage = "https://github.com/Borda/lucid-YOLO"\n', encoding="utf-8")
+
+        assert audit.check_the_repo_url_matches_the_declared_homepage(mkdocs_yml, pyproject) == []
+
+    def test_an_absent_repo_name_is_not_invented(self, tmp_path: Path) -> None:
+        """A config declaring no `repo_name` is not failed for it -- Material derives its own."""
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text("repo_url: https://example.com/a\n", encoding="utf-8")
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('Homepage = "https://example.com/a"\n', encoding="utf-8")
+
+        assert audit.check_the_repo_url_matches_the_declared_homepage(mkdocs_yml, pyproject) == []
+
+    def test_the_live_config_declares_a_matching_repo_name(self) -> None:
+        """The real `mkdocs.yml` names the same slug its `repo_url` does."""
+        assert (
+            audit.check_the_repo_url_matches_the_declared_homepage(audit.DEFAULT_MKDOCS_YML, audit.DEFAULT_PYPROJECT)
+            == []
+        )
+
+
 def test_the_repo_url_matches_the_declared_homepage_passes_when_equal(tmp_path: Path) -> None:
     """A matching ``repo_url`` and Homepage produce no violation."""
     mkdocs_yml = tmp_path / "mkdocs.yml"

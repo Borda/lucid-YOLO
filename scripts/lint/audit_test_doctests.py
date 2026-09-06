@@ -1,17 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Doctest-coverage audit for ``test_*.py`` helpers (WP-129/130, split off WP-117).
+"""Doctest-coverage audit for test helpers and the shipped surface (WP-129/130, split off WP-117).
 
-Scans both ``tests/`` and ``scripts/_tests/`` by default -- the latter holds the
-functional-core tests for ``scripts/`` modules (WP-130) and carries the same
-helper-needs-an-Example expectation.
+Scans ``tests/``, ``scripts/_tests/`` and ``src/`` by default. The first two hold
+test helpers -- ``scripts/_tests/`` the functional-core tests for ``scripts/``
+modules (WP-130) -- and carry the same helper-needs-an-Example expectation; the
+third is the shipped surface, where ``Makefile``'s "every public function is
+required to carry one" had no gate behind it at all.
 
 ``pytest --doctest-modules`` (WP-085, ``make test``) turns a helper's ``Examples:``
 block into an executable check the moment it exists, but nothing forces the block
 to exist in the first place. This walks the same module-level-function population
 by the same AST predicate ``--doctest-modules`` already exercises, and fails naming
-every non-fixture, non-``test_`` helper still missing a ``>>>`` line, so a new
-helper lands with an Example or fails the gate rather than joining the pile
-silently.
+every helper still missing a ``>>>`` line, so a new one lands with an Example or
+fails the gate rather than joining the pile silently.
+
+**A skipped Example is not an executed one.** A ``>>>`` line carrying
+``# doctest: +SKIP`` satisfies collection, satisfies a presence scan and satisfies
+the human reading the diff, while executing nothing -- so a docstring whose every
+Example line is skipped counts here only when each skip states why. The reason goes
+*before* the directive (``>>> f()  # needs a checkpoint  # doctest: +SKIP``) and not
+after it: CPython's ``doctest`` reads a directive comment to the end of its line and
+rejects trailing prose there as an unknown option, so a reason written after
+``+SKIP`` breaks the collection it is annotating.
 
 Scope is deliberately narrow to the one invariant: a docstring's presence and its
 ``>>>`` content. Whether a group of helpers should be regrouped into a class is
@@ -27,17 +37,48 @@ from __future__ import annotations
 
 import argparse
 import ast
+import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TESTS_DIR = REPO_ROOT / "tests"
 DEFAULT_SCRIPTS_TESTS_DIR = REPO_ROOT / "scripts" / "_tests"
+DEFAULT_SRC_DIR = REPO_ROOT / "src"
 
 #: Decorator names that mark a function as a fixture rather than a helper, in
 #: either bare (``@pytest.fixture``) or call (``@pytest.fixture(scope="module")``)
 #: form, and under either the ``pytest.fixture`` or bare ``fixture`` import spelling.
 _FIXTURE_DECORATOR_NAMES = frozenset({"fixture"})
+
+#: A doctest example line inside a docstring.
+_EXAMPLE_LINE_RE = re.compile(r"^\s*>>>")
+#: A ``+SKIP`` directive on such a line. ``doctest`` reads the directive comment to
+#: end of line, so nothing may follow the option list.
+_SKIP_RE = re.compile(r"#\s*doctest:[^#\n]*\+SKIP")
+#: A ``+SKIP`` preceded on the same line by a comment that is not itself a directive --
+#: the only place a reason can sit without breaking ``doctest``'s own parse.
+_REASONED_SKIP_RE = re.compile(r"#\s*(?!doctest:)\S[^#\n]*#\s*doctest:[^#\n]*\+SKIP")
+
+
+@dataclass(frozen=True, slots=True)
+class ScanRoot:
+    """One tree to audit, and the population inside it that owes an Example.
+
+    Attributes:
+        path: Directory walked recursively.
+        pattern: Glob selecting the files to parse under it.
+        include_private: Whether a leading-underscore function owes an Example. True
+            for test trees, where a module-level ``_helper`` is the whole population
+            this audit was built for; False for ``src/``, where the requirement
+            ``Makefile`` states is about the *public* surface and a private helper's
+            contract is its caller's docstring.
+    """
+
+    path: Path
+    pattern: str = "test_*.py"
+    include_private: bool = True
 
 
 def _decorator_name(node: ast.expr) -> str:
@@ -76,7 +117,7 @@ def _is_fixture(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return any(_decorator_name(dec) in _FIXTURE_DECORATOR_NAMES for dec in func.decorator_list)
 
 
-def module_level_helpers(path: Path) -> list[str]:
+def module_level_helpers(path: Path, include_private: bool = True) -> list[str]:
     """Names of ``path``'s module-level, non-fixture, non-``test_`` functions.
 
     Deliberately module-level only: a closure nested inside a helper (a fake
@@ -84,6 +125,13 @@ def module_level_helpers(path: Path) -> list[str]:
     and Example already, not a second surface a caller can reach, so it is not
     counted here -- the same boundary ``--doctest-modules`` draws when it collects
     a module's top-level functions.
+
+    Args:
+        path: Python file to parse.
+        include_private: Whether leading-underscore functions are counted.
+
+    Returns:
+        The function names owing an Example, in file order.
 
     Examples:
         >>> import tempfile
@@ -95,10 +143,11 @@ def module_level_helpers(path: Path) -> list[str]:
         ...         "@pytest.fixture\\n"
         ...         "def a_fixture(): ...\\n"
         ...         "def _helper(): ...\\n"
+        ...         "def public(): ...\\n"
         ...         "def test_thing(): ...\\n"
         ...     )
-        ...     module_level_helpers(sample)
-        ['_helper']
+        ...     module_level_helpers(sample), module_level_helpers(sample, include_private=False)
+        (['_helper', 'public'], ['public'])
     """
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     names = []
@@ -107,17 +156,56 @@ def module_level_helpers(path: Path) -> list[str]:
             continue
         if node.name.startswith("test_") or _is_fixture(node):
             continue
+        if not include_private and node.name.startswith("_"):
+            continue
         names.append(node.name)
     return names
 
 
+def example_gap(doc: str | None) -> str | None:
+    """Why ``doc`` fails to carry an executable Example, or ``None`` when it does not fail.
+
+    Two distinct failures, reported apart because they call for different repairs:
+    a docstring with no ``>>>`` line at all needs an Example written, while one whose
+    every ``>>>`` line is skipped already has an Example and needs either the skip
+    removed or a reason stated for it.
+
+    Args:
+        doc: A function's docstring, or ``None`` when it has none.
+
+    Returns:
+        A short reason, or ``None`` when at least one Example line will actually run
+        (or is skipped for a stated reason).
+
+    Examples:
+        >>> example_gap(">>> 1 + 1\\n2\\n") is None
+        True
+        >>> example_gap("No example here.")
+        'no Example'
+        >>> example_gap(">>> f()  # doctest: +SKIP")
+        'every Example line is skipped, none says why'
+        >>> example_gap(">>> f()  # needs a checkpoint  # doctest: +SKIP") is None
+        True
+    """
+    if doc is None:
+        return "no docstring"
+    lines = [line for line in doc.splitlines() if _EXAMPLE_LINE_RE.match(line)]
+    if not lines:
+        return "no Example"
+    countable = [line for line in lines if not _SKIP_RE.search(line) or _REASONED_SKIP_RE.search(line) is not None]
+    if not countable:
+        return "every Example line is skipped, none says why"
+    return None
+
+
 def has_doctest_example(path: Path, name: str) -> bool:
-    """True if the module-level function ``name`` in ``path`` has a ``>>>`` docstring line.
+    """True if the module-level function ``name`` in ``path`` carries an executable Example.
 
     A missing docstring also fails this check (``ast.get_docstring`` returns
     ``None``, and containment on ``None`` would raise, so the ``None`` case is
     handled explicitly), which keeps the predicate a single check rather than
-    two the caller has to combine.
+    two the caller has to combine. So does a docstring whose Example lines are all
+    skipped without a stated reason -- see :func:`example_gap`.
 
     Examples:
         >>> import tempfile
@@ -139,13 +227,20 @@ def has_doctest_example(path: Path, name: str) -> bool:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            doc = ast.get_docstring(node)
-            return doc is not None and ">>>" in doc
+            return example_gap(ast.get_docstring(node)) is None
     raise AssertionError(f"{name} not found at module level of {path}")  # pragma: no cover
 
 
-def find_missing(tests_dir: Path) -> list[str]:
-    """Every ``file::function`` under ``tests_dir`` still missing a doctest Example.
+def find_missing(tests_dir: Path, pattern: str = "test_*.py", include_private: bool = True) -> list[str]:
+    """Every ``file::function -- reason`` under ``tests_dir`` without an executable Example.
+
+    Args:
+        tests_dir: Directory walked recursively.
+        pattern: Glob selecting the files to parse under it.
+        include_private: Whether leading-underscore functions owe an Example.
+
+    Returns:
+        One finding per function, each naming why it failed.
 
     Examples:
         >>> import tempfile
@@ -155,14 +250,49 @@ def find_missing(tests_dir: Path) -> list[str]:
         ...     sample = root / "test_sample.py"
         ...     _ = sample.write_text("def _bare():\\n    'No example.'\\n")
         ...     [item.split("/")[-1] for item in find_missing(root)]
-        ['test_sample.py::_bare']
+        ['test_sample.py::_bare -- no Example']
     """
     missing = []
-    for path in sorted(tests_dir.rglob("test_*.py")):
-        for name in module_level_helpers(path):
-            if not has_doctest_example(path, name):
-                missing.append(f"{path.relative_to(tests_dir.parent)}::{name}")
+    for path in sorted(tests_dir.rglob(pattern)):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        documented = {
+            node.name: ast.get_docstring(node)
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        for name in module_level_helpers(path, include_private=include_private):
+            gap = example_gap(documented[name])
+            if gap is not None:
+                missing.append(f"{path.relative_to(tests_dir.parent)}::{name} -- {gap}")
     return missing
+
+
+def _scan_roots(tests_dirs: list[Path] | None, src_dirs: list[Path] | None) -> list[ScanRoot]:
+    """Resolve the CLI's two repeatable directory options into scan roots.
+
+    Naming either option replaces the whole default set rather than adding to it, so
+    ``--tests-dir tests`` audits exactly that and nothing else -- the alternative,
+    where a narrowing flag silently keeps scanning ``src/``, makes the flag useless
+    for the one job it has.
+
+    Args:
+        tests_dirs: Directories given as ``--tests-dir``, or ``None``.
+        src_dirs: Directories given as ``--src-dir``, or ``None``.
+
+    Returns:
+        The roots to walk, in the order given.
+
+    Examples:
+        >>> [root.pattern for root in _scan_roots(None, None)]
+        ['test_*.py', 'test_*.py', '*.py']
+        >>> [root.include_private for root in _scan_roots(None, [Path("src")])]
+        [False]
+    """
+    if tests_dirs is None and src_dirs is None:
+        tests_dirs, src_dirs = [DEFAULT_TESTS_DIR, DEFAULT_SCRIPTS_TESTS_DIR], [DEFAULT_SRC_DIR]
+    roots = [ScanRoot(path) for path in tests_dirs or []]
+    roots += [ScanRoot(path, pattern="*.py", include_private=False) for path in src_dirs or []]
+    return roots
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -172,27 +302,41 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command-line arguments; ``None`` uses ``sys.argv``.
 
     Returns:
-        Process exit code: ``0`` clean, ``1`` when any helper lacks an Example.
+        Process exit code: ``0`` clean, ``1`` when any function lacks an executable Example.
+
+    Examples:
+        Command-line usage (exit status is the process return code)::
+
+            $ python scripts/lint/audit_test_doctests.py --tests-dir tests
     """
-    parser = argparse.ArgumentParser(description="Audit tests/**/test_*.py helpers for doctest Examples.")
+    parser = argparse.ArgumentParser(description="Audit test helpers and src/ public functions for Examples.")
     parser.add_argument(
         "--tests-dir",
         type=Path,
         action="append",
         dest="tests_dirs",
         default=None,
-        help=f"directory to scan; repeatable (default: {DEFAULT_TESTS_DIR}, {DEFAULT_SCRIPTS_TESTS_DIR})",
+        help=f"test tree to scan for test_*.py helpers; repeatable "
+        f"(default: {DEFAULT_TESTS_DIR}, {DEFAULT_SCRIPTS_TESTS_DIR})",
+    )
+    parser.add_argument(
+        "--src-dir",
+        type=Path,
+        action="append",
+        dest="src_dirs",
+        default=None,
+        help=f"source tree to scan for public functions in *.py; repeatable (default: {DEFAULT_SRC_DIR})",
     )
     args = parser.parse_args(argv)
-    tests_dirs = args.tests_dirs if args.tests_dirs is not None else [DEFAULT_TESTS_DIR, DEFAULT_SCRIPTS_TESTS_DIR]
+    roots = _scan_roots(args.tests_dirs, args.src_dirs)
 
-    missing = [item for tests_dir in tests_dirs for item in find_missing(tests_dir)]
+    missing = [item for root in roots for item in find_missing(root.path, root.pattern, root.include_private)]
     if missing:
-        print(f"doctest-audit FAILED: {len(missing)} helper(s) missing a doctest Example")
+        print(f"doctest-audit FAILED: {len(missing)} function(s) without an executable Example")
         for item in missing:
             print(f"  - {item}")
         return 1
-    print("doctest-audit clean: every non-fixture helper carries a doctest Example")
+    print("doctest-audit clean: every scanned function carries an Example that runs")
     return 0
 
 

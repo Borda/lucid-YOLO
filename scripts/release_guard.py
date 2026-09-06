@@ -34,6 +34,23 @@ pass:
 6. **Gate** — the gate command (``make gate`` by default) must exit ``0``. A
    non-zero exit is a red gate and refuses the tag.
 
+Checks 1-5 are *metadata*: each reads a file and answers in milliseconds. Check 6
+is *orchestration*: it re-runs the whole merge bar. The two are separable, and they
+are separated here because leaving them fused made the guard call itself. The
+pre-commit hook runs with ``--metadata-only``; the standalone and workflow
+invocations run every check including the gate:
+
+* ``--metadata-only`` runs checks 1-5 and says so in its verdict. It exists
+  because ``make gate`` runs pre-commit, which runs this guard: on a commit whose
+  HEAD *is* a tag the fused form asked for another gate from inside the gate it
+  was already running, so release validation entered a cycle instead of reaching
+  the test and build stages. This mode is not an exemption — it never reports a
+  tag as shippable, only that its metadata is well-formed, and it refuses bad
+  metadata exactly as the full run does.
+* The full run — ``scripts/release_guard.py --tag v0.MINOR.PATCH``, which is what
+  ``.github/workflows/release.yml`` executes on a tag push — runs the gate once,
+  as the outermost caller. Nothing inside that gate asks for another.
+
 Deliberately **not** checked: whether the runtime requirements are uploadable to
 PyPI. ``[project].dependencies`` currently carries a direct reference — a git URL,
 legal to build and install and illegal to upload — accepted as D20 with the
@@ -473,6 +490,66 @@ def _current_tag() -> str | None:
     return completed.stdout.strip() if completed.returncode == 0 else None
 
 
+def evaluate_metadata(
+    tag: str,
+    changelog: Path,
+    pyproject: Path = DEFAULT_PYPROJECT,
+    package_root: Path = DEFAULT_PACKAGE_ROOT,
+    init_path: Path = DEFAULT_INIT,
+    frozen_root: Path = DEFAULT_FROZEN_ROOT,
+) -> list[CheckResult]:
+    """Run the five file-reading checks and return their results in order.
+
+    Every check here answers from a file in milliseconds, and none of them starts a
+    build or a test run. That is the whole property this function exists to isolate:
+    the gate command runs pre-commit, which runs this guard, so a guard that always
+    ran the gate ran it from inside itself on the one commit that mattered — a
+    release tag. Callers that are *already* inside the gate call this; the caller
+    that owns the gate calls :func:`evaluate`.
+
+    Args:
+        tag: The candidate tag.
+        changelog: Path to the changelog file.
+        pyproject: Manifest declaring the dependency tiers.
+        package_root: Directory of the package the distribution ships.
+        init_path: Module declaring the ``__version__`` the tag must match.
+        frozen_root: Root holding one frozen-golden directory per released minor.
+
+    Returns:
+        The ``[tag, changelog, version, goldens, dependencies]`` results.
+
+    Examples:
+        ```pycon
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     changelog = Path(tmp) / "CHANGELOG.md"
+        ...     _ = changelog.write_text("## [0.1.0]\\n")
+        ...     toml = Path(tmp) / "pyproject.toml"
+        ...     _ = toml.write_text('[project]\\ndependencies = []\\n')
+        ...     root = Path(tmp) / "pkg"
+        ...     root.mkdir()
+        ...     _ = (root / "__init__.py").write_text('__version__ = "0.1.0"\\n')
+        ...     frozen = Path(tmp) / "frozen" / "0.1"
+        ...     frozen.mkdir(parents=True)
+        ...     _ = (frozen / "optim_toy.json").write_text("{}")
+        ...     results = evaluate_metadata(
+        ...         "v0.1.0", changelog, toml, root, root / "__init__.py", frozen.parent
+        ...     )
+        ...     [(r.name, r.passed) for r in results]
+        [('tag', True), ('changelog', True), ('version', True), ('goldens', True), ('dependencies', True)]
+
+        ```
+    """
+    return [
+        check_tag(tag),
+        check_changelog(tag, changelog),
+        check_version(tag, init_path),
+        check_frozen_goldens(tag, frozen_root),
+        check_dependency_tiers(pyproject, package_root),
+    ]
+
+
 def evaluate(
     tag: str,
     changelog: Path,
@@ -482,12 +559,15 @@ def evaluate(
     init_path: Path = DEFAULT_INIT,
     frozen_root: Path = DEFAULT_FROZEN_ROOT,
 ) -> list[CheckResult]:
-    """Run every release-guard check and return their results in order.
+    """Run every release-guard check, metadata first and the gate last.
 
     The gate runs last because it is the only expensive check: a malformed tag, an
     unwritten changelog section, a version the package contradicts, a missing frozen
     snapshot or a mis-tiered dependency is answerable in milliseconds, and there is
     no reason to spend three minutes on the suite first.
+
+    Call this only from outside the gate. The gate command runs pre-commit, which
+    runs this guard; a caller already inside it wants :func:`evaluate_metadata`.
 
     Args:
         tag: The candidate tag.
@@ -525,11 +605,7 @@ def evaluate(
         ```
     """
     return [
-        check_tag(tag),
-        check_changelog(tag, changelog),
-        check_version(tag, init_path),
-        check_frozen_goldens(tag, frozen_root),
-        check_dependency_tiers(pyproject, package_root),
+        *evaluate_metadata(tag, changelog, pyproject, package_root, init_path, frozen_root),
         check_gate(gate_cmd),
     ]
 
@@ -541,8 +617,11 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command-line arguments (defaults to ``sys.argv[1:]``).
 
     Returns:
-        ``0`` only when the tag, changelog, version, frozen-golden, dependency-tier
-        and gate checks all pass; ``1`` otherwise.
+        ``0`` only when every check run passes; ``1`` otherwise. Which checks run
+        depends on ``--metadata-only``: with it, the five file-reading checks and no
+        gate; without it, those five and the gate. A passing ``--metadata-only`` run
+        says so in its verdict rather than claiming the tag may ship — it has not
+        asked the question the gate answers.
 
     Examples:
         The verdict lines go to stdout and name the changelog by absolute path,
@@ -599,6 +678,14 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_FROZEN_ROOT,
         help="root holding one frozen-golden directory per released minor (default: <repo>/goldens/frozen)",
     )
+    parser.add_argument(
+        "--metadata-only",
+        action="store_true",
+        help=(
+            "run the five file-reading checks and not the gate, ignoring --gate-cmd; for callers already "
+            "running inside the gate, which is every pre-commit invocation. Never reports a tag as shippable"
+        ),
+    )
     args = parser.parse_args(argv)
 
     tag = args.tag if args.tag is not None else _current_tag()
@@ -606,20 +693,36 @@ def main(argv: list[str] | None = None) -> int:
         print("release guard: HEAD is not exactly a tag — nothing to check")
         return 0
 
-    results = evaluate(
-        tag,
-        args.changelog,
-        args.gate_cmd,
-        args.pyproject,
-        args.package_root,
-        args.init_path,
-        args.frozen_root,
-    )
+    if args.metadata_only:
+        results = evaluate_metadata(
+            tag,
+            args.changelog,
+            args.pyproject,
+            args.package_root,
+            args.init_path,
+            args.frozen_root,
+        )
+        verdict = (
+            "metadata checks passed — the gate did NOT run in --metadata-only mode, so this is not a "
+            "shipping verdict; the tag-push release workflow runs this guard without the flag and "
+            "certifies the gate there"
+        )
+    else:
+        results = evaluate(
+            tag,
+            args.changelog,
+            args.gate_cmd,
+            args.pyproject,
+            args.package_root,
+            args.init_path,
+            args.frozen_root,
+        )
+        verdict = "all checks passed — tag may ship"
     for result in results:
         marker = "PASS" if result.passed else "FAIL"
         print(f"{marker} [{result.name}] {result.detail}")
     passed = all(result.passed for result in results)
-    print("release guard: " + ("all checks passed — tag may ship" if passed else "checks failed — tag refused"))
+    print("release guard: " + (verdict if passed else "checks failed — tag refused"))
     return 0 if passed else 1
 
 

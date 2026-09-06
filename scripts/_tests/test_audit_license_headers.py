@@ -50,6 +50,39 @@ def test_license_is_apache2_rejects_other_licenses(tmp_path: Path) -> None:
     assert audit.check_license_is_apache2(tmp_path) == ["LICENSE is not the Apache License, Version 2.0"]
 
 
+class TestLicenseAppendixPlaceholder:
+    """The appendix's copyright line says whether the licence was applied or only copied."""
+
+    def test_an_unfilled_placeholder_is_rejected(self, tmp_path: Path) -> None:
+        """`Copyright [yyyy] [name of copyright owner]` fails, wherever in the file it sits.
+
+        It sits about 5 kB into the Apache template, past any head-read window, so a
+        check reading the first 200 characters cannot see it however correct that
+        check is about the title above it. The whole file is read for this one.
+        """
+        (tmp_path / "LICENSE").write_text(
+            "Apache License\nVersion 2.0, January 2004\n" + "filler\n" * 200 + audit.COPYRIGHT_PLACEHOLDER + "\n",
+            encoding="utf-8",
+        )
+
+        violations = audit.check_license_is_apache2(tmp_path)
+
+        assert violations == [f"LICENSE still carries the Apache appendix placeholder: {audit.COPYRIGHT_PLACEHOLDER}"]
+
+    def test_a_filled_appendix_passes(self, tmp_path: Path) -> None:
+        """A named holder and year in the appendix is what the placeholder is replaced by."""
+        (tmp_path / "LICENSE").write_text(
+            "Apache License\nVersion 2.0, January 2004\n" + "filler\n" * 200 + "Copyright 2026 Jirka Borovec\n",
+            encoding="utf-8",
+        )
+
+        assert audit.check_license_is_apache2(tmp_path) == []
+
+    def test_the_real_license_is_filled(self) -> None:
+        """The repository's own LICENSE carries a holder, not the template's brackets."""
+        assert audit.COPYRIGHT_PLACEHOLDER not in (REPO_ROOT / "LICENSE").read_text(encoding="utf-8")
+
+
 class TestNoticeAttribution:
     """``check_notice_attribution`` over a synthetic NOTICE.
 
@@ -162,6 +195,47 @@ def test_spdx_header_names_the_offending_file(tmp_path: Path) -> None:
     (src / "bad.py").write_text("import os\n", encoding="utf-8")
     violations = audit.check_source_files_carry_spdx_header(tmp_path)
     assert violations == ["files missing SPDX header: ['src/bad.py']"]
+
+
+class TestSpdxHeaderScope:
+    """The header scope is the three trees this repository writes Python into."""
+
+    def test_a_shebang_may_precede_the_header(self, tmp_path: Path) -> None:
+        """An executable script carries the header on line two and is not unlicensed.
+
+        A shebang has to be first to work at all, so a first-line-only read calls
+        every runnable script headerless -- which is what the two `scripts/` files
+        reported as missing headers actually were.
+        """
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        (scripts / "runnable.py").write_text(f"#!/usr/bin/env python\n{audit.SPDX_LINE}\nimport os\n", encoding="utf-8")
+
+        assert audit.check_source_files_carry_spdx_header(tmp_path) == []
+
+    def test_a_scripts_file_without_the_header_is_named(self, tmp_path: Path) -> None:
+        """`scripts/` is in scope, so a missing header there fails rather than passing unseen."""
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        (scripts / "bare.py").write_text("import os\n", encoding="utf-8")
+
+        assert audit.check_source_files_carry_spdx_header(tmp_path) == [
+            "files missing SPDX header: ['scripts/bare.py']"
+        ]
+
+    def test_a_tests_file_without_the_header_is_named(self, tmp_path: Path) -> None:
+        """`tests/` is in scope too; a file that travels carries its marker or does not."""
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "test_bare.py").write_text("import os\n", encoding="utf-8")
+
+        violations = audit.check_source_files_carry_spdx_header(tmp_path)
+
+        assert violations == ["files missing SPDX header: ['tests/test_bare.py']"]
+
+    def test_the_scope_is_stated_rather_than_implied_by_a_glob(self) -> None:
+        """The trees are a named constant, so widening or narrowing is a visible decision."""
+        assert audit.HEADER_DIRS == ("src", "scripts", "tests")
 
 
 def test_the_live_repo_tree_is_currently_clean() -> None:

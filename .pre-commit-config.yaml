@@ -108,17 +108,21 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-      # Pure repo content (tests/**/test_*.py, scripts/_tests/test_*.py), not
-      # installed-environment state, so unlike license-audit this only needs to run
-      # when a test file actually changed rather than on every commit. Split off
-      # WP-117 into its own script (WP-129); scripts/_tests/ added in WP-130 when
-      # every scripts/-testing file moved out of tests/ to sit beside its subject.
+      # Pure repo content (tests/**/test_*.py, scripts/_tests/test_*.py, and since
+      # M-47 the public surface of src/), not installed-environment state, so unlike
+      # license-audit this only needs to run when one of those files actually changed
+      # rather than on every commit. Split off WP-117 into its own script (WP-129);
+      # scripts/_tests/ added in WP-130 when every scripts/-testing file moved out of
+      # tests/ to sit beside its subject. src/ carries `*.py` rather than a test glob
+      # and counts public functions only -- the Makefile's requirement is about the
+      # public surface, and this pattern has to list it or the hook stays silent on
+      # exactly the change that drops an Example from a shipped function.
       - id: test-doctest-audit
-        name: "📝 doctest coverage over test_*.py helpers"
+        name: "📝 doctest coverage over test_*.py helpers and the src/ public surface"
         entry: .venv/bin/python scripts/lint/audit_test_doctests.py
         language: system
         pass_filenames: false
-        files: ^(tests/.*/test_[^/]+\.py|scripts/_tests/test_[^/]+\.py)$
+        files: ^(tests/.*/test_[^/]+\.py|scripts/_tests/test_[^/]+\.py|src/.*\.py)$
       # A confirmed mechanical group (shared name prefix that also names a call
       # target in the file, three or more members) must sit under a
       # `class Test<Subject>:`, tests/eval/test_tile_merge.py's own established
@@ -150,13 +154,17 @@ repos:
         language: system
         pass_filenames: false
         files: ^(docs/figures/.*\.svg|docs/REPRODUCTION_REPORT\.md)$
-      # LICENSE/NOTICE/README wording plus the SPDX header every src/ file carries.
+      # LICENSE/NOTICE/README wording plus the SPDX header every file under src/,
+      # scripts/ and tests/ carries. The checker's scope became a named constant in
+      # the same change that widened it past src/ (L-61), so this pattern follows it:
+      # a file the checker reads and the hook never fires on is a check that runs
+      # only when something else happens to change.
       - id: license-headers
         name: "📄 license and attribution headers"
         entry: .venv/bin/python scripts/lint/audit_license_headers.py
         language: system
         pass_filenames: false
-        files: ^(LICENSE|NOTICE|README\.md|src/.*\.py)$
+        files: ^(LICENSE|NOTICE|README\.md|(src|scripts|tests)/.*\.py)$
       # Every frozen golden must still be the file the release wrote. The golden
       # harness compares each frozen file against its own stored values, so an edit
       # moving both the values and the tolerances is green there by construction --
@@ -191,8 +199,17 @@ repos:
         stages: [commit-msg]
       # commit-msg only sees the message being written right now; this is the
       # --all-files-reachable half, re-validating every commit not yet on
-      # origin/main so a run over the whole tree also re-checks history, not
-      # just the newest message.
+      # origin/main.
+      #
+      # `origin/main..HEAD` is not a history-wide walk and this hook is not the
+      # enforcing owner of the contract. The range is empty whenever the branch
+      # is already pushed, which is the normal state of a clean tree, so a green
+      # run here usually means zero commits were examined rather than that all of
+      # them passed. What it does catch is the case it is for: unpushed local
+      # work whose messages were written before this hook existed, or amended
+      # after commit-msg accepted them. The job that actually gates a
+      # contribution is `trailers` in `lint.yml`, over the pull request's own
+      # commit range, on a full-history checkout.
       - id: commit-trailers-history
         name: "📜 provenance commit trailers (unpushed history)"
         entry: .venv/bin/python scripts/lint/check_commit_trailers.py --range origin/main..HEAD
@@ -200,29 +217,47 @@ repos:
         pass_filenames: false
         stages: [pre-commit, manual]
       # `stages: [manual]`, not `[pre-commit, manual]`. WP-130b put this on every
-      # commit calling it "one already-fast golden recompute"; measured, it is
+      # commit calling it "one already-fast golden recompute"; measured then, it was
       # 34.6 s wall and 65 s CPU, charged to every commit and charged twice per
       # `make gate` -- once here inside `precommit`, once via the `golden`
       # target. `make gate` is the merge bar and runs the harness itself, so the
       # commit-stage copy repeated the gate rather than adding a second opinion,
       # which is what this file is for: linting and quick checks.
       #
-      # `lint.yml`'s `--all-files` run was CI's only full 43/43 sweep, so it did
-      # not simply disappear with the stage -- `ci-tests.yml` now runs the
-      # harness as its own step, beside the suite it belongs with. Standalone
-      # here as before: `pre-commit run --hook-stage manual golden-check`.
+      # `lint.yml`'s `--all-files` run was CI's only full sweep, so it did not
+      # simply disappear with the stage -- `ci-tests.yml` now runs the harness as
+      # its own step, beside the suite it belongs with. Standalone here as before:
+      # `pre-commit run --hook-stage manual golden-check`.
+      #
+      # The cost that decided the stage has since fallen to 7.1 s: 41 of the 50
+      # files are frozen copies byte-identical to a live sibling and now reuse that
+      # sibling's producer output (M-41). The stage is left where it is anyway. The
+      # second argument above is the durable one -- `make gate` runs this harness
+      # through its own target, so a commit-stage copy repeats the gate at any
+      # price -- and the price is a property of today's golden set, which the next
+      # accelerator-backed golden moves straight back up.
       - id: golden-check
         name: "🥇 metric golden regression"
         entry: .venv/bin/python scripts/check_goldens.py
         language: system
         pass_filenames: false
         stages: [manual]
-      # A no-arg invocation is a safe no-op off a tag (`_current_tag` resolves
-      # `None` when HEAD is not exactly a tag), so running it on every
-      # `--all-files` costs one `git describe` call and nothing else.
+      # `--metadata-only` is what keeps this hook from calling itself. Off a tag
+      # it is a no-op either way (`_current_tag` resolves `None` when HEAD is not
+      # exactly a tag), so the cost of running it on every `--all-files` is one
+      # `git describe`. *On* a tag the no-argument form ran its default gate
+      # command, `make gate` — which runs pre-commit, which runs this hook, which
+      # asked for another gate: release validation looped instead of reaching the
+      # test and build stages, on the one commit where it had a job to do.
+      #
+      # This is not an exemption from certification. The mode refuses malformed
+      # metadata exactly as the full run does, and its passing verdict says in
+      # words that no gate ran. `release.yml` invokes the guard without the flag
+      # on a tag push, from outside the gate, where running it once is what the
+      # flag makes possible.
       - id: release-guard
-        name: "🛡️ release tag guard"
-        entry: .venv/bin/python scripts/release_guard.py
+        name: "🛡️ release tag guard (metadata)"
+        entry: .venv/bin/python scripts/release_guard.py --metadata-only
         language: system
         pass_filenames: false
         stages: [pre-commit, manual]
