@@ -67,9 +67,12 @@ class UniqueAssigner(SmallTargetAssigner):
             documents why the normalization denominator uses its own floor rather
             than this value.
         s_min: Dimension threshold below which the surrogate inflates a box side
-            (the smallest stride, ``8.0`` at 640 input).
+            (the smallest stride, ``8.0`` at 640 input); finite and ``> 0``.
         s_ref: Replacement side length for an inflated dimension (the next
-            stride, ``16.0`` at 640 input).
+            stride, ``16.0`` at 640 input); finite, ``> 0``, and ``>= s_min``.
+            Validated with ``s_min`` by
+            :class:`~lucid_yolo.assign.stal.SmallTargetAssigner`, which this
+            constructor forwards both to unchanged.
 
     Examples:
         >>> import torch

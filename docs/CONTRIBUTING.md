@@ -95,6 +95,8 @@ Gate: tests/data/test_x.py::test_y # what proves the definition of done
 
 Under D18's relaxation a change with no roadmap row writes `WP: none` — the literal word, matching how `Assumptions:` states its own absence, so the message says no row applies rather than leaving a reader to decide whether one was forgotten. The other three trailers stay mandatory: the derivation question does not go away just because the tracking did.
 
+Reworking a message across a range rewrites history, and the safe way to do that is to take a `backup-*` or `backup/*` ref first. Those refs are local and are never pushed, so nothing in CI or on the remote will ever tell you they have gone stale — delete each one by hand (`git branch -D <name>`) once the rewritten branch is confirmed, in the same sitting. Left alone they accumulate silently, and a clone that carries a dozen of them offers a dozen plausible-looking answers to "what did this look like before", only one of which is the branch you actually want.
+
 ## 🐛 Reporting a problem
 
 Issue templates are in the repository. Two things make a report actionable here that are easy to leave out:

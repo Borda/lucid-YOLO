@@ -156,3 +156,24 @@ def test_disabling_hyperparameters_are_rejected_through_the_subclass() -> None:
     """
     with pytest.raises(ValueError, match=r"^eps must be finite"):
         UniqueAssigner(topk=7, eps=0.0)
+
+
+@pytest.mark.parametrize(
+    ("parameter", "value"),
+    [
+        pytest.param("s_min", 0.0, id="s-min-zero"),
+        pytest.param("s_ref", 0.0, id="s-ref-zero"),
+    ],
+)
+def test_disabling_surrogate_sizes_are_rejected_through_the_subclass(parameter: str, value: float) -> None:
+    """``UniqueAssigner`` inherits the STAL surrogate-size validation, under the right name.
+
+    The same reason as the base assigner's hyper-parameters — the o2o branch only ever
+    constructs its assigner through this subclass — plus one this class adds: it forwards
+    ``s_min`` and ``s_ref`` to :class:`~lucid_yolo.assign.stal.SmallTargetAssigner`
+    *positionally*, so a later signature change could transpose the pair with nothing to
+    say so. Asserting on the parameter's own name in the message catches that transposition
+    as well as a missing check: a swapped forward would refuse the other one.
+    """
+    with pytest.raises(ValueError, match=rf"^{parameter} must be finite"):
+        UniqueAssigner(topk=7, **{parameter: value})

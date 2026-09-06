@@ -130,3 +130,64 @@ def test_targets_unchanged() -> None:
     weights_expected[0] = 1.0  # best-aligned anchor reaches u_max = 1.0
     weights_expected[torch.tensor([1, 4, 5])] = 0.25**6  # = 0.9 * 0.25**6 * (1.0 / 0.9)
     assert torch.allclose(out.align_weights[0], weights_expected, atol=1e-9)
+
+
+@pytest.mark.parametrize(
+    ("parameter", "value"),
+    [
+        pytest.param("s_min", 0.0, id="s-min-zero"),
+        pytest.param("s_min", -8.0, id="s-min-negative"),
+        pytest.param("s_min", float("nan"), id="s-min-nan"),
+        pytest.param("s_min", float("inf"), id="s-min-inf"),
+        pytest.param("s_ref", 0.0, id="s-ref-zero"),
+        pytest.param("s_ref", -16.0, id="s-ref-negative"),
+        pytest.param("s_ref", float("nan"), id="s-ref-nan"),
+        pytest.param("s_ref", float("inf"), id="s-ref-inf"),
+    ],
+)
+def test_surrogate_sizes_that_disable_the_inflation_are_rejected(parameter: str, value: float) -> None:
+    """``s_min`` and ``s_ref`` are validated at construction, naming the parameter.
+
+    The surrogate is the whole of STAL, and both of its sizes accept values that switch
+    it off rather than tune it. A threshold at or below zero — or a ``nan`` one, which no
+    dimension ever compares below — inflates nothing, so the class silently becomes the
+    plain assigner it subclasses; an infinite threshold inflates *everything*, filtering
+    a large ground truth on a footprint that is not its own. A zero, negative, or ``nan``
+    replacement leaves the inflated ground truth with no candidates at all, and an
+    infinite one makes every anchor in the image a candidate for it. Only ``topk``,
+    ``alpha``, ``beta`` and ``eps`` were checked before, so each of these constructed an
+    assigner that then mis-assigned quietly for the rest of the run.
+    """
+    with pytest.raises(ValueError, match=rf"^{parameter} must be finite"):
+        SmallTargetAssigner(topk=4, **{parameter: value})
+
+
+def test_a_replacement_below_the_threshold_is_rejected() -> None:
+    """``s_ref < s_min`` raises, because a replacement under the threshold shrinks the box.
+
+    A dimension lying between the two sizes is replaced by a *smaller* one, so the
+    surrogate sits strictly inside the original ground truth and the subclass hands the
+    base assigner fewer candidates than the untouched box would have had on its own —
+    the exact opposite of what STAL exists for, on exactly the targets it exists for,
+    and with nothing at the call site to show for it.
+    """
+    with pytest.raises(ValueError, match=r"^s_ref must be >= s_min, got 4\.0 < 8\.0$"):
+        SmallTargetAssigner(topk=4, s_min=8.0, s_ref=4.0)
+
+
+def test_a_replacement_equal_to_the_threshold_is_accepted() -> None:
+    """``s_ref == s_min`` constructs and still inflates; the boundary is usable, not refused.
+
+    The check refuses the values that disable or invert the inflation, not every unusual
+    one. At ``s_ref == s_min`` every dimension the surrogate touches is below ``s_min`` by
+    definition and so is still strictly widened: the 6x6 ground truth of this module
+    becomes the 8x8 box ``[4, 4, 12, 12]``, whose corners are exactly the four stride-8
+    anchor centres vanilla TAL leaves it without. Refusing the boundary would reject a
+    conservative but coherent recipe — raise every side to at least the smallest stride.
+    """
+    pred_boxes = _TINY_GT.expand(1, 16, 4).contiguous()  # every pred == the GT box, IoU 1.0
+    points, scores, boxes, gt_boxes, gt_labels, gt_mask = _tiny_gt_scene(pred_boxes)
+
+    out = SmallTargetAssigner(topk=4, s_min=8.0, s_ref=8.0)(scores, boxes, points, gt_boxes, gt_labels, gt_mask)
+
+    assert set(out.fg_mask[0].nonzero(as_tuple=True)[0].tolist()) == set(_STAL_CANDIDATES)
