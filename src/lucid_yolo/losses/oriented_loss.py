@@ -84,6 +84,15 @@ Normalization
     thing. R1 Eq. 15's ``S`` is that identical sum, because ``align_weights`` is
     exactly zero at every background anchor.
 
+    The floor is R1's own rule and it is not neutral. Once the weights total less than
+    one — few positives, or positives whose alignment is uniformly small — the divisor
+    stops tracking them and each term becomes a weighted **sum** rather than a weighted
+    mean, so such a batch contributes proportionally less than a well-aligned one
+    instead of the same. Above unit total weight the two readings coincide. The same
+    sentence applies verbatim to the two detection terms and to
+    :func:`~lucid_yolo.losses.angle_loss.square_angle_loss`, which is the point: the
+    three normalizers agree, including in where they stop being means.
+
 Provenance: R1 sec. 3.4.3, R1 Eq. 13-15, R17. Assumptions: A22, A25, A41, A44, A49, A50.
 """
 

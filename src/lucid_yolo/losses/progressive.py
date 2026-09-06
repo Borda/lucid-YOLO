@@ -12,7 +12,7 @@ linear schedule::
 
     alpha(t) = max(1 - t / max(E - 1, 1), 0) * (alpha_init - alpha_final) + alpha_final
 
-with ``t`` the 0-based epoch index and ``E`` the total epoch count. The defaults
+with ``t`` the 0-based epoch index and ``E >= 1`` the total epoch count. The defaults
 ``(alpha_init, alpha_final) = (0.8, 0.1)`` place the branch weights at
 ``(0.8, 0.2)`` on the first epoch (dense o2m supervision dominates, driving fast
 high-recall learning) and ramp them to ``(0.1, 0.9)`` on the last epoch (the
@@ -54,17 +54,38 @@ def progressive_alpha(
     is ``alpha_init``), and the outer ``max(..., 0)`` clamps the ramp to zero at
     and beyond the final epoch so ``alpha`` never falls below ``alpha_final``.
 
+    The ramp is clamped at **both** ends (L-08). Clamping only below left a negative
+    epoch index extrapolating backwards past the start of the schedule — measured
+    ``progressive_alpha(-10, 100) = 0.8707`` against an ``alpha_init`` of ``0.8`` — so
+    a caller that reached here with an off-by-one would silently weight the o2m branch
+    above the endpoint the schedule is defined by. The upper clamp costs nothing for
+    ``epoch >= 0``, where the ramp never exceeds one, so every value on the schedule's
+    own domain is unchanged.
+
+    A non-positive ``total_epochs`` is rejected rather than absorbed. ``max(E - 1, 1)``
+    is a guard for ``E == 1``, and it happens to swallow ``E <= 0`` too: those runs took
+    the single-epoch branch and returned ``alpha_init`` for every epoch, a plausible
+    number describing a schedule that does not exist. The one caller,
+    :meth:`~lucid_yolo.ptl.module.DetectionLitModule.on_train_epoch_start`, already
+    returns early when ``trainer.max_epochs`` is ``None`` or ``<= 0``, so this raises
+    for nothing the training path reaches.
+
     Args:
         epoch: Current 0-based epoch index ``t``. Values ``>= total_epochs - 1``
-            all yield ``alpha_final`` (the ramp is clamped at zero).
-        total_epochs: Total epoch count ``E`` of the training run.
+            all yield ``alpha_final`` (the ramp is clamped at zero), and negative
+            values yield ``alpha_init`` (the ramp is clamped at one).
+        total_epochs: Total epoch count ``E`` of the training run. Must be ``>= 1``.
         alpha_init: One-to-many weight at ``epoch == 0``. Defaults to ``0.8``.
         alpha_final: One-to-many weight at ``epoch == total_epochs - 1``.
             Defaults to ``0.1``.
 
     Returns:
         The one-to-many branch weight ``alpha`` for this epoch; the one-to-one
-        branch receives ``1 - alpha``.
+        branch receives ``1 - alpha``. Always between ``alpha_final`` and
+        ``alpha_init`` inclusive.
+
+    Raises:
+        ValueError: If ``total_epochs`` is less than ``1``.
 
     Examples:
         >>> progressive_alpha(0, 100)  # first epoch: dense o2m dominates
@@ -75,8 +96,17 @@ def progressive_alpha(
         0.45
         >>> progressive_alpha(0, 1)  # single-epoch run: ramp guard -> alpha_init
         0.8
+        >>> progressive_alpha(-10, 100)  # before the schedule starts: no extrapolation
+        0.8
+        >>> try:
+        ...     progressive_alpha(0, 0)
+        ... except ValueError as error:
+        ...     print(error)
+        total_epochs must be >= 1; got 0
     """
-    ramp = max(1.0 - epoch / max(total_epochs - 1, 1), 0.0)
+    if total_epochs < 1:
+        raise ValueError(f"total_epochs must be >= 1; got {total_epochs}")
+    ramp = min(max(1.0 - epoch / max(total_epochs - 1, 1), 0.0), 1.0)
     return ramp * (alpha_init - alpha_final) + alpha_final
 
 
@@ -111,11 +141,14 @@ class ProgressiveLossSchedule:
 
         Args:
             epoch: Current 0-based epoch index ``t``.
-            total_epochs: Total epoch count ``E`` of the training run.
+            total_epochs: Total epoch count ``E`` of the training run; ``>= 1``.
 
         Returns:
             The one-to-many branch weight from :func:`progressive_alpha` using
             this schedule's ``(alpha_init, alpha_final)`` endpoints.
+
+        Raises:
+            ValueError: If ``total_epochs`` is less than ``1``.
 
         Examples:
             >>> round(ProgressiveLossSchedule().alpha_at(5, 11), 4)

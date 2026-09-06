@@ -143,3 +143,38 @@ def test_module_alpha_steps_through_schedule() -> None:
     trainer.fit(module, train_dataloaders=loader)
 
     assert recorder.alphas == pytest.approx([0.8, 0.45, 0.1])
+
+
+class TestRampDomain:
+    """The ramp is clamped at both ends, and a schedule with no epochs is refused (L-08).
+
+    The upper clamp and the ``total_epochs`` check are guards on inputs the training
+    path does not produce — :meth:`DetectionLitModule.on_train_epoch_start` already
+    returns early for a non-positive ``max_epochs`` — so they change no scheduled
+    value. What they remove is a plausible-looking answer to a nonsense question.
+    """
+
+    @pytest.mark.parametrize("epoch", [-1, -10, -1000])
+    def test_a_negative_epoch_does_not_extrapolate_past_alpha_init(self, epoch: int) -> None:
+        """Clamped below only, ``progressive_alpha(-10, 100)`` measured ``0.8707`` against ``0.8``."""
+        assert progressive_alpha(epoch, 100) == pytest.approx(0.8)
+
+    def test_alpha_stays_inside_its_endpoints_across_the_whole_integer_domain(self) -> None:
+        """The returned weight is bounded by the two endpoints for any epoch index."""
+        values = [progressive_alpha(epoch, 10) for epoch in range(-50, 50)]
+
+        assert min(values) == pytest.approx(0.1)
+        assert max(values) == pytest.approx(0.8)
+
+    @pytest.mark.parametrize("total_epochs", [0, -1, -100])
+    def test_a_schedule_with_no_epochs_is_refused_by_name(self, total_epochs: int) -> None:
+        """``max(E - 1, 1)`` used to swallow these, returning ``alpha_init`` for every epoch."""
+        with pytest.raises(ValueError, match="total_epochs must be >= 1"):
+            progressive_alpha(0, total_epochs)
+
+        with pytest.raises(ValueError, match="total_epochs must be >= 1"):
+            ProgressiveLossSchedule().alpha_at(0, total_epochs)
+
+    def test_the_single_epoch_run_still_works(self) -> None:
+        """``E == 1`` is the case the ``max(E - 1, 1)`` guard exists for and must survive."""
+        assert progressive_alpha(0, 1) == pytest.approx(0.8)

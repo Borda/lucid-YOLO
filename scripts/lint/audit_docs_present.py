@@ -40,7 +40,7 @@ _DECISION_FLOOR = 20
 
 #: Lowest assumption count ASSUMPTIONS.md is allowed to hold, for the same ratchet
 #: reason as the two floors above.
-_ASSUMPTION_FLOOR = 73
+_ASSUMPTION_FLOOR = 74
 
 #: Paths, relative to ``docs_dir``/``repo_root``, every required policy document must
 #: resolve to. Mirrors the former ``REQUIRED_FILES`` tuple, split into its two roots so

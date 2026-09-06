@@ -129,6 +129,14 @@ class DetectionBranchLoss:
     ) -> DetectionLossOutput:
         """Compute the detection-branch loss for one branch of one batch.
 
+        All three terms are normalized by the alignment-weight sum floored at ``1``
+        (R1 Eq. 15's ``S``). The floor is not neutral: once the weights total less
+        than one — few positives, or positives whose alignment is uniformly small —
+        the divisor stops tracking them, so the terms become weighted **sums**
+        rather than weighted means and such a batch contributes proportionally less
+        than a well-aligned one instead of the same. Above unit total weight the two
+        readings coincide, which is where every healthy batch sits.
+
         Args:
             pred_logits: ``(B, A, C)`` raw (pre-sigmoid) class logits.
             pred_boxes: ``(B, A, 4)`` predicted boxes in ``xyxy``, in the same

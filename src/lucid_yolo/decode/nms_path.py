@@ -54,7 +54,7 @@ import torch
 from torch import Tensor, nn
 from torchvision.ops import batched_nms
 
-from lucid_yolo.decode.common import pad_anchor_indices, pad_detections
+from lucid_yolo.decode.common import DET_WIDTH, PAD_ANCHOR_INDEX, pad_anchor_indices, pad_detections
 from lucid_yolo.models.heads.detect import decode_ltrb
 
 __all__ = ["NMSDecoder"]
@@ -202,12 +202,47 @@ class NMSDecoder(nn.Module):
             >>> _, none_kept = decoder.decode_with_indices(cls_logits, flat, points, strides)
             >>> none_kept
             tensor([[-1, -1, -1]])
+
+            An empty batch decodes to empty outputs of the documented width rather
+            than raising, matching :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder`:
+
+            >>> empty, empty_anchors = decoder.decode_with_indices(
+            ...     torch.zeros(0, 2, 1), torch.zeros(0, 2, 4), points, strides
+            ... )
+            >>> empty.shape, empty_anchors.shape
+            (torch.Size([0, 3, 6]), torch.Size([0, 3]))
         """
         boxes = decode_ltrb(raw_ltrb, anchor_points, strides)  # (B, A, 4)
         confidence = cls_logits.sigmoid()
         scores, classes = confidence.max(dim=-1)  # both (B, A), single-label per anchor
+        if boxes.shape[0] == 0:
+            # The per-image decode below is a list comprehension fed to `torch.stack`,
+            # which has no empty case — it raises rather than producing the zero-length
+            # batch every other shape in this decode already handles. Nothing in the
+            # return contract excludes `B = 0`, and the one-to-one decoder returns
+            # empties here, so the two paths would disagree on a batch an evaluation
+            # loop can legitimately hand either of them.
+            return self._empty_batch(boxes)
         decoded = [self._decode_image(boxes[i], scores[i], classes[i]) for i in range(boxes.shape[0])]
         return torch.stack([image for image, _ in decoded]), torch.stack([index for _, index in decoded])
+
+    def _empty_batch(self, boxes: Tensor) -> tuple[Tensor, Tensor]:
+        """The ``B = 0`` return: zero-row tensors of the documented widths.
+
+        Built from ``boxes`` so the empties carry the dtype and device the
+        non-empty path would have produced, which is what lets a caller
+        concatenate this batch with a decoded one without a conversion.
+
+        Args:
+            boxes: The ``(0, A, 4)`` decoded boxes, read for dtype and device only.
+
+        Returns:
+            A ``((0, max_det, 6), (0, max_det))`` pair shaped exactly as
+            :meth:`decode_with_indices` returns for a non-empty batch.
+        """
+        detections = boxes.new_zeros((0, self.max_det, DET_WIDTH))
+        anchors = torch.full((0, self.max_det), PAD_ANCHOR_INDEX, dtype=torch.long, device=boxes.device)
+        return detections, anchors
 
     def _decode_image(self, boxes: Tensor, scores: Tensor, classes: Tensor) -> tuple[Tensor, Tensor]:
         """Threshold, class-wise NMS, cap, and pad one image's anchors.

@@ -22,6 +22,21 @@ every image the same say. Second, the smoothing constant ``s = 1.0`` appears in
 both numerator and denominator, so an empty prediction against an empty target
 scores ``1 - 1/1 = 0`` — exactly zero loss — rather than ``0 / 0``.
 
+An **empty** batch is the one input both reductions have no answer for: a mean over
+zero elements is ``0 / 0``, so ``semantic_aux_loss(zeros(0, 3, 4, 4), ...)`` used to
+return ``nan`` in all three fields, against the convention every other loss in the
+package keeps (``mask_loss``, ``rle_loss`` and ``keypoint_nll_loss`` all reduce as
+``sum() / max(n, 1)`` precisely so an empty input stays finite). It now returns an
+exact zero still attached to ``logits``, which is also the value the ``s = 1.0``
+smoothing already gives the Dice term for an empty prediction against an empty
+target. The guard is an early return on ``numel() == 0`` rather than a swap of the
+divisors: it leaves ``reduction="mean"`` and ``.mean()`` reducing every non-empty
+batch, so no value any caller computes today can move on any device, which a
+hand-rolled ``sum() / n`` could not promise for the accelerator the frozen training
+goldens were produced on. Reaching the guard at all means the branch was handed no
+pixels, which the training path does not do — see :func:`semantic_aux_loss` for the
+precondition.
+
 ``total`` is ``bce + dice``: "equal weight" is read as unit coefficients on both
 terms. Any overall gain on the auxiliary objective belongs at the composition
 site that adds this loss to the detection terms, not baked in here, so that the
@@ -83,6 +98,14 @@ def semantic_aux_loss(logits: Tensor, targets: Tensor) -> SemanticAuxOutput:
     Returns:
         A :class:`SemanticAuxOutput` holding the two terms and their sum.
 
+    Note:
+        The intended input is a non-empty ``(B, C, H, W)`` batch: at least one
+        image, one class and one grid cell. An empty one is accepted and answered
+        with three exact zeros still carrying gradient rather than the ``nan`` an
+        empty mean produces (module docstring), but a batch with no elements
+        supervises nothing and reaching this function with one means the caller
+        assembled an empty branch input, not that the loss had nothing to say.
+
     Examples:
         >>> import torch
         >>> logits = torch.full((1, 1, 2, 2), 20.0)  # confidently positive
@@ -92,7 +115,16 @@ def semantic_aux_loss(logits: Tensor, targets: Tensor) -> SemanticAuxOutput:
         True
         >>> bool(out.total.equal(out.bce + out.dice))
         True
+        >>> empty = semantic_aux_loss(torch.zeros(0, 3, 4, 4), torch.zeros(0, 3, 4, 4))
+        >>> float(empty.total), float(empty.bce), float(empty.dice)
+        (0.0, 0.0, 0.0)
     """
+    if logits.numel() == 0:
+        # An exact zero that is still a function of `logits`, so an empty batch needs
+        # no special case at the composition site (mask_loss.py takes the same line).
+        zero = logits.sum()
+        return SemanticAuxOutput(total=zero, bce=zero, dice=zero)
+
     bce = F.binary_cross_entropy_with_logits(logits, targets, reduction="mean")
 
     probabilities = logits.sigmoid()

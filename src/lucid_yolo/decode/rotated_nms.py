@@ -75,7 +75,7 @@ import torch
 from torch import Tensor, nn
 
 from lucid_yolo.data.rotated_geom import rotated_iou
-from lucid_yolo.decode.common import pad_detections
+from lucid_yolo.decode.common import RBOX_COLUMNS, pad_detections
 from lucid_yolo.models.heads.obb import decode_rboxes
 
 __all__ = ["ROTATED_NMS_IOU_THRESHOLD", "RotatedNMSDecoder"]
@@ -88,6 +88,10 @@ __all__ = ["ROTATED_NMS_IOU_THRESHOLD", "RotatedNMSDecoder"]
 #: allowlist states a value for rotated suppression on this architecture; the register row
 #: records both that gap and the measured exposure the carry-over accepts.
 ROTATED_NMS_IOU_THRESHOLD = 0.7
+
+#: Width of the A45 oriented tuple ``[cx, cy, w, h, theta, score, class]`` — the five
+#: box columns of :data:`~lucid_yolo.decode.common.RBOX_COLUMNS` plus score and class.
+_RDET_WIDTH = RBOX_COLUMNS + 2
 
 #: Default per-image detection cap (R1 sec. 3.2.1, A9, A47).
 _DEFAULT_MAX_DET = 300
@@ -191,10 +195,21 @@ class RotatedNMSDecoder(nn.Module):
             >>> empty(cls_logits, raw_ltrb, angles, points, strides)
             tensor([[[0., 0., 0., 0., 0., 0., 0.],
                      [0., 0., 0., 0., 0., 0., 0.]]])
+            >>> # An empty batch decodes to an empty result of the documented width.
+            >>> zero = torch.zeros(0, 2, 1)
+            >>> empty(zero, torch.zeros(0, 2, 4), zero, points, strides).shape
+            torch.Size([0, 2, 7])
         """
         rboxes = decode_rboxes(raw_ltrb, angles, anchor_points, strides)  # (B, A, 5), canonical
         confidence = cls_logits.sigmoid()
         scores, classes = confidence.max(dim=-1)  # both (B, A), single-label per anchor
+        if rboxes.shape[0] == 0:
+            # `torch.stack` has no empty case and raises rather than returning the
+            # zero-length batch every other shape here already handles. Nothing in the
+            # return contract excludes `B = 0`, and both other decoders answer it with
+            # empties, so raising would make this the one path an evaluation loop has
+            # to special-case for a batch it can legitimately hand any of them.
+            return rboxes.new_zeros((0, self.max_det, _RDET_WIDTH))
         return torch.stack([self._decode_image(rboxes[i], scores[i], classes[i]) for i in range(rboxes.shape[0])])
 
     def _decode_image(self, rboxes: Tensor, scores: Tensor, classes: Tensor) -> Tensor:

@@ -22,10 +22,11 @@ import math
 
 import pytest
 import torch
+from torch import nn
 from torch.distributions import Laplace
 
 from lucid_yolo.losses import RLELoss
-from lucid_yolo.losses.rle_loss import _MIN_SIGMA, _AffineCoupling, _RealNVPFlow
+from lucid_yolo.losses.rle_loss import _MIN_SIGMA, _AffineCoupling, _CouplingConditioner, _RealNVPFlow
 
 _LAPLACE_ATOL = 1e-5
 
@@ -493,3 +494,55 @@ class TestUnlabeledPointsReachNoGradient:
         )
 
         assert seen == [(1, 2)]
+
+
+class TestConditionerOutputActivation:
+    """The trailing ``LeakyReLU`` on the conditioner's output head is pinned (M-24).
+
+    R14 says "Each fully-connected layer is followed by a Leaky-RELU" and this
+    module reads that literally, so the output ``Linear(64, 2)`` carries one too and
+    both emitted quantities arrive pre-squashed. That is a *reading* of a sentence
+    that does not distinguish hidden layers from the output projection, not a
+    transcription, and it is now recorded as such in the module docstring.
+
+    These assertions pin the structure the assumption describes, so the activation
+    cannot be silently dropped as an oversight — and so that removing it, if the
+    paired same-seed run the register asks for ever settles the question the other
+    way, is a deliberate edit to a failing test rather than a quiet one.
+    """
+
+    def test_the_output_projection_is_followed_by_a_leaky_relu(self) -> None:
+        """The last two modules of the conditioner stack are ``Linear(64, 2)`` then the activation."""
+        conditioner = _CouplingConditioner()
+
+        layers = list(conditioner.net)
+
+        assert isinstance(layers[-1], nn.LeakyReLU)
+        assert isinstance(layers[-2], nn.Linear)
+        assert (layers[-2].in_features, layers[-2].out_features) == (64, 2)
+
+    def test_every_fully_connected_layer_carries_one(self) -> None:
+        """Three ``Linear`` layers, three activations — R14's stated depth, read literally."""
+        layers = list(_CouplingConditioner().net)
+
+        assert sum(isinstance(layer, nn.Linear) for layer in layers) == 3
+        assert sum(isinstance(layer, nn.LeakyReLU) for layer in layers) == 3
+
+    def test_the_shift_output_is_one_sided_as_the_assumption_states(self) -> None:
+        """The consequence the assumption names: ``shift`` is squashed towards non-negative.
+
+        With the projection's weights driven negative, every raw output is negative
+        and the leak scales them by 0.01 rather than passing them through — which is
+        the structural bias the register row is being opened about.
+        """
+        torch.manual_seed(0)
+        conditioner = _CouplingConditioner()
+        projection = list(conditioner.net)[-2]
+        with torch.no_grad():
+            projection.weight.fill_(-1.0)
+            projection.bias.fill_(-1.0)
+
+        _, shift = conditioner(torch.ones(4, 1))
+
+        assert bool((shift < 0).all())
+        assert bool((shift > -1.0).all())  # leaked, not passed through

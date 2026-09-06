@@ -461,6 +461,14 @@ def _wrap_theta(theta: Tensor) -> Tensor:
     does. It moves such an angle by at most one ulp — under 1e-7 radians — which is the
     price of the range being a guarantee callers may rely on rather than a near-certainty.
 
+    The reduction is meaningful only while the input's own floating-point spacing stays
+    small against ``pi``, the same bound :func:`~lucid_yolo.losses.angle_loss.wrap_angle_delta`
+    states: ``|theta| < 2**23 * pi`` in float32, about ``2.6e7``. Past it the argument no
+    longer represents the angle it names — the nearest float to a given residual is a whole
+    rotation or more away — so the returned value stays in range and describes a different
+    angle. Not reachable from a parsed annotation, whose headings arrive in ``[-pi, pi]``;
+    stated because the signature accepts any tensor.
+
     Examples:
         >>> import torch
         >>> [round(v, 4) for v in _wrap_theta(torch.tensor([3.5, -0.9, 0.3])).tolist()]

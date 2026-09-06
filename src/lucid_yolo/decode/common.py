@@ -64,7 +64,7 @@ PAD_ANCHOR_INDEX = -1
 
 
 def pad_detections(detections: Tensor, max_det: int) -> Tensor:
-    """Pad the detection axis to a fixed length with score-zero rows.
+    """Resize the detection axis to exactly ``max_det``, padding or truncating.
 
     Appends all-zero rows (score 0) after the ranked detections so the output
     length along the detection axis (the second-to-last axis) is always
@@ -72,8 +72,17 @@ def pad_detections(detections: Tensor, max_det: int) -> Tensor:
     fixed length is the export-friendly contract: the shape does not depend on
     the anchor count or the survivor count, so a traced graph has a static output
     shape. The score-descending ordering of the input is preserved because the
-    appended rows all carry score 0. When the input already has at least
-    ``max_det`` rows it is returned unchanged (callers cap before padding).
+    appended rows all carry score 0.
+
+    An **over-length** input is truncated to its first ``max_det`` rows rather
+    than passed through. Returning it unchanged would break the one property the
+    function exists to provide — every in-tree caller caps before padding, so a
+    pass-through only ever surfaces as a variable-length export where a static
+    shape was promised, at whichever caller stopped capping. Truncation is the
+    cap those callers already apply: the rows arrive score-descending, so the
+    dropped tail is the lowest-scoring one, which is what ``max_det`` means.
+    :func:`pad_anchor_indices` truncates at the same length, so a detection and
+    its anchor index are dropped together and row ``n`` keeps naming anchor ``n``.
 
     Args:
         detections: Ranked detections with the detection count on the
@@ -81,8 +90,7 @@ def pad_detections(detections: Tensor, max_det: int) -> Tensor:
         max_det: Fixed output length along the detection axis.
 
     Returns:
-        Detections whose detection axis has length ``max_det`` (unchanged when
-        the input already has at least ``max_det`` rows).
+        Detections whose detection axis has length exactly ``max_det``.
 
     Examples:
         >>> import torch
@@ -92,10 +100,12 @@ def pad_detections(detections: Tensor, max_det: int) -> Tensor:
         >>> pad_detections(dets, max_det=4)[0, 2:]  # appended rows are zero
         tensor([[0., 0., 0., 0., 0., 0.],
                 [0., 0., 0., 0., 0., 0.]])
+        >>> pad_detections(torch.ones(1, 9, 6), max_det=4).shape  # over-length is cut
+        torch.Size([1, 4, 6])
     """
     kept = detections.shape[-2]
     if kept >= max_det:
-        return detections
+        return detections.narrow(-2, 0, max_det)
     pad_shape = list(detections.shape)
     pad_shape[-2] = max_det - kept
     padding = detections.new_zeros(pad_shape)
@@ -103,10 +113,10 @@ def pad_detections(detections: Tensor, max_det: int) -> Tensor:
 
 
 def pad_anchor_indices(indices: Tensor, max_det: int) -> Tensor:
-    """Pad the anchor-index axis to a fixed length with :data:`PAD_ANCHOR_INDEX`.
+    """Resize the anchor-index axis to exactly ``max_det``, padding or truncating.
 
     The index-side twin of :func:`pad_detections`, and it must stay that: the two
-    are padded to the same length by the same callers so that row ``n`` of a
+    are resized to the same length by the same callers so that row ``n`` of a
     decoder's detections and entry ``n`` of its anchor indices describe the same
     detection for every ``n``, padding rows included. Anything gathered per anchor
     and **not** carried in the A9 tuple — the mask coefficients of the
@@ -114,14 +124,19 @@ def pad_anchor_indices(indices: Tensor, max_det: int) -> Tensor:
     mismatch here pairs a box with another anchor's coefficients: a plausible mask
     of the wrong object, at a correct box, with a correct score.
 
+    That twinning is why an over-length input is truncated here too rather than
+    passed through: the detections beside it are, so an index axis that kept its
+    surplus entries would be the one length mismatch this function exists to rule
+    out. The shortfall is filled with :data:`PAD_ANCHOR_INDEX`.
+
     Args:
         indices: Source anchor index per kept detection, shape ``(N,)`` or
             ``(B, N)`` with the detection count last.
         max_det: Fixed output length along the detection axis.
 
     Returns:
-        Indices whose last axis has length ``max_det``, the shortfall filled with
-        :data:`PAD_ANCHOR_INDEX` (unchanged when already at least that long).
+        Indices whose last axis has length exactly ``max_det``, any shortfall
+        filled with :data:`PAD_ANCHOR_INDEX`.
 
     Examples:
         >>> import torch
@@ -129,10 +144,12 @@ def pad_anchor_indices(indices: Tensor, max_det: int) -> Tensor:
         tensor([ 3,  7, -1, -1])
         >>> pad_anchor_indices(torch.tensor([[3, 7]]), max_det=2)  # already full
         tensor([[3, 7]])
+        >>> pad_anchor_indices(torch.tensor([[3, 7, 1]]), max_det=2)  # over-length is cut
+        tensor([[3, 7]])
     """
     kept = indices.shape[-1]
     if kept >= max_det:
-        return indices
+        return indices.narrow(-1, 0, max_det)
     pad_shape = list(indices.shape)
     pad_shape[-1] = max_det - kept
     padding = torch.full(pad_shape, PAD_ANCHOR_INDEX, dtype=indices.dtype, device=indices.device)

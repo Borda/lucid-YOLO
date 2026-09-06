@@ -9,6 +9,8 @@ training-mode output.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 import torch
 
@@ -133,3 +135,63 @@ def test_dice_is_averaged_per_class_not_pooled_over_the_batch() -> None:
     wrong_pair = 1.0 - 1.0 / (16.0 + 1.0)
     expected = torch.tensor((correct_pair + wrong_pair) / 2.0)
     assert torch.allclose(dice, expected, atol=1e-5), "Dice must average per (B, C) pair, not pool the batch"
+
+
+class TestEmptyBatch:
+    """An empty batch returns a defined zero, not the ``nan`` an empty mean gives (M-25).
+
+    Every other loss in the package reduces so that an empty input stays finite —
+    ``mask_loss``, ``rle_loss`` and ``keypoint_nll_loss`` all divide by
+    ``max(n, 1)``. This one reduced with ``mean`` on both terms and returned ``nan``
+    in all three fields. Reachability is low; the inconsistency was the finding.
+    """
+
+    #: The shapes an empty batch can take: no images, no classes, an empty grid.
+    EMPTY_SHAPES: ClassVar[list[tuple[int, ...]]] = [(0, 3, 4, 4), (2, 0, 4, 4), (2, 3, 0, 4), (2, 3, 4, 0)]
+
+    @pytest.mark.parametrize("shape", EMPTY_SHAPES)
+    def test_every_term_is_an_exact_finite_zero(self, shape: tuple[int, ...]) -> None:
+        """All three fields are exactly zero and finite, whichever dimension is empty."""
+        out = semantic_aux_loss(torch.zeros(*shape), torch.zeros(*shape))
+
+        for name, term in (("total", out.total), ("bce", out.bce), ("dice", out.dice)):
+            assert bool(torch.isfinite(term)), f"{name} is not finite"
+            assert float(term) == 0.0, f"{name} is not exactly zero"
+
+    def test_the_zero_still_carries_gradient_to_the_logits(self) -> None:
+        """The zero is a function of ``logits``, so the composition site needs no branch."""
+        logits = torch.zeros(0, 3, 4, 4, requires_grad=True)
+
+        semantic_aux_loss(logits, torch.zeros(0, 3, 4, 4)).total.backward()
+
+        assert logits.grad is not None
+        assert logits.grad.shape == logits.shape
+
+    def test_the_terms_stay_scalar(self) -> None:
+        """Shape contract is unchanged: zero-dimensional tensors, as for a full batch."""
+        out = semantic_aux_loss(torch.zeros(0, 3, 4, 4), torch.zeros(0, 3, 4, 4))
+
+        assert out.total.ndim == 0
+        assert out.bce.ndim == 0
+        assert out.dice.ndim == 0
+
+    def test_a_non_empty_batch_is_untouched_by_the_guard(self) -> None:
+        """The guard is an early return, so every non-empty reduction is bit-unchanged.
+
+        Pins the reason the fix is a branch rather than a swap of the two divisors:
+        ``reduction="mean"`` and ``.mean()`` still reduce every real batch, so no
+        value produced on any device can move.
+        """
+        logits = torch.randn(2, 3, 4, 5)
+        targets = (torch.rand(2, 3, 4, 5) > 0.5).float()
+
+        out = semantic_aux_loss(logits, targets)
+
+        probabilities = logits.sigmoid()
+        intersection = (probabilities * targets).sum(dim=(-2, -1))
+        cardinality = probabilities.sum(dim=(-2, -1)) + targets.sum(dim=(-2, -1))
+        expected_dice = (1.0 - (2.0 * intersection + 1.0) / (cardinality + 1.0)).mean()
+        expected_bce = torch.nn.functional.binary_cross_entropy_with_logits(logits, targets, reduction="mean")
+
+        assert torch.equal(out.bce, expected_bce)
+        assert torch.equal(out.dice, expected_dice)

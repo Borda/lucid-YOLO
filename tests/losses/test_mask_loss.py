@@ -6,15 +6,21 @@ normalization, and the degenerate-box clamp — plus the no-positives and gradie
 contracts. Expected values are hand-derived in the test docstrings: with all
 logits at zero the per-pixel BCE is exactly ``ln 2`` regardless of the target, so
 every scenario below reduces to counting cropped pixels against a box area.
+
+A final group covers the normalizer's own arithmetic (L-07), which the public
+boundary cannot distinguish: an inverted box crops to nothing, so its numerator is
+zero whatever the divisor says.
 """
 
 from __future__ import annotations
 
 import math
 
+import pytest
 import torch
 
 from lucid_yolo.losses import instance_mask_loss
+from lucid_yolo.losses.mask_loss import _box_areas
 
 _LN2 = math.log(2.0)
 
@@ -187,3 +193,48 @@ def test_pixel_centres_decide_box_membership() -> None:
     expected = torch.zeros(4, 4, dtype=torch.bool)
     expected[0:2, 0:2] = True
     assert torch.equal(selected, expected), "crop must sample pixel centres, not pixel corners"
+
+
+class TestNormalizerFromInvertedBoxes:
+    """The area normalizer is clamped extent by extent, not once at the end (L-07).
+
+    ``((x2 - x1) * (y2 - y1)).clamp(min=1.0)`` reports a healthy area for a box
+    inverted on *both* axes, because two negative extents multiply to a positive
+    one — so a crop that selects nothing was normalized as though it had selected
+    a region. No loss value moves (an empty crop has an exactly zero numerator
+    either way), which is why the check is on :func:`_box_areas` directly: the
+    defect is invisible at the public boundary and would otherwise go untested.
+    """
+
+    def test_a_doubly_inverted_box_normalizes_by_the_minimum_area(self) -> None:
+        """The measured defect: ``(1 - 4) * (1 - 4) = 9`` for a box enclosing nothing."""
+        left, top = torch.tensor([4.0]), torch.tensor([4.0])
+        right, bottom = torch.tensor([1.0]), torch.tensor([1.0])
+
+        assert torch.equal(_box_areas(left, top, right, bottom), torch.tensor([1.0]))
+
+    def test_a_singly_inverted_box_normalizes_by_the_minimum_area(self) -> None:
+        """One negative extent already clamped correctly; it must keep doing so."""
+        left, top = torch.tensor([4.0, 0.0]), torch.tensor([0.0, 4.0])
+        right, bottom = torch.tensor([1.0, 3.0]), torch.tensor([3.0, 1.0])
+
+        assert torch.equal(_box_areas(left, top, right, bottom), torch.tensor([1.0, 1.0]))
+
+    def test_well_formed_boxes_keep_their_exact_area(self) -> None:
+        """The clamps are no-ops on any box of at least unit area, sub-pixel ones aside."""
+        left, top = torch.tensor([0.0, 2.0, 0.0]), torch.tensor([0.0, 1.0, 0.0])
+        right, bottom = torch.tensor([3.0, 5.0, 0.5]), torch.tensor([2.0, 4.5, 0.5])
+
+        areas = _box_areas(left, top, right, bottom)
+
+        assert torch.equal(areas, torch.tensor([6.0, 10.5, 1.0]))  # third clamps up from 0.25
+
+    def test_the_public_loss_is_unmoved_by_the_correction(self) -> None:
+        """An inverted box crops to nothing, so its contribution is zero under either divisor."""
+        logits = torch.zeros(2, 4, 4)
+        targets = torch.ones(2, 4, 4)
+        boxes = torch.tensor([[0.0, 0.0, 4.0, 4.0], [4.0, 4.0, 1.0, 1.0]])
+
+        # First instance covers the whole grid (ln 2 per pixel over 16 pixels / area 16),
+        # second contributes an exact zero; the mean over the two is half of ln 2.
+        assert float(instance_mask_loss(logits, targets, boxes)) == pytest.approx(_LN2 / 2.0, abs=1e-6)

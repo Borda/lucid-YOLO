@@ -462,3 +462,20 @@ class TestNonFiniteRowsAreDropped:
 
         assert detections.shape == (1, 2, 7)
         assert torch.equal(detections, torch.zeros_like(detections))
+
+
+def test_empty_batch_decodes_to_an_empty_result() -> None:
+    """``B = 0`` returns a zero-row A45 batch rather than raising inside ``torch.stack``.
+
+    The oriented decoder stacks one result per image, and ``torch.stack`` rejects an
+    empty list, so an empty batch failed with a message about a ``TensorList``. Both
+    other decoders return empties for the same input; matching them keeps the three
+    paths interchangeable for an evaluation loop that may legitimately hand any of
+    them a batch with no images in it.
+    """
+    points, strides = make_anchor_points([(1, 2)], [8])
+    decoder = RotatedNMSDecoder(max_det=4)
+
+    detections = decoder(torch.zeros(0, 2, 3), torch.zeros(0, 2, 4), torch.zeros(0, 2, 1), points, strides)
+
+    assert detections.shape == (0, 4, 7)

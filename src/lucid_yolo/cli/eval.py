@@ -60,8 +60,8 @@ def _resolve_eval_backend(requested: str) -> tuple[str, str | None]:
 
     hotcoco ships prebuilt wheels for this project's real target platforms
     (macOS/Linux/Windows, cp39-abi3), which is why ``"auto"`` — the default —
-    picks it without hedging. The fallback exists for what rf-detr PR 1402
-    documented rather than what is expected here: no musllinux wheel, so an
+    picks it without hedging. The fallback exists for what R36 documented rather
+    than what is expected here: no musllinux wheel, so an
     Alpine-style deploy falls back to a source build that needs a Rust
     toolchain this project has no way to guarantee. An explicit
     ``eval_backend="hotcoco"`` is a stated requirement, not a preference, and

@@ -21,6 +21,7 @@ reason the implementation does not use it.
 """
 
 import math
+from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 import torch
@@ -29,6 +30,9 @@ from torch import Tensor
 from lucid_yolo.data.rotated_geom import canonicalize
 from lucid_yolo.losses import probabilistic_iou, probiou_bhattacharyya_loss, probiou_hellinger_loss
 from lucid_yolo.losses.probiou import _working_dtype
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 #: Pairs spanning square/elongated, aligned/rotated, overlapping/disjoint.
 _PAIRS = [
@@ -661,3 +665,45 @@ class TestHalfPrecision:
         assert _working_dtype(torch.float64) is torch.float64
         assert round(float(probiou_bhattacharyya_loss(pred, target)), 6) == 1.849470
         assert round(float(probiou_hellinger_loss(pred, target)), 6) == 0.917976
+
+
+class TestSideFloorValidation:
+    """``min_side`` is rejected at the values that disable the A41 floor (M-23).
+
+    Both ProbIoU denominators vanish for a zero-area box, and the floor is the only
+    thing standing between that and a division by zero. ``min_side = 0`` and any
+    negative value never bind — ``clamp`` leaves a non-negative side untouched — so
+    they restore the ``NaN`` the parameter exists to prevent, and a non-finite floor
+    turns every box in the batch degenerate. All three were accepted silently.
+    """
+
+    #: Every public entry point takes the same floor and must reject it the same way.
+    LOSSES: ClassVar[list["Callable[..., Tensor]"]] = [
+        probiou_bhattacharyya_loss,
+        probiou_hellinger_loss,
+        probabilistic_iou,
+    ]
+
+    @pytest.mark.parametrize("bad", [0.0, -1e-4, math.nan, math.inf, -math.inf])
+    def test_a_disabling_min_side_is_refused_by_name(self, bad: float) -> None:
+        """Zero, negative and non-finite floors all raise, naming the parameter."""
+        box = torch.tensor([[3.0, 4.0, 9.0, 2.0, 0.4]])
+
+        for loss in self.LOSSES:
+            with pytest.raises(ValueError, match="min_side must be finite and > 0"):
+                loss(box, box, min_side=bad)
+
+    def test_the_value_a_zero_floor_used_to_produce_is_what_is_being_refused(self) -> None:
+        """A degenerate pair under a tighter-but-valid floor is finite; the floor is load-bearing."""
+        collapsed = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0]])
+        target = torch.tensor([[5.0, 1.0, 7.0, 3.0, -0.2]])
+
+        distance = probiou_bhattacharyya_loss(collapsed, target, min_side=1e-4)
+
+        assert bool(torch.isfinite(distance).all())
+
+    def test_a_smaller_working_floor_is_accepted(self) -> None:
+        """The check refuses only the disabling values, not an unusual but usable floor."""
+        box = torch.tensor([[3.0, 4.0, 9.0, 2.0, 0.4]])
+
+        assert float(probiou_hellinger_loss(box, box, min_side=1e-8)) == 0.0

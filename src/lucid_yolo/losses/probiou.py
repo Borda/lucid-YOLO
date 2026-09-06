@@ -109,6 +109,8 @@ Degenerate boxes (A41)
     intended behaviour: the loss does not chase a box that has collapsed.
 """
 
+import math
+
 import torch
 from torch import Tensor
 
@@ -125,6 +127,39 @@ _MIN_SIDE: float = 1e-4
 _RADICAND_FLOOR: float = 1e-20
 
 
+def _check_min_side(min_side: float) -> None:
+    """Reject a ``min_side`` that would disable the A41 floor (M-23).
+
+    The floor is the only thing standing between a zero-area box and the vanishing
+    denominators the module docstring describes. ``min_side = 0`` therefore removes
+    the safeguard entirely and a degenerate pair returns ``NaN``; a negative floor
+    never binds at all, since :meth:`~torch.Tensor.clamp` leaves every non-negative
+    side untouched; and a non-finite one turns every box in the batch degenerate.
+    All three are accepted silently by ``clamp`` itself, so the check is here.
+
+    The *upper* end is left to the caller's judgement rather than enforced: the A41
+    argument gives ~1e-10 and ~1e-3 as the outer bounds of a sensible frame, but
+    both depend on the coordinate frame the caller works in, which this function
+    cannot see.
+
+    Args:
+        min_side: The candidate side floor.
+
+    Raises:
+        ValueError: If ``min_side`` is not finite and strictly positive.
+
+    Examples:
+        >>> _check_min_side(1e-4)  # accepted: nothing returned
+        >>> try:
+        ...     _check_min_side(0.0)
+        ... except ValueError as error:
+        ...     print(error)
+        min_side must be finite and > 0; got 0.0
+    """
+    if not math.isfinite(min_side) or min_side <= 0.0:
+        raise ValueError(f"min_side must be finite and > 0; got {min_side}")
+
+
 def probiou_bhattacharyya_loss(pred: Tensor, target: Tensor, min_side: float = _MIN_SIDE) -> Tensor:
     """Bhattacharyya distance ``B_D`` between aligned pairs of rotated boxes (R17's L2).
 
@@ -139,14 +174,17 @@ def probiou_bhattacharyya_loss(pred: Tensor, target: Tensor, min_side: float = _
             ``theta`` in radians. Any leading shape broadcasts against ``target``.
         target: Target boxes of shape ``(..., 5)``, same convention.
         min_side: Floor applied to ``w`` and ``h`` before they become variances (A41);
-            keeps a zero-area box finite instead of dividing by zero.
+            keeps a zero-area box finite instead of dividing by zero. Must be finite
+            and strictly positive; ``0`` or a negative floor never binds and restores
+            the division by zero it exists to prevent (M-23).
 
     Returns:
         ``B_D`` per pair, shaped like the broadcast of the two inputs without their last
         dimension. Non-negative, unbounded above.
 
     Raises:
-        ValueError: If either input's last dimension is not ``5``.
+        ValueError: If either input's last dimension is not ``5``, or if ``min_side``
+            is not finite and strictly positive.
 
     Examples:
         >>> import torch
@@ -157,6 +195,7 @@ def probiou_bhattacharyya_loss(pred: Tensor, target: Tensor, min_side: float = _
     """
     _check_rboxes(pred, "pred")
     _check_rboxes(target, "target")
+    _check_min_side(min_side)
 
     out_dtype = torch.result_type(pred, target)
     work_dtype = _working_dtype(out_dtype)
@@ -197,13 +236,15 @@ def probabilistic_iou(pred: Tensor, target: Tensor, min_side: float = _MIN_SIDE)
     Args:
         pred: Predicted boxes of shape ``(..., 5)``, ``(cx, cy, w, h, theta)``.
         target: Target boxes of shape ``(..., 5)``, same convention.
-        min_side: Floor applied to ``w`` and ``h`` (A41).
+        min_side: Floor applied to ``w`` and ``h`` (A41). Must be finite and strictly
+            positive (M-23).
 
     Returns:
         ProbIoU per pair, in ``[0, 1]``; exactly ``1`` for a box against itself.
 
     Raises:
-        ValueError: If either input's last dimension is not ``5``.
+        ValueError: If either input's last dimension is not ``5``, or if ``min_side``
+            is not finite and strictly positive.
 
     Examples:
         >>> import torch
@@ -229,14 +270,16 @@ def probiou_hellinger_loss(pred: Tensor, target: Tensor, min_side: float = _MIN_
     Args:
         pred: Predicted boxes of shape ``(..., 5)``, ``(cx, cy, w, h, theta)``.
         target: Target boxes of shape ``(..., 5)``, same convention.
-        min_side: Floor applied to ``w`` and ``h`` (A41).
+        min_side: Floor applied to ``w`` and ``h`` (A41). Must be finite and strictly
+            positive (M-23).
 
     Returns:
         Loss per pair, in ``[0, 1]``; exactly ``0`` for a box against itself and
         approaching ``1`` for boxes with no meaningful overlap.
 
     Raises:
-        ValueError: If either input's last dimension is not ``5``.
+        ValueError: If either input's last dimension is not ``5``, or if ``min_side``
+            is not finite and strictly positive.
 
     Examples:
         >>> import torch

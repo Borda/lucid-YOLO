@@ -43,6 +43,7 @@ tensor operation on the axis-aligned path exactly as it was.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import torch
@@ -161,6 +162,107 @@ def _check_rbox_batch(gt_rboxes: Tensor, gt_boxes: Tensor) -> None:
         raise ValueError(f"gt_rboxes must be {expected} to match gt_boxes; got {tuple(gt_rboxes.shape)}")
 
 
+def _check_hyperparameters(alpha: float, beta: float, eps: float) -> None:
+    """Raise :class:`ValueError` unless the exponents and the union guard are usable.
+
+    These three are the assigner's numerical safeguards, and each of them has
+    values that switch it off rather than tune it — which is why they are checked
+    here rather than left to fail somewhere downstream as a ``NaN`` weight.
+
+    ``eps`` guards the IoU union division (:func:`_box_iou_cross`). At ``eps = 0``
+    a pair of zero-area boxes divides ``0 / 0`` and the IoU comes out ``NaN``
+    instead of the ``0.0`` overlap the guard exists to produce; a negative ``eps``
+    is worse, since it can flip the sign of a small union and hand top-k a
+    *negative* alignment for an anchor that genuinely overlaps.
+
+    A non-finite exponent makes ``t = s**alpha * u**beta`` non-finite at every
+    anchor, so the ranking carries no information at all. A negative one inverts
+    it: the worst-aligned anchor scores highest and top-k reads that as the best
+    candidate, which is a silently wrong assignment rather than a crash. Zero is
+    allowed for either exponent — it drops that factor from the metric, an
+    unusual but coherent request (``beta = 0`` is pure classification alignment).
+
+    Args:
+        alpha: Exponent on the classification score; must be finite and ``>= 0``.
+        beta: Exponent on the IoU; must be finite and ``>= 0``.
+        eps: Constant added to the IoU union; must be finite and ``> 0``.
+
+    Raises:
+        ValueError: If any of the three lies outside its documented range. The
+            message names the offending parameter and the value it was given.
+
+    Examples:
+        >>> _check_hyperparameters(1.0, 6.0, 1e-9)
+        >>> _check_hyperparameters(1.0, 6.0, 0.0)
+        Traceback (most recent call last):
+        ValueError: eps must be finite and > 0, got 0.0
+        >>> _check_hyperparameters(1.0, -6.0, 1e-9)
+        Traceback (most recent call last):
+        ValueError: beta must be finite and >= 0, got -6.0
+    """
+    for name, exponent in (("alpha", alpha), ("beta", beta)):
+        if not math.isfinite(exponent) or exponent < 0.0:
+            raise ValueError(f"{name} must be finite and >= 0, got {exponent}")
+    if not math.isfinite(eps) or eps <= 0.0:
+        raise ValueError(f"eps must be finite and > 0, got {eps}")
+
+
+def _check_labels(gt_labels: Tensor, gt_mask: Tensor, num_classes: int) -> None:
+    """Raise :class:`ValueError` unless every real ground-truth label names a predicted class.
+
+    :meth:`TaskAlignedAssigner._alignment_metric` gathers each ground truth's
+    predicted score by using its label as a column index, behind a
+    ``clamp(min=0)`` that exists for the padding slots. That clamp silently
+    absorbs a **negative** label: the ground truth is then scored against class 0,
+    assigned on that score, and trained towards its own (different) label, with
+    nothing anywhere reporting it. A label at or above ``num_classes`` is not
+    absorbed but fails inside ``torch.gather`` as an index error that names no
+    tensor a caller would recognise — and on an accelerator, not even reliably at
+    the call that caused it. Checking the range up front turns both into one
+    message naming the bound.
+
+    The two bounds have different scopes, because the gather does. Its index
+    tensor is built from **every** slot, padded ones included — nothing there
+    consults ``gt_mask`` — so the upper bound is a precondition on the whole
+    tensor: a padding slot holding ``num_classes`` fails the gather just as a real
+    one does, whatever the mask says. The lower bound applies to real ground
+    truths only, since that is precisely the case the ``clamp(min=0)`` does not
+    genuinely neutralize: at a padding slot the clamped row is discarded by
+    ``candidate_mask`` and never reaches a target, while at a real one it is kept
+    and scored against class 0. Both tests are vacuously true for an empty batch.
+
+    Args:
+        gt_labels: ``(B, N)`` long class ids of the padded ground truths.
+        gt_mask: ``(B, N)`` bool; ``True`` marks a real ground truth.
+        num_classes: Column count ``C`` of the predicted score tensor.
+
+    Raises:
+        ValueError: If any slot carries a label at or above ``C``, or if a real
+            ground truth carries a negative one.
+
+    Examples:
+        >>> import torch
+        >>> labels = torch.tensor([[0, -1]])  # -1 is a padding slot's leftover
+        >>> _check_labels(labels, torch.tensor([[True, False]]), num_classes=3)
+        >>> _check_labels(labels, torch.tensor([[True, True]]), num_classes=3)
+        Traceback (most recent call last):
+        ValueError: gt_labels must be in [0, 3) at real ground truths; got [-1]
+        >>> _check_labels(torch.tensor([[0, 7]]), torch.tensor([[True, False]]), num_classes=3)
+        Traceback (most recent call last):
+        ValueError: gt_labels must be < 3 at every slot, padding included; got [7]
+    """
+    too_large = gt_labels >= num_classes
+    if bool(too_large.any()):
+        raise ValueError(
+            f"gt_labels must be < {num_classes} at every slot, padding included; got {gt_labels[too_large].tolist()}"
+        )
+    negative = (gt_labels < 0) & gt_mask
+    if bool(negative.any()):
+        raise ValueError(
+            f"gt_labels must be in [0, {num_classes}) at real ground truths; got {gt_labels[negative].tolist()}"
+        )
+
+
 class TaskAlignedAssigner:
     """Task-Aligned label assigner for the anchor-free detection head.
 
@@ -174,14 +276,19 @@ class TaskAlignedAssigner:
             ground truth has fewer eligible (centre-inside) anchors than
             ``topk``, only the eligible ones are kept.
         alpha: Exponent on the classification score in ``t = s**alpha * u**beta``
-            (A2 default ``1.0``).
+            (A2 default ``1.0``). Must be finite and ``>= 0``.
         beta: Exponent on the IoU in ``t = s**alpha * u**beta`` (A2 default
-            ``6.0``).
-        eps: Small constant guarding the IoU union division. It does **not**
-            guard the target-normalization denominator: that quantity is
-            ``s * u_max**6``, which an absolute floor swamps at small overlap
-            (see :meth:`_build_result`), so the denominator is floored at the
-            dtype's smallest normal instead.
+            ``6.0``). Must be finite and ``>= 0``.
+        eps: Small constant guarding the IoU union division; must be finite and
+            ``> 0``. It does **not** guard the target-normalization denominator:
+            that quantity is ``s * u_max**6``, which an absolute floor swamps at
+            small overlap (see :meth:`_build_result`), so the denominator is
+            floored at the dtype's smallest normal instead.
+
+    Raises:
+        ValueError: If ``topk`` is below 1, or if any of ``alpha``, ``beta`` and
+            ``eps`` takes a value that disables the safeguard it exists to be
+            (see :func:`_check_hyperparameters`).
 
     Examples:
         >>> import torch
@@ -200,6 +307,7 @@ class TaskAlignedAssigner:
     def __init__(self, topk: int, alpha: float = 1.0, beta: float = 6.0, eps: float = 1e-9) -> None:
         if topk < 1:
             raise ValueError(f"topk must be >= 1, got {topk}")
+        _check_hyperparameters(alpha, beta, eps)
         self.topk = topk
         self.alpha = alpha
         self.beta = beta
@@ -223,8 +331,11 @@ class TaskAlignedAssigner:
             anchor_points: ``(A, 2)`` anchor-centre ``(x, y)`` pixels, shared
                 across the batch (see :func:`lucid_yolo.assign.make_anchor_points`).
             gt_boxes: ``(B, N, 4)`` padded ground-truth boxes in ``xyxy`` pixels.
-            gt_labels: ``(B, N)`` long class ids of the ground truths; entries at
-                padded slots are ignored.
+            gt_labels: ``(B, N)`` long class ids of the ground truths. Every entry
+                must be below ``C`` — the score gather indexes padded slots too —
+                and every *real* one must also be non-negative; a padded slot may
+                hold any negative value and is ignored. Checked at entry by
+                :func:`_check_labels` unless Python runs with ``-O``.
             gt_mask: ``(B, N)`` bool; ``True`` marks a real ground truth, ``False``
                 a padding slot that is never assigned.
             gt_rboxes: Optional ``(B, N, 5)`` rotated ground truths
@@ -268,6 +379,12 @@ class TaskAlignedAssigner:
         """
         with torch.no_grad():
             batch, num_anchors = pred_scores.shape[0], pred_scores.shape[1]
+            # Guarded by `__debug__` because reading the verdict costs a device sync,
+            # and this is the only one the assignment still pays (see
+            # `_resolve_conflicts`). Under `python -O` the assigner runs sync-free and
+            # a bad label reverts to the silent mis-scoring `_check_labels` describes.
+            if __debug__:
+                _check_labels(gt_labels, gt_mask, pred_scores.shape[-1])
             if gt_boxes.shape[1] == 0:
                 return self._empty_result(batch, num_anchors, pred_boxes.dtype, pred_boxes.device)
 
@@ -360,10 +477,22 @@ class TaskAlignedAssigner:
 
     @staticmethod
     def _resolve_conflicts(mask_pos: Tensor, align_metric: Tensor) -> Tensor:
-        """Give each anchor to the highest-``t`` GT that selected it; ``(B, N, A)``."""
+        """Give each anchor to the highest-``t`` GT that selected it; ``(B, N, A)``.
+
+        Resolution runs unconditionally, with no early exit for the common case in
+        which no anchor was claimed twice. That skip is decidable —
+        ``selected_per_anchor.max() <= 1`` settles it — but only on the *host*, so
+        taking it costs a device sync on every assignment call to save work the
+        ``torch.where`` below already discards anchor by anchor. Measured at
+        640-input shapes (``B=16``, ``A=8400``, ``N=20``, four repeats of a
+        median-of-50 over the public ``__call__``): dropping the sync is 2-5%
+        faster on MPS in both the contested and the uncontested regime, and within
+        run-to-run noise on CPU, where the delta flips sign across repeats. The two
+        forms are bit-identical on every returned field — with nothing contested,
+        ``contested`` is all-``False`` and ``torch.where`` returns ``mask_pos``
+        untouched — so the skip was only ever an optimization, and a negative one.
+        """
         selected_per_anchor = mask_pos.sum(dim=1)  # (B, A)
-        if int(selected_per_anchor.max().item()) <= 1:
-            return mask_pos
         num_gt = mask_pos.shape[1]
         contested = (selected_per_anchor > 1).unsqueeze(1)  # (B, 1, A)
         masked_align = align_metric.masked_fill(~mask_pos, -1.0)

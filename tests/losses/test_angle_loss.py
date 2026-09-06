@@ -438,3 +438,86 @@ def test_loss_is_bounded_by_one_over_a_random_sweep() -> None:
     loss = square_angle_loss(pred, target, width, height, torch.rand(4096) * 2)
 
     assert 0.0 <= loss.item() <= 1.0
+
+
+class TestSideFloorValidation:
+    """``min_side`` is rejected at the values that disable the A42 floor (M-23).
+
+    The floor is what keeps the backward pass finite: an unfloored zero height
+    sends ``ln(w/h)`` to ``inf`` and its gradient to ``NaN``. ``min_side = 0`` and
+    any negative value never bind, because ``clamp`` leaves a zero side alone, so
+    they reinstate exactly the failure the parameter exists to prevent — and both
+    constructed silently.
+    """
+
+    @pytest.mark.parametrize("bad", [0.0, -1e-4, math.nan, math.inf, -math.inf])
+    def test_a_disabling_min_side_is_refused_by_name(self, bad: float) -> None:
+        """Zero, negative and non-finite floors all raise, naming the parameter."""
+        sides = torch.ones(2)
+
+        with pytest.raises(ValueError, match="min_side must be finite and > 0"):
+            aspect_ratio_weight(sides, sides, min_side=bad)
+
+        with pytest.raises(ValueError, match="min_side must be finite and > 0"):
+            square_angle_loss(sides, sides, sides, sides, sides, min_side=bad)
+
+    @pytest.mark.parametrize("bad", [math.nan, math.inf])
+    def test_a_non_finite_lam_is_refused(self, bad: float) -> None:
+        """``lam`` was checked for sign only; a non-finite bandwidth flattens omega to 1."""
+        with pytest.raises(ValueError, match="lam must be finite and > 0"):
+            aspect_ratio_weight(torch.ones(2), torch.ones(2), lam=bad)
+
+    def test_the_defaults_and_a_smaller_working_floor_are_accepted(self) -> None:
+        """The check refuses only disabling values; a tighter floor still passes."""
+        collapsed = torch.zeros(1)
+
+        weight = aspect_ratio_weight(collapsed, collapsed, min_side=1e-8)
+
+        assert bool(torch.isfinite(weight).all())
+
+
+class TestWrapAngleDeltaRange:
+    """The documented magnitude bound, pinned on both sides (L-03).
+
+    The docstring used to promise "any real magnitude". It cannot: past
+    ``2**23 * pi`` in float32 the spacing between neighbouring floats is comparable
+    to ``pi``, so the argument no longer represents the angle it names and the
+    residual returned is some other angle's. That is a property of the input, not
+    of the wrapping rule, which is why it is documented rather than repaired.
+    """
+
+    def test_inside_the_documented_bound_the_residual_survives_to_the_inputs_own_spacing(self) -> None:
+        """Offsetting by whole multiples of pi returns the same residual, to within ulp.
+
+        The tolerance is the input's own float32 spacing rather than a constant:
+        that spacing is the whole subject of the bound, and it grows with the
+        magnitude long before the stated ceiling is reached.
+        """
+        base = torch.tensor([0.3, -0.4, 1.2])
+        spacing = float(torch.finfo(torch.float32).eps)
+        for turns in (1, 10, 1000):
+            shifted = wrap_angle_delta(base + turns * _PI)
+            tolerance = max(4.0 * spacing * turns * _PI, 1e-6)
+            assert torch.allclose(shifted, wrap_angle_delta(base), atol=tolerance)
+
+    @pytest.mark.parametrize(("magnitude", "expected"), [(1e8, 0.7307), (1e30, -1.2563)])
+    def test_past_the_documented_bound_the_angle_is_already_lost(self, magnitude: float, expected: float) -> None:
+        """The measured values the narrowed docstring cites, pinned so the claim stays true.
+
+        Neither answer is the residual of its argument — ``1e8`` is a multiple of
+        ``pi`` to well within float32's spacing there — and both are still in range,
+        which is exactly why the bound has to be stated rather than detected.
+        """
+        got = wrap_angle_delta(torch.tensor(magnitude))
+
+        assert float(got) == pytest.approx(expected, abs=1e-4)
+        assert -_HALF_PI <= float(got) < _HALF_PI
+
+    def test_the_returned_value_stays_in_range_at_any_magnitude(self) -> None:
+        """Whatever the input, the half-open range contract itself still holds."""
+        extreme = torch.tensor([1e8, -1e8, 1e20, -1e20, 1e30, -1e30])
+
+        wrapped = wrap_angle_delta(extreme)
+
+        assert bool((wrapped >= -_HALF_PI).all())
+        assert bool((wrapped < _HALF_PI).all())

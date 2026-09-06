@@ -50,7 +50,26 @@ coordinates at all and would not be a valid bijection over R^2. Each layer's
 of 64 units, every one followed by a Leaky-ReLU (R14 sec. 4: "Lfc=3 and Nn=64
 by default... Each fully-connected layer is followed by a Leaky-RELU"),
 mapping the one conditioning scalar to the transformed coordinate's
-``(log_scale, shift)`` pair. The log-scale leaves that conditioner through a
+``(log_scale, shift)`` pair. R14's sentence says *each* fully-connected layer, and
+this module reads it literally: the final ``Linear(64, 2)`` carries a Leaky-ReLU
+too, so both emitted quantities are pre-squashed — ``shift`` is effectively
+non-negative up to the leak, and ``log_scale = scale * tanh(raw)`` inherits the
+same asymmetry. **This literal reading is an assumption, not a transcription**
+(A74; the module has carried the activation since WP-125, and the row was minted
+when the audit asked what backed it). An output projection is not a hidden layer,
+and a flow whose job
+is to learn the *shape* of a residual density starts structurally biased when its
+head is one-sided. R14 states the conditioner's depth and width but neither its
+figure nor its appendix distinguishes hidden layers from the output projection, so
+the sentence admits both readings and the paper does not settle it. What would
+settle it here is the paired same-seed run the register asks for: the pose smoke
+recipe trained twice at identical seed, with and without the trailing activation,
+compared on the WP-125 acceptance metric. That run is a work package of its own —
+a behaviour change to a landed loss whose RLE-versus-Laplace-NLL comparison is the
+thing it would move — and is deliberately **not** made here; only the reading is
+recorded, so the next reader inherits an open question rather than a silent choice.
+
+The log-scale leaves that conditioner through a
 **tanh times a learned scale**, which is RealNVP's own parameterization of
 ``s`` and is given there as a stability measure ("To compute the scaling
 functions s, we use a hyperbolic tangent function multiplied by a learned
@@ -80,7 +99,8 @@ module — implemented directly from R14's equations and its own citation of
 RealNVP (Dinh et al.), per AGENTS.md sec. 6 and sec. 7.
 
 Provenance: R14 (Eq. 5, 7, 8, sec. 3.2, sec. 3.3, sec. 4, Appendix A Eq. 12), R12 (visibility semantics).
-Assumptions: A65 (resolved: sigmoid), A66 (visibility mask policy).
+Assumptions: A65 (resolved: sigmoid), A66 (visibility mask policy), and the
+conditioner output-head activation described above (A74).
 """
 
 from __future__ import annotations
@@ -111,6 +131,13 @@ class _CouplingConditioner(nn.Module):
 
     R14 sec. 4's stated default conditioner shape, shared by every coupling
     layer's own independent instance (parameters are not tied across layers).
+
+    The trailing ``LeakyReLU`` after the output ``Linear(64, 2)`` is the literal
+    reading of R14's "Each fully-connected layer is followed by a Leaky-RELU" and
+    is a registered assumption, not a transcription — it pre-squashes both emitted
+    quantities. The module docstring carries the argument on both sides and the
+    paired same-seed run that would settle it; this note exists so the activation
+    is not mistaken for an accident and quietly deleted.
 
     Examples:
         >>> import torch

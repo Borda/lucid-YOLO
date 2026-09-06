@@ -955,8 +955,7 @@ def hotcoco_available() -> tuple[bool, str | None]:
     Returns:
         ``(True, None)`` when hotcoco is usable. ``(False, reason)`` otherwise,
         ``reason`` a short, printable explanation — never raised, since a
-        missing Rust toolchain is an expected environment shape (rf-detr PR
-        1402's own "Not measured"/"musllinux" note), not a defect.
+        missing Rust toolchain is an expected environment shape (R36), not a defect.
 
     Examples:
         >>> available, reason = hotcoco_available()
@@ -975,8 +974,8 @@ def hotcoco_available() -> tuple[bool, str | None]:
 def _encode_mask_rle(mask: Tensor) -> dict[str, object]:
     """RLE-encode one boolean mask for a hotcoco annotation/result record.
 
-    Two of rf-detr PR 1402's five documented hotcoco compatibility traps live
-    here, both silent-wrong-number failures rather than errors: ``mask.encode``
+    Two of R36's five documented hotcoco traps live here, both silent-wrong-number
+    failures rather than errors: ``mask.encode``
     accepts ``uint8`` only and raises a confusing ``TypeError`` on a boolean
     array, and its ``counts`` field comes back as ``bytes`` — hotcoco's own COCO
     constructor decodes only the ``str`` form, silently reading a bytes payload
@@ -999,9 +998,8 @@ def _redirect_native_output() -> Iterator[None]:
     and 2 (a warning naming any evaluator parameter that differs from COCO's
     defaults). Verified directly: wrapping a hotcoco ``summarize()`` call in
     ``contextlib.redirect_stdout`` left the summary table on the real terminal
-    and an empty capture buffer — rf-detr PR 1402's own finding, reproduced here
-    rather than taken on faith. Descriptor-level ``os.dup2`` is the only redirect
-    that reaches it.
+    and an empty capture buffer — R36's finding, reproduced here. Descriptor-level
+    ``os.dup2`` is the only redirect that reaches it.
 
     Scoped to ``summarize()`` alone, and measured rather than assumed: running
     each phase of a hotcoco pass with descriptors 1 and 2 captured separately
@@ -1040,9 +1038,8 @@ def _hotcoco_stats(preds: list[dict[str, object]], gt: Mapping[str, object], iou
     alternative is available — the same choice :func:`_named_stats` already
     makes for the torchmetrics path). ``recThrs``/``maxDets`` are get-mutate-
     reassign, not in-place: hotcoco's ``params`` is copy-on-read, so
-    ``ev.params.recThrs = ...`` alone is a silent no-op (rf-detr PR 1402's
-    first documented trap, reproduced directly against this project's own
-    installed hotcoco before trusting it).
+    ``ev.params.recThrs = ...`` alone is a silent no-op (R36's first trap,
+    reproduced against the installed hotcoco before trusting it).
     """
     # Local names distinct from the module-level faster_coco_eval COCO/COCOeval_faster
     # import above: same identifiers, different package, and mypy resolves a shadowed
@@ -1095,7 +1092,7 @@ class _HotcocoStreamingScorer:
 
     A combined bbox+segm model runs **two** independent hotcoco passes rather than
     one tuple-``iou_type`` call, because hotcoco's own ``dataset`` is copy-on-read
-    (rf-detr PR 1402's second documented trap): an annotation's ``area`` field
+    (R36's second trap): an annotation's ``area`` field
     cannot be swapped in place between a box-area pass and a mask-area pass on one
     loaded document the way torchmetrics' internal combined path does, so this
     scorer builds two separate ground-truth/result documents instead — one whose
@@ -1542,8 +1539,7 @@ class DualPathEvaluator:
         #: than CPU — the parity evidence is CPU-only, so an accelerator run is
         #: unverified rather than known-equal.
         #: OKS keypoint scoring is untouched either way: it stays hand-driven
-        #: ``faster_coco_eval`` (A73), the same choice rf-detr PR 1402 itself made
-        #: ("Keypoint evaluation uses its own OKS path and is untouched").
+        #: ``faster_coco_eval`` (A73), the same choice R36 made.
         self._backend = backend
 
     def evaluate(

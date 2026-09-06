@@ -48,8 +48,7 @@ dependencies = [
   # conventional: three of the five known hotcoco/torchmetrics compatibility traps
   # (docs/ASSUMPTIONS.md A73) fail silently rather than raising, so each pre-1.0
   # minor needs re-verifying against tests/eval/test_coco_eval.py::TestHotcocoParity
-  # before it is allowed in -- the same reasoning rf-detr PR 1402 states for its
-  # own identical ceiling.
+  # before it is allowed in -- the same reasoning R36 states for its own ceiling.
   "hotcoco>=0.5,<0.6",
   "fvcore>=0.1.5",
   "pyyaml>=6.0",

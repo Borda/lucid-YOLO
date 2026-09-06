@@ -150,11 +150,13 @@ class SmallTargetAssigner(TaskAlignedAssigner):
     Args:
         topk: Number of highest-alignment anchors kept per ground truth.
         alpha: Exponent on the classification score in ``t = s**alpha * u**beta``
-            (A2 default ``1.0``).
+            (A2 default ``1.0``); finite and ``>= 0``.
         beta: Exponent on the IoU in ``t = s**alpha * u**beta`` (A2 default
-            ``6.0``).
-        eps: Small constant guarding the IoU union and the normalization
-            denominator.
+            ``6.0``); finite and ``>= 0``.
+        eps: Small constant guarding the IoU union; finite and ``> 0``. Validated
+            by :class:`~lucid_yolo.assign.tal.TaskAlignedAssigner`, which also
+            documents why the normalization denominator uses its own floor rather
+            than this value.
         s_min: Dimension threshold below which the surrogate inflates a box side
             (the smallest stride, ``8.0`` at 640 input).
         s_ref: Replacement side length for an inflated dimension (the next

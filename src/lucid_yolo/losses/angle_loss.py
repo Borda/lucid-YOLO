@@ -133,8 +133,22 @@ def wrap_angle_delta(delta: Tensor) -> Tensor:
 
     Exactly idempotent: an already-wrapped value is returned bit for bit.
 
+    The reduction is meaningful only while the input's own floating-point spacing stays
+    small against ``pi``, i.e. for ``|delta| < 2**23 * pi`` in float32 (about ``2.6e7``).
+    Past that the argument no longer represents the angle it names — the nearest float to
+    a given residual is a whole rotation or more away — and the returned value, while
+    still in range, is the residual of a different angle. Measured:
+    ``wrap_angle_delta(1e8) = 0.7307`` and ``wrap_angle_delta(1e30) = -1.2563``, neither
+    of which is the residual of its argument. This is a limit of the representation, not
+    of the algorithm: no wrapping rule can recover an angle the input already lost. The
+    angular residuals this loss is fed are differences of head outputs and targets, both
+    within a few multiples of ``pi``, so the bound is a statement about the contract
+    rather than a reachable failure.
+
     Args:
-        delta: Angular residuals in radians, any shape, any real magnitude.
+        delta: Angular residuals in radians, any shape. Magnitudes are expected to
+            satisfy ``|delta| < 2**23 * pi`` in float32 (see above); larger inputs
+            return a finite in-range value that no longer describes their own angle.
 
     Returns:
         The residuals reduced into ``[-pi/2, pi/2)`` as represented in the input dtype,
@@ -144,6 +158,8 @@ def wrap_angle_delta(delta: Tensor) -> Tensor:
         >>> import torch
         >>> wrap_angle_delta(torch.tensor([0.3, 3.4416, -3.4416, 1.5708])).round(decimals=4)
         tensor([ 0.3000,  0.3000, -0.3000, -1.5708])
+        >>> wrap_angle_delta(torch.tensor(1e8)).round(decimals=4)  # past the stated bound
+        tensor(0.7307)
     """
     in_range = (delta >= -_HALF_PI) & (delta < _HALF_PI)
     wrapped = torch.remainder(delta + _HALF_PI, _PI) - _HALF_PI
@@ -168,22 +184,32 @@ def aspect_ratio_weight(width: Tensor, height: Tensor, lam: float = _LAMBDA, min
         lam: R1's ``lambda``, the bandwidth in log-ratio units (Table 11's ``3.0``).
             Larger values extend square-object supervision to more elongated boxes.
         min_side: Floor applied to both sides before the ratio is taken (A42), keeping a
-            collapsed target finite instead of dividing by zero.
+            collapsed target finite instead of dividing by zero. Must be finite and
+            strictly positive: ``0`` or a negative floor never binds, and the unfloored
+            zero height it lets through sends ``ln(w/h)`` to ``inf`` and its gradient to
+            ``NaN`` — the exact failure A42 exists to prevent (M-23).
 
     Returns:
         ``omega`` per target, in ``(0, 1]``, shaped like the broadcast of the inputs.
 
     Raises:
-        ValueError: If ``lam`` is not strictly positive.
+        ValueError: If ``lam`` or ``min_side`` is not finite and strictly positive.
 
     Examples:
         >>> import torch
         >>> ratios = torch.tensor([1.0, 2.0, 5.0, 10.0, 20.0])
         >>> aspect_ratio_weight(ratios, torch.ones(5)).round(decimals=4)
         tensor([1.0000, 0.9480, 0.7499, 0.5548, 0.3689])
+        >>> try:
+        ...     aspect_ratio_weight(ratios, torch.ones(5), min_side=0.0)
+        ... except ValueError as error:
+        ...     print(error)
+        min_side must be finite and > 0; got 0.0
     """
-    if lam <= 0:
-        raise ValueError(f"lam must be > 0; got {lam}")
+    if not math.isfinite(lam) or lam <= 0:
+        raise ValueError(f"lam must be finite and > 0; got {lam}")
+    if not math.isfinite(min_side) or min_side <= 0:
+        raise ValueError(f"min_side must be finite and > 0; got {min_side}")
     log_ratio = torch.log(width.clamp(min=min_side) / height.clamp(min=min_side))
     return torch.exp(-(log_ratio**2) / (lam * lam))
 
@@ -199,10 +225,12 @@ def square_angle_loss(
 ) -> Tensor:
     """Assignment-weighted square-object angle loss (R1 Equation 15).
 
-    The **pre-gain** term: A22 puts its weight in the total objective at ``1.0`` but R1
-    does not state one, so the gain stays with the caller that assembles the oriented
-    objective (WP-088), exactly as ``box``/``cls``/``l1`` are reported pre-gain by
-    :class:`~lucid_yolo.losses.detection_loss.DetectionLossOutput`.
+    The **pre-gain** term: A22 puts its weight in the total objective at ``0.25`` — the
+    value WP-093 revised it to, not the ``1.0`` this project first assumed — but R1
+    states no weight at all, so the gain stays with the caller that assembles the
+    oriented objective (WP-088), exactly as ``box``/``cls``/``l1`` are reported pre-gain
+    by :class:`~lucid_yolo.losses.detection_loss.DetectionLossOutput`. The module
+    docstring carries the measurement behind the revision.
 
     Inputs are per-anchor and aligned. Passing only the foreground rows is the intended
     use, but a whole branch may be passed with background anchors carrying ``q_i = 0``:
@@ -218,16 +246,21 @@ def square_angle_loss(
         target_width: ``(...,)`` target widths ``w_star``, for ``omega``.
         target_height: ``(...,)`` target heights ``h_star``, for ``omega``.
         weights: ``(...,)`` TAL assignment weights ``q_i``, non-negative. Their sum,
-            floored at ``1``, is R1's normalizer ``S``.
+            floored at ``1``, is R1's normalizer ``S``. The floor is R1's own rule and
+            it is not neutral: once the weights total less than one — few positives, or
+            positives whose alignment is uniformly small — the divisor stops tracking
+            them and the term becomes a weighted **sum** rather than a weighted mean, so
+            such a batch contributes proportionally less than a well-aligned one instead
+            of the same. Above unit total weight the two readings coincide.
         lam: R1's ``lambda`` for ``omega`` (Table 11's ``3.0``).
-        min_side: Floor applied to the target sides (A42).
+        min_side: Floor applied to the target sides (A42); finite and strictly positive.
 
     Returns:
         Scalar (zero-dimensional) loss, non-negative and bounded above by the largest
         ``omega`` present, carrying gradient back to ``pred_theta``.
 
     Raises:
-        ValueError: If ``lam`` is not strictly positive.
+        ValueError: If ``lam`` or ``min_side`` is not finite and strictly positive.
 
     Examples:
         >>> import torch

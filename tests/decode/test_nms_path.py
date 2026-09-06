@@ -343,3 +343,27 @@ class TestDegenerateBoxesAreDropped:
         survivors = detections[0, detections[0, :, 4] > 0.0]
         assert survivors.shape[0] == 1
         assert int(anchors[0, 0]) == 2  # the only anchor carrying a real box
+
+
+def test_empty_batch_decodes_to_empty_outputs() -> None:
+    """``B = 0`` returns zero-row tensors of the documented widths rather than raising.
+
+    The per-image decode is a list comprehension handed to ``torch.stack``, which has
+    no empty case: an empty batch used to die inside stack with a message naming a
+    ``TensorList`` rather than the input. Nothing in the return contract excludes
+    ``B = 0``, and :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` already answers it
+    with empties, so raising here made this the one path an evaluation loop had to
+    special-case for a batch it can legitimately hand either decoder.
+    """
+    points, strides = make_anchor_points([(1, 2)], [8])
+    decoder = NMSDecoder(max_det=4)
+
+    detections, anchors = decoder.decode_with_indices(
+        torch.zeros(0, 2, 3), torch.zeros(0, 2, _BOX_CORNERS), points, strides
+    )
+
+    assert (detections.shape, anchors.shape, anchors.dtype) == (
+        (0, 4, 6),
+        (0, 4),
+        torch.long,
+    )

@@ -68,7 +68,10 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     docs_dir.mkdir(parents=True, exist_ok=True)
     (docs_dir / "model_cards").mkdir(exist_ok=True)
     _write(docs_dir / "PROVENANCE.md", "".join(f"| R{i} | source {i} |\n" for i in range(1, 22)))
-    _write(docs_dir / "ASSUMPTIONS.md", "".join(f"| A{i} | t | v | src | p | open |\n" for i in range(1, 74)))
+    _write(
+        docs_dir / "ASSUMPTIONS.md",
+        "".join(f"| A{i} | t | v | src | p | open |\n" for i in range(1, audit._ASSUMPTION_FLOOR + 1)),
+    )
     _write(
         docs_dir / "DECISIONS.md",
         "".join(f"| D{i} | t |\n" for i in range(1, 21))
@@ -173,20 +176,22 @@ class TestCheckAssumptionIdsContiguous:
         assert "non-contiguous assumption ids: [1, 3]" in violations
 
     def test_flags_a_row_deleted_from_the_tail(self, tmp_path: Path) -> None:
-        """Deleting A73 leaves the remainder contiguous, and the row-count floor is what sees it."""
+        """Deleting the last row leaves the remainder contiguous, and the row-count floor is what sees it."""
         _write_required_docs(tmp_path / "docs", tmp_path)
         full = (tmp_path / "docs" / "ASSUMPTIONS.md").read_text(encoding="utf-8")
-        _write(tmp_path / "docs" / "ASSUMPTIONS.md", full.replace("| A73 | t | v | src | p | open |\n", ""))
+        last = audit._ASSUMPTION_FLOOR
+        _write(tmp_path / "docs" / "ASSUMPTIONS.md", full.replace(f"| A{last} | t | v | src | p | open |\n", ""))
 
         violations = audit.check_assumption_ids_contiguous(tmp_path / "docs", tmp_path)
 
-        assert violations == ["assumptions shrank below 73 rows: 72"]
+        floor = audit._ASSUMPTION_FLOOR
+        assert violations == [f"assumptions shrank below {floor} rows: {floor - 1}"]
 
     def test_flags_a_row_deleted_from_the_middle(self, tmp_path: Path) -> None:
         """Deleting A40 is reported as a shrink, not only as a gap.
 
-        The ``max(ids)`` predicate this replaced could not see it: A73 still stood, so
-        the floor stayed silent and the only finding was a 73-element id list a reader
+        The ``max(ids)`` predicate this replaced could not see it: the last row still
+        stood, so the floor stayed silent and the only finding was an id list a reader
         had to scan for the hole. The count says what actually happened.
         """
         _write_required_docs(tmp_path / "docs", tmp_path)
@@ -195,7 +200,8 @@ class TestCheckAssumptionIdsContiguous:
 
         violations = audit.check_assumption_ids_contiguous(tmp_path / "docs", tmp_path)
 
-        assert "assumptions shrank below 73 rows: 72" in violations
+        floor = audit._ASSUMPTION_FLOOR
+        assert f"assumptions shrank below {floor} rows: {floor - 1}" in violations
 
     def test_is_clean_for_a_full_register(self, tmp_path: Path) -> None:
         """A contiguous register at or above the floor reports no violation."""

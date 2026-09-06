@@ -143,3 +143,16 @@ def test_zero_gt_batch_is_all_background() -> None:
     out = UniqueAssigner(topk=7)(scores, pred_boxes, _grid_points(), empty_boxes, empty_labels, empty_mask)
 
     assert bool(out.fg_mask.any()) is False
+
+
+def test_disabling_hyperparameters_are_rejected_through_the_subclass() -> None:
+    """``UniqueAssigner`` inherits the base assigner's parameter validation.
+
+    The o2o branch constructs its assigner through this subclass, never through
+    :class:`~lucid_yolo.assign.tal.TaskAlignedAssigner` directly, so validation that
+    only fired on the base class would leave the branch that actually trains
+    unguarded. ``eps = 0`` is the case that matters most here: it turns a degenerate
+    IoU union into ``NaN``, and a ``NaN`` alignment metric selects nothing.
+    """
+    with pytest.raises(ValueError, match=r"^eps must be finite"):
+        UniqueAssigner(topk=7, eps=0.0)
