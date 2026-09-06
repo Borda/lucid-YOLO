@@ -316,7 +316,12 @@ def test_toy_convergence_mu_moves_toward_ground_truth() -> None:
         last_loss = float(loss_fn(mu_hat, sigma_raw, mu_gt, visibility))
 
     assert last_loss < first_loss
-    assert torch.allclose(mu_hat.detach(), mu_gt, atol=0.5)
+    # atol measured, not guessed: 50 Adam steps land ``mu_hat`` 0.064 from the target at
+    # seed 0, and within 0.040-0.098 over seeds 0-4 (the flow's Linear init is the only
+    # thing the seed moves here). 0.15 leaves ~50% headroom over the worst of that sweep
+    # while still rejecting a residual that converges to the wrong point -- the previous
+    # 0.5 was 5-12x the real spread and would have passed a quarter-unit offset bug.
+    assert torch.allclose(mu_hat.detach(), mu_gt, atol=0.15)
 
 
 class TestCouplingScaleBound:

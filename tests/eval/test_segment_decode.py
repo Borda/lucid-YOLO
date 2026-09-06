@@ -298,8 +298,8 @@ def test_recovered_mask_and_box_agree_on_the_original_grid() -> None:
     The gate against the silent failure mode: if ``masks_to_original`` derived
     its scale or padding independently of the box inverse, every bbox score would
     stay right while every segm score drifted by the difference. Both are pushed
-    through their own inverse here and the mask's bounding box must land within
-    one pixel per side of the mapped box.
+    through their own inverse here and the mask's bounding box must land on the
+    mapped box exactly, not merely near it.
     """
     letterbox = Letterbox(64)
     box = torch.tensor([12.0, 20.0, 44.0, 46.0])
@@ -313,4 +313,10 @@ def test_recovered_mask_and_box_agree_on_the_original_grid() -> None:
     rows = recovered.any(dim=1).nonzero().flatten()
     cols = recovered.any(dim=0).nonzero().flatten()
     mask_box = torch.tensor([cols[0], rows[0], cols[-1] + 1, rows[-1] + 1], dtype=torch.float32)
-    assert torch.allclose(mask_box, mapped_box, atol=1.0), f"mask box {mask_box} vs detection box {mapped_box}"
+    # atol measured, not guessed: this fixture is fully deterministic (no RNG anywhere in
+    # it) and the two boxes agree to 0.0 on all four sides -- 48x96 into a 64-canvas is an
+    # exact 2/3 with an exact 16-row pad, so the inverse lands on integers rather than
+    # between pixels. The former atol=1.0 therefore bought nothing but a blind spot: it
+    # accepted a whole-pixel shift per side, which is precisely the silent segm-only drift
+    # the docstring above names. 1e-4 absorbs float noise on the division and nothing else.
+    assert torch.allclose(mask_box, mapped_box, atol=1e-4), f"mask box {mask_box} vs detection box {mapped_box}"

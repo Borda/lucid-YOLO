@@ -404,17 +404,29 @@ class TestDownloadCoco:
             )
 
     def test_skips_extracted_split_without_network(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A split whose sentinel directory already exists is not re-fetched.
+        """A split whose sentinel directory already exists is returned as found, not re-fetched.
 
-        ``urlopen`` is monkeypatched to raise on any call, so this test fails loudly
-        if the sentinel check is ever bypassed -- re-running a download on a complete
-        root must be free, not merely idempotent.
+        ``urlopen`` is monkeypatched to raise on any call, so a bypassed sentinel
+        check fails loudly -- re-running a download on a complete root must be free,
+        not merely idempotent. Returning without raising is not on its own the
+        contract, though: a skip path that cleared the split before returning, or
+        that handed back some path other than ``data_root``, would also raise
+        nothing. So the pre-existing member file is written with content the archive
+        would never produce and asserted byte-identical afterwards, and the returned
+        path is compared to the root that went in.
         """
         root = tmp_path / "coco"
-        (root / "val2017").mkdir(parents=True)
+        split = root / "val2017"
+        split.mkdir(parents=True)
+        local = split / "000000000000.jpg"  # the name the archive itself extracts
+        local.write_bytes(b"local copy, not from the archive")
+
         monkeypatch.setattr(urllib.request, "urlopen", _raise_if_called)
-        # Must not raise: sentinel present, no download attempted.
-        dl.download_coco(root, ["val"], annotations=False, progress=False)
+        returned = dl.download_coco(root, ["val"], annotations=False, progress=False)
+
+        assert returned == root
+        assert local.read_bytes() == b"local copy, not from the archive"  # left as found
+        assert not (root / "val2017.zip").exists()  # nothing fetched or left behind
 
     def test_force_redownloads(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """``force=True`` re-fetches a split even though its sentinel already exists.

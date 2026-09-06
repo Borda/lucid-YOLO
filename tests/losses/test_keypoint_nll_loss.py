@@ -281,7 +281,12 @@ def test_toy_convergence_mu_moves_toward_ground_truth() -> None:
         last_loss = float(loss_fn(mu_hat, sigma_raw, mu_gt, visibility))
 
     assert last_loss < first_loss
-    assert torch.allclose(mu_hat.detach(), mu_gt, atol=0.5)
+    # atol measured, not guessed: 50 Adam steps land ``mu_hat`` 0.0413 from the target,
+    # and identically so for seeds 0-4 -- this control holds no parameters, so unlike the
+    # RLE case the endpoint does not move with the seed at all. 0.06 leaves ~45% headroom
+    # for cross-platform float drift while still rejecting a residual that converges to
+    # the wrong point; the previous 0.5 was 12x the measured error.
+    assert torch.allclose(mu_hat.detach(), mu_gt, atol=0.06)
 
 
 class TestUnlabeledPointsReachNoGradient:

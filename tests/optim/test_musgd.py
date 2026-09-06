@@ -47,6 +47,18 @@ def _param_with_grad(*shape: int) -> torch.nn.Parameter:
 def _expected_muon_update(nesterov_grad: torch.Tensor, ns_steps: int) -> torch.Tensor:
     """Recompute the Muon branch by hand: scaled orthogonalization of the 2D view.
 
+    "By hand" is bounded, and the boundary is deliberate. The reshape to a 2D view and
+    the ``0.2 * sqrt(max(rows, cols))`` scale are re-derived here, so the assertions
+    below genuinely check what ``_matrix_update`` does with them; the Newton-Schulz
+    iteration itself is delegated to :func:`orthogonalize`, which makes that one factor
+    a comparison of the code against itself. It is left that way on purpose. Re-deriving
+    a five-step quintic iteration in the test would duplicate the algorithm rather than
+    check it, and a hand-copy that drifts from the production one is a false failure
+    waiting to happen; meanwhile ``orthogonalize`` carries thirteen tests of its own,
+    including orthogonality against known singular vectors, so it is verified elsewhere
+    rather than assumed here. The parts this helper could get wrong are the parts it
+    computes.
+
     Examples:
         >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
         <torch._C.Generator object at ...>
