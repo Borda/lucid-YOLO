@@ -33,15 +33,16 @@ from planted import (
     NUM_CLASSES,
     PLANTED_LABEL,
     PRESENT_LOGIT,
-    ltrb_from_anchor,
+    SUPERSEDED_SEAM,
+    plant_detection,
     write_checkpoint,
 )
 
-from lucid_yolo.assign.grid import HEAD_STRIDES, make_anchor_points
+from lucid_yolo.assign.grid import make_anchor_points
 from lucid_yolo.cli import predict as predict_cli
 from lucid_yolo.decode.nms_path import NMSDecoder
 from lucid_yolo.decode.topk_e2e import TopKDecoder
-from lucid_yolo.models.heads.detect import DualHeadOutput
+from lucid_yolo.models.heads.detect import BranchName, BranchOutput, DualHeadOutput
 from lucid_yolo.predict import (
     _TASK_ENTRY_POINTS,
     DECODE_PATHS,
@@ -61,9 +62,16 @@ class _PlantedDetectionModule(DetectionLitModule):
 
     Subclasses the real module rather than faking one, so ``task`` is genuinely the
     module's own property and :func:`~lucid_yolo.predict.predict_image` reads it the way
-    it reads a checkpoint's. Only :meth:`forward` is replaced: the untrained backbone
-    would answer with noise, and what is under test is the geometry between the file on
-    disk and the returned coordinates, not what a network saw.
+    it reads a checkpoint's. The replaced method is
+    :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward_branch`, which is the seam
+    that entry point calls; the untrained backbone would answer with noise, and what is
+    under test is the geometry between the file on disk and the returned coordinates, not
+    what a network saw.
+
+    The superseded dual-branch :meth:`forward` is made to raise rather than left planting
+    outputs nobody reads. A stub that kept answering on the old seam would simply stop
+    being consulted, and the assertions below would pass against head noise while proving
+    nothing -- see :data:`~planted.SUPERSEDED_SEAM`.
 
     Args:
         canvas_box: The ``xyxy`` box, in letterboxed-canvas pixels, the single planted
@@ -83,18 +91,19 @@ class _PlantedDetectionModule(DetectionLitModule):
         self._label = int(label)
         self._num_classes = int(num_classes)
 
+    def forward_branch(self, images: Tensor, branch: BranchName) -> BranchOutput:
+        """Emit one confident anchor decoding to the planted box, on whichever branch is asked."""
+        # Both decode paths are meant to select the same detection here, so the plant does
+        # not vary by branch; which branch was requested is proved by the suites that do
+        # vary it (segmentation's coefficients, keypoints' point sets).
+        del branch
+        grid = plant_detection(images, self._canvas_box, self._label, self._num_classes)
+        return BranchOutput(cls=grid.cls, box=grid.box)
+
     def forward(self, images: Tensor) -> DualHeadOutput:
-        """Emit one confident anchor on both branches, decoding to the planted box."""
-        batch, _, height, width = images.shape
-        points, strides = make_anchor_points([(height // s, width // s) for s in HEAD_STRIDES], list(HEAD_STRIDES))
-        x1, y1, x2, y2 = self._canvas_box
-        centre = torch.tensor([(x1 + x2) / 2, (y1 + y2) / 2])
-        anchor = int((points - centre).pow(2).sum(dim=-1).argmin())
-        cls_logits = torch.full((batch, points.shape[0], self._num_classes), ABSENT_LOGIT)
-        cls_logits[:, anchor, self._label] = PRESENT_LOGIT
-        raw_ltrb = torch.zeros(batch, points.shape[0], 4)
-        raw_ltrb[:, anchor] = ltrb_from_anchor(self._canvas_box, points[anchor], strides[anchor])
-        return DualHeadOutput(o2m_cls=cls_logits, o2m_box=raw_ltrb, o2o_cls=cls_logits, o2o_box=raw_ltrb)
+        """Refuse the superseded dual-branch seam, loudly."""
+        del images
+        raise AssertionError(SUPERSEDED_SEAM)
 
 
 @pytest.mark.parametrize("decoder", [pytest.param(path, id=path) for path in DECODE_PATHS])

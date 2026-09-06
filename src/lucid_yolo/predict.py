@@ -114,7 +114,7 @@ if TYPE_CHECKING:
 
     from torch import Tensor
 
-    from lucid_yolo.models.heads.detect import DualHeadOutput
+    from lucid_yolo.models.heads.detect import BranchName, BranchOutput
     from lucid_yolo.ptl.module import DetectionLitModule
 
 __all__ = [
@@ -268,6 +268,32 @@ def _check_predict_arguments(decoder: DecodePath, conf_threshold: float, img_siz
     require_grid_side("img_size", img_size)
 
 
+def _branch_for(decoder: DecodePath) -> BranchName:
+    """Return the head branch the named decode path reads.
+
+    The one place that states the pairing, so the four entry points cannot disagree about
+    it: the top-k path reads the one-to-one branch and the suppression path the dense one,
+    which is what every decode helper below already assumed field by field. Stating it once
+    is what lets the module run a single branch — the other one used to be computed and
+    dropped.
+
+    The ``== "e2e"`` test and the one-to-many fallback are deliberately the same shape the
+    decode helpers use, and :func:`_check_predict_arguments` has already rejected anything
+    that is neither, so the fallback here is reached only by a genuine ``"nms"``.
+
+    Args:
+        decoder: The decode path, already validated.
+
+    Returns:
+        The name of the branch that path's decoder reads.
+
+    Examples:
+        >>> _branch_for("e2e"), _branch_for("nms")
+        ('o2o', 'o2m')
+    """
+    return "o2o" if decoder == "e2e" else "o2m"
+
+
 def predict_image(
     module: DetectionLitModule,
     image: Path,
@@ -323,19 +349,20 @@ def predict_image(
 
     module.to(run_on).eval()
     with torch.no_grad():
-        head_out = module(batch)
+        # One branch, not both: the decode below reads a single branch's logits and boxes,
+        # and running the other one's stems only to drop them is the cost this asks the
+        # module not to pay.
+        branch_out = module.forward_branch(batch, _branch_for(decoder))
     anchor_points, strides = anchor_grid(canvas, run_on)
     if decoder == "e2e":
-        detections = TopKDecoder()(head_out.o2o_cls, head_out.o2o_box, anchor_points, strides)
+        detections = TopKDecoder()(branch_out.cls, branch_out.box, anchor_points, strides)
     else:
         # Only this path is given the threshold: it decides what enters suppression, and
         # a box the threshold drops could only ever have been suppressed anyway, so the
         # survivor set is unchanged and the sort is cheaper. The top-k path's own
         # threshold merely zeroes scores that the filter below drops regardless, so
         # handing it the number too would state the same cut in two places.
-        detections = NMSDecoder(conf_threshold=conf_threshold)(
-            head_out.o2m_cls, head_out.o2m_box, anchor_points, strides
-        )
+        detections = NMSDecoder(conf_threshold=conf_threshold)(branch_out.cls, branch_out.box, anchor_points, strides)
     mapped = to_letterboxed_original(
         detections.cpu(), orig_size=orig_size, letterboxed_size=canvas, allow_upscale=letterbox.allow_upscale
     )
@@ -445,10 +472,14 @@ def predict_segmentation(
         # whose `forward` hides it. This function has already dispatched on the
         # checkpoint's own task, so a wrapper here would be a second spelling of a
         # composition that deliberately exists once.
-        segmented = module.forward_segmentation(batch)
+        #
+        # The branch-limited twin, because Eq. 7 reads one branch's coefficients: the other
+        # branch's coefficient stem is the widest of the optional ones, and it used to be
+        # computed here and dropped.
+        branch_out, prototypes = module.forward_segmentation_branch(batch, _branch_for(decoder))
     anchor_points, strides = anchor_grid(canvas, run_on)
     detections, anchor_index, coefficients = _decode_with_coefficients(
-        segmented.detect, decoder, conf_threshold, anchor_points, strides
+        branch_out, decoder, conf_threshold, anchor_points, strides
     )
 
     # One selection, applied to the boxes and to the indices the coefficients are gathered
@@ -457,7 +488,7 @@ def predict_segmentation(
     # threshold, and letting one through would gather some real anchor's coefficients.
     keep = (detections[0, :, SCORE_COLUMN] > conf_threshold) & (anchor_index[0] >= 0)
     kept = detections[0][keep]
-    canvas_masks = _canvas_masks(segmented.prototypes, coefficients[0], anchor_index[0][keep], kept, canvas)
+    canvas_masks = _canvas_masks(prototypes, coefficients[0], anchor_index[0][keep], kept, canvas)
     mapped = to_letterboxed_original(
         kept.unsqueeze(0).cpu(), orig_size=orig_size, letterboxed_size=canvas, allow_upscale=letterbox.allow_upscale
     )
@@ -468,7 +499,7 @@ def predict_segmentation(
 
 
 def _decode_with_coefficients(
-    head_out: DualHeadOutput,
+    branch_out: BranchOutput,
     decoder: DecodePath,
     conf_threshold: float,
     anchor_points: Tensor,
@@ -476,25 +507,30 @@ def _decode_with_coefficients(
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Decode the selected path and return its detections, anchor indices and coefficients.
 
-    The three come from one branch and must keep coming from one branch: the one-to-one
-    coefficients are what the E2E decode reads and the dense ones are what the
-    suppression path reads, so pairing either decoder's rows with the other branch's
-    coefficients yields a plausible mask of a different object. Choosing all three in one
-    place is what makes that pairing unrepresentable rather than merely unlikely.
+    The three still come from one branch, but the branch is chosen upstream rather than
+    here: :func:`_branch_for` names it once and the module runs only that half, so what
+    arrives is a single :class:`~lucid_yolo.models.heads.detect.BranchOutput` with no
+    second branch to pair against. That is a stronger guarantee than the field-by-field
+    discipline this function used to keep — a plausible mask of a *different* object is
+    now unrepresentable because the other branch's coefficients were never computed, not
+    merely because three reads were written to agree.
+
+    ``decoder`` still selects the *decoder*, which is a separate choice from the branch:
+    the two paths rank and suppress differently, and only the second is given the
+    threshold.
     """
     if decoder == "e2e":
         detections, anchor_index = TopKDecoder().decode_with_indices(
-            head_out.o2o_cls, head_out.o2o_box, anchor_points, strides
+            branch_out.cls, branch_out.box, anchor_points, strides
         )
-        coefficients = head_out.o2o_coeff
     else:
         # Only this path is given the threshold, for the reason `predict_image` states:
         # it decides what enters suppression, and the top-k path's own threshold would
         # merely zero scores the survivor filter drops regardless.
         detections, anchor_index = NMSDecoder(conf_threshold=conf_threshold).decode_with_indices(
-            head_out.o2m_cls, head_out.o2m_box, anchor_points, strides
+            branch_out.cls, branch_out.box, anchor_points, strides
         )
-        coefficients = head_out.o2m_coeff
+    coefficients = branch_out.coeff
     if coefficients is None:
         raise ValueError(
             f"this checkpoint's task is {_SEGMENT_TASK!r} but its head emits no mask coefficients on the "
@@ -620,9 +656,11 @@ def predict_oriented(
 
     module.to(run_on).eval()
     with torch.no_grad():
-        head_out = module(batch)
+        # One branch, not both: R1 Eq. 13's heading is read from the branch the selected
+        # decoder ranks, and the other branch's angle stem used to run and be dropped.
+        branch_out = module.forward_branch(batch, _branch_for(decoder))
     anchor_points, strides = anchor_grid(canvas, run_on)
-    detections = _decode_oriented(head_out, decoder, conf_threshold, anchor_points, strides)
+    detections = _decode_oriented(branch_out, decoder, conf_threshold, anchor_points, strides)
     mapped = rboxes_to_letterboxed_original(
         detections.cpu(), orig_size=orig_size, letterboxed_size=canvas, allow_upscale=letterbox.allow_upscale
     )
@@ -631,7 +669,7 @@ def predict_oriented(
 
 
 def _decode_oriented(
-    head_out: DualHeadOutput,
+    branch_out: BranchOutput,
     decoder: DecodePath,
     conf_threshold: float,
     anchor_points: Tensor,
@@ -639,12 +677,14 @@ def _decode_oriented(
 ) -> Tensor:
     """Decode the selected oriented path into the fixed-size A45 batch it emits.
 
-    The oriented analogue of :func:`_decode_with_coefficients`, and it exists for the same
-    reason: the class logits, the ltrb distances and the **angles** have to come from one
-    branch, and choosing all three in one place is what makes a mismatched trio
-    unrepresentable rather than merely unlikely. Reading the one-to-one heading beside the
-    dense branch's boxes would answer with a correct-looking rectangle at a heading no
-    part of the model predicted for it.
+    The oriented analogue of :func:`_decode_with_coefficients`, and the branch discipline
+    it used to enforce field by field is now structural: :func:`_branch_for` names the
+    branch upstream and the module runs only that half, so the class logits, the ltrb
+    distances and the **angles** arrive as one
+    :class:`~lucid_yolo.models.heads.detect.BranchOutput` and cannot be mixed. Reading the
+    one-to-one heading beside the dense branch's boxes — a correct-looking rectangle at a
+    heading no part of the model predicted for it — is unrepresentable here rather than
+    merely guarded against.
 
     The two paths are not two spellings of one thing. ``e2e`` ranks and suppresses
     nothing, which is R1's claim for the one-to-one branch; ``nms`` is the dense branch's
@@ -655,7 +695,7 @@ def _decode_oriented(
     survivor filter drops regardless.
     """
     o2o = decoder == ORIENTED_DECODE_PATH
-    angles = head_out.o2o_angle if o2o else head_out.o2m_angle
+    angles = branch_out.angle
     if angles is None:
         branch = ORIENTED_DECODE_PATH if o2o else "one-to-many"
         raise ValueError(
@@ -664,12 +704,12 @@ def _decode_oriented(
             f"built without the orientation stems and cannot produce a heading."
         )
     if o2o:
-        rboxes = decode_rboxes(head_out.o2o_box, angles, anchor_points, strides)
-        return o2o_rotated_topk(head_out.o2o_cls, rboxes)
+        rboxes = decode_rboxes(branch_out.box, angles, anchor_points, strides)
+        return o2o_rotated_topk(branch_out.cls, rboxes)
     # Annotated rather than returned inline: `nn.Module.__call__` is typed `Any`, and
     # returning it straight would silently widen this function's contract to `Any` too.
     suppressed: Tensor = RotatedNMSDecoder(conf_threshold=conf_threshold)(
-        head_out.o2m_cls, head_out.o2m_box, angles, anchor_points, strides
+        branch_out.cls, branch_out.box, angles, anchor_points, strides
     )
     return suppressed
 
@@ -794,10 +834,12 @@ def predict_keypoints(
 
     module.to(run_on).eval()
     with torch.no_grad():
-        head_out = module(batch)
+        # One branch, not both: the pose is gathered from the branch the selected decoder
+        # ranked, and the other branch's point and sigma stems used to run and be dropped.
+        branch_out = module.forward_branch(batch, _branch_for(decoder))
     anchor_points, strides = anchor_grid(canvas, run_on)
     detections, anchor_index, raw_points = _decode_with_points(
-        head_out, decoder, conf_threshold, anchor_points, strides
+        branch_out, decoder, conf_threshold, anchor_points, strides
     )
 
     # One selection for the boxes and for the indices the points are gathered by, so the
@@ -823,7 +865,7 @@ def predict_keypoints(
 
 
 def _decode_with_points(
-    head_out: DualHeadOutput,
+    branch_out: BranchOutput,
     decoder: DecodePath,
     conf_threshold: float,
     anchor_points: Tensor,
@@ -831,22 +873,21 @@ def _decode_with_points(
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Decode the selected path and return its detections, anchor indices and raw points.
 
-    :func:`_decode_with_coefficients` for the point stem, and the same rule holds: the
-    three come from one branch and must keep coming from one branch, since pairing
-    either decoder's rows with the other branch's points yields a plausible pose of a
-    different object. Choosing all three in one place makes that pairing unrepresentable
-    rather than merely unlikely.
+    :func:`_decode_with_coefficients` for the point stem, and the same rule holds in the
+    same stronger form: the branch is chosen upstream by :func:`_branch_for`, so the three
+    arrive as one :class:`~lucid_yolo.models.heads.detect.BranchOutput` and a plausible
+    pose of a *different* object cannot be assembled here — the other branch's points were
+    never computed.
     """
     if decoder == "e2e":
         detections, anchor_index = TopKDecoder().decode_with_indices(
-            head_out.o2o_cls, head_out.o2o_box, anchor_points, strides
+            branch_out.cls, branch_out.box, anchor_points, strides
         )
-        raw_points = head_out.o2o_keypoints
     else:
         detections, anchor_index = NMSDecoder(conf_threshold=conf_threshold).decode_with_indices(
-            head_out.o2m_cls, head_out.o2m_box, anchor_points, strides
+            branch_out.cls, branch_out.box, anchor_points, strides
         )
-        raw_points = head_out.o2m_keypoints
+    raw_points = branch_out.keypoints
     if raw_points is None:
         raise ValueError(
             f"this checkpoint's task is {_KEYPOINTS_TASK!r} but its head emits no points on the "

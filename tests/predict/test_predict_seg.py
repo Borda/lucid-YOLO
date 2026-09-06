@@ -53,14 +53,14 @@ from planted import (
     ORIGINAL_SIZE,
     PLANTED_LABEL,
     PRESENT_LOGIT,
-    ltrb_from_anchor,
+    SUPERSEDED_SEAM,
+    plant_detection,
     write_checkpoint,
 )
 
-from lucid_yolo.assign.grid import HEAD_STRIDES, make_anchor_points
 from lucid_yolo.cli import predict as predict_cli
 from lucid_yolo.models.build import SegmentOutput
-from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS, DualHeadOutput
+from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS, BranchName, BranchOutput
 from lucid_yolo.predict import predict_image, predict_segmentation
 from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -87,14 +87,17 @@ class _PlantedSegmentationModule(DetectionLitModule):
 
     Subclasses the real module for the reason the detection stub does — ``task`` is then
     genuinely the module's own property, read exactly as it would be read off a
-    checkpoint — and replaces only :meth:`forward_segmentation`, which is the entry point
-    :func:`~lucid_yolo.predict.predict_segmentation` calls. The untrained backbone would
-    answer with noise, and what is under test is the geometry between the file on disk
-    and the returned mask, not what a network saw.
+    checkpoint — and replaces only
+    :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward_segmentation_branch`, which
+    is the entry point :func:`~lucid_yolo.predict.predict_segmentation` calls. The
+    untrained backbone would answer with noise, and what is under test is the geometry
+    between the file on disk and the returned mask, not what a network saw. The superseded
+    :meth:`forward_segmentation` raises -- see :data:`~planted.SUPERSEDED_SEAM`.
 
     Both branches carry the same box, so the two decode paths select the same detection;
     they carry **different** mask coefficients, so each path's mask reveals which
-    branch's coefficients it actually read.
+    branch's coefficients it actually read. That asymmetry now also proves the branch
+    argument reaches the plant: asking for the wrong branch returns the other path's mask.
 
     Args:
         canvas_box: The ``xyxy`` box, in letterboxed-canvas pixels, the single planted
@@ -112,34 +115,25 @@ class _PlantedSegmentationModule(DetectionLitModule):
         self._canvas_box = tuple(float(value) for value in canvas_box)
         self._label = int(label)
 
-    def forward_segmentation(self, images: Tensor) -> SegmentOutput:
-        """Emit one confident anchor per branch, each pointing at its own prototype."""
+    def forward_segmentation_branch(self, images: Tensor, branch: BranchName) -> tuple[BranchOutput, Tensor]:
+        """Emit one confident anchor pointing at the requested branch's own prototype."""
         batch, _, height, width = images.shape
-        points, strides = make_anchor_points([(height // s, width // s) for s in HEAD_STRIDES], list(HEAD_STRIDES))
-        x1, y1, x2, y2 = self._canvas_box
-        centre = torch.tensor([(x1 + x2) / 2, (y1 + y2) / 2])
-        anchor = int((points - centre).pow(2).sum(dim=-1).argmin())
-
-        cls_logits = torch.full((batch, points.shape[0], NUM_CLASSES), ABSENT_LOGIT)
-        cls_logits[:, anchor, self._label] = PRESENT_LOGIT
-        raw_ltrb = torch.zeros(batch, points.shape[0], 4)
-        raw_ltrb[:, anchor] = ltrb_from_anchor(self._canvas_box, points[anchor], strides[anchor])
+        grid = plant_detection(images, self._canvas_box, self._label)
         # A one-hot coefficient vector makes the Eq. 7 combination select a single
         # prototype unchanged, so the mask that comes back is the rectangle planted below.
-        o2o_coeff = torch.zeros(batch, points.shape[0], DEFAULT_NUM_COEFFS)
-        o2m_coeff = torch.zeros(batch, points.shape[0], DEFAULT_NUM_COEFFS)
-        o2o_coeff[:, anchor, 0] = 1.0
-        o2m_coeff[:, anchor, 1] = 1.0
-
-        detect = DualHeadOutput(
-            o2m_cls=cls_logits,
-            o2m_box=raw_ltrb,
-            o2o_cls=cls_logits,
-            o2o_box=raw_ltrb,
-            o2m_coeff=o2m_coeff,
-            o2o_coeff=o2o_coeff,
+        # Prototype 0 belongs to the one-to-one branch and prototype 1 to the dense one,
+        # which is what lets each decode path's mask name the branch it read.
+        coefficients = torch.zeros(batch, grid.points.shape[0], DEFAULT_NUM_COEFFS)
+        coefficients[:, grid.anchor, 0 if branch == "o2o" else 1] = 1.0
+        return (
+            BranchOutput(cls=grid.cls, box=grid.box, coeff=coefficients),
+            _planted_prototypes(batch, height, width),
         )
-        return SegmentOutput(detect=detect, prototypes=_planted_prototypes(batch, height, width), semantic=None)
+
+    def forward_segmentation(self, images: Tensor) -> SegmentOutput:
+        """Refuse the superseded dual-branch seam, loudly."""
+        del images
+        raise AssertionError(SUPERSEDED_SEAM)
 
 
 def _planted_prototypes(batch: int, height: int, width: int) -> Tensor:

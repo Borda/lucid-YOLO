@@ -25,16 +25,32 @@ deliberately not an importable package (see ``tests/conftest.py``), and the sibl
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
 
+from lucid_yolo.assign.grid import HEAD_STRIDES, make_anchor_points
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from torch import Tensor
+
+#: Raised by the stub modules' superseded ``forward``/``forward_segmentation``.
+#:
+#: The four suites plant their outputs on the seam the entry points call. When that seam
+#: moved to :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward_branch`, a stub that
+#: kept planting on ``forward`` would have stopped being consulted at all: the real,
+#: untrained head would answer with noise and every geometry assertion would go on passing
+#: while testing nothing. Making the *old* seam raise is what turns that silent failure
+#: into a loud one, in both directions — if an entry point ever regresses to calling
+#: ``forward``, these suites fail immediately instead of quietly asserting against noise.
+SUPERSEDED_SEAM = (
+    "this stub plants its outputs on the branch-limited seam; reaching the dual-branch "
+    "forward means the caller bypassed it and the assertions would be meaningless"
+)
 
 #: Original image size ``(height, width)``: not square, so the letterbox pad is
 #: one-sided and a pad-blind inverse cannot survive by accident.
@@ -105,6 +121,74 @@ def ltrb_from_anchor(box: tuple[float, ...], centre: Tensor, stride: Tensor) -> 
             (y2 - centre[1]) / stride,
         )
     )
+
+
+@dataclass(frozen=True)
+class PlantedGrid:
+    """One planted detection and the anchor grid it was planted on.
+
+    Attributes:
+        cls: Class logits ``(B, A, num_classes)``, saturated present at the planted
+            anchor's own class and saturated absent everywhere else.
+        box: Raw ltrb distances ``(B, A, 4)``, zero except at the planted anchor.
+        points: The anchor centres ``(A, 2)`` in canvas pixels.
+        strides: Each anchor's level stride ``(A, 1)``.
+        anchor: Index of the anchor the detection was planted on, so a caller can plant
+            its own extra stems -- coefficients, angles, points -- at the same row.
+
+    Examples:
+        >>> import torch
+        >>> grid = plant_detection(torch.zeros(1, 3, 64, 64), (8.0, 24.0, 40.0, 48.0), label=1)
+        >>> grid.cls.shape, grid.box.shape
+        (torch.Size([1, 84, 2]), torch.Size([1, 84, 4]))
+    """
+
+    cls: Tensor
+    box: Tensor
+    points: Tensor
+    strides: Tensor
+    anchor: int
+
+
+def plant_detection(
+    images: Tensor, canvas_box: tuple[float, ...], label: int, num_classes: int = NUM_CLASSES
+) -> PlantedGrid:
+    """Plant one confident detection at ``canvas_box`` on the grid ``images`` implies.
+
+    The arithmetic every stub module in these suites needs before it can add its own
+    stems, in one place rather than four: build the anchor grid, find the anchor nearest
+    the box's centre, saturate that anchor's class logit and give it the ltrb distances
+    that decode back to the box. Four copies of this stayed correct only by coincidence,
+    and each was free to drift from the box the shared assertions are written against.
+
+    Args:
+        images: The input batch, read only for its shape.
+        canvas_box: Target ``xyxy`` box in letterboxed-canvas pixels.
+        label: Class index the planted detection carries.
+        num_classes: Class count the stub head reports over. Defaults to
+            :data:`NUM_CLASSES`.
+
+    Returns:
+        A :class:`PlantedGrid` holding the logits, the distances, the grid and the index
+        of the anchor everything was planted on.
+
+    Examples:
+        >>> import torch
+        >>> grid = plant_detection(torch.zeros(1, 3, 64, 64), (8.0, 24.0, 40.0, 48.0), label=1)
+        >>> bool(grid.cls[0, grid.anchor, 1] == PRESENT_LOGIT)
+        True
+    """
+    batch, _, height, width = images.shape
+    points, strides = make_anchor_points([(height // s, width // s) for s in HEAD_STRIDES], list(HEAD_STRIDES))
+    x1, y1, x2, y2 = canvas_box
+    centre = torch.tensor([(x1 + x2) / 2, (y1 + y2) / 2])
+    anchor = int((points - centre).pow(2).sum(dim=-1).argmin())
+
+    cls_logits = torch.full((batch, points.shape[0], num_classes), ABSENT_LOGIT)
+    cls_logits[:, anchor, int(label)] = PRESENT_LOGIT
+    raw_ltrb = torch.zeros(batch, points.shape[0], 4)
+    raw_ltrb[:, anchor] = ltrb_from_anchor(tuple(float(v) for v in canvas_box), points[anchor], strides[anchor])
+    return PlantedGrid(cls=cls_logits, box=raw_ltrb, points=points, strides=strides, anchor=anchor)
 
 
 def write_checkpoint(task: str, path: Path) -> Path:

@@ -34,18 +34,16 @@ from typing import TYPE_CHECKING, ClassVar
 import pytest
 import torch
 from planted import (
-    ABSENT_LOGIT,
     CANVAS_BOX,
     EXPECTED_ORIGINAL_BOX,
     IMG_SIZE,
     NUM_CLASSES,
     PLANTED_LABEL,
-    PRESENT_LOGIT,
-    ltrb_from_anchor,
+    SUPERSEDED_SEAM,
+    plant_detection,
 )
 
-from lucid_yolo.assign.grid import HEAD_STRIDES, make_anchor_points
-from lucid_yolo.models.heads.detect import DualHeadOutput
+from lucid_yolo.models.heads.detect import BranchName, BranchOutput, DualHeadOutput
 from lucid_yolo.predict import DECODE_PATHS, predict_keypoints
 from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -148,14 +146,18 @@ class _PlantedKeypointModule(DetectionLitModule):
 
     Subclasses the real module for the reason the detection and segmentation stubs do —
     ``task`` is then genuinely the module's own property, read exactly as it would be read
-    off a checkpoint — and replaces only :meth:`forward`, which is the entry point
-    :func:`~lucid_yolo.predict.predict_keypoints` calls. The untrained backbone would
+    off a checkpoint — and replaces only
+    :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward_branch`, which is the entry
+    point :func:`~lucid_yolo.predict.predict_keypoints` calls. The untrained backbone would
     answer with noise, and what is under test is the geometry between the file on disk and
-    the returned joint coordinates, not what a network saw.
+    the returned joint coordinates, not what a network saw. The superseded dual-branch
+    :meth:`forward` raises -- see :data:`~planted.SUPERSEDED_SEAM`.
 
     Both branches carry the same box, so the two decode paths select the same detection;
     they carry **different** point sets, so each path's pose reveals which branch's stem it
-    actually read. Every anchor other than the selected one and the decoy carries a zero
+    actually read. That asymmetry is now doing double duty: it is also what proves the
+    branch argument reaches the plant, since asking for the wrong branch returns the other
+    path's pose. Every anchor other than the selected one and the decoy carries a zero
     offset, which decodes to that anchor's own centre.
 
     Args:
@@ -184,29 +186,23 @@ class _PlantedKeypointModule(DetectionLitModule):
         self._label = int(label)
         self._with_points = bool(with_points)
 
-    def forward(self, images: Tensor) -> DualHeadOutput:
-        """Emit one confident anchor on both branches, each carrying its own point set."""
-        batch, _, height, width = images.shape
-        points, strides = make_anchor_points([(height // s, width // s) for s in HEAD_STRIDES], list(HEAD_STRIDES))
-        x1, y1, x2, y2 = self._canvas_box
-        centre = torch.tensor([(x1 + x2) / 2, (y1 + y2) / 2])
-        anchor = int((points - centre).pow(2).sum(dim=-1).argmin())
-
-        cls_logits = torch.full((batch, points.shape[0], NUM_CLASSES), ABSENT_LOGIT)
-        cls_logits[:, anchor, self._label] = PRESENT_LOGIT
-        raw_ltrb = torch.zeros(batch, points.shape[0], 4)
-        raw_ltrb[:, anchor] = ltrb_from_anchor(self._canvas_box, points[anchor], strides[anchor])
-        branch_points = {
-            path: self._raw_branch_points(batch, points, strides, anchor, path) for path in _CANVAS_KEYPOINTS
-        }
-        return DualHeadOutput(
-            o2m_cls=cls_logits,
-            o2m_box=raw_ltrb,
-            o2o_cls=cls_logits,
-            o2o_box=raw_ltrb,
-            o2m_keypoints=branch_points["nms"] if self._with_points else None,
-            o2o_keypoints=branch_points["e2e"] if self._with_points else None,
+    def forward_branch(self, images: Tensor, branch: BranchName) -> BranchOutput:
+        """Emit one confident anchor carrying the requested branch's own point set."""
+        batch = int(images.shape[0])
+        grid = plant_detection(images, self._canvas_box, self._label)
+        # The branch names and the decode-path names are two spellings of one pairing, and
+        # `_CANVAS_KEYPOINTS` is keyed by the path. The top-k path reads the one-to-one
+        # branch, so that is the point set this returns for it.
+        path = "e2e" if branch == "o2o" else "nms"
+        raw_points = (
+            self._raw_branch_points(batch, grid.points, grid.strides, grid.anchor, path) if self._with_points else None
         )
+        return BranchOutput(cls=grid.cls, box=grid.box, keypoints=raw_points)
+
+    def forward(self, images: Tensor) -> DualHeadOutput:
+        """Refuse the superseded dual-branch seam, loudly."""
+        del images
+        raise AssertionError(SUPERSEDED_SEAM)
 
     @staticmethod
     def _raw_branch_points(batch: int, points: Tensor, strides: Tensor, anchor: int, path: str) -> Tensor:

@@ -79,15 +79,19 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Literal, cast
 
 import torch
 from torch import Tensor, nn
 
 from lucid_yolo.models.blocks import ConvBNAct, DepthwiseConv
+from lucid_yolo.validate import require_one_of
 
 __all__ = [
+    "BRANCH_NAMES",
     "CLS_PRIOR_PROB",
     "DEFAULT_NUM_COEFFS",
+    "BranchName",
     "BranchOutput",
     "DualDetectionHead",
     "DualHeadOutput",
@@ -462,6 +466,17 @@ def _flatten_level(feature_map: Tensor) -> Tensor:
     return feature_map.flatten(2).transpose(1, 2)
 
 
+#: The two branches a caller can ask :class:`DualDetectionHead` for by name. Spelled as a
+#: ``Literal`` beside a runtime tuple for the same reason
+#: :data:`~lucid_yolo.predict.DECODE_PATHS` is: the ``Literal`` protects statically-checked
+#: callers, and the tuple is what :func:`~lucid_yolo.validate.require_one_of` checks the
+#: ones that are not against. A branch name is the kind of argument whose violation is
+#: otherwise silent -- ``"O2O"`` or a typo would fall through an ``if``/``else`` to the
+#: *other* branch and answer with a plausible tensor nothing marks as wrong.
+BranchName = Literal["o2o", "o2m"]
+BRANCH_NAMES: tuple[BranchName, ...] = ("o2o", "o2m")
+
+
 @dataclass(frozen=True)
 class BranchOutput:
     """Dense predictions of a single detection branch.
@@ -786,6 +801,51 @@ class DualDetectionHead(nn.Module):
             num_keypoints=num_keypoints,
         )
 
+    def forward_branch(self, features: tuple[Tensor, Tensor, Tensor], branch: BranchName) -> BranchOutput:
+        """Run **one** named branch over the neck features.
+
+        :meth:`forward` runs both because training needs both: the one-to-many branch
+        supplies the dense assignment's targets and the one-to-one branch the E2E ones.
+        Inference does not. Every decode path reads exactly one branch -- the top-k path
+        the one-to-one, the suppression path the one-to-many -- and the other branch's
+        stems are computed, materialized and then dropped. This is the seam that lets a
+        caller ask for only the half it will read.
+
+        ``branch`` is validated rather than dispatched on directly, because its violation
+        is otherwise silent: a bare ``if branch == "o2o"`` maps ``"O2O"``, ``"o2o "`` or a
+        typo onto the *other* branch and returns a well-shaped tensor that no downstream
+        check can recognise as the wrong one.
+
+        Args:
+            features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32, with
+                channel counts matching the constructor's ``in_channels``.
+            branch: Which branch to run, one of :data:`BRANCH_NAMES`.
+
+        Returns:
+            That branch's :class:`BranchOutput`: dense class logits, raw ltrb distances,
+            and whichever of the optional coefficient, angle and keypoint tensors the
+            head was built with.
+
+        Raises:
+            ValueError: If ``branch`` is not one of :data:`BRANCH_NAMES`.
+
+        Examples:
+            >>> import torch
+            >>> head = DualDetectionHead((8, 16, 32), num_classes=3).eval()
+            >>> maps = (torch.zeros(1, 8, 4, 4), torch.zeros(1, 16, 2, 2), torch.zeros(1, 32, 1, 1))
+            >>> with torch.no_grad():
+            ...     one_to_one = head.forward_branch(maps, "o2o")
+            >>> one_to_one.cls.shape  # 4*4 + 2*2 + 1*1 anchors, 3 classes
+            torch.Size([1, 21, 3])
+            >>> head.forward_branch(maps, "O2O")
+            Traceback (most recent call last):
+                ...
+            ValueError: branch must be one of ('o2o', 'o2m'); got 'O2O'
+        """
+        require_one_of("branch", branch, BRANCH_NAMES)
+        selected = self.o2o if branch == "o2o" else self.o2m
+        return cast("BranchOutput", selected(features))
+
     def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> DualHeadOutput:
         """Run both branches over the neck features.
 
@@ -799,8 +859,8 @@ class DualDetectionHead(nn.Module):
             coefficients, raw orientation angles, and raw point-coordinate and
             uncertainty tensors, for both branches.
         """
-        o2m: BranchOutput = self.o2m(features)
-        o2o: BranchOutput = self.o2o(features)
+        o2m = self.forward_branch(features, "o2m")
+        o2o = self.forward_branch(features, "o2o")
         return DualHeadOutput(
             o2m_cls=o2m.cls,
             o2m_box=o2m.box,

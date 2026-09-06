@@ -196,7 +196,13 @@ from lucid_yolo.losses.progressive import ProgressiveLossSchedule
 from lucid_yolo.losses.rle_loss import RLELoss
 from lucid_yolo.losses.semantic_loss import semantic_aux_loss
 from lucid_yolo.models.build import SegmentOutput, build_detection_stages, build_segmentation_stages
-from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS, DualHeadOutput, decode_ltrb
+from lucid_yolo.models.heads.detect import (
+    DEFAULT_NUM_COEFFS,
+    BranchName,
+    BranchOutput,
+    DualHeadOutput,
+    decode_ltrb,
+)
 from lucid_yolo.models.heads.keypoint import decode_keypoints
 from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.heads.proto import assemble_masks
@@ -1119,6 +1125,92 @@ class DetectionLitModule(LightningModule):
         detect = cast("DualHeadOutput", self.head(features))
         fused: Tensor = self.proto_fusion(features)
         return SegmentOutput(detect=detect, prototypes=self.protonet(fused), semantic=self.semantic(fused))
+
+    def forward_branch(self, images: Tensor, branch: BranchName) -> BranchOutput:
+        """Run the backbone, neck, and **one** head branch over an image batch.
+
+        :meth:`forward` returns both branches because training reads both. Every
+        inference decode reads exactly one: the top-k path the one-to-one branch, the
+        suppression path the one-to-many. Called through :meth:`forward`, the other
+        branch's stems run over all three levels and their outputs are discarded, so this
+        is the entry point for a caller that already knows which half it will read.
+
+        The composition is deliberately the same three calls :meth:`forward` makes, with
+        only the head's own branch selection narrowed -- the backbone and neck are shared
+        by both branches and are not run twice or run differently here.
+
+        Args:
+            images: Input batch of shape ``(B, 3, H, W)`` with ``H`` and ``W``
+                divisible by 32.
+            branch: Which head branch to run, one of
+                :data:`~lucid_yolo.models.heads.detect.BRANCH_NAMES`.
+
+        Returns:
+            That branch's
+            :class:`~lucid_yolo.models.heads.detect.BranchOutput` dense predictions.
+
+        Raises:
+            ValueError: If ``branch`` is not a known branch name.
+
+        Examples:
+            >>> import torch
+            >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4).eval()
+            >>> with torch.no_grad():
+            ...     one_to_one = module.forward_branch(torch.zeros(1, 3, 160, 160), "o2o")
+            >>> one_to_one.cls.shape[-1]
+            4
+        """
+        return self.head.forward_branch(self.neck(self.backbone(images)), branch)
+
+    def forward_segmentation_branch(self, images: Tensor, branch: BranchName) -> tuple[BranchOutput, Tensor]:
+        """Run **one** head branch and the prototype maps over an image batch.
+
+        The branch-limited twin of :meth:`forward_segmentation`, and the mask side's
+        reason for existing is the same as the detection side's: Eq. 7 reads the
+        coefficients of the branch its decoder read, never both.
+
+        Two things are dropped rather than returned. The other branch's stems -- including
+        its coefficient stem, which is the widest of the optional ones -- are never run.
+        The auxiliary semantic head is not run either: it is training-only (A17) and
+        already returns ``None`` in eval mode, so a caller decoding masks has nothing to
+        read from it. What remains is exactly the pair Eq. 7 multiplies.
+
+        Args:
+            images: Input batch of shape ``(B, 3, H, W)`` with ``H`` and ``W``
+                divisible by 32.
+            branch: Which head branch to run, one of
+                :data:`~lucid_yolo.models.heads.detect.BRANCH_NAMES`.
+
+        Returns:
+            A ``(branch_output, prototypes)`` pair: that branch's dense predictions, and
+            the raw prototype maps ``(B, num_coeffs, H/4, W/4)``.
+
+        Raises:
+            ValueError: If this module's task is not ``"segment"`` -- the mask branches
+                are only built for that task, so any other task has no prototypes to
+                return; or if ``branch`` is not a known branch name.
+
+        Examples:
+            >>> import torch
+            >>> module = DetectionLitModule(
+            ...     depth=0.34, width=0.25, max_channels=256, num_classes=4, task="segment"
+            ... ).eval()
+            >>> with torch.no_grad():
+            ...     one_to_one, prototypes = module.forward_segmentation_branch(torch.zeros(1, 3, 64, 64), "o2o")
+            >>> prototypes.shape  # twice the P3 grid (A15): 64 / 8 * 2
+            torch.Size([1, 32, 16, 16])
+            >>> one_to_one.coeff.shape[-1]
+            32
+        """
+        if self._task != "segment":
+            raise ValueError(
+                f"forward_segmentation_branch requires task='segment'; this module's task is {self._task!r}"
+            )
+        features: tuple[Tensor, Tensor, Tensor] = self.neck(self.backbone(images))
+        detect = self.head.forward_branch(features, branch)
+        fused: Tensor = self.proto_fusion(features)
+        prototypes: Tensor = self.protonet(fused)
+        return detect, prototypes
 
     def training_step(self, batch: StepBatch, batch_idx: int) -> Tensor:
         """Run one training step under automatic optimization (D4).

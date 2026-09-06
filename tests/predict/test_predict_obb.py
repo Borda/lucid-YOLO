@@ -44,15 +44,14 @@ from planted import (
     IMG_SIZE,
     NUM_CLASSES,
     PLANTED_LABEL,
-    PRESENT_LOGIT,
-    ltrb_from_anchor,
+    SUPERSEDED_SEAM,
+    plant_detection,
     write_checkpoint,
 )
 
-from lucid_yolo.assign.grid import HEAD_STRIDES, make_anchor_points
 from lucid_yolo.cli import predict as predict_cli
 from lucid_yolo.cli.eval import DEFAULT_IMG_SIZE
-from lucid_yolo.models.heads.detect import DualHeadOutput
+from lucid_yolo.models.heads.detect import BranchName, BranchOutput, DualHeadOutput
 from lucid_yolo.predict import DEFAULT_ORIENTED_IMG_SIZE, DecodePath, predict_oriented
 from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -79,10 +78,13 @@ class _PlantedOrientedModule(DetectionLitModule):
 
     Subclasses the real module for the reason its two siblings do — ``task`` is then
     genuinely the module's own property, read exactly as it would be read off a checkpoint
-    — and replaces only :meth:`forward`, which is what
+    — and replaces only
+    :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward_branch`, which is what
     :func:`~lucid_yolo.predict.predict_oriented` calls. The untrained backbone would
     answer with noise, and what is under test is the geometry between the file on disk and
-    the returned tuple, not what a network saw.
+    the returned tuple, not what a network saw. The superseded dual-branch :meth:`forward`
+    raises, so a caller that regresses to it fails instead of quietly asserting against
+    that noise -- see :data:`~planted.SUPERSEDED_SEAM`.
 
     The box is planted through its **axis-aligned envelope**, because that is the shape the
     head actually regresses: :func:`~lucid_yolo.models.heads.obb.decode_rboxes` decodes
@@ -110,33 +112,27 @@ class _PlantedOrientedModule(DetectionLitModule):
         self._extents = (float(extents[0]), float(extents[1]))
         self._raw_theta = float(raw_theta)
 
-    def forward(self, images: Tensor) -> DualHeadOutput:
-        """Emit one confident anchor on both branches, decoding to the planted rotated box."""
-        batch, _, height, width = images.shape
-        points, strides = make_anchor_points([(height // s, width // s) for s in HEAD_STRIDES], list(HEAD_STRIDES))
+    def forward_branch(self, images: Tensor, branch: BranchName) -> BranchOutput:
+        """Emit one confident anchor decoding to the planted rotated box, on the asked branch."""
+        # Both branches carry the same rotated box and the same heading: this suite's
+        # subject is the decode and the letterbox inverse, not which branch supplied them.
+        del branch
         centre_x, centre_y = self._centre
         half_w, half_h = self._extents[0] / 2, self._extents[1] / 2
         envelope = (centre_x - half_w, centre_y - half_h, centre_x + half_w, centre_y + half_h)
-        anchor = int((points - torch.tensor([centre_x, centre_y])).pow(2).sum(dim=-1).argmin())
+        grid = plant_detection(images, envelope, PLANTED_LABEL)
+        angles = torch.zeros_like(grid.box[..., :1])
+        angles[:, grid.anchor, 0] = self._raw_theta
+        return BranchOutput(cls=grid.cls, box=grid.box, angle=angles)
 
-        cls_logits = torch.full((batch, points.shape[0], NUM_CLASSES), ABSENT_LOGIT)
-        cls_logits[:, anchor, PLANTED_LABEL] = PRESENT_LOGIT
-        raw_ltrb = torch.zeros(batch, points.shape[0], 4)
-        raw_ltrb[:, anchor] = ltrb_from_anchor(envelope, points[anchor], strides[anchor])
-        angles = torch.zeros(batch, points.shape[0], 1)
-        angles[:, anchor, 0] = self._raw_theta
-        return DualHeadOutput(
-            o2m_cls=cls_logits,
-            o2m_box=raw_ltrb,
-            o2o_cls=cls_logits,
-            o2o_box=raw_ltrb,
-            o2m_angle=angles,
-            o2o_angle=angles,
-        )
+    def forward(self, images: Tensor) -> DualHeadOutput:
+        """Refuse the superseded dual-branch seam, loudly."""
+        del images
+        raise AssertionError(SUPERSEDED_SEAM)
 
 
 class _AngleFreeOrientedModule(DetectionLitModule):
-    """An ``obb`` module whose forward returns no angles at all.
+    """An ``obb`` module whose branch output carries no angles at all.
 
     Unreachable from a checkpoint this project builds — an ``obb`` head always builds both
     orientation stems — and constructible here, which is the only way to prove the guard
@@ -150,13 +146,19 @@ class _AngleFreeOrientedModule(DetectionLitModule):
     def __init__(self) -> None:
         super().__init__(depth=0.34, width=0.25, max_channels=64, num_classes=NUM_CLASSES, task="obb")
 
-    def forward(self, images: Tensor) -> DualHeadOutput:
+    def forward_branch(self, images: Tensor, branch: BranchName) -> BranchOutput:
         """Emit the detection outputs of an oriented head that has lost its angle stems."""
-        batch, _, height, width = images.shape
-        points, _ = make_anchor_points([(height // s, width // s) for s in HEAD_STRIDES], list(HEAD_STRIDES))
-        cls_logits = torch.full((batch, points.shape[0], NUM_CLASSES), ABSENT_LOGIT)
-        raw_ltrb = torch.zeros(batch, points.shape[0], 4)
-        return DualHeadOutput(o2m_cls=cls_logits, o2m_box=raw_ltrb, o2o_cls=cls_logits, o2o_box=raw_ltrb)
+        del branch
+        # Nothing is planted. This stub exists only to reach the missing-angle guard, which
+        # fires before a single logit is read, so "absent everywhere" — the shape of a head
+        # that detected nothing — is the honest content for it to carry.
+        grid = plant_detection(images, CANVAS_RBOX_CENTRE + CANVAS_RBOX_EXTENTS, PLANTED_LABEL)
+        return BranchOutput(cls=torch.full_like(grid.cls, ABSENT_LOGIT), box=torch.zeros_like(grid.box))
+
+    def forward(self, images: Tensor) -> DualHeadOutput:
+        """Refuse the superseded dual-branch seam, loudly."""
+        del images
+        raise AssertionError(SUPERSEDED_SEAM)
 
 
 @pytest.mark.parametrize(
