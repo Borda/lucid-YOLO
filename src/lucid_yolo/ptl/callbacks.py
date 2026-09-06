@@ -158,7 +158,7 @@ class EMACallback(Callback):
     A shadow copy of the module's floating-point parameters **and** buffers (batch-norm
     running statistics included; integer buffers such as ``num_batches_tracked`` are left
     out — they carry no meaningful average) is created on :meth:`on_fit_start` on the
-    module's device. After each optimizer step (:meth:`on_train_batch_end`, honoring
+    module's device. After each *optimizer step* (:meth:`on_train_batch_end`, honoring
     ``update_every``) the shadow is blended toward the live weights under
     :func:`torch.no_grad` with a *warmup-ramped* decay
 
@@ -173,6 +173,28 @@ class EMACallback(Callback):
     checkpointed via :meth:`state_dict`/:meth:`load_state_dict`, so a save/resume round
     trip continues the same average rather than restarting it.
 
+    **Cadence is optimizer steps, not batches.** ``update_every`` and ``tau`` are both
+    counted in optimizer steps, so ``accumulate_grad_batches > 1`` does not multiply the
+    number of blends: :meth:`on_train_batch_end` blends only on a batch that actually
+    advanced ``trainer.global_step``, which under accumulation is the last batch of each
+    accumulation window. That hook rather than ``on_before_zero_grad`` because Lightning
+    calls the latter at the *start* of an accumulation window, before that window's
+    ``training_step`` — it would blend pre-step weights and never see the state left by the
+    final optimizer step of a run.
+
+    **Callback ordering.** The weight swap is deliberately hook-scoped, not run-scoped, so
+    it does not depend on how Lightning happens to order the callback list: the shadow is
+    installed in :meth:`on_validation_start` and taken out again in
+    :meth:`on_validation_end` (and in :meth:`on_exception`, so a failed validation cannot
+    leave EMA weights wearing the live model's identity). Checkpoints written by
+    :class:`~pytorch_lightning.callbacks.ModelCheckpoint` therefore hold the *raw* trained
+    weights in ``state_dict``, with the EMA available separately under this callback's
+    ``state_dict`` — the split :func:`~lucid_yolo.eval.checkpoint.load_checkpoint_model`
+    relies on when it overlays the shadow on request. ``ModelCheckpoint`` saves from
+    ``on_validation_end`` too, and Lightning moves it to the end of the callback list, so
+    within a single validation the restore runs first; the two facts are recorded together
+    because only the second is Lightning's to change.
+
     The exact ``decay``/``tau`` constants are unpublished in the source papers; the
     defaults are the conventional YOLO-lineage values and are documented here as a small,
     self-contained assumption (D4 names EMA explicitly, so no ``ASSUMPTIONS.md`` row is
@@ -181,10 +203,10 @@ class EMACallback(Callback):
     Args:
         decay: Nominal per-update decay the warmup ramp relaxes toward. Must be in
             ``[0, 1)``. Defaults to ``0.9999``.
-        tau: Warmup time constant (in updates) of the decay ramp; larger values ramp in
-            more slowly. Must be positive. Defaults to ``2000``.
-        update_every: Refresh the shadow every ``update_every`` optimizer steps. Must be
-            at least ``1``. Defaults to ``1``.
+        tau: Warmup time constant (in updates, and so in optimizer steps) of the decay
+            ramp; larger values ramp in more slowly. Must be positive. Defaults to ``2000``.
+        update_every: Refresh the shadow every ``update_every`` optimizer steps — not every
+            ``update_every`` batches. Must be at least ``1``. Defaults to ``1``.
 
     Raises:
         ValueError: If ``decay`` is outside ``[0, 1)``, ``tau`` is not positive, or
@@ -221,7 +243,13 @@ class EMACallback(Callback):
         self._shadow: dict[str, Tensor] | None = None
         self._backup: dict[str, Tensor] | None = None
         self._num_updates = 0
-        self._batches_seen = 0
+        self._steps_seen = 0
+        #: ``trainer.global_step`` as of the last batch this callback looked at, so a batch
+        #: that did not advance the optimizer (an accumulation window's non-final batch) is
+        #: told apart from one that did. Re-seeded from the trainer at every
+        #: :meth:`on_train_start`, which on resume already carries the restored step count,
+        #: so it is derived rather than checkpointed.
+        self._last_global_step = 0
 
     def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Create (or, on resume, relocate) the shadow on the module's device.
@@ -240,6 +268,16 @@ class EMACallback(Callback):
             self._shadow = {name: tensor.detach().clone() for name, tensor in self._ema_tensors(pl_module)}
         self._shadow = {name: tensor.to(device) for name, tensor in self._shadow.items()}
 
+    def on_train_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Seed the optimizer-step watermark from the trainer, so a resume does not double-count.
+
+        Args:
+            trainer: The active trainer, read for its ``global_step``.
+            pl_module: The module being trained (unused; part of the hook signature).
+        """
+        del pl_module
+        self._last_global_step = trainer.global_step
+
     def on_train_batch_end(
         self,
         trainer: Trainer,
@@ -248,20 +286,30 @@ class EMACallback(Callback):
         batch: Any,
         batch_idx: int,
     ) -> None:
-        """Blend the shadow toward the live weights, honoring ``update_every``.
+        """Blend the shadow toward the live weights once per optimizer step.
+
+        A batch that did not advance ``trainer.global_step`` — every batch of an
+        ``accumulate_grad_batches`` window but its last — leaves the shadow untouched, so
+        ``update_every`` and the ``tau`` ramp are counted in optimizer steps as documented
+        rather than in batches. By this hook the step has already been applied, so the
+        blend reads post-step weights.
 
         Args:
-            trainer: The active trainer (unused; part of the hook signature).
+            trainer: The active trainer, read for its ``global_step``.
             pl_module: The module whose weights are shadowed.
             outputs: The step outputs (unused; part of the hook signature).
             batch: The batch just processed (unused; part of the hook signature).
             batch_idx: Index of the batch within the epoch (unused).
         """
-        del trainer, outputs, batch, batch_idx
+        del outputs, batch, batch_idx
         if self._shadow is None:
             return
-        self._batches_seen += 1
-        if self._batches_seen % self.update_every != 0:
+        global_step = trainer.global_step
+        if global_step == self._last_global_step:
+            return
+        self._last_global_step = global_step
+        self._steps_seen += 1
+        if self._steps_seen % self.update_every != 0:
             return
         self._num_updates += 1
         decay = self._decay_at(self._num_updates)
@@ -292,6 +340,33 @@ class EMACallback(Callback):
             pl_module: The module to restore the live weights into.
         """
         del trainer
+        self._restore_live_weights(pl_module)
+
+    def on_exception(self, trainer: Trainer, pl_module: LightningModule, exception: BaseException) -> None:
+        """Take the shadow back out of the module when a run dies mid-validation.
+
+        Without this the swap of :meth:`on_validation_start` is undone only by the normal
+        completion path, so an exception raised inside the validation loop propagates with
+        the EMA weights still installed under the raw model's identity — anything the
+        failure handler then inspects, saves or resumes from would be the shadow rather
+        than the trained weights. Restoration is idempotent, so the ordinary path running
+        first (or this hook firing outside validation) is harmless.
+
+        Args:
+            trainer: The active trainer (unused; part of the hook signature).
+            pl_module: The module to restore the live weights into.
+            exception: The exception being propagated (unused; part of the hook signature).
+        """
+        del trainer, exception
+        self._restore_live_weights(pl_module)
+
+    def _restore_live_weights(self, pl_module: LightningModule) -> None:
+        """Copy the stashed live weights back into ``pl_module`` and drop the stash.
+
+        A no-op when no backup is held, which is what makes it safe to call from both the
+        normal and the exceptional path; clearing the backup afterwards is what makes a
+        second call a no-op rather than a re-restore of stale weights.
+        """
         if self._backup is None:
             return
         with torch.no_grad():
@@ -304,18 +379,23 @@ class EMACallback(Callback):
 
         Returns:
             A dict with the ``shadow`` tensor mapping (or ``None`` before ``on_fit_start``)
-            and the ``num_updates`` / ``batches_seen`` counters. The shadow tensors are
+            and the ``num_updates`` / ``steps_seen`` counters. The shadow tensors are
             cloned so a checkpoint captures the snapshot at call time, not a later state.
         """
         shadow = None if self._shadow is None else {name: tensor.clone() for name, tensor in self._shadow.items()}
         return {
             "shadow": shadow,
             "num_updates": self._num_updates,
-            "batches_seen": self._batches_seen,
+            "steps_seen": self._steps_seen,
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Restore the shadow and update counters from a checkpoint.
+
+        A checkpoint written before the cadence was fixed to optimizer steps carries the
+        counter under ``batches_seen``; it is read as the ``update_every`` phase it in fact
+        was, so resuming such a run continues rather than restarts. The two counts differ
+        only when that run used ``accumulate_grad_batches > 1``.
 
         Args:
             state_dict: A mapping produced by :meth:`state_dict`.
@@ -323,7 +403,8 @@ class EMACallback(Callback):
         shadow = state_dict.get("shadow")
         self._shadow = None if shadow is None else {name: tensor.clone() for name, tensor in shadow.items()}
         self._num_updates = int(state_dict.get("num_updates", 0))
-        self._batches_seen = int(state_dict.get("batches_seen", 0))
+        legacy_steps = state_dict.get("batches_seen", 0)
+        self._steps_seen = int(state_dict.get("steps_seen", legacy_steps))
 
     def _decay_at(self, step: int) -> float:
         """Return the warmup-ramped decay ``decay * (1 - exp(-step / tau))`` at ``step``."""

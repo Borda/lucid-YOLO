@@ -99,6 +99,18 @@ Two differences from the COCO tiers, forced by the data rather than chosen:
 
 `lucid-eval` picks the rotated protocol from the checkpoint's own task, and with it the 1024 px letterbox and batch 8; an explicit `--img_size` or `--batch_size` still wins.
 
+## 🖥️ Oriented and keypoint runs are single-device
+
+`lucid-yolo fit` refuses `task: obb` and `task: keypoints` on more than one process, and says so at setup rather than partway through the first validation. Their epoch metrics — `val/rotated_mAP` and `val/oks_mAP` — accumulate plain Python lists that nothing gathers, so each rank would score its own shard and log it as the split's number. Average precision ranks every detection of the split against every other by confidence, so per-rank values cannot be averaged back into the right one; a wrong number that looks plausible is worse than a refusal. Leave `trainer.devices` at `1` for these two tasks, or pick a bigger accelerator rather than more of them. Detection and segmentation are unaffected: their metrics are torchmetrics metrics and synchronise across ranks.
+
+## 🔐 What `--checkpoint` will deserialize
+
+Every command above reads its checkpoint through one loader, and that loader reads the file twice in a fixed order. The first read is restricted — `torch.load(..., weights_only=True)` — and refuses anything the file names outside torch's allowlist while the pickle stream is still being parsed, so a checkpoint carrying an arbitrary reducer is rejected before that reducer runs. Only a file that survives that read is handed to Lightning.
+
+The order is what makes this a policy rather than a hope. `weights_only` reached Lightning's `load_from_checkpoint` in 2.6.0, and this project's floor is `pytorch-lightning>=2.4`; below 2.6 the argument is absorbed as a hyper-parameter override and changes nothing about how the file is read. So the restriction cannot be stated at that call on every supported install — but it can be stated at the first read, on all of them.
+
+Two consequences before pointing `--checkpoint` at a file someone else produced. A checkpoint whose `hyper_parameters` or callback state carries a non-tensor object is refused rather than loaded, which is the same refusal a hostile file gets: the reader cannot tell the two apart, and does not guess. And a file swapped between the two reads is checked in its first form and loaded in its second — the gate is a check on the file, not a lock on it.
+
 ## 📁 A YOLO-format root instead of COCO's
 
 Every tier above works unchanged against a YOLO-format root — no dedicated config, just three overrides on `det_nano_smoke.yaml`:

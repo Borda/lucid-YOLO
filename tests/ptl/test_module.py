@@ -21,7 +21,7 @@ Batches are synthetic tensors plus hand-built :class:`~lucid_yolo.data.targets.T
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -42,6 +42,9 @@ if TYPE_CHECKING:
 
 #: Class count of the tiny test head.
 _NUM_CLASSES = 4
+#: Point count for the keypoint modules the distributed guard test builds. Small and
+#: arbitrary: the guard fires on the task name, so the schema only has to be valid.
+_GUARD_NUM_KEYPOINTS = 3
 #: Square input side; divisible by every stride for an integer anchor grid.
 _IMG_SIZE = 160
 #: Images per synthetic batch.
@@ -65,8 +68,12 @@ def reset_random_seeds() -> Iterator[None]:
     yield
 
 
-def _tiny_module(task: str = "detect") -> DetectionLitModule:
+def _tiny_module(task: str = "detect", **kwargs: Any) -> DetectionLitModule:
     """Build an n-scale module with a low channel cap for fast CPU tests.
+
+    ``kwargs`` reaches the constructor untouched, for the task-specific arguments a few
+    tasks require (``num_keypoints`` for ``"keypoints"``, which has no default because the
+    point count is the dataset's property rather than the model's).
 
     Examples:
         >>> module = _tiny_module()
@@ -74,8 +81,10 @@ def _tiny_module(task: str = "detect") -> DetectionLitModule:
         'detect'
         >>> _tiny_module(task="segment").task
         'segment'
+        >>> _tiny_module(task="keypoints", num_keypoints=3).task
+        'keypoints'
     """
-    return DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=_NUM_CLASSES, task=task)
+    return DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=_NUM_CLASSES, task=task, **kwargs)
 
 
 def _synthetic_targets(num_boxes: int) -> Targets:
@@ -419,3 +428,73 @@ def test_validation_ground_truth_matches_the_per_target_transfer() -> None:
     for entry, target in zip(recorded[0], targets, strict=True):
         assert torch.equal(entry["boxes"], target.boxes.cpu())
         assert torch.equal(entry["labels"], target.labels.cpu())
+
+
+def _guarded_module(task: str) -> DetectionLitModule:
+    """Build a tiny module for any of the four tasks, filling in the keypoint schema.
+
+    Examples:
+        >>> _guarded_module("keypoints").task
+        'keypoints'
+    """
+    extra = {"num_keypoints": _GUARD_NUM_KEYPOINTS} if task == "keypoints" else {}
+    return _tiny_module(task=task, **extra)
+
+
+class TestDistributedValidationGuard:
+    """Tasks whose epoch metric accumulates rank-local lists refuse to run multi-process.
+
+    ``val/rotated_mAP`` and ``val/oks_mAP`` are scored off plain Python lists that nothing
+    gathers, so on more than one process each rank would score its own shard and log it as
+    the split's metric (audit A07/M-04). Average precision ranks every detection of the
+    split against every other by confidence, so per-rank values cannot be averaged back into
+    the right number — the run is refused at ``setup`` rather than allowed to log a
+    plausible wrong one. ``detect``/``segment`` use torchmetrics metrics, which synchronise.
+    """
+
+    @pytest.mark.parametrize("task", [pytest.param("obb", id="obb"), pytest.param("keypoints", id="keypoints")])
+    @pytest.mark.parametrize("stage", [pytest.param("fit", id="fit"), pytest.param("validate", id="validate")])
+    def test_rejects_multi_process_runs(self, task: str, stage: str) -> None:
+        """A two-process trainer is refused for both guarded tasks, naming the limitation.
+
+        Both ``fit`` and ``validate`` are checked: the metric is computed in the validation
+        epoch end either way, so guarding only the training entry point would leave
+        ``lucid-yolo validate`` free to produce the same rank-local number.
+        """
+        module = _guarded_module(task)
+        module._trainer = MagicMock(spec=Trainer, world_size=2)
+
+        with pytest.raises(RuntimeError, match="single-process only"):
+            module.setup(stage)
+
+    @pytest.mark.parametrize(
+        "task",
+        [
+            pytest.param("detect", id="detect"),
+            pytest.param("segment", id="segment"),
+            pytest.param("obb", id="obb"),
+            pytest.param("keypoints", id="keypoints"),
+        ],
+    )
+    def test_accepts_single_process_runs(self, task: str) -> None:
+        """Every task sets up normally on one process, so the guard costs accepted runs nothing."""
+        module = _guarded_module(task)
+        module._trainer = MagicMock(spec=Trainer, world_size=1)
+
+        module.setup("fit")
+
+    @pytest.mark.parametrize("task", [pytest.param("detect", id="detect"), pytest.param("segment", id="segment")])
+    def test_leaves_gathering_tasks_free_to_scale(self, task: str) -> None:
+        """A multi-process ``detect``/``segment`` run is untouched: torchmetrics gathers for it."""
+        module = _guarded_module(task)
+        module._trainer = MagicMock(spec=Trainer, world_size=4)
+
+        module.setup("fit")
+
+    @pytest.mark.parametrize("task", [pytest.param("obb", id="obb"), pytest.param("keypoints", id="keypoints")])
+    def test_predict_stage_is_exempt(self, task: str) -> None:
+        """Prediction runs no validation protocol, so it keeps the multi-process path open."""
+        module = _guarded_module(task)
+        module._trainer = MagicMock(spec=Trainer, world_size=2)
+
+        module.setup("predict")

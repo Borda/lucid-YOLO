@@ -22,6 +22,23 @@ module already mutated -- and an ambiguous key is refused rather than resolved b
 one wins". The shadow is also checked to cover every floating-point parameter and buffer
 *before* any copy happens: a partial shadow otherwise leaves the module half EMA and half
 raw, which is neither of the two claims a report can make, and leaves it that way silently.
+
+The two reads of one file are deliberate, and their **order** is the trust boundary. The
+restricted read comes first: ``torch.load(..., weights_only=True)`` refuses any global the
+file names outside torch's allowlist while it is still parsing the pickle stream, so a
+checkpoint carrying an arbitrary reducer is rejected before that reducer runs. Only a file
+that survived that read is handed to Lightning, whose own read is unrestricted on part of
+the supported range -- ``weights_only`` reached ``load_from_checkpoint`` in Lightning
+2.6.0, and ``pyproject.toml`` declares ``>=2.4``, where the argument is swallowed by
+``**kwargs`` as a hyper-parameter override and changes nothing about how the file is read.
+Passing it there would therefore *look* like a policy without being one on every version
+the project claims to support; the ordering is the policy, and it holds on all of them.
+
+The cost is that the file is deserialized twice (A03, L-46). Reading it once would mean
+building the module from the payload through Lightning's private ``_load_state``, the
+coupling to unsupported API that M-17 names elsewhere in this repository; two reads of a
+local file is the cheaper of those two prices. One gap is stated rather than closed: a file
+replaced between the reads is checked in its first form and loaded in its second.
 """
 
 from __future__ import annotations
@@ -33,7 +50,9 @@ import torch
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
+    from typing import Any
 
     from torch import Tensor
 
@@ -58,9 +77,14 @@ def load_eval_module(checkpoint: Path, *, use_ema: bool) -> tuple[DetectionLitMo
         The eval-mode module and a small provenance dict (checkpoint, epoch, step, EMA).
 
     Raises:
-        ValueError: If ``use_ema`` is requested and the checkpoint carries no EMA shadow,
-            names the EMA callback in more than one ``callbacks`` entry, or carries a
-            shadow that does not cover every floating-point parameter and buffer.
+        pickle.UnpicklingError: If the checkpoint names anything restricted loading refuses.
+            Raised by the first read, before any reducer the file carries is called and
+            before the file reaches Lightning -- see the module docstring on the ordering.
+        ValueError: If the checkpoint carries no ``epoch`` or ``global_step``, or -- under
+            ``use_ema`` -- no ``num_updates`` beside the shadow; and if ``use_ema`` is
+            requested and the checkpoint carries no EMA shadow, names the EMA callback in
+            more than one ``callbacks`` entry, or carries a shadow that does not cover
+            every floating-point parameter and buffer.
 
     Examples:
         >>> from pathlib import Path
@@ -68,21 +92,57 @@ def load_eval_module(checkpoint: Path, *, use_ema: bool) -> tuple[DetectionLitMo
         Traceback (most recent call last):
         FileNotFoundError: ...
     """
-    module = DetectionLitModule.load_from_checkpoint(checkpoint, map_location="cpu")
+    # Restricted first, unconditionally: this read is the gate, not a second opinion.
     payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    module = DetectionLitModule.load_from_checkpoint(checkpoint, map_location="cpu")
     info: dict[str, object] = {
         "checkpoint": str(checkpoint),
-        "epoch": int(payload["epoch"]),
-        "global_step": int(payload["global_step"]),
+        "epoch": _required_int(payload, "epoch", str(checkpoint)),
+        "global_step": _required_int(payload, "global_step", str(checkpoint)),
         "ema": use_ema,
     }
     if use_ema:
         # One resolution of the callback's key, used for both lookups: the shadow and the
         # counter that says how many updates produced it must come from the same entry.
         state_key = _overlay_ema(module, payload)
-        info["ema_updates"] = int(payload["callbacks"][state_key]["num_updates"])
+        entry = cast("Mapping[str, Any]", payload["callbacks"][state_key])
+        info["ema_updates"] = _required_int(entry, "num_updates", f"{checkpoint} callbacks entry {state_key!r}")
     module.eval()
     return module, info
+
+
+def _required_int(payload: Mapping[str, Any], key: str, where: str) -> int:
+    """Read ``key`` as an integer, or refuse naming the key, the file, and what is there.
+
+    Indexing the payload raw turns a truncated or hand-built checkpoint into ``KeyError:
+    'epoch'`` -- which names the dict lookup that failed and nothing an operator can act
+    on, on a path ``lucid-eval`` and ``lucid-predict`` surface directly.
+
+    Args:
+        payload: The checkpoint dict, or one entry inside it.
+        key: The key that must be present.
+        where: What to name in the refusal -- the checkpoint path, plus the entry when the
+            lookup is a nested one.
+
+    Returns:
+        The value at ``key``, as an ``int``.
+
+    Raises:
+        ValueError: If ``key`` is absent.
+
+    Examples:
+        >>> _required_int({"epoch": 3}, "epoch", "run.ckpt")
+        3
+        >>> _required_int({}, "epoch", "run.ckpt")
+        Traceback (most recent call last):
+        ValueError: run.ckpt carries no 'epoch'; it holds []...
+    """
+    if key not in payload:
+        raise ValueError(
+            f"{where} carries no {key!r}; it holds {sorted(payload)}. Every Lightning checkpoint is written "
+            f"with this key, so the file is truncated, hand-built, or not a checkpoint of this project."
+        )
+    return int(payload[key])
 
 
 def pick_device(requested: str) -> torch.device:

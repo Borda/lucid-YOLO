@@ -198,6 +198,28 @@ class DetectionCLI(LightningCLI):
         # step of a configured run instead of at the line that configured it.
         parser.link_arguments("model.task", "data.keypoint_targets", compute_fn=lambda task: task == "keypoints")
 
+    def _config_value(self, key: str, default: Any) -> Any:
+        """Read a top-level key out of the instantiated config, unwrapping the subcommand.
+
+        ``fit``/``validate``/``test``/``predict`` each nest the whole config one level deep
+        under the subcommand name, while a subcommand-less invocation does not; this reads
+        either shape. It stands in for :class:`~pytorch_lightning.cli.LightningCLI`'s own
+        private ``_get`` — same two lookups, but written against
+        :class:`jsonargparse.Namespace`'s public :meth:`~jsonargparse.Namespace.get`, so
+        the CLI's behaviour is not pinned to an undocumented method that any Lightning
+        release is free to rename or drop.
+
+        Args:
+            key: Top-level config key to read (e.g. ``"trainer"`` or ``"variant"``).
+            default: Value to return when the key is absent.
+
+        Returns:
+            The configured value, or ``default`` when the key is not set.
+        """
+        config = self.config_init
+        scoped = config if self.subcommand is None else config.get(self.subcommand, config)
+        return scoped.get(key, default)
+
     def _add_trainer_default_callback(self, callback: Callback) -> None:
         """Append ``callback`` to ``trainer_defaults["callbacks"]`` without replacing it.
 
@@ -247,8 +269,8 @@ class DetectionCLI(LightningCLI):
         Returns:
             The configured :class:`~pytorch_lightning.Trainer`.
         """
-        choice = str(self._get(self.config_init, "progress_bar", default=_DEFAULT_PROGRESS_BAR))
-        trainer_config = self._get(self.config_init, "trainer", default={})
+        choice = str(self._config_value("progress_bar", _DEFAULT_PROGRESS_BAR))
+        trainer_config = self._config_value("trainer", {})
         trainer_callbacks = trainer_config.get("callbacks") or []
         user_bar = any(isinstance(callback, ProgressBar) for callback in trainer_callbacks)
         if choice == "none":
@@ -258,7 +280,7 @@ class DetectionCLI(LightningCLI):
             self._add_trainer_default_callback(bar)
         user_checkpoint = any(isinstance(callback, ModelCheckpoint) for callback in trainer_callbacks)
         if not user_checkpoint:
-            variant = str(self._get(self.config_init, "variant", default=_DEFAULT_VARIANT))
+            variant = str(self._config_value("variant", _DEFAULT_VARIANT))
             self._add_trainer_default_callback(ModelCheckpoint(filename=_checkpoint_filename(self.model.task, variant)))
         if trainer_config.get("logger") in (None, True) and "logger" not in kwargs:
             kwargs["logger"] = _default_loggers(trainer_config.get("default_root_dir"))

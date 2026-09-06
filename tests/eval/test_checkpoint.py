@@ -32,7 +32,9 @@ The three claims under test:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import os
+import pickle
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import torch
@@ -42,10 +44,14 @@ from lucid_yolo.eval.checkpoint import available_devices, pick_device
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
     from torch import Tensor
+
+#: Epoch and step the built checkpoints carry, read back out of the provenance dict.
+_EPOCH = 3
+_GLOBAL_STEP = 120
 
 #: The value every shadow tensor is planted at: not a plausible initialization, so a
 #: tensor still holding its raw value after an overlay is visible rather than arguable.
@@ -145,6 +151,80 @@ def _float_snapshot(module: torch.nn.Module) -> dict[str, Tensor]:
     """
     named = [*module.named_parameters(), *module.named_buffers()]
     return {name: tensor.detach().clone() for name, tensor in named if tensor.is_floating_point()}
+
+
+def _checkpoint_dict(module: DetectionLitModule, **extra: object) -> dict[str, object]:
+    """Build the checkpoint dict Lightning writes, with ``extra`` keys added or replaced.
+
+    One statement of what a saved checkpoint looks like, so a test that plants something
+    unusual in one differs from the ordinary case by exactly the thing it planted — and a
+    test that *removes* a key removes it from a dict that was otherwise well-formed.
+
+    Args:
+        module: The module whose weights and hyper-parameters are saved.
+        **extra: Top-level entries added to the dict, replacing any key of the same name.
+
+    Returns:
+        A checkpoint dict ready for :func:`torch.save`.
+
+    Examples:
+        >>> checkpoint = _checkpoint_dict(_module(), epoch=7)
+        >>> checkpoint["epoch"]
+        7
+        >>> sorted(checkpoint)[:3]
+        ['callbacks', 'epoch', 'global_step']
+    """
+    payload: dict[str, object] = {
+        "state_dict": module.state_dict(),
+        "hyper_parameters": dict(module.hparams),
+        "epoch": _EPOCH,
+        "global_step": _GLOBAL_STEP,
+        "pytorch-lightning_version": "2.4.0",
+        "loops": {},
+        "callbacks": {},
+        "optimizer_states": [],
+        "lr_schedulers": [],
+    }
+    return payload | extra
+
+
+class _CreatesADirectoryWhenReconstructed:
+    """A harmless planted object whose *reconstruction* is visible on the filesystem.
+
+    Restricted loading refuses the ``os.makedirs`` global while reading the pickle stream,
+    before any reducer is called — so the directory existing afterwards is proof that the
+    file was deserialized without that restriction. Creating a directory under ``tmp_path``
+    is the mildest side effect that can be asserted on; what is under test is that *a*
+    reducer ran at all, not what this particular one does.
+    """
+
+    def __init__(self, marker: Path) -> None:
+        self._marker = marker
+
+    def __reduce__(self) -> tuple[Callable[[str], None], tuple[str]]:
+        """Reconstruct by creating ``marker`` — the observable stand-in for arbitrary code."""
+        return (os.makedirs, (str(self._marker),))
+
+
+@pytest.fixture
+def torch_defaults_to_unrestricted(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Present :func:`torch.load`'s pre-2.6 default, which the declared ``torch>=2.4`` floor permits.
+
+    Torch 2.6 changed the default of ``weights_only`` from ``False`` to ``True``. On any
+    supported install below that, an unpassed ``weights_only`` — and the explicit ``None``
+    Lightning forwards — still resolves to *unrestricted* loading. This shim reproduces
+    that one resolution and delegates everything else to the real function, which is what
+    makes the ordering of the two reads observable on a machine running a newer torch.
+    """
+    real_load = torch.load
+
+    def _pre_2_6_load(*args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("weights_only") is None:
+            kwargs["weights_only"] = False
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", _pre_2_6_load)
+    yield
 
 
 class TestOverlayEma:
@@ -277,29 +357,114 @@ class TestLoadEvalModuleWithEma:
         """
         module = _module()
         path = tmp_path / "ema.ckpt"
-        torch.save(
-            {
-                "state_dict": module.state_dict(),
-                "hyper_parameters": dict(module.hparams),
-                "epoch": 3,
-                "global_step": 120,
-                "pytorch-lightning_version": "2.4.0",
-                "loops": {},
-                "callbacks": {_PARAMETRIZED_KEY: {"shadow": _full_shadow(module), "num_updates": _NUM_UPDATES}},
-                "optimizer_states": [],
-                "lr_schedulers": [],
-            },
-            path,
-        )
+        callbacks = {_PARAMETRIZED_KEY: {"shadow": _full_shadow(module), "num_updates": _NUM_UPDATES}}
+        torch.save(_checkpoint_dict(module, callbacks=callbacks), path)
 
         loaded, info = loader.load_eval_module(path, use_ema=True)
 
         assert info["ema"] is True
         assert info["ema_updates"] == _NUM_UPDATES
-        assert info["epoch"] == 3
+        assert info["epoch"] == _EPOCH
         assert not loaded.training
         for name, tensor in _float_snapshot(loaded).items():
             assert bool((tensor == _SHADOW_VALUE).all()), f"{name} did not take the shadow"
+
+
+class TestCheckpointTrust:
+    """A checkpoint is refused when reading it would run code this loader did not choose."""
+
+    def test_a_disallowed_object_is_refused_before_its_reducer_runs(self, tmp_path: Path) -> None:
+        """A planted object that restricted loading rejects is never reconstructed.
+
+        The acceptance check for the trust boundary as it stands on the installed stack:
+        the checkpoint carries an object whose reconstruction creates a directory, and that
+        directory must not exist after the refusal. The exception alone would not settle
+        it — an error raised *after* the reducer ran is a compromise that reported itself.
+        """
+        marker = tmp_path / "reducer-ran"
+        path = tmp_path / "planted.ckpt"
+        torch.save(_checkpoint_dict(_module(), trust_probe=_CreatesADirectoryWhenReconstructed(marker)), path)
+
+        with pytest.raises(pickle.UnpicklingError):
+            loader.load_eval_module(path, use_ema=False)
+
+        assert not marker.exists(), "the planted reducer ran: the file reached unrestricted pickle"
+
+    @pytest.mark.usefixtures("torch_defaults_to_unrestricted")
+    def test_the_refusal_holds_where_torch_still_defaults_to_unrestricted_loading(self, tmp_path: Path) -> None:
+        """On the declared ``torch>=2.4`` floor the restricted read still happens first.
+
+        This is the case the installed torch hides. Below 2.6 an unpassed ``weights_only``
+        means unrestricted loading, and Lightning forwards ``None`` rather than deciding —
+        so a loader that hands the file to Lightning *first* runs the planted reducer and
+        only then raises from the read beside it, having already lost. Both orders raise;
+        the directory is the only thing that tells them apart.
+        """
+        marker = tmp_path / "reducer-ran"
+        path = tmp_path / "planted.ckpt"
+        torch.save(_checkpoint_dict(_module(), trust_probe=_CreatesADirectoryWhenReconstructed(marker)), path)
+
+        with pytest.raises(pickle.UnpicklingError):
+            loader.load_eval_module(path, use_ema=False)
+
+        assert not marker.exists(), "the planted reducer ran: the file reached unrestricted pickle"
+
+    def test_an_ordinary_checkpoint_still_loads_through_the_gate(self, tmp_path: Path) -> None:
+        """A checkpoint carrying nothing unusual loads and reports its provenance.
+
+        The half of the acceptance check a loader that refused everything would also pass.
+        ``lucid-eval`` reads every real checkpoint through this call, so the gate is only
+        worth having if the ordinary case is unchanged by it.
+        """
+        path = tmp_path / "plain.ckpt"
+        torch.save(_checkpoint_dict(_module()), path)
+
+        loaded, info = loader.load_eval_module(path, use_ema=False)
+
+        assert info == {"checkpoint": str(path), "epoch": _EPOCH, "global_step": _GLOBAL_STEP, "ema": False}
+        assert not loaded.training
+
+
+class TestMalformedCheckpointsAreNamed:
+    """A checkpoint missing a key the loader reads is named, not indexed into blindly."""
+
+    @pytest.mark.parametrize(
+        "missing",
+        [pytest.param("epoch", id="epoch"), pytest.param("global_step", id="global_step")],
+    )
+    def test_a_missing_provenance_key_names_itself_and_the_file(self, tmp_path: Path, missing: str) -> None:
+        """A checkpoint short of a provenance key raises ``ValueError`` naming it, not ``KeyError``.
+
+        ``lucid-eval`` and ``lucid-predict`` hand whatever this raises straight to an
+        operator. ``KeyError: 'epoch'`` names the dict lookup that failed and nothing about
+        which file is wrong or what to do about it, and it was outside the documented
+        ``Raises`` contract, which covered only the EMA refusals.
+        """
+        path = tmp_path / "truncated.ckpt"
+        checkpoint = _checkpoint_dict(_module())
+        del checkpoint[missing]
+        torch.save(checkpoint, path)
+
+        with pytest.raises(ValueError, match=f"carries no {missing!r}") as refusal:
+            loader.load_eval_module(path, use_ema=False)
+
+        assert str(path) in str(refusal.value)
+
+    def test_a_shadow_without_its_update_counter_names_the_entry(self, tmp_path: Path) -> None:
+        """An EMA entry carrying a shadow but no ``num_updates`` is named rather than raising ``KeyError``.
+
+        The counter is read out of the same entry the shadow came from, *after* the overlay
+        has been applied — the second half of the WP-174 failure shape: a checkpoint that
+        passes the overlay and then dies on a raw index, with the module already mutated.
+        """
+        module = _module()
+        path = tmp_path / "no-counter.ckpt"
+        torch.save(_checkpoint_dict(module, callbacks={_PARAMETRIZED_KEY: {"shadow": _full_shadow(module)}}), path)
+
+        with pytest.raises(ValueError, match="carries no 'num_updates'") as refusal:
+            loader.load_eval_module(path, use_ema=True)
+
+        assert _PARAMETRIZED_KEY in str(refusal.value)
 
 
 @pytest.fixture

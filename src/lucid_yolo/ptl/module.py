@@ -221,6 +221,13 @@ _STRIDES: tuple[int, int, int] = (8, 16, 32)
 #: and ``"keypoints"`` adds the WP-132 residual log-likelihood term.
 _TASKS: tuple[str, ...] = ("detect", "segment", "obb", "keypoints")
 
+#: Tasks whose epoch validation metric accumulates rank-local Python lists rather than a
+#: gathering :class:`~torchmetrics.Metric`, and which therefore refuse to run distributed
+#: (:meth:`DetectionLitModule.setup`). The list-based accumulators are documented where
+#: they are declared; this names the consequence in one place so the guard and the
+#: ``docs/TRAINING.md`` single-device note cannot drift from each other.
+_RANK_LOCAL_VAL_TASKS: frozenset[str] = frozenset({"obb", "keypoints"})
+
 #: Keypoint objectives a ``"keypoints"`` run may select between, each mapped to the
 #: class that implements it (WP-135). ``"rle"`` is R14's full residual
 #: log-likelihood and the default every existing config, checkpoint and accepted
@@ -928,6 +935,51 @@ class DetectionLitModule(LightningModule):
         """
         return self._task
 
+    def setup(self, stage: str) -> None:
+        """Refuse multi-process runs for the protocols whose validation cannot yet gather.
+
+        ``val/mAP`` and ``val/segm_mAP`` come from :mod:`torchmetrics` metrics, which
+        synchronise across ranks themselves. The oriented and keypoint protocols do not:
+        :attr:`_val_rotated_preds` and :attr:`_val_keypoint_preds` are ordinary Python
+        lists, so on more than one process each rank would score and log its own shard as
+        if it were the whole split. That is not recoverable after the fact — average
+        precision ranks every detection of the split against every other by confidence, so
+        averaging per-rank AP values is a different quantity, not an approximation of the
+        right one. Rather than log a plausible wrong number, these tasks refuse to start
+        distributed; ``"detect"`` and ``"segment"`` are unaffected and stay free to scale.
+
+        Lifting this needs the buffers gathered with image identity (so sampler padding's
+        duplicate images are dropped rather than double-counted) and scored once on one
+        rank — the work is real, so the limit is enforced here instead of assumed.
+
+        Args:
+            stage: The Trainer stage being set up (``"fit"``, ``"validate"``, ``"test"`` or
+                ``"predict"``). ``"predict"`` runs no validation protocol and is exempt.
+
+        Raises:
+            RuntimeError: If the task is ``"obb"`` or ``"keypoints"`` and the trainer spans
+                more than one process.
+
+        Examples:
+            >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4)
+            >>> module.setup("fit")  # "detect" scales freely; no trainer attachment needed
+        """
+        if stage == "predict" or self.task not in _RANK_LOCAL_VAL_TASKS:
+            return
+        # Reached only for the two guarded tasks, and Lightning calls `setup` with the
+        # module already attached, so reading the trainer here cannot be the detached case
+        # the `detect`/`segment` early return above keeps free.
+        world_size = self.trainer.world_size
+        if world_size > 1:
+            raise RuntimeError(
+                f"task={self.task!r} validation is single-process only, but the trainer spans "
+                f"{world_size} processes. Its epoch metric accumulates rank-local Python lists "
+                "and never gathers them, so each rank would score its own shard as if it were "
+                "the whole split, and average precision cannot be recovered by averaging "
+                "per-rank values. Re-run with devices=1 (and no distributed strategy), or use "
+                "task='detect'/'segment', whose metrics synchronise across ranks."
+            )
+
     @property
     def alpha(self) -> float:
         """One-to-many branch weight of the dual loss (the WP-035 schedule seam).
@@ -1339,12 +1391,21 @@ class DetectionLitModule(LightningModule):
         :meth:`_log_oks_map`), beside ``val/mAP`` rather than instead of it, for
         the same reason ``val/segm_mAP`` sits beside ``val/mAP`` and not the
         other way ``val/rotated_mAP`` does.
+
+        The ``val/segm_mAP`` guard is reduced across processes before it is read.
+        :meth:`~torchmetrics.Metric.compute` synchronises collectively, so a rank
+        that happened to draw a shard without mask targets must still enter it —
+        deciding to skip on that rank alone would leave the others waiting inside
+        the collective for a call that never comes. The reduction is ``any``: one
+        rank with masks makes the metric well-defined for all of them, and on a
+        single process it is the identity, so the accepted single-device behaviour
+        is unchanged.
         """
         if self.task != "obb":
             computed = self._val_map.compute()
             self.log("val/mAP", computed["map"].to(torch.float32), prog_bar=True)
             self._val_map.reset()
-        if self._val_segm is not None and self._val_segm_seen:
+        if self._val_segm is not None and self._any_rank_saw_masks():
             self.log("val/segm_mAP", self._val_segm.compute()["map"].to(torch.float32), prog_bar=True)
             self._val_segm.reset()
             self._val_segm_seen = False
@@ -1352,6 +1413,19 @@ class DetectionLitModule(LightningModule):
             self._log_rotated_map()
         if self._val_keypoint_preds:
             self._log_oks_map()
+
+    def _any_rank_saw_masks(self) -> bool:
+        """Return whether *any* process fed the segmentation metric this epoch.
+
+        :attr:`_val_segm_seen` is set per rank, but the metric's ``compute`` is a collective
+        call, so the decision to make it has to be one every rank agrees on. Lightning's
+        strategy reduces the flag with ``all=False`` (an ``any`` across the world); on a
+        single process the base strategy returns the flag untouched. A detached module —
+        every doctest here, and any direct call outside a run — reads its own flag.
+        """
+        if self._trainer is None:
+            return self._val_segm_seen
+        return bool(self.trainer.strategy.reduce_boolean_decision(self._val_segm_seen, all=False))
 
     def _log_rotated_map(self) -> None:
         """Score the epoch's accumulated oriented detections and clear the buffers.

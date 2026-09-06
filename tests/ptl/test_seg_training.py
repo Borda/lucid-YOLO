@@ -18,8 +18,11 @@ recording stub doubles as the observation point for the two pre-gain terms.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 import torch
+from pytorch_lightning import Trainer
 from torch import Tensor, nn
 
 from lucid_yolo.assign import make_anchor_points
@@ -528,6 +531,53 @@ def test_mask_map_is_skipped_when_the_batch_carries_no_ground_truth_masks() -> N
 
     assert "val/mAP" in epoch_recorder.values
     assert "val/segm_mAP" not in epoch_recorder.values
+
+
+class TestMaskMetricGuardIsCollective:
+    """The "did any batch carry masks" decision is reduced across ranks before it is read.
+
+    :meth:`~torchmetrics.Metric.compute` synchronises collectively, so a rank whose shard
+    held no mask targets must still enter it once any other rank has masks — skipping on
+    that rank alone would hang every other one inside the collective (audit M-05). The
+    reduction is Lightning's, so a single-process run gets the flag back unchanged and the
+    accepted behaviour is untouched; these tests stub the strategy to prove the flag is
+    routed through it rather than read directly.
+    """
+
+    @staticmethod
+    def _module_with_strategy_decision(decision: bool) -> DetectionLitModule:
+        """Return a segment module attached to a trainer whose strategy reduces to ``decision``."""
+        module = _tiny_module("segment").eval()
+        strategy = MagicMock()
+        strategy.reduce_boolean_decision.return_value = decision
+        module._trainer = MagicMock(spec=Trainer, strategy=strategy)
+        module.log = _LogRecorder()  # type: ignore[method-assign]
+        return module
+
+    def test_computes_when_another_rank_saw_masks(self) -> None:
+        """A local shard without masks still computes once the reduction says some rank had them."""
+        module = self._module_with_strategy_decision(True)
+        module.validation_step(_synthetic_batch(), 0)
+        assert module._val_segm_seen is False
+        recorder = _LogRecorder()
+        module.log = recorder  # type: ignore[method-assign]
+
+        module.on_validation_epoch_end()
+
+        assert "val/segm_mAP" in recorder.values
+
+    def test_skips_when_no_rank_saw_masks(self) -> None:
+        """With the reduction false everywhere the collective is skipped on every rank alike."""
+        module = self._module_with_strategy_decision(False)
+        images, targets = _synthetic_batch()
+        module.validation_step((images, targets, _collated_masks(images, targets)), 0)
+        assert module._val_segm_seen is True
+        recorder = _LogRecorder()
+        module.log = recorder  # type: ignore[method-assign]
+
+        module.on_validation_epoch_end()
+
+        assert "val/segm_mAP" not in recorder.values
 
 
 #: Side of the toy prototype grid the pairing test scores on.
