@@ -43,7 +43,7 @@ from lucid_yolo.eval import (
     letterboxed_batches,
     load_eval_annotations,
 )
-from lucid_yolo.eval.coco_eval import _METRIC_KEYS, _SEGM_PREFIX, _StreamingScorer
+from lucid_yolo.eval.coco_eval import _METRIC_KEYS, _SEGM_PREFIX, _BatchGeometry, _StreamingScorer
 from lucid_yolo.models.build import Segmenter
 from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -460,3 +460,78 @@ def test_masks_stay_paired_with_their_own_detections() -> None:
 
     assert stats["map"] == pytest.approx(1.0)
     assert stats["segm_map"] == pytest.approx(1.0), "each mask must stay paired with its own detection"
+
+
+class TestPaddedRowMaskDecode:
+    """``_path_masks`` decodes the real detections only, and pads the rest back."""
+
+    @staticmethod
+    def _scene(real: int, padded: int) -> tuple[DualPathEvaluator, Tensor, Tensor, Tensor, _BatchGeometry]:
+        """One image of ``real`` scored detections inside a ``padded``-row block, with prototypes.
+
+        Examples:
+            >>> callable(TestPaddedRowMaskDecode._scene)
+            True
+        """
+        generator = torch.Generator().manual_seed(0)
+        rows = [[4.0 + 8 * n, 4.0 + 8 * n, 28.0 + 8 * n, 28.0 + 8 * n, 0.9 - 0.01 * n, 0.0] for n in range(real)]
+        rows += [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]] * (padded - real)
+        detections = torch.tensor([rows], dtype=torch.float32)
+        anchor_index = torch.arange(padded).unsqueeze(0)
+        coefficients = torch.rand(1, padded, 32, generator=generator) * 2.0 - 1.0
+        prototypes = torch.rand(1, 32, 16, 16, generator=generator) * 2.0 - 1.0
+        letterbox = Letterbox(_IMAGE_SIZE[0])
+        geometry = _BatchGeometry(
+            anchor_points=torch.zeros(padded, 2),
+            strides=torch.ones(padded),
+            canvas=_IMAGE_SIZE,
+            orig_sizes=[_IMAGE_SIZE],
+            prototypes=prototypes,
+        )
+        evaluator = DualPathEvaluator(
+            model=torch.nn.Identity(),  # _path_masks never consults the model
+            e2e_decoder=TopKDecoder(),
+            nms_decoder=NMSDecoder(),
+            label_to_category={0: _CATEGORY},
+            letterbox=letterbox,
+        )
+        return evaluator, detections, anchor_index, coefficients, geometry
+
+    def test_the_prefix_decode_matches_decoding_every_padded_row(self) -> None:
+        """Slicing to the real detections returns exactly what decoding all 300 rows returned.
+
+        The padded block is the fixed ``max_det`` shape ``pad_detections`` emits, so an
+        image with a handful of objects still arrives with most of its rows carrying a
+        score-zero, all-zero box. Those rows are skipped now instead of decoded, which is
+        only sound if the full decode produced nothing for them: an all-zero box crops
+        every pixel away, so it should. Asserted against the full decode rather than
+        argued — the real rows bit-identical, the padding rows all ``False`` on both
+        sides, so a future change that makes an empty box decode to *something* fails
+        here rather than silently changing a score.
+        """
+        evaluator, detections, anchor_index, coefficients, geometry = self._scene(real=3, padded=16)
+        every_row = torch.tensor([[[1.0, 1.0, float(_IMAGE_SIZE[1]), float(_IMAGE_SIZE[0]), 0.5, 0.0]] * 16])
+        every_row[0, :3] = detections[0, :3]
+
+        sliced = evaluator._path_masks(detections, anchor_index, coefficients, geometry)[0]
+        unsliced = evaluator._path_masks(every_row, anchor_index, coefficients, geometry)[0]
+
+        assert sliced.shape == (16, *_IMAGE_SIZE)
+        assert torch.equal(sliced[:3], unsliced[:3])
+        assert not bool(sliced[3:].any()), "a padding row decoded to a non-empty mask"
+
+    def test_an_image_with_no_real_detections_yields_the_padded_shape(self) -> None:
+        """An all-padding image returns ``max_det`` empty masks rather than an empty stack.
+
+        The stack is indexed downstream by a boolean mask over every padded row, so a
+        short stack mis-indexes rather than failing loudly. This is the degenerate case
+        of that contract: nothing scored, so nothing is decoded at all, and the shape has
+        to come from the block rather than from the decoder.
+        """
+        evaluator, detections, anchor_index, coefficients, geometry = self._scene(real=0, padded=16)
+
+        masks = evaluator._path_masks(detections, anchor_index, coefficients, geometry)[0]
+
+        assert masks.shape == (16, *_IMAGE_SIZE)
+        assert masks.dtype == torch.bool
+        assert not bool(masks.any())

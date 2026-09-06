@@ -37,6 +37,7 @@ import torch
 
 from lucid_yolo.assign.grid import make_anchor_points
 from lucid_yolo.decode import ROTATED_NMS_IOU_THRESHOLD, NMSDecoder, RotatedNMSDecoder
+from lucid_yolo.decode.rotated_nms import _suppressible
 from lucid_yolo.eval.dota_eval import rotated_iou
 
 if TYPE_CHECKING:
@@ -479,3 +480,87 @@ def test_empty_batch_decodes_to_an_empty_result() -> None:
     detections = decoder(torch.zeros(0, 2, 3), torch.zeros(0, 2, 4), torch.zeros(0, 2, 1), points, strides)
 
     assert detections.shape == (0, 4, 7)
+
+
+def _unscreened_suppress(decoder: RotatedNMSDecoder, rboxes: Tensor, scores: Tensor, classes: Tensor) -> Tensor:
+    """Suppress by computing every remaining pair's IoU, the way the loop did before screening.
+
+    The reference the screened loop is asserted against: identical rule, identical order,
+    no pre-filter. Kept in the test rather than in the source so the comparison is
+    against code that cannot itself have been changed by the optimization.
+
+    Examples:
+        >>> callable(_unscreened_suppress)
+        True
+    """
+    order = torch.argsort(scores, descending=True, stable=True)
+    kept: list[Tensor] = []
+    while order.numel() and len(kept) < decoder.max_det:
+        best, rest = order[0], order[1:]
+        kept.append(best)
+        if not rest.numel():
+            break
+        overlap = rotated_iou(rboxes[best].unsqueeze(0), rboxes[rest])[0]
+        order = rest[~((classes[rest] == classes[best]) & (overlap > decoder.iou_threshold))]
+    return torch.stack(kept) if kept else order.new_empty((0,))
+
+
+def _random_scene(count: int, classes: int, seed: int) -> tuple[Tensor, Tensor, Tensor]:
+    """Canonical rotated boxes, scores and class ids for the screening equivalence tests.
+
+    Examples:
+        >>> rboxes, scores, labels = _random_scene(4, 2, seed=0)
+        >>> rboxes.shape, scores.shape, labels.shape
+        (torch.Size([4, 5]), torch.Size([4]), torch.Size([4]))
+    """
+    generator = torch.Generator().manual_seed(seed)
+    centres = torch.rand(count, 2, generator=generator) * 640.0
+    sides = 8.0 + torch.rand(count, 2, generator=generator) * 96.0
+    angles = (torch.rand(count, 1, generator=generator) - 0.5) * math.pi
+    scores = torch.rand(count, generator=generator)
+    labels = torch.randint(0, classes, (count,), generator=generator)
+    return torch.cat((centres, sides, angles), dim=-1), scores, labels
+
+
+class TestScreenedSuppression:
+    """The pre-IoU screen changes what is computed, never what is decided."""
+
+    @pytest.mark.parametrize("num_classes", [1, 3, 15])
+    @pytest.mark.parametrize("seed", [0, 1, 2])
+    def test_screening_reproduces_the_unscreened_survivors(self, num_classes: int, seed: int) -> None:
+        """Screened and unscreened suppression return the same indices, in the same order.
+
+        The screen drops two kinds of pair before the polygon intersection: one whose
+        class differs, whose overlap the rule never reads, and one whose circumscribed
+        circles do not reach, whose exact IoU is zero. Neither can change a survivor, and
+        this asserts it over scenes dense enough to exercise both — 200 boxes on a 640
+        canvas, at one, three and fifteen classes, so the single-class case (where the
+        class half of the screen does nothing) is covered too.
+        """
+        rboxes, scores, labels = _random_scene(200, num_classes, seed)
+        decoder = RotatedNMSDecoder(max_det=300)
+
+        screened = decoder._suppress(rboxes, scores, labels)
+
+        assert torch.equal(screened, _unscreened_suppress(decoder, rboxes, scores, labels))
+
+    def test_the_reach_bound_rejects_only_exactly_disjoint_pairs(self) -> None:
+        """Every pair the reach test drops has an exact rotated IoU of ``0.0``.
+
+        The class half of the screen is a restatement of the rule, but the reach half is
+        a geometric bound, and a bound that is too tight would silently delete real
+        overlaps. Asserted directly rather than argued: over a dense scene at one class,
+        so the class test admits everything and the reach test is the only thing masking,
+        the maximum IoU among rejected pairs is zero — and the minimum among the pairs it
+        keeps is not, so the scene genuinely exercises both sides.
+        """
+        rboxes, _, _ = _random_scene(120, 1, seed=3)
+        one_class = torch.zeros(rboxes.shape[0] - 1, dtype=torch.long)
+        best, rest = rboxes[0], rboxes[1:]
+
+        reachable = _suppressible(best, rest, torch.tensor(0), one_class)
+        overlaps = rotated_iou(best.unsqueeze(0), rest)[0]
+
+        assert bool((~reachable).any()), "the scene rejects nothing, so it does not test the bound"
+        assert float(overlaps[~reachable].max()) == 0.0
+        assert float(overlaps[reachable].max()) > 0.0
