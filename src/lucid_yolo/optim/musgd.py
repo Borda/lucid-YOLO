@@ -189,11 +189,29 @@ class MuSGD(Optimizer):
 
         Matrix parameters (``ndim >= 2``) get ``w_muon*muon + w_sgd*sgd`` plus
         decoupled weight decay; vector parameters get the SGD update alone.
+
+        ``w_muon == 0`` is the SGD-only arm A7's independent gains admit, and it
+        used to pay for the branch it had switched off: every matrix parameter
+        still ran its full Newton-Schulz iteration and the result was then
+        multiplied by zero. The gain is read here rather than inside
+        :meth:`_muon_branch` because the iteration is reached through that one
+        call, and skipping it at the call site is what removes the work rather
+        than merely discarding it. The kept branch's arithmetic is untouched, so
+        a ``w_muon > 0`` run is bit-for-bit the run it was.
+
+        The one behavioural difference is confined to the arm that is switched
+        off: ``0.0 * nan`` is ``nan``, so a non-finite orthogonalization used to
+        poison an update whose Muon half carried no weight, and now cannot. The
+        zero-gain arm's finite arithmetic is unchanged -- ``0 + w_sgd*g`` and
+        ``w_sgd*g`` are the same float.
         """
         if param.ndim < 2:
             return nesterov_grad
-        muon = self._muon_branch(nesterov_grad, group["ns_steps"])
-        update = muon.mul(group["w_muon"]).add(nesterov_grad, alpha=group["w_sgd"])
+        if group["w_muon"] == 0.0:
+            update = nesterov_grad.mul(group["w_sgd"])
+        else:
+            muon = self._muon_branch(nesterov_grad, group["ns_steps"])
+            update = muon.mul(group["w_muon"]).add(nesterov_grad, alpha=group["w_sgd"])
         weight_decay = group["weight_decay"]
         if weight_decay != 0.0:
             update = update.add(param, alpha=weight_decay)

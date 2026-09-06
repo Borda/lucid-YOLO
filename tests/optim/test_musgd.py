@@ -178,6 +178,87 @@ def test_zero_grad_param_skipped() -> None:
     assert idle not in opt.state
 
 
+class TestZeroMuonGain:
+    """The ``w_muon = 0`` arm skips the Muon branch instead of computing and discarding it.
+
+    A7's gains are independent, so ``w_muon = 0`` is a usable SGD-only arm rather
+    than a degenerate configuration. It used to run the full Newton-Schulz
+    iteration for every matrix parameter and then multiply the result by zero --
+    on the n-scale detector, 127 orthogonalizations per step for nothing.
+    """
+
+    def _count_orthogonalize_calls(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+        """Install a counting stand-in for ``orthogonalize`` and return its one-element tally."""
+        tally = [0]
+        real = orthogonalize
+
+        def counting(matrix: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
+            tally[0] += 1
+            return real(matrix, steps=steps, eps=eps)
+
+        monkeypatch.setattr("lucid_yolo.optim.musgd.orthogonalize", counting)
+        return tally
+
+    @pytest.mark.parametrize(
+        ("w_muon", "expected_calls"),
+        [
+            pytest.param(0.0, 0, id="zero-gain-runs-no-iteration"),
+            pytest.param(0.5, 1, id="nonzero-gain-still-iterates"),
+        ],
+    )
+    def test_newton_schulz_runs_only_for_a_nonzero_gain(
+        self, monkeypatch: pytest.MonkeyPatch, w_muon: float, expected_calls: int
+    ) -> None:
+        """One matrix parameter triggers one orthogonalization at ``w_muon > 0`` and none at zero.
+
+        The zero case is the regression: before the short-circuit the iteration
+        ran and its result was scaled to nothing, so the call count -- not the
+        parameter value -- is what distinguishes the two implementations.
+        """
+        tally = self._count_orthogonalize_calls(monkeypatch)
+        matrix = _param_with_grad(6, 4)
+        opt = MuSGD([matrix], lr=0.1, w_muon=w_muon)
+
+        opt.step()
+
+        assert tally[0] == expected_calls
+
+    def test_zero_gain_update_is_the_pure_sgd_step_with_weight_decay(self) -> None:
+        """At ``w_muon = 0`` a matrix parameter moves by exactly ``-lr*(w_sgd*nesterov + wd*w)``.
+
+        The skipped branch must be worth exactly zero, which is what makes
+        skipping it a performance change and not a numerical one: the surviving
+        terms are the SGD half and the decoupled decay, and both are asserted
+        against hand-written arithmetic rather than against the old code path.
+        """
+        lr, momentum, w_sgd, weight_decay = 0.1, 0.9, 0.4, 0.2
+        matrix = _param_with_grad(6, 4)
+        matrix0, matrix_grad = matrix.detach().clone(), matrix.grad.clone()
+        opt = MuSGD([matrix], lr=lr, momentum=momentum, weight_decay=weight_decay, w_muon=0.0, w_sgd=w_sgd, ns_steps=5)
+
+        opt.step()
+
+        nesterov = (1.0 + momentum) * matrix_grad  # first step: buffer = g
+        expected = matrix0 - lr * (w_sgd * nesterov + weight_decay * matrix0)
+        torch.testing.assert_close(matrix.detach(), expected)
+
+    def test_zero_gain_leaves_a_vector_parameter_on_its_own_path(self) -> None:
+        """A 1D parameter takes the same pure Nesterov SGD step whatever ``w_muon`` says.
+
+        The short-circuit sits in the matrix branch, and the rank split above it
+        is unchanged: a vector parameter never reached the Muon branch and must
+        still move by ``-lr*(1+mu)*g``, with no weight decay (A12).
+        """
+        lr, momentum = 0.1, 0.9
+        vector = _param_with_grad(8)
+        vector0, vector_grad = vector.detach().clone(), vector.grad.clone()
+        opt = MuSGD([vector], lr=lr, momentum=momentum, weight_decay=0.2, w_muon=0.0, w_sgd=1.0)
+
+        opt.step()
+
+        torch.testing.assert_close(vector.detach(), vector0 - lr * (1.0 + momentum) * vector_grad)
+
+
 class TestConstructorValidation:
     """Out-of-range hyperparameters are rejected at construction."""
 
