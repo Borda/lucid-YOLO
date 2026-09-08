@@ -1,0 +1,5 @@
+# Every path in this repository is owned by the maintainer, so any pull request
+# touching any file requests a review from them automatically.
+# Later rules win over earlier ones, so add narrower paths below this line.
+
+* @Borda

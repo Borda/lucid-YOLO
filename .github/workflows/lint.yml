@@ -17,6 +17,13 @@ jobs:
   # Everything the local `.git/hooks/pre-commit` runs, over the whole tree rather
   # than the staged diff: ruff check and format, strict mypy, the hygiene hooks,
   # and the copyleft dependency audit.
+  #
+  # This is also the only place the twelve `repo: local` hooks run in CI. They are
+  # listed under `ci: skip:` in `.pre-commit-config.yaml` because pre-commit.ci
+  # cannot run them -- its container has no `.venv` for their `language: system`
+  # entries to resolve, and no step that could build one -- so every one of them
+  # failed there before checking anything. That key is pre-commit.ci's alone; the
+  # `pre-commit` CLI ignores it, so the run below still executes the full set.
   precommit:
     runs-on: ubuntu-latest
     env:
@@ -29,24 +36,30 @@ jobs:
       # resolve and the hook exits 128 with a Git error — the job would fail
       # before linting a line, and the failure would name a missing ref rather
       # than anything about the submission.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "📥 Check out the repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: "🐍 Set up Python"
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: "📦 Install uv"
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       # `typing` as well as `dev`: the mypy hook is `language: system` with entry
       # `.venv/bin/python -m mypy`, so it resolves the interpreter this step installs
       # into rather than an environment pre-commit manages. Without the group the hook
       # fails with `No module named mypy` -- which is what it did after the 0.8.0
       # release commit dropped the declaration.
-      - name: Create venv and install the dev and typing dependency groups
+      - name: "🧰 Create venv and install the dev and typing dependency groups"
         run: |
           uv venv --python 3.11 .venv
           uv pip install --python .venv/bin/python -e . --group dev --group typing
-      - name: Run pre-commit (all linters + strict mypy + license audit)
+      # `--all-files`, not the staged diff, and with no `SKIP` in the environment: this
+      # runs the remote hooks and the twelve local ones together, which is the full set
+      # a commit sees on a laptop.
+      - name: "🔍 Run pre-commit (all linters + strict mypy + local audit hooks)"
         run: .venv/bin/pre-commit run --all-files
 
   # Admission layer one (WP-142): every commit a contributor submits carries its own
@@ -63,16 +76,18 @@ jobs:
     steps:
       # Full history: the range spans the pull request's own commits, and a shallow
       # clone cannot walk back to its base.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "📥 Check out the repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: "🐍 Set up Python"
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       # The two SHAs go through the environment rather than into the command string:
       # they are interpolated from event data, and a value reaching a shell directly is
       # how that becomes an injection rather than a range.
-      - name: Check Developer Certificate of Origin sign-offs
+      - name: "✍️ Check Developer Certificate of Origin sign-offs"
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -91,13 +106,15 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "📥 Check out the repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: "🐍 Set up Python"
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-      - name: Check provenance trailers on the pull request's own commits
+      - name: "🏷️ Check provenance trailers on the pull request's own commits"
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}

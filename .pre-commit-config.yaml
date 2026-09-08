@@ -2,6 +2,33 @@
 # commit-msg time, and without this it would be installed but never fire.
 default_install_hook_types: [pre-commit, commit-msg]
 
+# pre-commit.ci runs in a bare container: no `.venv`, no editable install of this
+# package, and no step that could create either. Every `repo: local` hook below is
+# `language: system` with entry `.venv/bin/python`, so all twelve of them fail there
+# with "Executable `.venv/bin/python` not found" -- before running a check. They are
+# skipped rather than rewritten because the coverage is not lost: `lint.yml`'s
+# `precommit` job builds the venv with uv and runs `pre-commit run --all-files` over
+# the same set, which is where these checks are actually enforced. What is left for
+# the service is the half it can run unaided -- the hooks whose environments it
+# builds itself.
+#
+# `commit-trailers-history` would fail there even with an interpreter: its range is
+# `origin/main..HEAD`, and the service's checkout carries no `refs/remotes/origin/main`.
+ci:
+  skip:
+    - mypy
+    - license-audit
+    - test-doctest-audit
+    - flat-test-group-audit
+    - docs-present
+    - docs-site
+    - figure-captions
+    - license-headers
+    - frozen-manifest
+    - version-single-source
+    - commit-trailers-history
+    - release-guard
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

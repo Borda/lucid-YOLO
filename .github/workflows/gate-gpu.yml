@@ -40,17 +40,20 @@ jobs:
     # producers), with room for a cold checkout and a first-time dependency install.
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: "📥 Check out the repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "🐍 Set up Python"
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      - name: Create venv and install the dev dependency group
+      - name: "📦 Install uv"
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: "🧰 Create venv and install the dev dependency group"
         run: |
           uv venv --python 3.11 .venv
           uv pip install --python .venv/bin/python -e . --group dev
-      - name: Report the accelerator the gate is about to run on
+      - name: "🖥️ Report the accelerator the gate is about to run on"
         run: |
           nvidia-smi || echo "nvidia-smi unavailable"
           .venv/bin/python -c "import torch; print('cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
@@ -62,12 +65,12 @@ jobs:
       # `golden-gpu` retrains a model, so a second pass to "record the result" would
       # cost another full gate and could disagree with the one that decided the run.
       # `pipefail` keeps the gate's exit status, not tee's, as the job's verdict.
-      - name: Accelerator gate (marked tests + goldens/gpu regression)
+      - name: "⚡ Accelerator gate (marked tests + goldens/gpu regression)"
         run: |
           set -o pipefail
           mkdir -p .reports/gate-gpu
           make gate-gpu 2>&1 | tee .reports/gate-gpu/gate.log
-      - name: Upload the run record
+      - name: "📤 Upload the run record"
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

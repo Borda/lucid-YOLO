@@ -39,13 +39,16 @@ jobs:
       contents: read
       pages: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: "📥 Check out the repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "🐍 Set up Python"
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      - name: Create venv and install the docs dependency group
+      - name: "📦 Install uv"
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: "🧰 Create venv and install the docs dependency group"
         run: |
           uv venv --python 3.11 .venv
           uv pip install --python .venv/bin/python --group docs
@@ -54,17 +57,17 @@ jobs:
       # installed environment rather than the diff (D15/D16), which means an
       # unaudited environment is an unaudited dependency — run it where the
       # exposure enters.
-      - name: Dependency license audit over the docs environment
+      - name: "⚖️ Dependency license audit over the docs environment"
         run: .venv/bin/python scripts/lint/audit_licenses.py
-      - name: Build the site (strict)
+      - name: "🏗️ Build the site (strict)"
         run: .venv/bin/python -m mkdocs build --strict
       # Skipped on pull requests: it reads the repository's Pages configuration and
       # fails when Pages is not enabled, which would turn every PR red for a reason
       # no PR can fix. On push it is the early, legible failure for that same state.
-      - name: Configure Pages
+      - name: "⚙️ Configure Pages"
         if: github.event_name == 'push'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-      - name: Upload the built site as a Pages artifact
+      - name: "📤 Upload the built site as a Pages artifact"
         if: github.event_name == 'push'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
@@ -83,6 +86,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy to GitHub Pages
+      - name: "🚀 Deploy to GitHub Pages"
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

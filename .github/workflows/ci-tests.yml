@@ -40,13 +40,16 @@ jobs:
     env:
       UV_TORCH_BACKEND: "cpu"
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: "📥 Check out the repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "🐍 Set up Python"
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      - name: Create venv and install the dev dependency group
+      - name: "📦 Install uv"
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: "🧰 Create venv and install the dev dependency group"
         run: |
           uv venv --python ${{ matrix.python-version }} .venv
           uv pip install --python .venv/bin/python -e . --group dev
@@ -58,7 +61,7 @@ jobs:
       # never here. A pull request breaking a lint checker's own logic was green.
       # The Makefile's `PY` is `.venv/bin/python`, which is the venv the step above
       # creates, so `make` resolves the same interpreter this job installed into.
-      - name: Offline unit suite with coverage (make test)
+      - name: "🧪 Offline unit suite with coverage (make test)"
         run: make test
       # The frozen-golden sweep. It used to ride `lint.yml`'s `pre-commit
       # --all-files` run, which was CI's only full 43/43 check; WP-162 took
@@ -72,6 +75,6 @@ jobs:
       # different interpreter build or a different BLAS produces. Running the sweep in
       # every cell would report platform differences as golden regressions, which is a
       # separate question from the one the goldens answer.
-      - name: Frozen golden regression
+      - name: "🥇 Frozen golden regression"
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         run: .venv/bin/python scripts/check_goldens.py
