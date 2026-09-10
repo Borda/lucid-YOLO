@@ -34,6 +34,7 @@ sec. 6-7); no optimizer implementation is consulted.
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from typing import TYPE_CHECKING, Any, overload
 
 import torch
@@ -159,16 +160,45 @@ class MuSGD(Optimizer):
         return loss
 
     def _step_group(self, group: dict[str, Any]) -> None:
-        """Apply the MuSGD update to every parameter with a gradient in ``group``."""
+        """Apply one MuSGD update, batching matrix parameters with the same exact shape.
+
+        The n-scale detector carries 127 matrix parameters but only 20 exact
+        ``(shape, dtype, device)`` keys. Calling :meth:`_parameter_update` through
+        :func:`torch.vmap` once per key turns each Newton--Schulz product into a
+        batched product, while the function inside the map keeps the same
+        normalization, requested iteration count, branch weights and decay.
+        Vector parameters and the ``w_muon == 0`` arm stay on their scalar path;
+        neither has an orthogonalization to combine.
+        """
         momentum = group["momentum"]
         lr = group["lr"]
+        active: list[tuple[Tensor, Tensor]] = []
+        updates: list[Tensor | None] = []
+        matrix_buckets: dict[tuple[torch.Size, torch.dtype, torch.device], list[int]] = defaultdict(list)
         for param in group["params"]:
             grad = param.grad
             if grad is None:
                 continue
             nesterov_grad = self._nesterov_grad(param, grad, momentum)
-            update = self._parameter_update(param, nesterov_grad, group)
-            param.add_(update, alpha=-lr)
+            index = len(active)
+            active.append((param, nesterov_grad))
+            if param.ndim < 2 or group["w_muon"] == 0.0:
+                updates.append(self._parameter_update(param, nesterov_grad, group))
+            else:
+                updates.append(None)
+                matrix_buckets[(param.shape, param.dtype, param.device)].append(index)
+
+        for indices in matrix_buckets.values():
+            params = torch.stack([active[index][0] for index in indices])
+            grads = torch.stack([active[index][1] for index in indices])
+            batched = torch.vmap(lambda param, grad: self._parameter_update(param, grad, group))(params, grads)
+            for index, bucket_update in zip(indices, batched.unbind(), strict=True):
+                updates[index] = bucket_update
+
+        for (param, _), parameter_update in zip(active, updates, strict=True):
+            if parameter_update is None:  # pragma: no cover - every matrix bucket is filled above
+                raise RuntimeError("missing MuSGD matrix update")
+            param.add_(parameter_update, alpha=-lr)
 
     def _nesterov_grad(self, param: Tensor, grad: Tensor, momentum: float) -> Tensor:
         """Advance the shared momentum buffer and return the Nesterov-adjusted gradient.
@@ -196,8 +226,11 @@ class MuSGD(Optimizer):
         multiplied by zero. The gain is read here rather than inside
         :meth:`_muon_branch` because the iteration is reached through that one
         call, and skipping it at the call site is what removes the work rather
-        than merely discarding it. The kept branch's arithmetic is untouched, so
-        a ``w_muon > 0`` run is bit-for-bit the run it was.
+        than merely discarding it. The expression inside this function remains
+        untouched. Before exact-shape batching, this paragraph also promised that
+        a ``w_muon > 0`` run was bit-for-bit the run it was. :meth:`_step_group`
+        now maps the expression over equal-shape matrices, so that scheduling
+        promise no longer holds even though the formula does.
 
         The one behavioural difference is confined to the arm that is switched
         off: ``0.0 * nan`` is ``nan``, so a non-finite orthogonalization used to

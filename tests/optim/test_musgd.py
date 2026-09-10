@@ -190,6 +190,143 @@ def test_zero_grad_param_skipped() -> None:
     assert idle not in opt.state
 
 
+class TestExactShapeBatching:
+    """Equal-shape matrices share one Newton--Schulz call without sharing state.
+
+    Shape, dtype and device are the complete batching key: every operation inside
+    :meth:`MuSGD._parameter_update` is elementwise or acts on the final two matrix
+    axes, so a leading batch axis cannot mix parameters. These tests compare the
+    result with separate per-parameter calls and count the production call
+    boundary, since values alone cannot prove that the separate launches are gone.
+    """
+
+    def _count_orthogonalize_calls(self, monkeypatch: pytest.MonkeyPatch) -> list[tuple[torch.Size, torch.dtype]]:
+        """Install a recording wrapper around the real orthogonalization."""
+        calls: list[tuple[torch.Size, torch.dtype]] = []
+        real = orthogonalize
+
+        def recording(matrix: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
+            calls.append((matrix.shape, matrix.dtype))
+            return real(matrix, steps=steps, eps=eps)
+
+        monkeypatch.setattr("lucid_yolo.optim.musgd.orthogonalize", recording)
+        return calls
+
+    def test_equal_shapes_share_one_call_and_match_individual_updates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Three equal conv kernels become one call and retain three independent answers."""
+        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.03, 0.8, 0.6, 0.4, 0.02, 5
+        kernels = [_param_with_grad(5, 3, 3, 3) for _ in range(3)]
+        starts = [param.detach().clone() for param in kernels]
+        grads = [param.grad.clone() for param in kernels]
+        calls = self._count_orthogonalize_calls(monkeypatch)
+        opt = MuSGD(
+            kernels,
+            lr=lr,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            w_muon=w_muon,
+            w_sgd=w_sgd,
+            ns_steps=ns_steps,
+        )
+
+        opt.step()
+
+        assert calls == [(torch.Size([5, 27]), torch.float32)]
+        for param, start, grad in zip(kernels, starts, grads, strict=True):
+            nesterov = (1.0 + momentum) * grad
+            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
+            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
+            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+
+    def test_shape_and_dtype_boundaries_form_separate_batches(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Equal dimensions batch, an opposite orientation and float64 do not, and every value still matches unbatched.
+
+        Values are checked against the same `_expected_muon_update` construction the
+        equal-shape test uses, so the boundary is proven on outcomes, not only on the
+        recorded call sites.
+        """
+        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
+        double_param = torch.nn.Parameter(torch.randn(6, 4, dtype=torch.float64))
+        double_param.grad = torch.randn_like(double_param)
+        params = [
+            _param_with_grad(6, 4),
+            _param_with_grad(6, 4),
+            _param_with_grad(4, 6),
+            double_param,
+        ]
+        starts = [param.detach().clone() for param in params]
+        grads = [param.grad.clone() for param in params]
+        calls = self._count_orthogonalize_calls(monkeypatch)
+        opt = MuSGD(params, lr=lr)
+
+        opt.step()
+
+        assert calls == [
+            (torch.Size([6, 4]), torch.float32),
+            (torch.Size([4, 6]), torch.float32),
+            (torch.Size([6, 4]), torch.float64),
+        ]
+        assert [param.dtype for param in params] == [torch.float32, torch.float32, torch.float32, torch.float64]
+        for param, start, grad in zip(params, starts, grads, strict=True):
+            nesterov = (1.0 + momentum) * grad
+            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
+            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
+            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+
+    def test_parameter_groups_never_share_a_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Equal matrices with different group options keep separate update calls and separate values."""
+        lr, momentum, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 5e-4, 5
+        left = _param_with_grad(6, 4)
+        right = _param_with_grad(6, 4)
+        starts = [left.detach().clone(), right.detach().clone()]
+        grads = [left.grad.clone(), right.grad.clone()]
+        calls = self._count_orthogonalize_calls(monkeypatch)
+        opt = MuSGD(
+            [
+                {"params": [left], "w_muon": 0.2},
+                {"params": [right], "w_muon": 0.8},
+            ],
+            lr=lr,
+        )
+
+        opt.step()
+
+        assert calls == [
+            (torch.Size([6, 4]), torch.float32),
+            (torch.Size([6, 4]), torch.float32),
+        ]
+        for param, start, grad, w_muon in zip([left, right], starts, grads, [0.2, 0.8], strict=True):
+            nesterov = (1.0 + momentum) * grad
+            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
+            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
+            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+
+    @pytest.mark.gpu
+    def test_device_boundary_forms_a_separate_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Equal shape and dtype on different devices never share a batch."""
+        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
+        cpu_param = _param_with_grad(6, 4)
+        cuda_param = torch.nn.Parameter(torch.randn(6, 4, device="cuda"))
+        cuda_param.grad = torch.randn_like(cuda_param)
+        params = [cpu_param, cuda_param]
+        starts = [param.detach().clone() for param in params]
+        grads = [param.grad.clone() for param in params]
+        calls = self._count_orthogonalize_calls(monkeypatch)
+        opt = MuSGD(params, lr=lr)
+
+        opt.step()
+
+        assert calls == [
+            (torch.Size([6, 4]), torch.float32),
+            (torch.Size([6, 4]), torch.float32),
+        ]
+        for param, start, grad in zip(params, starts, grads, strict=True):
+            nesterov = (1.0 + momentum) * grad
+            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
+            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
+            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+
+
 class TestZeroMuonGain:
     """The ``w_muon = 0`` arm skips the Muon branch instead of computing and discarding it.
 
