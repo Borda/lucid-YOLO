@@ -549,14 +549,17 @@ class TestExactShapeBatching:
 
     @pytest.mark.usefixtures("batching_on_every_device")
     def test_interleaved_vector_and_matrix_params_reassemble_correctly(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Vectors interleaved between equal-shape matrices land at the right index after batching.
+        """Vectors interleaved between equal-shape matrices land at the right param after batching.
 
-        ``_step_group`` tracks bucket membership by list index into its internal
-        ``active`` list; a group ordered ``[bias, kernel_a, bias2, kernel_b]`` is
-        the case where the index-skip reassembly must skip the two vector slots
-        (indices 0 and 2) and route the batched kernel updates back to indices 1
-        and 3, not 0 and 1. Every existing batching test uses an all-matrix list,
-        so this path was previously unpinned.
+        ``_step_group`` routes each non-batchable param (a vector) straight to
+        ``_parameter_update`` and buckets each batchable matrix by
+        ``(shape, dtype, grad_dtype, device)`` in a ``defaultdict`` keyed on
+        ``_BucketKey``, each bucket holding a list of ``_PendingUpdate`` with a
+        direct reference back to its own param. A group ordered
+        ``[bias, kernel_a, bias2, kernel_b]`` pins that the two vectors update via
+        the unbatched path while ``kernel_a``/``kernel_b`` batch together and each
+        write back to its own param, not the other's. Every existing batching test
+        uses an all-matrix list, so this path was previously unpinned.
         """
         lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.9, 0.6, 0.4, 0.01, 5
         bias = _param_with_grad(4)
