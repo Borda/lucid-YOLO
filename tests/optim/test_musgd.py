@@ -27,6 +27,19 @@ def reset_random_seeds() -> Iterator[None]:
     yield
 
 
+@pytest.fixture
+def batching_on_every_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Widen the batching gate to every device type the suite runs on.
+
+    Production batches on CUDA alone, so a CPU-only machine would otherwise take
+    the per-parameter path through every one of the batching tests and prove
+    nothing about batching. Widening the gate keeps those tests exercising the
+    mapped path wherever they run; the narrow default is what
+    ``test_a_non_batching_device_keeps_the_per_parameter_path`` pins.
+    """
+    monkeypatch.setattr("lucid_yolo.optim.musgd._BATCHED_DEVICE_TYPES", frozenset({"cpu", "cuda", "mps"}))
+
+
 def _param_with_grad(*shape: int) -> torch.nn.Parameter:
     """Return a parameter of ``shape`` with a random gradient already attached.
 
@@ -198,6 +211,11 @@ class TestExactShapeBatching:
     axes, so a leading batch axis cannot mix parameters. These tests compare the
     result with separate per-parameter calls and count the production call
     boundary, since values alone cannot prove that the separate launches are gone.
+
+    Which devices take that key is a separate question from what the key is, and
+    the two are tested separately: every test here but the last asks the fixture
+    to widen the device gate, so the key is exercised on whatever device the suite
+    runs on, and the last one asks what an un-widened gate does.
     """
 
     def _count_orthogonalize_calls(self, monkeypatch: pytest.MonkeyPatch) -> list[tuple[torch.Size, torch.dtype]]:
@@ -212,6 +230,7 @@ class TestExactShapeBatching:
         monkeypatch.setattr("lucid_yolo.optim.musgd.orthogonalize", recording)
         return calls
 
+    @pytest.mark.usefixtures("batching_on_every_device")
     def test_equal_shapes_share_one_call_and_match_individual_updates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Three equal conv kernels become one call and retain three independent answers."""
         lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.03, 0.8, 0.6, 0.4, 0.02, 5
@@ -238,6 +257,7 @@ class TestExactShapeBatching:
             expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
 
+    @pytest.mark.usefixtures("batching_on_every_device")
     def test_shape_and_dtype_boundaries_form_separate_batches(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Equal dimensions batch, an opposite orientation and float64 do not, and every value still matches unbatched.
 
@@ -273,6 +293,7 @@ class TestExactShapeBatching:
             expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
 
+    @pytest.mark.usefixtures("batching_on_every_device")
     def test_parameter_groups_never_share_a_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Equal matrices with different group options keep separate update calls and separate values."""
         lr, momentum, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 5e-4, 5
@@ -302,6 +323,7 @@ class TestExactShapeBatching:
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
 
     @pytest.mark.gpu
+    @pytest.mark.usefixtures("batching_on_every_device")
     def test_device_boundary_forms_a_separate_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Equal shape and dtype on different devices never share a batch."""
         lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
@@ -322,6 +344,41 @@ class TestExactShapeBatching:
             (torch.Size([6, 4]), torch.float32),
         ]
         for param, start, grad in zip(params, starts, grads, strict=True):
+            nesterov = (1.0 + momentum) * grad
+            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
+            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
+            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+
+    def test_a_non_batching_device_keeps_the_per_parameter_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Three equal CPU kernels take three separate orthogonalizations, at the same values.
+
+        Batching is not free and not uniformly profitable: it buys one large kernel
+        launch in place of many, which the measurement found to be a win on CUDA and
+        a loss on MPS, where the mapped path ran at 108.45 ms per optimizer step
+        against 60.99 ms for the per-parameter loop. CPU is outside the gate for the
+        same reason, and this is the test that would fail if the gate were dropped or
+        widened again -- the call count is the only observable that separates the two
+        paths, since the values below hold either way.
+        """
+        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.03, 0.8, 0.6, 0.4, 0.02, 5
+        kernels = [_param_with_grad(5, 3, 3, 3) for _ in range(3)]
+        starts = [param.detach().clone() for param in kernels]
+        grads = [param.grad.clone() for param in kernels]
+        calls = self._count_orthogonalize_calls(monkeypatch)
+        opt = MuSGD(
+            kernels,
+            lr=lr,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            w_muon=w_muon,
+            w_sgd=w_sgd,
+            ns_steps=ns_steps,
+        )
+
+        opt.step()
+
+        assert calls == [(torch.Size([5, 27]), torch.float32)] * 3
+        for param, start, grad in zip(kernels, starts, grads, strict=True):
             nesterov = (1.0 + momentum) * grad
             expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
             expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
