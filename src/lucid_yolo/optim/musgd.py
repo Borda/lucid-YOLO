@@ -177,7 +177,8 @@ class MuSGD(Optimizer):
         batched product, while the function inside the map keeps the same
         normalization, requested iteration count, branch weights and decay.
         Vector parameters and the ``w_muon == 0`` arm stay on their scalar path;
-        neither has an orthogonalization to combine.
+        :meth:`_is_batchable_matrix` is what says which parameters those are, and
+        it says it for :meth:`_parameter_update` too.
 
         The map is taken only where it pays (:data:`_BATCHED_DEVICE_TYPES`). One
         large kernel launch in place of many is a win where launch overhead
@@ -207,10 +208,10 @@ class MuSGD(Optimizer):
             if grad is None:
                 continue
             nesterov_grad = self._nesterov_grad(param, grad, momentum)
-            if param.ndim < 2 or group["w_muon"] == 0.0 or param.device.type not in _BATCHED_DEVICE_TYPES:
-                param.add_(self._parameter_update(param, nesterov_grad, group), alpha=-lr)
-            else:
+            if self._is_batchable_matrix(param, group) and param.device.type in _BATCHED_DEVICE_TYPES:
                 matrix_buckets[(param.shape, param.dtype, param.device)].append((param, nesterov_grad))
+            else:
+                param.add_(self._parameter_update(param, nesterov_grad, group), alpha=-lr)
 
         for bucket in matrix_buckets.values():
             if len(bucket) == 1:
@@ -222,6 +223,34 @@ class MuSGD(Optimizer):
             batched = torch.vmap(lambda param, grad: self._parameter_update(param, grad, group))(params, grads)
             for (bucket_param, _), bucket_update in zip(bucket, batched.unbind(), strict=True):
                 bucket_param.add_(bucket_update, alpha=-lr)
+
+    @staticmethod
+    def _is_batchable_matrix(param: Tensor, group: dict[str, Any]) -> bool:
+        """Whether ``param`` reaches the orthogonalizing arm of :meth:`_parameter_update`.
+
+        That arm is the only one carrying a Newton--Schulz product, which makes it
+        the only one with anything to batch -- so "takes the Muon branch" and "may
+        be stacked with another parameter" are one question with one answer, and
+        this is where it is answered. A vector parameter returns before the branch
+        and a zero ``w_muon`` takes the arm beside it; neither has a product, so
+        neither joins a bucket.
+
+        Both callers read it: :meth:`_step_group` to decide what to stack, and
+        :meth:`_parameter_update` to decide which arm to run. Stating the condition
+        once is the point. Written out at both call sites it would drift, and the
+        two directions of drift are not equally visible -- one silently stops
+        batching, the other stacks a parameter whose branch is switched off and
+        fails inside the map.
+
+        Args:
+            param: The parameter under update.
+            group: Its parameter group, read for ``w_muon``.
+
+        Returns:
+            ``True`` when ``param`` has rank at least 2 and its group's Muon gain
+            is non-zero.
+        """
+        return param.ndim >= 2 and group["w_muon"] != 0.0
 
     def _nesterov_grad(self, param: Tensor, grad: Tensor, momentum: float) -> Tensor:
         """Advance the shared momentum buffer and return the Nesterov-adjusted gradient.
@@ -246,11 +275,12 @@ class MuSGD(Optimizer):
         ``w_muon == 0`` is the SGD-only arm A7's independent gains admit, and it
         used to pay for the branch it had switched off: every matrix parameter
         still ran its full Newton-Schulz iteration and the result was then
-        multiplied by zero. The gain is read here rather than inside
-        :meth:`_muon_branch` because the iteration is reached through that one
-        call, and skipping it at the call site is what removes the work rather
-        than merely discarding it. The expression inside this function remains
-        untouched. Before exact-shape batching, this paragraph also promised that
+        multiplied by zero. The gain is read here -- through
+        :meth:`_is_batchable_matrix`, which owns the condition for both callers --
+        rather than inside :meth:`_muon_branch`, because the iteration is reached
+        through that one call, and skipping it at the call site is what removes
+        the work rather than merely discarding it. The expression inside this
+        function remains untouched. Before exact-shape batching, this paragraph also promised that
         a ``w_muon > 0`` run was bit-for-bit the run it was. :meth:`_step_group`
         now maps the expression over equal-shape matrices, so that scheduling
         promise no longer holds even though the formula does.
@@ -263,11 +293,11 @@ class MuSGD(Optimizer):
         """
         if param.ndim < 2:
             return nesterov_grad
-        if group["w_muon"] == 0.0:
-            update = nesterov_grad.mul(group["w_sgd"])
-        else:
+        if self._is_batchable_matrix(param, group):
             muon = self._muon_branch(nesterov_grad, group["ns_steps"])
             update = muon.mul(group["w_muon"]).add(nesterov_grad, alpha=group["w_sgd"])
+        else:
+            update = nesterov_grad.mul(group["w_sgd"])
         weight_decay = group["weight_decay"]
         if weight_decay != 0.0:
             update = update.add(param, alpha=weight_decay)
