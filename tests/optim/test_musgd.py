@@ -306,9 +306,10 @@ class TestExactShapeBatching:
         """Equal shape and dtype on different devices never share a batch."""
         lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
         cpu_param = _param_with_grad(6, 4)
-        cuda_param = torch.nn.Parameter(torch.randn(6, 4, device="cuda"))
-        cuda_param.grad = torch.randn_like(cuda_param)
-        params = [cpu_param, cuda_param]
+        accelerator_device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+        accelerator_param = torch.nn.Parameter(torch.randn(6, 4, device=accelerator_device))
+        accelerator_param.grad = torch.randn_like(accelerator_param)
+        params = [cpu_param, accelerator_param]
         starts = [param.detach().clone() for param in params]
         grads = [param.grad.clone() for param in params]
         calls = self._count_orthogonalize_calls(monkeypatch)
