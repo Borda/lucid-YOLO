@@ -197,6 +197,31 @@ class TestEdgeCases:
         assert torch.isfinite(result).all()
 
 
+class TestVmapSafety:
+    """``orthogonalize`` is mapped under ``torch.vmap`` by the Muon branch of MuSGD.
+
+    That is only correct if every reduction inside stays elementwise or scoped to
+    the final two axes rather than reducing over the batch axis ``vmap``
+    introduces. This exercises the contract directly, independent of
+    ``tests/optim/test_musgd.py``'s ``TestExactShapeBatching``.
+    """
+
+    def test_vmap_matches_per_matrix_loop(self) -> None:
+        """Mapping over a batch of same-shape matrices matches a per-matrix loop.
+
+        A reduction that silently collapsed over the batch axis (e.g.
+        ``x.norm()`` in place of the dim-scoped ``torch.linalg.matrix_norm(x)``)
+        would still pass every single-instance test in this file yet diverge here
+        as soon as the batch holds more than one matrix.
+        """
+        batch = torch.stack([_random_conditioned(4, 4, torch.float32) for _ in range(3)])
+
+        looped = torch.stack([orthogonalize(matrix) for matrix in batch])
+        vmapped = torch.vmap(orthogonalize)(batch)
+
+        torch.testing.assert_close(vmapped, looped)
+
+
 class TestInputValidation:
     """Non-2D inputs and step counts that run no iteration are rejected."""
 

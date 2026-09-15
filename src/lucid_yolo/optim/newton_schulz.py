@@ -57,6 +57,19 @@ def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
     ``torch.no_grad()``. A zero matrix orthogonalizes to zeros without producing
     NaNs.
 
+    Vmap safety: callers (:mod:`lucid_yolo.optim.musgd`) may map this function
+    with ``torch.vmap`` to batch it over a leading axis, treating each ``matrix``
+    as an independent 2D slice. That is only correct because every operation in
+    this function is either elementwise (``x / scalar``) or scoped to the final
+    two axes (``torch.linalg.matrix_norm``, ``x @ x.T``, ``x.T``). Any future
+    change must preserve that: a reduction that is not scoped to
+    ``dim=(-2, -1)`` -- for example swapping ``torch.linalg.matrix_norm(x)`` for
+    ``x.norm()`` or bare ``torch.norm(x)`` -- would reduce across the batch axis
+    introduced by ``vmap`` too, silently giving the wrong answer for every
+    multi-element vmap batch while still passing a single-instance test.
+    ``tests/optim/test_newton_schulz.py`` carries a direct vmap-vs-loop
+    regression test for this invariant.
+
     Args:
         matrix: A 2D tensor of any floating-point dtype.
         steps: Number of Newton-Schulz iterations to run (default 5, per A5).
