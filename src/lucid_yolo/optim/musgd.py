@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, NamedTuple, overload
 
 import torch
 from torch import Tensor
@@ -59,6 +59,39 @@ _MUON_RMS_SCALE: float = 0.2
 #: 60.99 ms for the per-parameter loop and CPU moves 39.64 ms to 38.47 ms. A device
 #: outside this set keeps the loop, which is also the arithmetic the tests pin.
 _BATCHED_DEVICE_TYPES: frozenset[str] = frozenset({"cuda"})
+
+
+class _BucketKey(NamedTuple):
+    """The identity two matrix parameters must share to be stacked into one map.
+
+    Every operation inside :meth:`MuSGD._parameter_update` is elementwise or acts
+    on the final two matrix axes, so a leading batch axis cannot mix parameters
+    that agree on these four fields.
+
+    The gradient dtype is one of the four because :func:`torch.stack` is applied
+    to the Nesterov-adjusted gradients as well as to the parameters, and those
+    two dtypes are not the same field. :meth:`MuSGD._nesterov_grad` returns
+    ``grad.add(buffer)``, which promotes, so a parameter whose ``.grad`` carries
+    a wider dtype than itself -- reachable once ``param.grad_dtype`` is relaxed
+    from its default, which is what a mixed-precision setup does -- yields a
+    wider Nesterov gradient than its same-shape, same-dtype neighbour. Stacking
+    the two promotes silently rather than raising, and the neighbour would then
+    be computed at a precision its own path never chose. Keying on it puts them
+    in separate buckets instead, which is the answer the per-parameter path gives
+    anyway.
+    """
+
+    shape: torch.Size
+    param_dtype: torch.dtype
+    grad_dtype: torch.dtype
+    device: torch.device
+
+
+class _PendingUpdate(NamedTuple):
+    """A parameter and the Nesterov-adjusted gradient its update has yet to be made from."""
+
+    param: Tensor
+    nesterov_grad: Tensor
 
 
 class MuSGD(Optimizer):
@@ -172,7 +205,7 @@ class MuSGD(Optimizer):
         """Apply one MuSGD update, batching matrix parameters with the same exact shape.
 
         The n-scale detector carries 127 matrix parameters but only 41 exact
-        ``(shape, dtype, device)`` keys. Calling :meth:`_parameter_update` through
+        :class:`_BucketKey` values. Calling :meth:`_parameter_update` through
         :func:`torch.vmap` once per key turns each Newton--Schulz product into a
         batched product, while the function inside the map keeps the same
         normalization, requested iteration count, branch weights and decay.
@@ -200,29 +233,28 @@ class MuSGD(Optimizer):
         """
         momentum = group["momentum"]
         lr = group["lr"]
-        matrix_buckets: dict[tuple[torch.Size, torch.dtype, torch.device], list[tuple[Tensor, Tensor]]] = defaultdict(
-            list
-        )
+        matrix_buckets: dict[_BucketKey, list[_PendingUpdate]] = defaultdict(list)
         for param in group["params"]:
             grad = param.grad
             if grad is None:
                 continue
             nesterov_grad = self._nesterov_grad(param, grad, momentum)
             if self._is_batchable_matrix(param, group) and param.device.type in _BATCHED_DEVICE_TYPES:
-                matrix_buckets[(param.shape, param.dtype, param.device)].append((param, nesterov_grad))
+                key = _BucketKey(param.shape, param.dtype, nesterov_grad.dtype, param.device)
+                matrix_buckets[key].append(_PendingUpdate(param, nesterov_grad))
             else:
                 param.add_(self._parameter_update(param, nesterov_grad, group), alpha=-lr)
 
         for bucket in matrix_buckets.values():
             if len(bucket) == 1:
-                single, single_grad = bucket[0]
-                single.add_(self._parameter_update(single, single_grad, group), alpha=-lr)
+                lone = bucket[0]
+                lone.param.add_(self._parameter_update(lone.param, lone.nesterov_grad, group), alpha=-lr)
                 continue
-            params = torch.stack([bucket_param for bucket_param, _ in bucket])
-            grads = torch.stack([bucket_grad for _, bucket_grad in bucket])
+            params = torch.stack([pending.param for pending in bucket])
+            grads = torch.stack([pending.nesterov_grad for pending in bucket])
             batched = torch.vmap(lambda param, grad: self._parameter_update(param, grad, group))(params, grads)
-            for (bucket_param, _), bucket_update in zip(bucket, batched.unbind(), strict=True):
-                bucket_param.add_(bucket_update, alpha=-lr)
+            for pending, bucket_update in zip(bucket, batched.unbind(), strict=True):
+                pending.param.add_(bucket_update, alpha=-lr)
 
     @staticmethod
     def _is_batchable_matrix(param: Tensor, group: dict[str, Any]) -> bool:

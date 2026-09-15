@@ -19,6 +19,13 @@ import torch
 
 from lucid_yolo.optim import MuSGD, orthogonalize
 
+#: Whether this torch exposes ``Tensor.grad_dtype``, the supported way to hold a gradient in
+#: a dtype other than its parameter's. Below it, assigning such a gradient is refused
+#: outright and the case cannot be built. The project floor is ``torch>=2.4`` and the
+#: attribute is newer than that, so the one test needing it is gated on the capability
+#: rather than on a version number.
+_GRAD_DTYPE_SUPPORTED = hasattr(torch.Tensor, "grad_dtype")
+
 
 @pytest.fixture(autouse=True)
 def reset_random_seeds() -> Iterator[None]:
@@ -206,11 +213,13 @@ def test_zero_grad_param_skipped() -> None:
 class TestExactShapeBatching:
     """Equal-shape matrices share one Newton--Schulz call without sharing state.
 
-    Shape, dtype and device are the complete batching key: every operation inside
-    :meth:`MuSGD._parameter_update` is elementwise or acts on the final two matrix
-    axes, so a leading batch axis cannot mix parameters. These tests compare the
-    result with separate per-parameter calls and count the production call
-    boundary, since values alone cannot prove that the separate launches are gone.
+    Shape, both dtypes and device are the complete batching key: every operation
+    inside :meth:`MuSGD._parameter_update` is elementwise or acts on the final two
+    matrix axes, so a leading batch axis cannot mix parameters that agree on them.
+    Both dtypes, because the gradients are stacked as well as the parameters and
+    the two need not match. These tests compare the result with separate
+    per-parameter calls and count the production call boundary, since values alone
+    cannot prove that the separate launches are gone.
 
     Which devices take that key is a separate question from what the key is, and
     the two are tested separately: every test here but the last asks the fixture
@@ -348,6 +357,47 @@ class TestExactShapeBatching:
             expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
             expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
+
+    @pytest.mark.skipif(not _GRAD_DTYPE_SUPPORTED, reason="torch.Tensor.grad_dtype postdates the torch>=2.4 floor")
+    @pytest.mark.usefixtures("batching_on_every_device")
+    def test_a_gradient_dtype_of_its_own_forms_a_separate_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Two float32 matrices whose gradients differ in dtype are stacked apart.
+
+        ``_nesterov_grad`` returns ``grad.add(buffer)``, which promotes, so a
+        float64 gradient on a float32 parameter yields a float64 Nesterov gradient
+        while its same-shape, same-dtype neighbour yields a float32 one. Only the
+        parameters agree; the gradients are stacked too. ``torch.stack`` promotes
+        a mixed pair rather than refusing it, so the neighbour would be computed at
+        a precision its own path never chose and nothing would say so -- the failure
+        this key separation removes is silent, which is why it is worth a key field
+        rather than an assertion.
+
+        The gradient is assigned through ``grad_dtype``, which is the supported way
+        to hold a gradient in a dtype other than its parameter's and the reason this
+        case is reachable at all.
+        """
+        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
+        promoting = torch.nn.Parameter(torch.randn(6, 4))
+        promoting.grad_dtype = None  # accept a gradient wider than the parameter
+        promoting.grad = torch.randn(6, 4, dtype=torch.float64)
+        params = [promoting, _param_with_grad(6, 4)]
+        starts = [param.detach().clone() for param in params]
+        grads = [param.grad.clone() for param in params]
+        calls = self._count_orthogonalize_calls(monkeypatch)
+        opt = MuSGD(params, lr=lr)
+
+        opt.step()
+
+        assert calls == [
+            (torch.Size([6, 4]), torch.float64),
+            (torch.Size([6, 4]), torch.float32),
+        ]
+        assert [param.dtype for param in params] == [torch.float32, torch.float32]
+        for param, start, grad in zip(params, starts, grads, strict=True):
+            nesterov = (1.0 + momentum) * grad
+            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
+            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
+            torch.testing.assert_close(param.detach(), (start - lr * expected_update).to(param.dtype))
 
     def _count_vmap_calls(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
         """Install a counting stand-in for ``torch.vmap`` and return its one-element tally."""
