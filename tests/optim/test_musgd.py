@@ -482,6 +482,112 @@ class TestExactShapeBatching:
             expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
 
+    @pytest.mark.usefixtures("batching_on_every_device")
+    def test_interleaved_vector_and_matrix_params_reassemble_correctly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Vectors interleaved between equal-shape matrices land at the right index after batching.
+
+        ``_step_group`` tracks bucket membership by list index into its internal
+        ``active`` list; a group ordered ``[bias, kernel_a, bias2, kernel_b]`` is
+        the case where the index-skip reassembly must skip the two vector slots
+        (indices 0 and 2) and route the batched kernel updates back to indices 1
+        and 3, not 0 and 1. Every existing batching test uses an all-matrix list,
+        so this path was previously unpinned.
+        """
+        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.9, 0.6, 0.4, 0.01, 5
+        bias = _param_with_grad(4)
+        kernel_a = _param_with_grad(6, 4)
+        bias2 = _param_with_grad(3)
+        kernel_b = _param_with_grad(6, 4)
+        params = [bias, kernel_a, bias2, kernel_b]
+        starts = [param.detach().clone() for param in params]
+        grads = [param.grad.clone() for param in params]
+        calls = self._count_orthogonalize_calls(monkeypatch)
+        opt = MuSGD(
+            params,
+            lr=lr,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            w_muon=w_muon,
+            w_sgd=w_sgd,
+            ns_steps=ns_steps,
+        )
+
+        opt.step()
+
+        assert calls == [(torch.Size([6, 4]), torch.float32)]
+        for index in (0, 2):  # vector slots: pure Nesterov SGD, no weight decay
+            expected = starts[index] - lr * (1.0 + momentum) * grads[index]
+            torch.testing.assert_close(params[index].detach(), expected)
+        for index in (1, 3):  # matrix slots: batched Muon+SGD+decay, reassembled by index
+            nesterov = (1.0 + momentum) * grads[index]
+            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
+            expected_update.add_(nesterov, alpha=w_sgd).add_(starts[index], alpha=weight_decay)
+            torch.testing.assert_close(params[index].detach(), starts[index] - lr * expected_update)
+
+    @pytest.mark.usefixtures("batching_on_every_device")
+    def test_large_bucket_reassembles_every_index_correctly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A bucket of eight equal-shape matrices reassembles every element correctly.
+
+        Every other batching test caps at two or three elements, while a
+        real n-scale deployment reaches roughly six to ten equal-shape matrices
+        per bucket. The ``zip(..., strict=True)`` reassembly in ``_step_group``
+        is untested at that scale before this test.
+        """
+        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.03, 0.8, 0.6, 0.4, 0.02, 5
+        kernels = [_param_with_grad(4, 4) for _ in range(8)]
+        starts = [param.detach().clone() for param in kernels]
+        grads = [param.grad.clone() for param in kernels]
+        calls = self._count_orthogonalize_calls(monkeypatch)
+        opt = MuSGD(
+            kernels,
+            lr=lr,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            w_muon=w_muon,
+            w_sgd=w_sgd,
+            ns_steps=ns_steps,
+        )
+
+        opt.step()
+
+        assert calls == [(torch.Size([4, 4]), torch.float32)]
+        for param, start, grad in zip(kernels, starts, grads, strict=True):
+            nesterov = (1.0 + momentum) * grad
+            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
+            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
+            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+
+    @pytest.mark.usefixtures("batching_on_every_device")
+    def test_state_dict_roundtrip_through_multi_element_bucket(self) -> None:
+        """A checkpoint saved mid-batch restores each parameter's own momentum buffer, not a mixed one.
+
+        ``test_state_dict_roundtrip`` at module scope only routes through a
+        singleton bucket. Momentum buffers are keyed by parameter identity
+        before bucketing runs, so this is expected to be unaffected by batching
+        -- but that expectation was previously unpinned once two or more
+        equal-shape matrices share a batch.
+        """
+        original = [_param_with_grad(6, 4) for _ in range(3)]
+        opt_a = MuSGD(original, lr=0.1)
+        opt_a.step()
+        checkpoint = io.BytesIO()
+        torch.save(opt_a.state_dict(), checkpoint)
+        resumed = [torch.nn.Parameter(param.detach().clone()) for param in original]
+        opt_b = MuSGD(resumed, lr=0.1)
+        checkpoint.seek(0)
+        opt_b.load_state_dict(torch.load(checkpoint, weights_only=True))
+
+        next_grads = [torch.randn_like(param) for param in original]
+        for param, grad in zip(original, next_grads, strict=True):
+            param.grad = grad.clone()
+        for param, grad in zip(resumed, next_grads, strict=True):
+            param.grad = grad.clone()
+        opt_a.step()
+        opt_b.step()
+
+        for param_a, param_b in zip(original, resumed, strict=True):
+            torch.testing.assert_close(param_a.detach(), param_b.detach())
+
 
 class TestZeroMuonGain:
     """The ``w_muon = 0`` arm skips the Muon branch instead of computing and discarding it.
@@ -546,6 +652,31 @@ class TestZeroMuonGain:
         nesterov = (1.0 + momentum) * matrix_grad  # first step: buffer = g
         expected = matrix0 - lr * (w_sgd * nesterov + weight_decay * matrix0)
         torch.testing.assert_close(matrix.detach(), expected)
+
+    def test_zero_gain_skips_batching_for_multiple_equal_shape_matrices(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Two or more equal-shape matrices at ``w_muon = 0`` all take the scalar path, never a shared batch.
+
+        ``_step_group``'s bucket-membership test is ``ndim < 2 or w_muon == 0.0``:
+        at zero Muon gain a matrix parameter never enters ``matrix_buckets``
+        regardless of how many peers share its shape. ``test_newton_schulz_runs_
+        only_for_a_nonzero_gain`` above only covers a single matrix parameter;
+        this extends the same zero-call invariant to three equal-shape matrices
+        that would otherwise be eligible to batch together.
+        """
+        lr, momentum, w_sgd, weight_decay = 0.1, 0.9, 0.4, 0.2
+        matrices = [_param_with_grad(6, 4) for _ in range(3)]
+        starts = [matrix.detach().clone() for matrix in matrices]
+        grads = [matrix.grad.clone() for matrix in matrices]
+        tally = self._count_orthogonalize_calls(monkeypatch)
+        opt = MuSGD(matrices, lr=lr, momentum=momentum, weight_decay=weight_decay, w_muon=0.0, w_sgd=w_sgd, ns_steps=5)
+
+        opt.step()
+
+        assert tally[0] == 0
+        for param, start, grad in zip(matrices, starts, grads, strict=True):
+            nesterov = (1.0 + momentum) * grad
+            expected = start - lr * (w_sgd * nesterov + weight_decay * start)
+            torch.testing.assert_close(param.detach(), expected)
 
     def test_zero_gain_leaves_a_vector_parameter_on_its_own_path(self) -> None:
         """A 1D parameter takes the same pure Nesterov SGD step whatever ``w_muon`` says.
