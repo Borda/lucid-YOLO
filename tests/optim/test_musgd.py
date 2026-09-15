@@ -64,6 +64,37 @@ def _param_with_grad(*shape: int) -> torch.nn.Parameter:
     return param
 
 
+class _FakeDeviceParameter(torch.nn.Parameter):
+    """A real CPU-backed parameter that reports a caller-chosen fake ``.device``.
+
+    ``torch.randn(..., device=torch.device("cpu", N))`` collapses back to plain
+    ``"cpu"`` the moment a real tensor is allocated on it, so two genuinely
+    different device values cannot be produced from CPU tensors alone. This
+    subclass keeps the real CPU storage every arithmetic op needs and overrides
+    only the ``.device`` attribute :meth:`MuSGD._step_group` reads to build its
+    ``(shape, dtype, device)`` bucket key -- enough to prove that key's device
+    slot is load-bearing without a second real accelerator.
+
+    Examples:
+        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
+        <torch._C.Generator object at ...>
+        >>> tagged = _FakeDeviceParameter(torch.randn(2, 2), torch.device("cpu", 1))
+        >>> tagged.device
+        device(type='cpu', index=1)
+        >>> tagged.shape
+        torch.Size([2, 2])
+    """
+
+    def __new__(cls, data: torch.Tensor, fake_device: torch.device) -> _FakeDeviceParameter:
+        instance = super().__new__(cls, data, requires_grad=True)
+        instance._fake_device = fake_device
+        return instance
+
+    @property
+    def device(self) -> torch.device:
+        return self._fake_device
+
+
 def _expected_muon_update(nesterov_grad: torch.Tensor, ns_steps: int) -> torch.Tensor:
     """Recompute the Muon branch by hand: scaled orthogonalization of the 2D view.
 
@@ -399,6 +430,40 @@ class TestExactShapeBatching:
             expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
             torch.testing.assert_close(param.detach(), (start - lr * expected_update).to(param.dtype))
 
+    def test_device_boundary_forms_a_separate_batch_on_cpu_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Two equal-shape, equal-dtype params on different ``.device`` values never share a batch.
+
+        ``test_device_boundary_forms_a_separate_batch`` above is the only test of
+        this invariant and is ``@pytest.mark.gpu``-only, so it never runs in the
+        default CPU-only CI matrix. A real second CPU tensor cannot carry a
+        genuinely different device value -- ``torch.randn(..., device=("cpu", 1))``
+        collapses back to plain ``"cpu"`` the moment the tensor is allocated -- so
+        this test tags one of two identical CPU tensors with a fake ``.device``
+        via :class:`_FakeDeviceParameter`, proving the device slot of the
+        ``(shape, dtype, device)`` bucket key is load-bearing without hardware.
+        """
+        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
+        real_cpu_param = _param_with_grad(6, 4)
+        tagged_param = _FakeDeviceParameter(torch.randn(6, 4), torch.device("cpu", 1))
+        tagged_param.grad = torch.randn(6, 4)
+        params = [real_cpu_param, tagged_param]
+        starts = [param.detach().clone() for param in params]
+        grads = [param.grad.clone() for param in params]
+        calls = self._count_orthogonalize_calls(monkeypatch)
+        opt = MuSGD(params, lr=lr)
+
+        opt.step()
+
+        assert calls == [
+            (torch.Size([6, 4]), torch.float32),
+            (torch.Size([6, 4]), torch.float32),
+        ]
+        for param, start, grad in zip(params, starts, grads, strict=True):
+            nesterov = (1.0 + momentum) * grad
+            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
+            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
+            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+
     def _count_vmap_calls(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
         """Install a counting stand-in for ``torch.vmap`` and return its one-element tally."""
         tally = [0]
@@ -587,6 +652,57 @@ class TestExactShapeBatching:
 
         for param_a, param_b in zip(original, resumed, strict=True):
             torch.testing.assert_close(param_a.detach(), param_b.detach())
+
+    @pytest.mark.usefixtures("batching_on_every_device")
+    def test_batched_trajectory_matches_unbatched_reference_over_many_steps(self) -> None:
+        """Divergence between the batched and unbatched paths stays within a tight bound over 40 steps.
+
+        Every other batching test in this class compares a single step. The PR
+        introducing exact-shape batching reports that floating-point
+        reassociation inside ``torch.vmap`` grows the gap between batched and
+        unbatched runs with step count -- "max difference from the old loop
+        after 60 local CUDA steps is 3.814697e-06; after 35 CPU steps it is
+        1.192093e-06" -- so a single-step comparison cannot catch a regression
+        that only compounds over a real training run. This test runs the
+        production batched path (``opt.step()`` on equal-shape matrices) and an
+        unbatched reference (direct :meth:`MuSGD._parameter_update` calls, no
+        ``vmap``) side by side for 40 steps with the same fixed per-parameter
+        gradients each step, and asserts the worst per-step divergence never
+        exceeds ``1e-5`` -- a bound comfortably above the PR's own reported
+        1.192093e-06-after-35-CPU-steps figure, tight enough to catch a
+        regression that reintroduces or worsens the reassociation gap.
+        """
+        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.9, 0.5, 0.5, 5e-4, 5
+        n_steps = 40
+        batched_params = [_param_with_grad(6, 4) for _ in range(3)]
+        fixed_grads = [param.grad.clone() for param in batched_params]
+        for param, grad in zip(batched_params, fixed_grads, strict=True):
+            param.grad = grad
+        opt = MuSGD(
+            batched_params,
+            lr=lr,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            w_muon=w_muon,
+            w_sgd=w_sgd,
+            ns_steps=ns_steps,
+        )
+        group = opt.param_groups[0]
+        reference_params = [param.detach().clone() for param in batched_params]
+        reference_buffers = [torch.zeros_like(param) for param in reference_params]
+
+        max_abs_diff = 0.0
+        for _ in range(n_steps):
+            opt.step()
+            for index, grad in enumerate(fixed_grads):
+                reference_buffers[index].mul_(momentum).add_(grad)
+                nesterov = grad.add(reference_buffers[index], alpha=momentum)
+                update = opt._parameter_update(reference_params[index], nesterov, group)
+                reference_params[index] = reference_params[index] - lr * update
+            for batched_param, reference_param in zip(batched_params, reference_params, strict=True):
+                max_abs_diff = max(max_abs_diff, (batched_param.detach() - reference_param).abs().max().item())
+
+        assert max_abs_diff < 1e-5
 
 
 class TestZeroMuonGain:
