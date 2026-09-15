@@ -349,6 +349,54 @@ class TestExactShapeBatching:
             expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
 
+    def _count_vmap_calls(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+        """Install a counting stand-in for ``torch.vmap`` and return its one-element tally."""
+        tally = [0]
+        real = torch.vmap
+
+        def counting(*args: object, **kwargs: object) -> object:
+            tally[0] += 1
+            return real(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(torch, "vmap", counting)
+        return tally
+
+    @pytest.mark.usefixtures("batching_on_every_device")
+    @pytest.mark.parametrize(
+        ("matrix_count", "expected_maps"),
+        [
+            pytest.param(1, 0, id="lone-matrix-calls-directly"),
+            pytest.param(2, 1, id="two-equal-matrices-take-one-map"),
+        ],
+    )
+    def test_a_bucket_of_one_is_called_rather_than_mapped(
+        self, monkeypatch: pytest.MonkeyPatch, matrix_count: int, expected_maps: int
+    ) -> None:
+        """A bucket holding one parameter reaches the update directly; two of them take one map.
+
+        A single-element map has nothing to batch and is not free: it pays a stack,
+        a trace and an unbind to wrap the one call it makes, and it returns a value
+        that is no longer bit-for-bit the direct call's. Ten of the n-scale
+        detector's buckets hold one parameter, so this is the common case rather
+        than the corner one, and the map count is what separates the two paths --
+        the recorded orthogonalization shape is the same either way.
+        """
+        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
+        matrices = [_param_with_grad(6, 4) for _ in range(matrix_count)]
+        starts = [param.detach().clone() for param in matrices]
+        grads = [param.grad.clone() for param in matrices]
+        maps = self._count_vmap_calls(monkeypatch)
+        opt = MuSGD(matrices, lr=lr)
+
+        opt.step()
+
+        assert maps[0] == expected_maps
+        for param, start, grad in zip(matrices, starts, grads, strict=True):
+            nesterov = (1.0 + momentum) * grad
+            expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
+            expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
+            torch.testing.assert_close(param.detach(), start - lr * expected_update)
+
     def test_a_non_batching_device_keeps_the_per_parameter_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Three equal CPU kernels take three separate orthogonalizations, at the same values.
 

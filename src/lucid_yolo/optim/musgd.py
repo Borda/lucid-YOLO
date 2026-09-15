@@ -185,36 +185,43 @@ class MuSGD(Optimizer):
         which is which per backend rather than per shape: MPS ran the mapped path
         at 108.45 ms per optimizer step against 60.99 ms for the per-parameter
         loop. Every parameter on a device outside that set keeps the loop.
+
+        A bucket holding one parameter is called directly rather than mapped. There
+        is nothing to combine, the stack-map-unbind round trip costs more than the
+        call it wraps, and the direct call is the one that stays bit-for-bit what an
+        unbatched run produced -- a mapped single ``(4, 21, 1, 1)`` differed from it
+        by 4.77e-7. Ten of the n-scale detector's buckets hold one parameter.
+
+        Each update is applied where it resolves rather than collected for a final
+        pass. Every update reads its own parameter and nothing else, so the order is
+        free, while holding one update per parameter alive alongside one gradient per
+        parameter is a transient peak that grows with the model.
         """
         momentum = group["momentum"]
         lr = group["lr"]
-        active: list[tuple[Tensor, Tensor]] = []
-        updates: list[Tensor | None] = []
-        matrix_buckets: dict[tuple[torch.Size, torch.dtype, torch.device], list[int]] = defaultdict(list)
+        matrix_buckets: dict[tuple[torch.Size, torch.dtype, torch.device], list[tuple[Tensor, Tensor]]] = defaultdict(
+            list
+        )
         for param in group["params"]:
             grad = param.grad
             if grad is None:
                 continue
             nesterov_grad = self._nesterov_grad(param, grad, momentum)
-            index = len(active)
-            active.append((param, nesterov_grad))
             if param.ndim < 2 or group["w_muon"] == 0.0 or param.device.type not in _BATCHED_DEVICE_TYPES:
-                updates.append(self._parameter_update(param, nesterov_grad, group))
+                param.add_(self._parameter_update(param, nesterov_grad, group), alpha=-lr)
             else:
-                updates.append(None)
-                matrix_buckets[(param.shape, param.dtype, param.device)].append(index)
+                matrix_buckets[(param.shape, param.dtype, param.device)].append((param, nesterov_grad))
 
-        for indices in matrix_buckets.values():
-            params = torch.stack([active[index][0] for index in indices])
-            grads = torch.stack([active[index][1] for index in indices])
+        for bucket in matrix_buckets.values():
+            if len(bucket) == 1:
+                single, single_grad = bucket[0]
+                single.add_(self._parameter_update(single, single_grad, group), alpha=-lr)
+                continue
+            params = torch.stack([bucket_param for bucket_param, _ in bucket])
+            grads = torch.stack([bucket_grad for _, bucket_grad in bucket])
             batched = torch.vmap(lambda param, grad: self._parameter_update(param, grad, group))(params, grads)
-            for index, bucket_update in zip(indices, batched.unbind(), strict=True):
-                updates[index] = bucket_update
-
-        for (param, _), parameter_update in zip(active, updates, strict=True):
-            if parameter_update is None:  # pragma: no cover - every matrix bucket is filled above
-                raise RuntimeError("missing MuSGD matrix update")
-            param.add_(parameter_update, alpha=-lr)
+            for (bucket_param, _), bucket_update in zip(bucket, batched.unbind(), strict=True):
+                bucket_param.add_(bucket_update, alpha=-lr)
 
     def _nesterov_grad(self, param: Tensor, grad: Tensor, momentum: float) -> Tensor:
         """Advance the shared momentum buffer and return the Nesterov-adjusted gradient.
