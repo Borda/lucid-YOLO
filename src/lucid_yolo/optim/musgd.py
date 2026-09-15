@@ -171,7 +171,7 @@ class MuSGD(Optimizer):
     def _step_group(self, group: dict[str, Any]) -> None:
         """Apply one MuSGD update, batching matrix parameters with the same exact shape.
 
-        The n-scale detector carries 127 matrix parameters but only 20 exact
+        The n-scale detector carries 127 matrix parameters but only 41 exact
         ``(shape, dtype, device)`` keys. Calling :meth:`_parameter_update` through
         :func:`torch.vmap` once per key turns each Newton--Schulz product into a
         batched product, while the function inside the map keeps the same
@@ -280,16 +280,16 @@ class MuSGD(Optimizer):
         rather than inside :meth:`_muon_branch`, because the iteration is reached
         through that one call, and skipping it at the call site is what removes
         the work rather than merely discarding it. The expression inside this
-        function remains untouched. Before exact-shape batching, this paragraph also promised that
-        a ``w_muon > 0`` run was bit-for-bit the run it was. :meth:`_step_group`
-        now maps the expression over equal-shape matrices, so that scheduling
-        promise no longer holds even though the formula does.
+        function remains untouched. Before exact-shape batching, this paragraph
+        also promised that a ``w_muon > 0`` run was bit-for-bit the run it was.
+        :meth:`_step_group` now maps the expression over equal-shape matrices, so
+        that scheduling promise no longer holds even though the formula does.
 
-        The one behavioural difference is confined to the arm that is switched
-        off: ``0.0 * nan`` is ``nan``, so a non-finite orthogonalization used to
-        poison an update whose Muon half carried no weight, and now cannot. The
-        zero-gain arm's finite arithmetic is unchanged -- ``0 + w_sgd*g`` and
-        ``w_sgd*g`` are the same float.
+        One of the remaining behavioural differences is confined to the arm that
+        is switched off: ``0.0 * nan`` is ``nan``, so a non-finite
+        orthogonalization used to poison an update whose Muon half carried no
+        weight, and now cannot. The zero-gain arm's finite arithmetic is
+        unchanged -- ``0 + w_sgd*g`` and ``w_sgd*g`` are the same float.
         """
         if param.ndim < 2:
             return nesterov_grad
