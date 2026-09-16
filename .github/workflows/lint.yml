@@ -29,7 +29,7 @@ jobs:
     env:
       UV_TORCH_BACKEND: "cpu"
     steps:
-      # Full history, for the same reason the `dco` and `trailers` jobs below ask
+      # Full history, for the same reason the `trailers` job below asks
       # for it: `pre-commit run --all-files` includes `commit-trailers-history`,
       # whose entry is `--range origin/main..HEAD`. The default single-commit
       # checkout creates no `refs/remotes/origin/main`, so that range does not
@@ -62,37 +62,14 @@ jobs:
       - name: "🔍 Run pre-commit (all linters + strict mypy + local audit hooks)"
         run: .venv/bin/pre-commit run --all-files
 
-  # Admission layer one (WP-142): every commit a contributor submits carries its own
-  # `Signed-off-by`. Pull requests only -- a push to `main` has no contributor range to
-  # check, and this repository's own history predates the requirement, so running it
-  # there would refuse every existing commit rather than any submitted one.
+  # Admission layer one, the DCO sign-off, is not a job here. It was `scripts/lint/
+  # check_dco.py` and a `dco` job (WP-142) until the DCO GitHub App was installed on
+  # the repository; the app posts a `DCO` status on every pull request, skips bot and
+  # merge commits, and requires the sign-off address to match the author's, which is
+  # one rule the in-repo check declined to enforce. Two checks with two rules on the
+  # same line is one too many, so the in-repo one was removed rather than kept as a
+  # looser shadow of the hosted one.
   #
-  # The check is a file in this repository rather than a hosted app, so it runs the same
-  # way on a laptop and here, and it survives whatever happens to that service. It needs
-  # no environment beyond the standard library, which is why this job installs nothing.
-  dco:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      # Full history: the range spans the pull request's own commits, and a shallow
-      # clone cannot walk back to its base.
-      - name: "📥 Check out the repository"
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: "🐍 Set up Python"
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.11"
-      # The two SHAs go through the environment rather than into the command string:
-      # they are interpolated from event data, and a value reaching a shell directly is
-      # how that becomes an injection rather than a range.
-      - name: "✍️ Check Developer Certificate of Origin sign-offs"
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python scripts/lint/check_dco.py --range "${BASE_SHA}..${HEAD_SHA}"
-
   # Admission layer three (WP-144), and the only one producing a reviewable artifact
   # rather than a promise: a contributor must name what an algorithmic change derives
   # from, so an unnamed derivation on a loss or an assigner is visible at review instead
@@ -102,6 +79,11 @@ jobs:
   # replaces the messages it would have validated, so checking them there validates a
   # message nobody wrote. That argument covers the merge result and not the submission.
   # The contributor's own commits are exactly what review reads, and they exist here.
+  #
+  # A commit an automation authored -- pre-commit.ci's autoupdate, a dependabot bump,
+  # anything under GitHub's App address -- is skipped by name, here and in the
+  # `commit-trailers-history` hook the `precommit` job runs: a pin bump has no
+  # derivation to name. Before the skip, every such pull request failed both jobs.
   trailers:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

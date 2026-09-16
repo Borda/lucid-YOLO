@@ -80,6 +80,17 @@ HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 DENIAL_RE = re.compile(r"^none\b", re.IGNORECASE)
 #: Co-author separator: a line containing only dashes.
 SEPARATOR_RE = re.compile(r"^---\s*$", re.MULTILINE)
+#: The author address GitHub assigns to a commit made by an App installation --
+#: ``66853113+pre-commit-ci[bot]@users.noreply.github.com`` and its dependabot and
+#: renovate siblings. Range mode skips these commits instead of validating them: a
+#: dependency-pin bump has no algorithmic derivation to name, nobody wrote the message,
+#: and what lands on ``main`` is the maintainer's squash-merge message, which is
+#: written by a person and checked as one. The address is the closest thing a checkout
+#: can see to GitHub's own ``Bot`` account type. It is also self-reported, and a
+#: contributor willing to forge it is the contributor already willing to write a
+#: false trailer, so the check keeps enforcing the shape and leaves the truth where
+#: it was. The DCO GitHub App applies the same exemption to the sign-off it checks.
+BOT_AUTHOR_RE = re.compile(r"\[bot\]@users\.noreply\.github\.com$")
 
 #: Heading text (lowercased, emoji-tolerant) marking the section whose rows admit a
 #: source, and the subsection inside it whose rows do not.
@@ -401,14 +412,19 @@ class UnresolvableRange(RuntimeError):
     """A git range this repository cannot resolve, such as one naming an absent base ref."""
 
 
-def _commit_shas(commit_range: str) -> list[str]:
-    """Return the non-merge commit hashes in a git range, newest first.
+def _range_commits(commit_range: str) -> list[tuple[str, str]]:
+    """Return ``(hash, author address)`` for each non-merge commit in a git range, newest first.
+
+    The author address, not the committer's: a commit made through GitHub's web flow
+    or an App carries ``GitHub <noreply@github.com>`` as its committer whoever wrote
+    it, so the committer says nothing about who the message belongs to.
 
     Args:
         commit_range: A git range expression such as ``origin/main..HEAD``.
 
     Returns:
-        Full commit hashes; empty when the range selects nothing.
+        Full commit hashes paired with their author address; empty when the range
+        selects nothing.
 
     Raises:
         UnresolvableRange: When git cannot resolve the range. A shallow checkout has no
@@ -419,7 +435,7 @@ def _commit_shas(commit_range: str) -> list[str]:
             here and is owed a sentence naming the fix rather than a stack trace.
     """
     result = subprocess.run(
-        ["git", "log", "--no-merges", "--format=%H", commit_range],
+        ["git", "log", "--no-merges", "--format=%H%x1f%ae", commit_range],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -428,7 +444,12 @@ def _commit_shas(commit_range: str) -> list[str]:
     if result.returncode != 0:
         detail = result.stderr.strip().splitlines()
         raise UnresolvableRange(detail[0] if detail else f"git could not resolve {commit_range!r}")
-    return [line for line in result.stdout.splitlines() if line]
+    commits = []
+    for line in result.stdout.splitlines():
+        if line:
+            sha, _, author = line.partition("\x1f")
+            commits.append((sha, author))
+    return commits
 
 
 def _commit_message(sha: str) -> str:
@@ -450,11 +471,14 @@ def _commit_message(sha: str) -> str:
     return result.stdout
 
 
-def _report(reports: list[tuple[str, list[str]]]) -> int:
+def _report(reports: list[tuple[str, list[str]]], skipped: int = 0) -> int:
     """Print per-commit results and return the process exit code.
 
     Args:
         reports: ``(label, violations)`` pairs, one per validated message.
+        skipped: How many commits range mode left unvalidated because an automation
+            authored them; named in the summary so a clean verdict over a range that
+            validated nothing reads as what it is.
 
     Returns:
         ``1`` when any message has violations, otherwise ``0``.
@@ -464,10 +488,11 @@ def _report(reports: list[tuple[str, list[str]]]) -> int:
         print(f"COMMIT {label}: FAIL")
         for item in violations:
             print(f"  - {item}")
+    skipped_note = f", {skipped} automation commit(s) skipped" if skipped else ""
     if failed:
-        print(f"commit-trailer check FAILED: {len(failed)} of {len(reports)} message(s) invalid")
+        print(f"commit-trailer check FAILED: {len(failed)} of {len(reports)} message(s) invalid{skipped_note}")
         return 1
-    print(f"commit-trailer check clean: {len(reports)} message(s) validated")
+    print(f"commit-trailer check clean: {len(reports)} message(s) validated{skipped_note}")
     return 0
 
 
@@ -506,19 +531,24 @@ def main(argv: list[str] | None = None) -> int:
 
     registers = load_registers(args.provenance, args.assumptions)
     reports: list[tuple[str, list[str]]] = []
+    skipped = 0
     if args.file is not None:
         message = args.file.read_text(encoding="utf-8")
         reports.append((str(args.file), validate_message(message, registers)))
     else:
         try:
-            shas = _commit_shas(args.commit_range)
+            commits = _range_commits(args.commit_range)
         except UnresolvableRange as unresolvable:
             print(f"commit-trailer check FAILED: cannot resolve range {args.commit_range!r}: {unresolvable}")
             print("  fetch the base ref first -- a shallow clone has no origin/main to measure against")
             return 1
-        for sha in shas:
+        for sha, author in commits:
+            if BOT_AUTHOR_RE.search(author):
+                print(f"COMMIT {sha[:12]}: SKIP (automation author {author})")
+                skipped += 1
+                continue
             reports.append((sha[:12], validate_message(_commit_message(sha), registers)))
-    return _report(reports)
+    return _report(reports, skipped)
 
 
 if __name__ == "__main__":
