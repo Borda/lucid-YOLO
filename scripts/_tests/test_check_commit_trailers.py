@@ -29,6 +29,13 @@ VALIDATOR_PATH = REPO_ROOT / "scripts" / "lint" / "check_commit_trailers.py"
 PROVENANCE_PATH = REPO_ROOT / "docs" / "PROVENANCE.md"
 ASSUMPTIONS_PATH = REPO_ROOT / "docs" / "ASSUMPTIONS.md"
 
+#: The author a GitHub App installation commits under, as the bot branch behind pull
+#: request 4 carried it. Range mode skips this author; the tests below build such a
+#: commit beside human ones and check that only the human ones are validated.
+BOT_AUTHOR = "pre-commit-ci[bot] <66853113+pre-commit-ci[bot]@users.noreply.github.com>"
+#: What pre-commit.ci writes: no conventional type, no trailer of any kind.
+BOT_MESSAGE = "[pre-commit.ci] pre-commit autoupdate\n\nupdates:\n- ruff-pre-commit: v0.16.1 -> v0.16.7\n"
+
 #: A contract-satisfying message with a substitutable subject, for the range-mode
 #: repositories below. ``R1`` is read from the real ``docs/PROVENANCE.md``, which is
 #: what the validator loads its allowlist from whatever repository it is walking.
@@ -322,8 +329,13 @@ class TestAssumptionRegister:
 
 
 @pytest.fixture
-def throwaway_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[Sequence[str]], list[str]]:
+def throwaway_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[Sequence[str | tuple[str, str]]], list[str]]:
     """Build a git repository holding the given messages and point the validator at it.
+
+    Each entry is a message, or a ``(message, author)`` pair for a commit that should
+    carry an author other than the fixture's own -- the bot case.
 
     ``REPO_ROOT`` is redirected to the new repository, so ``--range`` walks that rather
     than this checkout; ``DEFAULT_PROVENANCE`` is bound at import and keeps reading the
@@ -337,8 +349,8 @@ def throwaway_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Cal
         monkeypatch: Redirects ``REPO_ROOT`` and isolates git's configuration.
 
     Returns:
-        A callable taking the commit messages, oldest first, and returning their hashes
-        in the same order.
+        A callable taking the commit messages (or message-author pairs), oldest first,
+        and returning their hashes in the same order.
     """
     repo = tmp_path / "repository"
     template = tmp_path / "empty-git-template"
@@ -350,7 +362,7 @@ def throwaway_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Cal
         result = subprocess.run(["git", *argv], cwd=repo, input=stdin, capture_output=True, text=True, check=True)
         return result.stdout.strip()
 
-    def _build(messages: Sequence[str]) -> list[str]:
+    def _build(messages: Sequence[str | tuple[str, str]]) -> list[str]:
         subprocess.run(
             ["git", "init", "--quiet", f"--template={template}", "--initial-branch=main", str(repo)],
             capture_output=True,
@@ -360,10 +372,12 @@ def throwaway_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Cal
         _git("config", "user.email", "fixture@example.invalid")
         _git("config", "commit.gpgsign", "false")
         shas = []
-        for index, message in enumerate(messages):
+        for index, entry in enumerate(messages):
+            message, author = entry if isinstance(entry, tuple) else (entry, None)
             (repo / f"file_{index}.txt").write_text(f"{index}\n", encoding="utf-8")
             _git("add", f"file_{index}.txt")
-            _git("commit", "--quiet", "--file", "-", stdin=message)
+            author_flag = [f"--author={author}"] if author else []
+            _git("commit", "--quiet", *author_flag, "--file", "-", stdin=message)
             shas.append(_git("rev-parse", "HEAD"))
         monkeypatch.setattr(validator, "REPO_ROOT", repo)
         return shas
@@ -489,3 +503,76 @@ class TestContributorRange:
         assert status == 1
         assert "1 of 2 message(s) invalid" in out
         assert shas[-1][:12] in out
+
+    def test_range_mode_skips_a_commit_an_automation_authored(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        throwaway_repository: Callable[[Sequence[str | tuple[str, str]]], list[str]],
+    ) -> None:
+        """A bot-authored commit is skipped by name; the human commits beside it are still checked.
+
+        Pull request 4 is the case: pre-commit.ci's autoupdate commit carries no
+        conventional subject and no trailer, and nobody wrote it. Refusing it would
+        block every dependency-pin bump the service opens; validating a message no
+        person wrote checks nothing. The skip is printed so the verdict says what was
+        left out, and a human commit in the same range still fails on its own merits.
+        """
+        shas = throwaway_repository(
+            [
+                RANGE_MESSAGE_TEMPLATE.format(subject="chore: seed the range"),
+                (BOT_MESSAGE, BOT_AUTHOR),
+                RANGE_MESSAGE_TEMPLATE.format(subject="fix(data): correct the pad value"),
+            ]
+        )
+
+        status = validator.main(["--range", f"{shas[0]}..{shas[-1]}"])
+
+        out = capsys.readouterr().out
+        assert status == 0
+        assert f"COMMIT {shas[1][:12]}: SKIP (automation author" in out
+        assert "1 message(s) validated, 1 automation commit(s) skipped" in out
+
+    def test_a_human_commit_beside_a_skipped_bot_commit_is_still_refused(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        throwaway_repository: Callable[[Sequence[str | tuple[str, str]]], list[str]],
+    ) -> None:
+        """The skip is per author, not per range: a bad human message next to a bot one still fails."""
+        shas = throwaway_repository(
+            [
+                RANGE_MESSAGE_TEMPLATE.format(subject="chore: seed the range"),
+                (BOT_MESSAGE, BOT_AUTHOR),
+                "no conventional type on this subject\n\nWP: 144\nProvenance: R1\nAssumptions: none\nGate: t.py::x\n",
+            ]
+        )
+
+        status = validator.main(["--range", f"{shas[0]}..{shas[-1]}"])
+
+        out = capsys.readouterr().out
+        assert status == 1
+        assert "1 of 1 message(s) invalid, 1 automation commit(s) skipped" in out
+        assert shas[-1][:12] in out
+
+    def test_a_bot_address_outside_github_noreply_is_not_skipped(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        throwaway_repository: Callable[[Sequence[str | tuple[str, str]]], list[str]],
+    ) -> None:
+        """Only GitHub's own App address is an automation; ``[bot]`` in a name alone is not.
+
+        The skip keys on the address suffix GitHub assigns, so a display name ending in
+        ``[bot]`` under some other domain is a contributor and is validated as one.
+        """
+        shas = throwaway_repository(
+            [
+                RANGE_MESSAGE_TEMPLATE.format(subject="chore: seed the range"),
+                (BOT_MESSAGE, "someone[bot] <bot@example.invalid>"),
+            ]
+        )
+
+        status = validator.main(["--range", f"{shas[0]}..{shas[-1]}"])
+
+        out = capsys.readouterr().out
+        assert status == 1
+        assert "SKIP" not in out
+        assert "1 of 1 message(s) invalid" in out

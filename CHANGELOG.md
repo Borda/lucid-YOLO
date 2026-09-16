@@ -17,8 +17,14 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Changed
 
+- **The DCO sign-off is checked by the DCO GitHub App, not by a job here.** `scripts/lint/check_dco.py` and the `dco` job in `lint.yml` (WP-142) are removed. The app posts a `DCO` status on every pull request, skips bot and merge commits, and requires the sign-off address to match the author's — one rule the in-repo check declined to enforce, so the two disagreed on the same line. `docs/CONTRIBUTING.md` states the app's rule.
+
+- **Automation-authored commits are skipped by the provenance trailer check.** pre-commit.ci's autoupdate and dependabot's pin bumps carry no trailers and no conventional subject, and every such pull request failed the `trailers` job and the `commit-trailers-history` hook inside `precommit`. Range mode now skips a commit whose author address is GitHub's App address, prints the skip by commit, and counts it in the summary; a human commit in the same range is still validated.
+
 - **The golden sweep is five times faster.** 41 of the 50 files are frozen copies byte-identical to a live sibling and now reuse that sibling's producer output: 34.6 s to 7.1 s, same files, same verdicts, and every file still parses, validates and compares against its own stored values. The hook stays on `stages: [manual]` regardless — `make gate` runs the harness through its own target, so a commit-stage copy repeats the gate at any price.
+
 - **Coverage has a floor.** `fail_under = 96` against a measured 97.21%, so the promise of coverage as a gate is one the gate can keep.
+
 - **Contributors with an existing `.venv` must reinstall the dev dependency group.** 0.8.0 added `--doctest-plus` to `addopts` and `pytest-doctestplus>=1.3` to the `dev` group in the same commit, so an environment provisioned before it aborts every `pytest` invocation with `unrecognized arguments: --doctest-plus` — including `make test` and therefore `make gate`, which fail before collecting anything rather than reporting a missing plugin. `make setup` provisions it; an existing tree needs `uv pip install --python .venv/bin/python -e . --group dev --group typing`, the `typing` group being the second thing that release left undeclared. The failure is loud but its message names the flag rather than the plugin, which is the part worth stating here.
 
 ## [0.8.0] - 2026-09-05
