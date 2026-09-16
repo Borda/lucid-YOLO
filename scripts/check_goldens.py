@@ -404,10 +404,14 @@ def check_all(goldens_dir: Path = DEFAULT_GOLDENS_DIR, include_gpu: bool = False
         One :class:`GoldenResult` per discovered golden, in discovery order.
 
     Examples:
+        The full sweep is the CI step's job, not this docstring's -- it is ~55 s:
+
         ```pycon
-        >>> results = check_all()
-        >>> all(r.passed for r in results)
+        >>> results = check_all()  # doctest: +SKIP
+        >>> all(r.passed for r in results)  # doctest: +SKIP
         True
+        >>> check_all(Path("/nonexistent"))
+        []
 
         ```
     """

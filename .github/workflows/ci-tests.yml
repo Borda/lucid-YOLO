@@ -50,9 +50,10 @@ jobs:
       # The Makefile's `PY` is `.venv/bin/python`, the venv created above.
       - name: "🧪 Offline unit suite with coverage (make test)"
         run: make test
-      # Frozen golden sweep. WP-162 took `golden-check` off the commit stage, and
-      # `lint.yml`'s `--all-files` run had been CI's only full sweep. It lives here
-      # because the harness recomputes model metrics: a test-shaped check.
+      # Frozen golden sweep, and the only one CI runs. WP-162 took `golden-check` off
+      # the commit stage; the suite's own three copies (a doctest, a test and the
+      # exit-code test, ~55 s each, two thirds of `make test`) are gone too. It lives
+      # here because the harness recomputes model metrics: a test-shaped check.
       #
       # One cell only: the values were frozen on Linux under 3.11, and the
       # tolerances are sized for code drift, not interpreter or BLAS drift.

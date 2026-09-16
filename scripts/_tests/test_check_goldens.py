@@ -47,11 +47,13 @@ def _load_harness() -> ModuleType:
 harness = _load_harness()
 
 
-def test_real_goldens_pass() -> None:
-    """The full harness run over the repository's real goldens passes (DoD a)."""
-    results = harness.check_all()
-    assert results, "expected at least one real golden to be discovered"
-    assert all(r.passed for r in results), [harness.format_result(r, harness.DEFAULT_GOLDENS_DIR) for r in results]
+# There is deliberately no ``test_real_goldens_pass`` here. It ran ``check_all()``
+# over every real golden -- the same ~55 s sweep ``ci-tests.yml`` runs as its own
+# step on the one cell the goldens were frozen on -- and so did the ``check_all``
+# doctest and the exit-code test below, so ``make test`` paid the sweep three times
+# per cell and six cells paid it on interpreters the tolerances were never sized
+# for. The harness's own logic is pinned below against a copied golden; the
+# repository's goldens have one checker, and it is the CI step.
 
 
 def test_tampered_golden_fails(tmp_path: Path) -> None:
@@ -300,9 +302,10 @@ def test_resolve_producer_contract(spec_valid: bool) -> None:
             harness.resolve_producer("not-a-valid-spec")
 
 
-def test_main_exit_code_zero_on_real_goldens() -> None:
-    """The CLI returns 0 when every real golden passes."""
-    assert harness.main([]) == 0
+def test_main_exit_code_zero_on_a_passing_golden(tmp_path: Path) -> None:
+    """The CLI returns 0 when every golden it finds passes."""
+    shutil.copy(REAL_GOLDEN, tmp_path / REAL_GOLDEN.name)
+    assert harness.main(["--goldens-dir", str(tmp_path)]) == 0
 
 
 def test_main_exit_code_one_on_empty_dir(tmp_path: Path) -> None:
