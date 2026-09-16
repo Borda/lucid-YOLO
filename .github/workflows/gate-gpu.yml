@@ -1,26 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 name: Accelerator Gate
 
-# The schedule the Makefile's `gate-gpu` comment claimed to be. `make gate` runs the
-# offline half on every push; the marked tests and the goldens/gpu/ subtree needed an
-# accelerator, so nothing ran them unless a human remembered — which is how the frozen
-# detection overfit golden drifted for six days under WP-078, and why
-# docs/RESEARCH_LOG.md still records shapes_regression_det.json as outstanding.
+# The schedule the Makefile's `gate-gpu` comment claimed to be. The marked tests and
+# the goldens/gpu/ subtree need an accelerator, so nothing ran them unless a human
+# remembered -- which is how the detection overfit golden drifted for six days under
+# WP-078; docs/RESEARCH_LOG.md still lists shapes_regression_det.json as outstanding.
 #
-# Arming this workflow is one repository action, deliberately outside the file: set the
-# repository variable GPU_RUNNER_LABEL to the label of a self-hosted CUDA runner (e.g.
-# `gpu-cuda`). Until it is set, both triggers resolve to a visible skipped job rather
-# than a run queued forever against a label no machine answers to. GitHub-hosted runners
+# Arming it is one repository action: set the variable GPU_RUNNER_LABEL to the label
+# of a self-hosted CUDA runner (e.g. `gpu-cuda`). Until then both triggers resolve
+# to a visible skipped job rather than a run queued forever. GitHub-hosted runners
 # have no GPU, so there is no default worth hard-coding.
 #
-# Nightly rather than per-push on purpose: the L4 reference run costs ~915 s for the
-# marked tests and retrains the same pipeline again for the goldens, and the point of
-# the target is that drift is caught within a day, not within a minute.
+# Nightly, not per-push: the L4 reference run costs ~915 s for the marked tests and
+# retrains the same pipeline again for the goldens; drift caught within a day is
+# the point.
 
 on:
   schedule:
-    # 04:17 UTC. Offset off the hour because scheduled runs queue behind the top-of-hour
-    # spike, and a nightly gate that starts 30 min late is a nightly gate nobody reads.
+    # 04:17 UTC: off the hour, because scheduled runs queue behind the top-of-hour
+    # spike.
     - cron: "17 4 * * *"
   workflow_dispatch:
 
@@ -36,8 +34,7 @@ jobs:
   gate-gpu:
     if: vars.GPU_RUNNER_LABEL != ''
     runs-on: ${{ vars.GPU_RUNNER_LABEL }}
-    # ~2x the L4 reference (915 s of marked tests, then golden-gpu retrains all five
-    # producers), with room for a cold checkout and a first-time dependency install.
+    # ~2x the L4 reference, with room for a cold checkout and a first install.
     timeout-minutes: 90
     steps:
       - name: "📥 Check out the repository"
@@ -58,13 +55,10 @@ jobs:
           nvidia-smi || echo "nvidia-smi unavailable"
           .venv/bin/python -c "import torch; print('cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
       # `make gate-gpu` is `test-gpu` then `golden-gpu`: the marked tests assert the
-      # WP-040/087/088/132 acceptance floors, the goldens assert the frozen values, and
-      # it was the second of those that silently went stale.
-      #
-      # The transcript is tee'd rather than recomputed: every producer under
-      # `golden-gpu` retrains a model, so a second pass to "record the result" would
-      # cost another full gate and could disagree with the one that decided the run.
-      # `pipefail` keeps the gate's exit status, not tee's, as the job's verdict.
+      # WP-040/087/088/132 floors, the goldens the frozen values. The transcript is
+      # tee'd, not recomputed: every producer retrains a model, so a second pass
+      # would cost another gate and could disagree with the first. `pipefail` keeps
+      # the gate's exit status, not tee's, as the verdict.
       - name: "⚡ Accelerator gate (marked tests + goldens/gpu regression)"
         run: |
           set -o pipefail
