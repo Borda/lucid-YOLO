@@ -6,7 +6,8 @@ Commits subject plus mandatory ``WP:``/``Provenance:``/``Assumptions:``/``Gate:`
 trailers, with every provenance source id resolvable against the allowlist in
 ``docs/PROVENANCE.md`` and every assumption id against the register in
 ``docs/ASSUMPTIONS.md``. Hash-sign and at-sign characters may only appear in the
-co-author trailers that follow the ``---`` separator.
+co-author trailers that follow the ``---`` separator and in ``Signed-off-by:`` lines,
+which ``git commit -s`` and ``git rebase --signoff`` append before it.
 
 Three rules are worth stating here because each is a decision rather than a shape:
 
@@ -80,6 +81,12 @@ HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 DENIAL_RE = re.compile(r"^none\b", re.IGNORECASE)
 #: Co-author separator: a line containing only dashes.
 SEPARATOR_RE = re.compile(r"^---\s*$", re.MULTILINE)
+#: A DCO sign-off line. Git's own ``-s`` and ``--signoff`` append it as the last body
+#: line, which is before the ``---`` separator when one exists, and the at-sign it
+#: carries is an address rather than a mention: GitHub links ``@name``, not e-mail.
+#: ``docs/CONTRIBUTING.md`` tells contributors to use ``-s``, so the checker must not
+#: refuse what the guide asks for.
+SIGNOFF_RE = re.compile(r"^Signed-off-by:.*$", re.MULTILINE)
 #: The author address GitHub assigns to a commit made by an App installation --
 #: ``66853113+pre-commit-ci[bot]@users.noreply.github.com`` and its dependabot and
 #: renovate siblings. Range mode skips these commits instead of validating them: a
@@ -370,7 +377,7 @@ def _check_trailers(body: str, registers: Registers) -> list[str]:
 
 
 def _check_forbidden_chars(body: str) -> list[str]:
-    """Reject ``#`` and ``@`` before the co-author separator.
+    """Reject ``#`` and ``@`` before the co-author separator, outside sign-off lines.
 
     Args:
         body: The message text preceding the co-author separator.
@@ -381,8 +388,15 @@ def _check_forbidden_chars(body: str) -> list[str]:
     Examples:
         >>> _check_forbidden_chars("clean body\\n")
         []
+        >>> _check_forbidden_chars("body\\n\\nSigned-off-by: Ada <ada@example.com>\\n")
+        []
+        >>> _check_forbidden_chars("see @ada\\n")
+        ["forbidden character '@' appears before the '---' separator"]
     """
-    return [f"forbidden character {char!r} appears before the '---' separator" for char in ("#", "@") if char in body]
+    checked = SIGNOFF_RE.sub("", body)
+    return [
+        f"forbidden character {char!r} appears before the '---' separator" for char in ("#", "@") if char in checked
+    ]
 
 
 def validate_message(message: str, registers: Registers) -> list[str]:

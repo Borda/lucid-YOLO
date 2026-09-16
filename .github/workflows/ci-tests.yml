@@ -14,25 +14,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Linting, strict typing and the copyleft audit live in lint.yml; the commit-trailer
-  # contract is a local pre-commit check here, because a squash merge replaces the
-  # messages this workflow would have validated. WP-144 narrowed that: the argument
-  # covers the merge result and not the submission, so lint.yml's `trailers` job checks
-  # the pull request's own commits, which are what review actually reads.
-  # `requires-python` is `>=3.11`, and until now only 3.11 ran: 3.12 and 3.13 were
-  # claimed by the metadata and never exercised. macOS likewise -- `gate-gpu.yml`
-  # runs the accelerator half there against MPS, while the offline suite that decides
-  # whether a change may land had only ever run on Linux.
-  #
-  # `UV_TORCH_BACKEND: cpu` matters more here than in a single job: without it every
-  # one of the six cells resolves and downloads a CUDA-linked torch wheel for a runner
-  # with no GPU.
+  # Lint, strict mypy and the copyleft audit live in lint.yml, whose `trailers` job
+  # checks the pull request's own commits (WP-144); a squash merge replaces the
+  # messages a check here would read. The matrix covers every `requires-python`
+  # interpreter on both CPU platforms; before it only 3.11 on Linux ever ran.
+  # `UV_TORCH_BACKEND: cpu` stops each cell from downloading a CUDA torch wheel.
   testing:
     runs-on: ${{ matrix.os }}
     strategy:
-      # Every cell reports. A failure on one interpreter is a finding about that
-      # interpreter, and cancelling its siblings hides whether the others agree --
-      # which is the question a matrix exists to answer.
+      # Every cell reports: one failing interpreter is a finding, and cancelling
+      # its siblings hides whether the others agree.
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -53,28 +44,42 @@ jobs:
         run: |
           uv venv --python ${{ matrix.python-version }} .venv
           uv pip install --python .venv/bin/python -e . --group dev
-      # `make test`, not an inline pytest line. The inline one omitted both
-      # `--doctest-modules` and the `src scripts` paths, so `testpaths = ["tests"]`
-      # applied and CI collected 1548 tests where the Makefile collects 2668: every
-      # `scripts/_tests/` test -- the ten lint checkers, the golden harness, the
-      # release guard -- and some 879 doctests ran on the developer's machine and
-      # never here. A pull request breaking a lint checker's own logic was green.
-      # The Makefile's `PY` is `.venv/bin/python`, which is the venv the step above
-      # creates, so `make` resolves the same interpreter this job installed into.
+      # `make test`, not inline pytest: the inline line omitted `--doctest-modules`
+      # and `src scripts`, so CI collected 1548 tests where the Makefile collects
+      # 2668 -- every `scripts/_tests/` check and some 879 doctests never ran here.
+      # The Makefile's `PY` is `.venv/bin/python`, the venv created above.
       - name: "🧪 Offline unit suite with coverage (make test)"
         run: make test
-      # The frozen-golden sweep. It used to ride `lint.yml`'s `pre-commit
-      # --all-files` run, which was CI's only full 43/43 check; WP-162 took
-      # `golden-check` off the commit stage, so without this step CI would have
-      # stopped checking the goldens entirely. It lives in this job rather than
-      # back in `lint.yml` because the harness recomputes model metrics -- it is
-      # a test-shaped check, and this is the job that runs the suite.
+      # Frozen golden sweep, and the only one CI runs. WP-162 took `golden-check` off
+      # the commit stage; the suite's own three copies (a doctest, a test and the
+      # exit-code test, ~55 s each, two thirds of `make test`) are gone too. It lives
+      # here because the harness recomputes model metrics: a test-shaped check.
       #
-      # One cell only. The stored values were frozen on Linux under 3.11, and the
-      # tolerances are sized for the drift a code change causes, not for the drift a
-      # different interpreter build or a different BLAS produces. Running the sweep in
-      # every cell would report platform differences as golden regressions, which is a
-      # separate question from the one the goldens answer.
+      # One cell only: the values were frozen on Linux under 3.11, and the
+      # tolerances are sized for code drift, not interpreter or BLAS drift.
       - name: "🥇 Frozen golden regression"
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         run: .venv/bin/python scripts/check_goldens.py
+
+  # One check name for the matrix. Branch protection names checks, and a cell's name
+  # carries its coordinates (`testing (macos-latest, 3.13)`): requiring cells means
+  # editing the rule whenever the matrix changes, and an unlisted red cell does not
+  # block the merge. `if: always()` makes this a guardian rather than a rubber stamp:
+  # without it a skipped or cancelled matrix skips this job too, and a skipped
+  # required check counts as passing. Both results fail here on purpose.
+  testing-guardian:
+    permissions: {}
+    runs-on: ubuntu-latest
+    needs: testing
+    if: always()
+    steps:
+      - name: "📋 Report the matrix result"
+        env:
+          RESULT: ${{ needs.testing.result }}
+        run: echo "testing matrix result ${RESULT}"
+      - name: "❌ Fail on a failed cell"
+        if: needs.testing.result == 'failure'
+        run: exit 1
+      - name: "⏭️ Fail on a cancelled or skipped matrix"
+        if: contains(fromJSON('["cancelled", "skipped"]'), needs.testing.result)
+        run: exit 1

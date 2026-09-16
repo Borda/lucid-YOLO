@@ -14,32 +14,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Everything the local `.git/hooks/pre-commit` runs, over the whole tree rather
-  # than the staged diff: ruff check and format, strict mypy, the hygiene hooks,
-  # and the copyleft dependency audit.
+  # Everything the local pre-commit hook runs, over the whole tree: ruff check and
+  # format, strict mypy, the hygiene hooks and the copyleft audit.
   #
-  # This is also the only place the twelve `repo: local` hooks run in CI. They are
-  # listed under `ci: skip:` in `.pre-commit-config.yaml` because pre-commit.ci
-  # cannot run them -- its container has no `.venv` for their `language: system`
-  # entries to resolve, and no step that could build one -- so every one of them
-  # failed there before checking anything. That key is pre-commit.ci's alone; the
-  # `pre-commit` CLI ignores it, so the run below still executes the full set.
+  # Also the only place the twelve `repo: local` hooks run in CI. They sit under
+  # `ci: skip:` in `.pre-commit-config.yaml` because pre-commit.ci has no `.venv`
+  # for their `language: system` entries, so each failed there before checking
+  # anything. The `pre-commit` CLI ignores that key, so the run below is the full set.
   precommit:
     runs-on: ubuntu-latest
     env:
       UV_TORCH_BACKEND: "cpu"
+      # One defect, one check. `commit-trailers-history` validates `origin/main..HEAD`,
+      # which on a pull request is the range the `trailers` job below already reports
+      # on, so a bad message failed both jobs; on a push to `main` the range is empty.
+      # Skipped here, the hook stays a laptop check and this job needs no full history.
+      SKIP: commit-trailers-history
     steps:
-      # Full history, for the same reason the `trailers` job below asks
-      # for it: `pre-commit run --all-files` includes `commit-trailers-history`,
-      # whose entry is `--range origin/main..HEAD`. The default single-commit
-      # checkout creates no `refs/remotes/origin/main`, so that range does not
-      # resolve and the hook exits 128 with a Git error — the job would fail
-      # before linting a line, and the failure would name a missing ref rather
-      # than anything about the submission.
       - name: "📥 Check out the repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
       - name: "🐍 Set up Python"
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -48,42 +41,34 @@ jobs:
       - name: "📦 Install uv"
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       # `typing` as well as `dev`: the mypy hook is `language: system` with entry
-      # `.venv/bin/python -m mypy`, so it resolves the interpreter this step installs
-      # into rather than an environment pre-commit manages. Without the group the hook
-      # fails with `No module named mypy` -- which is what it did after the 0.8.0
-      # release commit dropped the declaration.
+      # `.venv/bin/python -m mypy`, so mypy must be in this venv. Without the group
+      # it fails with `No module named mypy`, as it did after the 0.8.0 release
+      # commit dropped the declaration.
       - name: "🧰 Create venv and install the dev and typing dependency groups"
         run: |
           uv venv --python 3.11 .venv
           uv pip install --python .venv/bin/python -e . --group dev --group typing
-      # `--all-files`, not the staged diff, and with no `SKIP` in the environment: this
-      # runs the remote hooks and the twelve local ones together, which is the full set
-      # a commit sees on a laptop.
+      # `--all-files`: remote and local hooks together, the set a laptop commit sees
+      # minus the one hook the `trailers` job owns.
       - name: "🔍 Run pre-commit (all linters + strict mypy + local audit hooks)"
         run: .venv/bin/pre-commit run --all-files
 
-  # Admission layer one, the DCO sign-off, is not a job here. It was `scripts/lint/
-  # check_dco.py` and a `dco` job (WP-142) until the DCO GitHub App was installed on
-  # the repository; the app posts a `DCO` status on every pull request, skips bot and
-  # merge commits, and requires the sign-off address to match the author's, which is
-  # one rule the in-repo check declined to enforce. Two checks with two rules on the
-  # same line is one too many, so the in-repo one was removed rather than kept as a
-  # looser shadow of the hosted one.
+  # Admission layer one, the DCO sign-off, is not a job here: `check_dco.py` and the
+  # `dco` job (WP-142) were removed when the DCO GitHub App was installed. The app
+  # posts a `DCO` status on every pull request, skips bot and merge commits, and
+  # requires the sign-off address to match the author's -- one rule the in-repo
+  # check did not enforce, and two checks with two rules on one line is one too many.
   #
-  # Admission layer three (WP-144), and the only one producing a reviewable artifact
-  # rather than a promise: a contributor must name what an algorithmic change derives
-  # from, so an unnamed derivation on a loss or an assigner is visible at review instead
-  # of after release.
+  # Admission layer three (WP-144), the only one producing a reviewable artifact
+  # rather than a promise: an algorithmic change must name what it derives from.
+  # `ci-tests.yml` rightly skips this for `main` -- a squash merge replaces the
+  # messages -- but the contributor's own commits are what review reads, and they
+  # exist here.
   #
-  # `ci-tests.yml` skips this, correctly, for what lands on `main`: a squash merge
-  # replaces the messages it would have validated, so checking them there validates a
-  # message nobody wrote. That argument covers the merge result and not the submission.
-  # The contributor's own commits are exactly what review reads, and they exist here.
-  #
-  # A commit an automation authored -- pre-commit.ci's autoupdate, a dependabot bump,
-  # anything under GitHub's App address -- is skipped by name, here and in the
-  # `commit-trailers-history` hook the `precommit` job runs: a pin bump has no
-  # derivation to name. Before the skip, every such pull request failed both jobs.
+  # Automation-authored commits (pre-commit.ci, dependabot, anything under GitHub's
+  # App address) are skipped: a pin bump has no derivation to name. Before the skip,
+  # every such pull request failed. This job is the only CI check of the contract,
+  # so a bad message is one red check, not two.
   trailers:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

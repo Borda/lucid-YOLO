@@ -139,6 +139,31 @@ Gate: tests/models/test_head.py::test_dual_head_shapes
 Co-authored-by: Claude <209825114+claude[bot]@users.noreply.github.com>
 """
 
+SIGNOFF_BEFORE_SEPARATOR_MESSAGE = """feat(models): add dual detection head
+
+WP: 022
+Provenance: R1
+Assumptions: none
+Gate: tests/models/test_head.py::test_dual_head_shapes
+
+Signed-off-by: Ada Lovelace <ada@example.com>
+
+---
+Co-authored-by: Claude <209825114+claude[bot]@users.noreply.github.com>
+"""
+
+MENTION_BESIDE_SIGNOFF_MESSAGE = """feat(models): add dual detection head
+
+Thanks @ada for the review.
+
+WP: 022
+Provenance: R1
+Assumptions: none
+Gate: tests/models/test_head.py::test_dual_head_shapes
+
+Signed-off-by: Ada Lovelace <ada@example.com>
+"""
+
 
 def test_valid_message_passes() -> None:
     """The canonical AGENTS.md section 5 message reports no violation."""
@@ -166,6 +191,17 @@ def test_hash_before_separator_fails() -> None:
 def test_at_sign_after_separator_passes() -> None:
     """An at-sign confined to the co-author trailers is permitted."""
     assert validator.validate_message(AT_SIGN_AFTER_SEPARATOR_MESSAGE, VALID_IDS) == []
+
+
+def test_signoff_before_separator_passes() -> None:
+    """The sign-off ``git commit -s`` appends before the separator is permitted."""
+    assert validator.validate_message(SIGNOFF_BEFORE_SEPARATOR_MESSAGE, VALID_IDS) == []
+
+
+def test_at_sign_beside_a_signoff_still_fails() -> None:
+    """A sign-off line exempts itself only; a mention on another body line is still rejected."""
+    violations = validator.validate_message(MENTION_BESIDE_SIGNOFF_MESSAGE, VALID_IDS)
+    assert any("'@'" in violation for violation in violations)
 
 
 @pytest.mark.parametrize(
