@@ -109,7 +109,7 @@ repos:
         # `tomllib` (3.11+) to parse pyproject.toml. Pinned so PATH drift cannot repeat it.
         language_version: python3.11
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.1
+    rev: v0.16.7
     hooks:
       - id: ruff-check
         name: "🦀 ruff check"
