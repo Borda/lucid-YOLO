@@ -25,9 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       UV_TORCH_BACKEND: "cpu"
-      # One defect, one check. `commit-trailers-history` validates `origin/main..HEAD`,
-      # which on a pull request is the range the `trailers` job below already reports
-      # on, so a bad message failed both jobs; on a push to `main` the range is empty.
+      # `commit-trailers-history` validates `origin/main..HEAD`: on a pull request
+      # those are branch commits a squash merge never lands, and on a push to `main`
+      # the range is empty. The message that lands is checked by pr-message.yml.
       # Skipped here, the hook stays a laptop check and this job needs no full history.
       SKIP: commit-trailers-history
     steps:
@@ -49,40 +49,12 @@ jobs:
           uv venv --python 3.11 .venv
           uv pip install --python .venv/bin/python -e . --group dev --group typing
       # `--all-files`: remote and local hooks together, the set a laptop commit sees
-      # minus the one hook the `trailers` job owns.
+      # minus the one hook skipped above.
       - name: "🔍 Run pre-commit (all linters + strict mypy + local audit hooks)"
         run: .venv/bin/pre-commit run --all-files
 
-  # Admission layer one, the DCO sign-off, is not a job here: `check_dco.py` and the
-  # `dco` job (WP-142) were removed when the DCO GitHub App was installed. The app
-  # posts a `DCO` status on every pull request, skips bot and merge commits, and
-  # requires the sign-off address to match the author's -- one rule the in-repo
-  # check did not enforce, and two checks with two rules on one line is one too many.
-  #
-  # Admission layer three (WP-144), the only one producing a reviewable artifact
-  # rather than a promise: an algorithmic change must name what it derives from.
-  # `ci-tests.yml` rightly skips this for `main` -- a squash merge replaces the
-  # messages -- but the contributor's own commits are what review reads, and they
-  # exist here.
-  #
-  # Automation-authored commits (pre-commit.ci, dependabot, anything under GitHub's
-  # App address) are skipped: a pin bump has no derivation to name. Before the skip,
-  # every such pull request failed. This job is the only CI check of the contract,
-  # so a bad message is one red check, not two.
-  trailers:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: "📥 Check out the repository"
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: "🐍 Set up Python"
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.11"
-      - name: "🏷️ Check provenance trailers on the pull request's own commits"
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python scripts/lint/check_commit_trailers.py --range "${BASE_SHA}..${HEAD_SHA}"
+  # Admission layer one, the DCO sign-off, is the DCO GitHub App's status, not a job
+  # here: `check_dco.py` and the `dco` job (WP-142) were removed when the app was
+  # installed. Admission layer three, the provenance trailers, is pr-message.yml:
+  # this workflow's `trailers` job validated a pull request's own commits, and a
+  # squash-only repository never lands those.

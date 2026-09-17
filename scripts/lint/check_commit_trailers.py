@@ -5,9 +5,10 @@ Enforces the commit format defined in ``AGENTS.md`` sec. 5: a Conventional
 Commits subject plus mandatory ``WP:``/``Provenance:``/``Assumptions:``/``Gate:``
 trailers, with every provenance source id resolvable against the allowlist in
 ``docs/PROVENANCE.md`` and every assumption id against the register in
-``docs/ASSUMPTIONS.md``. Hash-sign and at-sign characters may only appear in the
-co-author trailers that follow the ``---`` separator and in ``Signed-off-by:`` lines,
-which ``git commit -s`` and ``git rebase --signoff`` append before it.
+``docs/ASSUMPTIONS.md``. Issue references (``#42``) and mentions (``@name``) may only
+appear in the co-author trailers that follow the ``---`` separator and in
+``Signed-off-by:`` lines, which ``git commit -s`` and ``git rebase --signoff`` append
+before it.
 
 Three rules are worth stating here because each is a decision rather than a shape:
 
@@ -87,6 +88,12 @@ SEPARATOR_RE = re.compile(r"^---\s*$", re.MULTILINE)
 #: ``docs/CONTRIBUTING.md`` tells contributors to use ``-s``, so the checker must not
 #: refuse what the guide asks for.
 SIGNOFF_RE = re.compile(r"^Signed-off-by:.*$", re.MULTILINE)
+#: What the two banned characters are banned for: GitHub's auto-links. ``#42`` becomes
+#: a link to whatever issue 42 is in whichever repository the commit ends up in, and
+#: ``@ada`` pings an account. A markdown heading (``## What changed``) links nothing,
+#: and pull-request descriptions -- the squash message under this repository's merge
+#: setting -- carry them, so only the linking forms are refused.
+FORBIDDEN_RE = re.compile(r"(#\d)|(@\w)")
 #: The author address GitHub assigns to a commit made by an App installation --
 #: ``66853113+pre-commit-ci[bot]@users.noreply.github.com`` and its dependabot and
 #: renovate siblings. Range mode skips these commits instead of validating them: a
@@ -377,7 +384,7 @@ def _check_trailers(body: str, registers: Registers) -> list[str]:
 
 
 def _check_forbidden_chars(body: str) -> list[str]:
-    """Reject ``#`` and ``@`` before the co-author separator, outside sign-off lines.
+    """Reject issue references and mentions before the separator, outside sign-off lines.
 
     Args:
         body: The message text preceding the co-author separator.
@@ -392,11 +399,12 @@ def _check_forbidden_chars(body: str) -> list[str]:
         []
         >>> _check_forbidden_chars("see @ada\\n")
         ["forbidden character '@' appears before the '---' separator"]
+        >>> _check_forbidden_chars("## What changed\\n")
+        []
     """
     checked = SIGNOFF_RE.sub("", body)
-    return [
-        f"forbidden character {char!r} appears before the '---' separator" for char in ("#", "@") if char in checked
-    ]
+    found = {match.group(0)[0] for match in FORBIDDEN_RE.finditer(checked)}
+    return [f"forbidden character {char!r} appears before the '---' separator" for char in ("#", "@") if char in found]
 
 
 def validate_message(message: str, registers: Registers) -> list[str]:
