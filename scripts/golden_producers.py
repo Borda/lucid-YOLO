@@ -933,12 +933,13 @@ def kp_params_flops() -> dict[str, float]:
     from the FLOP tally along with the rest of that branch, while the parameter
     count is the whole checkpoint.
 
-    **This golden holds nothing published.** R14 (RLE) specifies a loss and an
-    evaluation protocol and no architecture at all, so — unlike detection (R1
-    Table 7), segmentation (Table S9) and oriented detection (Table S11) — there is
-    no published size table to hold this against. The golden is therefore a pure
+    **This golden holds nothing published.** R1 Table S10 does publish a size
+    table for every pose scale, and this model does not meet it — 13.0% under on
+    params and 26.5% under on FLOPs at ``n`` (A77, measured 2026-09-17; the
+    docstring said no such table existed until then). Until WP-180 selects a
+    stem width against that table and ships its gate, the golden is a pure
     regression lock, and it deliberately inherits **detection's** protocol
-    (640-pixel input, 80 classes) rather than inventing one, so
+    (640-pixel input, 80 classes) rather than Table S10's, so
     ``params_flops_kp.json`` minus ``params_flops_det.json`` is exactly what the
     point stem costs.
 

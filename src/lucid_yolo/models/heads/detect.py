@@ -410,11 +410,14 @@ def _build_keypoint_stem(channels: int, num_keypoints: int) -> nn.Sequential:
 
     The stem follows the shared two-depthwise-separable-unit shape used by the
     coefficient stem, with :func:`_stem_width` providing A28's
-    ``max(16, channels // 3)`` hidden width. Unlike the angle task, no R1 Table
-    S11 or other allowlisted measurement covers a keypoint task — R1 does not
-    cover one at all, and R14 is registered for the future pose milestone only —
-    so inventing a keypoint-specific width would be unmeasured. Reusing the
-    shared width matches :func:`_build_coeff_stem`'s precedent.
+    ``max(16, channels // 3)`` hidden width. That width was chosen (WP-122) on
+    the belief that no allowlisted measurement covers a keypoint task; R1 Table
+    S10 does, and against it this stem measures 13.0% under the paper's ``n``
+    params and 26.5% under its FLOPs, converging by ``l``/``x`` (A77, measured
+    2026-09-17). The width is unchanged here — a size gate does not yet exist for
+    it, and choosing one is WP-180's job, the way A20's angle-stem width was
+    chosen against Table S11 rather than by hand. R1 sec. 3.4.2 names the branch
+    ("a parallel sigma branch predicts per-axis uncertainty") and gives no width.
 
     The final 1x1 emits four raw channels per point in point-major order: for
     zero-based point ``i``, channels ``4*i`` through ``4*i+3`` are

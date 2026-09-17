@@ -215,18 +215,23 @@ def test_obb_params_flops_golden() -> None:
     )
 
 
-# The keypoint task has a golden and no published-table gate, which is the one
-# structural difference from its three siblings above. Detection has R1 Table 7,
-# segmentation Table S9, oriented detection Table S11; R14 (RLE) specifies a loss
-# and an OKS evaluation protocol and **no architecture**, so there is no size table
-# in the literature to hold this model to. That absence is the finding, and it is
-# recorded here rather than papered over: no ``_TABLE_*`` constant belongs in this
-# section, and inventing one — from a sibling table, from a third-party pose model,
-# or from this project's own measurements — would fabricate a published claim.
+# The keypoint task has a golden and no published-table gate — not because no
+# table exists, as this comment said until 2026-09-17, but because the model does
+# not meet the one that does. R1 Table S10 publishes every pose scale's size at
+# 640 px (n 2.9 M / 7.5 G ... x 57.6 M / 201.7 G); measured at its protocol (1
+# class, 17 points, the full two-branch model as the gates above count it) this
+# model is 13.0% under on params and 26.5% under on FLOPs at ``n``, -4.5% / -10.8%
+# at ``s``, and within the sibling tolerances only from ``l`` on (A77). The point
+# stem reuses A28's shared width; R1's is wider at the small scales. A
+# ``_TABLE_S10`` gate is WP-180's, shipped together with the width it selects, the
+# way ``_TABLE_S11`` shipped with A20's ``// 2`` — a gate that fails at every
+# scale would certify nothing, and a gate with a tolerance widened to pass would
+# certify less.
 #
-# What remains is a pure regression lock, at detection's own protocol (640 px, 80
-# classes) so that the keypoint golden minus the detection golden is exactly what
-# the point stems cost. It catches an architecture change; it certifies no parity.
+# What remains meanwhile is a pure regression lock, at detection's own protocol
+# (640 px, 80 classes) so that the keypoint golden minus the detection golden is
+# exactly what the point stems cost. It catches an architecture change; it
+# certifies no parity.
 def test_kp_params_flops_golden() -> None:
     """The frozen goldens/params_flops_kp.json regression lock still reproduces."""
     result = check_golden(DEFAULT_GOLDENS_DIR / "params_flops_kp.json")

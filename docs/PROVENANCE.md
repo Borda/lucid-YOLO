@@ -12,7 +12,7 @@ Reference *implementations* (R25–R28, R36) are admitted under D13/ADR-004 on t
 
 | ID | Reference | Role |
 | -- | -- | -- |
-| R1 | Jocher, G. et al., *Ultralytics YOLO26: Unified Real-Time End-to-End Vision Models*, arXiv:2606.03748 (2026) | Method source: Eq. 1–15, Figs. S1/S2, Tables 2–11, S1–S11 |
+| R1 | Jocher, G. et al., *Ultralytics YOLO26: Unified Real-Time End-to-End Vision Models*, arXiv:2606.03748 (2026) | Method source: Eq. 1–15, Figs. S1/S2, Tables 2–11, S1–S11. Sec. 3.4.2 (pose objective: sigma branch, Eq. 10–11, the OKS + RLE composition), Table 9 (its weight split) and Table S10 (pose sizes) were inside this role from the start and unread until 2026-09-17 (D22, A75–A77) |
 | R2 | Sapkota, R. et al., *YOLO26: Key Architectural Enhancements and Performance Benchmarking for Real-Time Object Detection*, arXiv:2509.25164 (2026) | Independent analysis; benchmark corroboration (incl. seg/OBB tables) |
 | R3 | Hidayatullah, P., Tubagus, R., *YOLO26: A Comprehensive Architecture Overview and Key Improvements*, arXiv:2602.14582 (2026) | Third-party architectural specification: variant multipliers, block diagram, SPPF shortcut, Top-K decoding, STAL minimum-anchor behavior |
 
@@ -29,7 +29,7 @@ Reference *implementations* (R25–R28, R36) are admitted under D13/ADR-004 on t
 | R10 | Zheng, Z. et al., *Distance-IoU Loss*, arXiv:1911.08287 (AAAI 2020) | CIoU definition (A1) |
 | R11 | Hidayatullah, P. et al., *YOLOv8 to YOLO11: A Comprehensive Architecture In-depth Comparative Review*, arXiv:2501.13400 (2025) | C3k2/C2PSA/SPPF internals in the YOLO11 lineage (A3) |
 | R13 | Zhou, Y. et al., *MMRotate*, arXiv:2204.13317 (ACM MM 2022) | Long-edge angle convention; rotated-box tooling conventions (A21, A23) |
-| R14 | Li, J. et al., *Human Pose Regression with Residual Log-Likelihood Estimation*, arXiv:2107.11291 (ICCV 2021) | RLE keypoint loss (Eq. 8, sec. 3.2–3.3, Appendix A Eq. 12) and its Table 7 flow-free ablation baseline (A65, A66) |
+| R14 | Li, J. et al., *Human Pose Regression with Residual Log-Likelihood Estimation*, arXiv:2107.11291 (ICCV 2021) | RLE keypoint loss (Eq. 8, sec. 3.2–3.3, Appendix A Eq. 12) and its Table 7 flow-free ablation baseline (A65, A66). The origin of the RLE term R1 sec. 3.4.2 composes into its pose objective (R1 cites it as such); where R1 Eq. 11 and R14 Eq. 8 differ, A76 records which form the code carries |
 | R16 | Bolya, D. et al., *YOLACT: Real-time Instance Segmentation*, arXiv:1904.02689 (ICCV 2019) | Prototype–coefficient mask formulation; protonet, K, coefficient, mask-loss conventions (A14–A18) |
 | R17 | Llerena, J. M. et al., *Gaussian Bounding Boxes and Probabilistic IoU*, arXiv:2106.06072 (2021) | ProbIoU rotated loss (A19) |
 | R20 | Redmon, J. et al., *You Only Look Once: Unified, Real-Time Object Detection*, arXiv:1506.02640 (CVPR 2016) | Origin of the YOLO family term; MIT-licensed Darknet lineage (naming attribution) |
@@ -119,3 +119,4 @@ The `R1–R20` row is a genuine collapse and stays one. Those twenty were transc
 | 2026-08-17 | R35 | docformatter adopted as the PEP 257 docstring commit hook (WP-116) |
 | 2026-09-04 | R36 | Throughput survey of the `1.9.0..develop` range, read for validation-path candidates; three landed after being re-derived and measured here (WP-163, WP-164, WP-165) |
 | 2026-09-05 | R37 | The governing blueprint, registered on the date its `src/` citations were counted (WP-175). Not an external source and never a first *use*: it has been cited since the first commit, and this line records when it became resolvable against this register rather than when it was first read |
+| 2026-09-17 | R1 sec. 3.4.2, Table 9, Table S10 | **First read**, forty-seven days after the source was registered and inside its role the whole time. The pose objective, its weight ablation and its size table; read from the arXiv PDF after issue 2 on the tracker named them, and what they change is D22, A65–A68 and A75–A77 (WP-178). The 2026-08-01 row above stands as written: the seeding pass registered R1 from the blueprint's reference list without reading every section, and this line is what that cost |

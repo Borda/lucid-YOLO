@@ -7,6 +7,7 @@ from lucid_yolo.losses.detection_loss import DetectionBranchLoss, DetectionLossO
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
 from lucid_yolo.losses.keypoint_nll_loss import LaplaceNLLLoss
 from lucid_yolo.losses.mask_loss import instance_mask_loss
+from lucid_yolo.losses.oks_loss import OKSLoss
 from lucid_yolo.losses.oriented_loss import (
     DEFAULT_ROTATED_IOU_FORM,
     ROTATED_IOU_FORMS,
@@ -26,6 +27,7 @@ __all__ = [
     "DualBranchLoss",
     "DualLossOutput",
     "LaplaceNLLLoss",
+    "OKSLoss",
     "OrientedLossOutput",
     "ProgressiveLossSchedule",
     "RLELoss",

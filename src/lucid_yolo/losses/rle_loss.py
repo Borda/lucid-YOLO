@@ -94,13 +94,30 @@ ground truth regardless of visibility, so training against the same set the
 metric scores against is the consistent reading rather than a narrower one
 this project invented.
 
+**Where this sits in R1 (read 2026-09-17, D22).** R1 sec. 3.4.2 is YOLO26's own
+pose section and composes exactly this term into its objective: "a parallel
+sigma branch predicts per-axis uncertainty sigma = (sigma_x, sigma_y) in (0, 1)^2",
+the residual is normalized as ``eps = (x_hat - x*) / sigma`` (R1 Eq. 10, the
+``x_bar`` above), and "a shared RealNVP normalizing flow estimates log phi(eps)".
+R1 prints the loss (Eq. 11) as ``log sigma - log phi(eps) + log(2 sigma) + |eps|``
+— the bracketed pair being the Laplace NLL written in the *un-normalized* frame,
+which carries its own ``log sigma`` — so ``sigma`` enters twice per axis where
+R14 Eq. 8, transcribed here, evaluates the base density on the normalized residual
+and carries ``log sigma_hat`` once. The two differ by a ``1/sigma`` gradient on
+every scale; which R1 means is not settled by its text, and this module keeps
+R14's form until a paired run measures the other (A76, roadmap WP-181). The OKS
+term R1 composes beside this one is :class:`~lucid_yolo.losses.oks_loss.OKSLoss`
+(A75).
+
 No detection-repository code of any kind was consulted while writing this
 module — implemented directly from R14's equations and its own citation of
 RealNVP (Dinh et al.), per AGENTS.md sec. 6 and sec. 7.
 
-Provenance: R14 (Eq. 5, 7, 8, sec. 3.2, sec. 3.3, sec. 4, Appendix A Eq. 12), R12 (visibility semantics).
-Assumptions: A65 (resolved: sigmoid), A66 (visibility mask policy), and the
-conditioner output-head activation described above (A74).
+Provenance: R14 (Eq. 5, 7, 8, sec. 3.2, sec. 3.3, sec. 4, Appendix A Eq. 12), R12 (visibility semantics),
+R1 sec. 3.4.2, Eq. 10-11 (the composition this term belongs to).
+Assumptions: A65 (resolved: sigmoid), A66 (visibility mask policy), the
+conditioner output-head activation described above (A74), and A76 (one ``log
+sigma``, not R1 Eq. 11's two).
 """
 
 from __future__ import annotations

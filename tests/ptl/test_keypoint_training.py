@@ -22,6 +22,9 @@ the **wiring** rather than at the components again:
 * the keypoints module's state-dict keys are the detection module's plus the
   point stems and the flow, so the stages stayed flat and accepted checkpoints
   keep loading;
+* the WP-178 OKS term (A75) is off by default and, when switched on, enters the
+  total at exactly ``oks_gain`` times the logged pre-gain term — and adds no
+  checkpoint key, so the pinned state-dict set above still holds;
 * keypoints survive the loader's packed transport, including a batch mixing
   annotated and instance-free images;
 * the datamodule hands ``HorizontalFlip`` the pairing the *dataset* derived from
@@ -48,6 +51,7 @@ from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.eval.coco_eval import COCO_KEYPOINT_OKS_SIGMAS, SYMBOL_KEYPOINT_OKS_SIGMA
 from lucid_yolo.losses.keypoint_nll_loss import LaplaceNLLLoss
+from lucid_yolo.losses.oks_loss import OKSLoss
 from lucid_yolo.losses.rle_loss import RLELoss
 from lucid_yolo.ptl import DetectionLitModule, normalize_keypoints_to_box, pad_keypoints
 from lucid_yolo.ptl import module as ptl_module
@@ -422,6 +426,77 @@ class TestTrainingStep:
 
         detection_total = detection.training_step((images, _boxes_only(targets)), 0)
         assert float(posed_total.detach()) == float(detection_total.detach())
+
+    def test_the_oks_gain_enters_the_total_at_its_weight(self) -> None:
+        """Switching ``oks_gain`` from its zero default to one adds exactly ``1.0 * oks`` (WP-178).
+
+        The same leverage check the RLE gain gets, run from the other side: the default
+        is *off*, so the module that differs is the one with the gain, and the size of the
+        change it makes must be the logged pre-gain OKS term times one. A term wired at
+        some other weight, or logged as something other than what is added, fails here.
+        """
+        weighted = _tiny_module(oks_gain=1.0)
+        default = _tiny_module()
+        default.load_state_dict(weighted.state_dict())
+        recorder = _LogRecorder()
+        weighted.log = recorder  # type: ignore[method-assign]
+        batch = _posed_batch()
+
+        with_gain = weighted.training_step(batch, 0)
+
+        without_gain = default.training_step(batch, 0)
+        added = float(with_gain.detach()) - float(without_gain.detach())
+        assert added != 0.0
+        assert added == pytest.approx(1.0 * recorder.values["train/oks"], rel=_LEVERAGE_RTOL)
+
+    def test_the_oks_term_is_logged_pre_gain_at_the_default_zero_gain(self) -> None:
+        """A default module still logs a non-zero, finite ``train/oks`` it is not training on.
+
+        The reading a dose-response run against R1 Table 9's ``(24, 1)`` needs before it
+        moves the gain; a term logged only when weighted would give that run nothing to
+        compare against.
+        """
+        module = _tiny_module()
+
+        module.training_step(_posed_batch(), 0)
+
+        logged = module.log.values["train/oks"]  # type: ignore[attr-defined]
+        assert math.isfinite(logged)
+        assert 0.0 < logged <= 1.0  # 1 - OKS of an untrained head, bounded by construction
+
+    def test_zero_gains_reproduce_the_detection_step_bit_for_bit(self) -> None:
+        """At ``keypoint_gain=0`` **and** ``oks_gain=0`` the total is a ``task="detect"`` module's, exactly.
+
+        The test above with the OKS term made explicit rather than left at its default:
+        both pose terms are computed either way, and both must vanish from the total
+        without a rounding trace when their gains are zero.
+        """
+        posed = _tiny_module(keypoint_gain=0.0, oks_gain=0.0)
+        detection = _tiny_module(task="detect")
+        shared = set(detection.state_dict())
+        detection.load_state_dict({key: value for key, value in posed.state_dict().items() if key in shared})
+        images, targets = _posed_batch()
+
+        posed_total = posed.training_step((images, targets), 0)
+
+        detection_total = detection.training_step((images, _boxes_only(targets)), 0)
+        assert float(posed_total.detach()) == float(detection_total.detach())
+
+    def test_the_oks_loss_is_built_for_keypoints_only_and_adds_no_checkpoint_key(self) -> None:
+        """``oks_loss`` exists under ``"keypoints"`` with the metric's sigmas and no state-dict key.
+
+        Its sigma table is the ``val/oks_mAP`` evaluator's own, at the tiny head's ``K``
+        (A67's uniform value, since 3 is not COCO's 17), and it lives in a non-persistent
+        buffer so the pinned key set of ``test_state_dict_is_the_detection_state_dict_plus_the_point_stems_and_flow``
+        is untouched.
+        """
+        posed = _tiny_module()
+        detection = _tiny_module(task="detect")
+
+        assert isinstance(posed.oks_loss, OKSLoss)
+        assert posed.oks_loss.k.tolist() == pytest.approx([2.0 * SYMBOL_KEYPOINT_OKS_SIGMA] * _NUM_KEYPOINTS)
+        assert detection.oks_loss is None
+        assert not any(key.startswith("oks_loss.") for key in posed.state_dict())
 
     def test_an_image_without_instances_gives_a_finite_loss(self) -> None:
         """An empty batch yields a finite, exactly-zero keypoint term rather than a ``0 / 0`` NaN.

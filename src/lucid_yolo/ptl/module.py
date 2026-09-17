@@ -82,11 +82,15 @@ Task conditioning:
     :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss` and the pooled
     per-class union by :func:`~lucid_yolo.losses.semantic_loss.semantic_aux_loss`.
 
-    ``"keypoints"`` (WP-132) adds ``keypoint_gain * rle`` — R14's residual
-    log-likelihood over the head's point predictions, or whichever objective
-    ``keypoint_loss`` put in that slot (WP-135). Structurally it is the
+    ``"keypoints"`` (WP-132) adds ``keypoint_gain * rle + oks_gain * oks`` — R14's
+    residual log-likelihood over the head's point predictions, or whichever
+    objective ``keypoint_loss`` put in that slot (WP-135), beside the
+    Object-Keypoint-Similarity term R1 sec. 3.4.2 names as YOLO26's own pose
+    objective (:class:`~lucid_yolo.losses.oks_loss.OKSLoss`, WP-178, A75; at
+    ``oks_gain=0.0`` by default, so the shipped objective is the RLE term alone).
+    Structurally it is the
     ``"segment"`` shape rather than the ``"obb"`` one: nothing is replaced, every
-    detection term keeps its gain, and the pose term rides on top. That follows
+    detection term keeps its gain, and the pose terms ride on top. That follows
     from what the two tasks *are*. An oriented box is the same object the
     axis-aligned box describes, told better, so the two descriptions compete for
     the same slot; a keypoint is a second, independent thing to say about an
@@ -186,6 +190,7 @@ from lucid_yolo.eval.segment_decode import decode_instance_masks
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
 from lucid_yolo.losses.keypoint_nll_loss import LaplaceNLLLoss
 from lucid_yolo.losses.mask_loss import instance_mask_loss
+from lucid_yolo.losses.oks_loss import OKSLoss
 from lucid_yolo.losses.oriented_loss import (
     DEFAULT_ROTATED_IOU_FORM,
     ROTATED_IOU_FORMS,
@@ -225,7 +230,7 @@ _STRIDES: tuple[int, int, int] = (8, 16, 32)
 #: Task names the module accepts. All four are wired: ``"detect"`` is the dual
 #: detection objective alone, ``"segment"`` adds the WP-087 mask terms, ``"obb"``
 #: swaps the two box terms for the WP-088 rotated ones and adds the angle term,
-#: and ``"keypoints"`` adds the WP-132 residual log-likelihood term.
+#: and ``"keypoints"`` adds the WP-132 residual log-likelihood term and the WP-178 OKS term.
 _TASKS: tuple[str, ...] = ("detect", "segment", "obb", "keypoints")
 
 #: Tasks whose epoch validation metric accumulates rank-local Python lists rather than a
@@ -234,6 +239,40 @@ _TASKS: tuple[str, ...] = ("detect", "segment", "obb", "keypoints")
 #: they are declared; this names the consequence in one place so the guard and the
 #: ``docs/TRAINING.md`` single-device note cannot drift from each other.
 _RANK_LOCAL_VAL_TASKS: frozenset[str] = frozenset({"obb", "keypoints"})
+
+
+def _keypoint_oks_sigmas(num_keypoints: int | None) -> tuple[float, ...]:
+    """Pick the per-keypoint OKS sigma vector for a point count (A67, WP-137).
+
+    :data:`~lucid_yolo.eval.coco_eval.COCO_KEYPOINT_OKS_SIGMAS` only when the count
+    matches COCO's own 17-point human schema exactly, and
+    :data:`~lucid_yolo.eval.coco_eval.SYMBOL_KEYPOINT_OKS_SIGMA` (A67's uniform
+    sigma) repeated for every other count — the choice ``scripts/overfit_micro.py``'s
+    synthetic gate makes for its 7-point symbol schema, shared from one place. One
+    function serves both consumers on purpose: the ``val/oks_mAP`` evaluator and the
+    :class:`~lucid_yolo.losses.oks_loss.OKSLoss` training term (WP-178) must score
+    against the **same** tolerances, or the loss would pull towards a target the
+    metric does not measure.
+
+    Args:
+        num_keypoints: The schema's point count, or ``None`` for a module with no
+            point stem (an empty vector).
+
+    Returns:
+        A length-``K`` tuple of sigmas.
+
+    Examples:
+        >>> _keypoint_oks_sigmas(3)
+        (0.072, 0.072, 0.072)
+        >>> len(_keypoint_oks_sigmas(17)), _keypoint_oks_sigmas(17)[0]
+        (17, 0.026)
+        >>> _keypoint_oks_sigmas(None)
+        ()
+    """
+    if num_keypoints == len(COCO_KEYPOINT_OKS_SIGMAS):
+        return COCO_KEYPOINT_OKS_SIGMAS
+    return (SYMBOL_KEYPOINT_OKS_SIGMA,) * (num_keypoints or 0)
+
 
 #: Keypoint objectives a ``"keypoints"`` run may select between, each mapped to the
 #: class that implements it (WP-135). ``"rle"`` is R14's full residual
@@ -624,6 +663,72 @@ class _StepContext:
     masks: list[Tensor] | None
 
 
+@dataclass(frozen=True)
+class _KeypointPositives:
+    """One branch's assigned positives, gathered once for every pose term to score (WP-178).
+
+    Attributes:
+        predicted: ``(P, K, 2)`` decoded points of the positives, in input pixels.
+        raw_sigma: ``(P, K, 2)`` raw, unactivated per-axis sigma of the positives.
+        annotated: ``(P, K, 2)`` ground-truth points of each positive's assigned
+            instance, in input pixels.
+        frame: ``(P, 4)`` ``xyxy`` box of each positive's assigned instance, in
+            input pixels — the A71 frame for the RLE term, the A75 area for OKS.
+        visibility: ``(P, K)`` int64 visibility of the assigned instance's points.
+    """
+
+    predicted: Tensor
+    raw_sigma: Tensor
+    annotated: Tensor
+    frame: Tensor
+    visibility: Tensor
+
+
+def _validate_task_arguments(task: str, num_keypoints: int | None, rotated_iou_form: str, keypoint_loss: str) -> None:
+    """Refuse a :class:`DetectionLitModule` argument set that names nothing buildable.
+
+    The constructor's own checks, held apart from it so the flat hyperparameter
+    surface WP-038 configures from YAML stays one readable block of assignments.
+    Every rejection is a misconfiguration that would otherwise surface far from its
+    cause — a head built for the wrong point count broadcasts cleanly against nothing.
+
+    Args:
+        task: The supervision task; must be one of ``_TASKS``.
+        num_keypoints: The point count, required under ``"keypoints"`` and refused
+            under every other task (the class docstring argues both directions).
+        rotated_iou_form: Must name one of R17's two rotated-IoU losses.
+        keypoint_loss: Must name one of the ``_KEYPOINT_LOSSES`` objectives.
+
+    Raises:
+        ValueError: On any of the five rejections the class docstring lists.
+
+    Examples:
+        >>> _validate_task_arguments("detect", None, "hellinger", "rle")
+        >>> _validate_task_arguments("keypoints", None, "hellinger", "rle")
+        Traceback (most recent call last):
+            ...
+        ValueError: task='keypoints' needs an explicit num_keypoints: ...
+    """
+    if task not in _TASKS:
+        raise ValueError(f"task must be one of {_TASKS}, got {task!r}")
+    if rotated_iou_form not in ROTATED_IOU_FORMS:
+        raise ValueError(f"rotated_iou_form must be one of {sorted(ROTATED_IOU_FORMS)}, got {rotated_iou_form!r}")
+    if keypoint_loss not in _KEYPOINT_LOSSES:
+        raise ValueError(f"keypoint_loss must be one of {tuple(_KEYPOINT_LOSSES)}, got {keypoint_loss!r}")
+    if task == "keypoints" and num_keypoints is None:
+        raise ValueError(
+            "task='keypoints' needs an explicit num_keypoints: the point count is a property of the "
+            "dataset's annotation schema (COCO person is 17), so there is no default to fall back on"
+        )
+    if task != "keypoints" and num_keypoints is not None:
+        raise ValueError(
+            f"num_keypoints={num_keypoints} is meaningless for task={task!r}: only the 'keypoints' "
+            f"task builds the point stem, so this module would predict no points at all while "
+            f"save_hyperparameters records a point schema its checkpoint cannot honour. Set "
+            f"task='keypoints' to train points, or drop num_keypoints"
+        )
+
+
 class DetectionLitModule(LightningModule):
     """Lightning detector: model stack, dual-branch loss, and MuSGD (WP-034).
 
@@ -655,8 +760,8 @@ class DetectionLitModule(LightningModule):
             for their rotated counterparts (see the module docstring's table).
             ``"keypoints"`` builds both branches' point stems (``num_keypoints``,
             WP-122) and adds the R14 residual log-likelihood term at
-            ``keypoint_gain``, leaving every detection term as it was.
-            Defaults to ``"detect"``.
+            ``keypoint_gain`` and the OKS term at ``oks_gain``, leaving every
+            detection term as it was. Defaults to ``"detect"``.
         num_keypoints: Point count ``K`` both head branches predict under
             ``task="keypoints"``; **required** for that task and refused for every
             other one. It has no default on purpose — ``K`` describes the dataset's
@@ -741,6 +846,26 @@ class DetectionLitModule(LightningModule):
             mechanism, and one figure on its own cannot settle it. The switch is
             therefore an experimental control, not a tuning knob: a production pose
             run has no reason to leave the default.
+        oks_gain: Weight on the Object-Keypoint-Similarity term
+            (:class:`~lucid_yolo.losses.oks_loss.OKSLoss`, WP-178) under
+            ``task="keypoints"``, ignored otherwise. Defaults to ``0.0`` (A75), which
+            is a deliberate *off* rather than a measured value. R1 sec. 3.4.2 states
+            that YOLO26's pose training uses an OKS-based loss extended with RLE, and
+            R1 Table 9 ablates the pair's weights ``(w_OKS, w_RLE)`` on COCO
+            keypoints val for YOLO26s — ``(48, 0)`` 61.5, ``(48, 1)`` 60.8,
+            ``(24, 1)`` 63.0, ``(24, 2)`` 62.5, ``(12, 1)`` 62.6, ``(0, 1)`` 61.9,
+            ``(0, 2)`` 62.4 mAP — so the published target is ``(24, 1)``. But R1
+            gives no formula for its OKS loss and its citation is off this project's
+            allowlist, so the term here is derived from R12's metric definition
+            (A75), and a weight measured under a loss this project had to derive is
+            not a measured value here. Shipping ``24.0`` as the default would make
+            an untested number look like evidence while being none — A68's own
+            reasoning for ``keypoint_gain`` — and would silently move every existing
+            keypoints config off the objective its accepted figures were produced
+            under. ``0.0`` keeps that objective bit-exact (the module's
+            ``oks_gain=0`` bit-exactness test is its validation); the pre-gain term
+            is still computed and logged as ``train/oks`` so a dose-response run
+            against ``(24, 1)`` has its reading before it moves the gain.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
@@ -788,26 +913,10 @@ class DetectionLitModule(LightningModule):
         rotated_iou_form: str = DEFAULT_ROTATED_IOU_FORM,
         keypoint_gain: float = 1.0,
         keypoint_loss: str = "rle",
+        oks_gain: float = 0.0,
     ) -> None:
         super().__init__()
-        if task not in _TASKS:
-            raise ValueError(f"task must be one of {_TASKS}, got {task!r}")
-        if rotated_iou_form not in ROTATED_IOU_FORMS:
-            raise ValueError(f"rotated_iou_form must be one of {sorted(ROTATED_IOU_FORMS)}, got {rotated_iou_form!r}")
-        if keypoint_loss not in _KEYPOINT_LOSSES:
-            raise ValueError(f"keypoint_loss must be one of {tuple(_KEYPOINT_LOSSES)}, got {keypoint_loss!r}")
-        if task == "keypoints" and num_keypoints is None:
-            raise ValueError(
-                "task='keypoints' needs an explicit num_keypoints: the point count is a property of the "
-                "dataset's annotation schema (COCO person is 17), so there is no default to fall back on"
-            )
-        if task != "keypoints" and num_keypoints is not None:
-            raise ValueError(
-                f"num_keypoints={num_keypoints} is meaningless for task={task!r}: only the 'keypoints' "
-                f"task builds the point stem, so this module would predict no points at all while "
-                f"save_hyperparameters records a point schema its checkpoint cannot honour. Set "
-                f"task='keypoints' to train points, or drop num_keypoints"
-            )
+        _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
         self.save_hyperparameters()
         self._task = task
         self._num_keypoints = num_keypoints
@@ -816,6 +925,7 @@ class DetectionLitModule(LightningModule):
         self._angle_gain: float = angle_gain
         self._keypoint_gain: float = keypoint_gain
         self._keypoint_loss: str = keypoint_loss
+        self._oks_gain: float = oks_gain
         self._rotated_iou_form: str = rotated_iou_form
         #: Under ``"obb"`` the two box gains move out of the dual detection loss and
         #: onto the rotated terms; the dual loss is then constructed with zeros in
@@ -870,6 +980,13 @@ class DetectionLitModule(LightningModule):
         self.rle_loss: RLELoss | LaplaceNLLLoss | None = (
             _KEYPOINT_LOSSES[keypoint_loss]() if task == "keypoints" else None
         )
+        #: The OKS term (WP-178, A75), beside the RLE term rather than in its slot: R1
+        #: sec. 3.4.2 composes the two. Its sigma table is a **non-persistent** buffer
+        #: and it holds no parameters, so a keypoints module's ``state_dict`` — and
+        #: every pose checkpoint produced before the term existed — is exactly what it
+        #: was; the sigmas are the ``val/oks_mAP`` evaluator's own, through
+        #: :func:`_keypoint_oks_sigmas`, so the loss pulls towards what the metric scores.
+        self.oks_loss: OKSLoss | None = OKSLoss(_keypoint_oks_sigmas(num_keypoints)) if task == "keypoints" else None
         oriented = task == "obb"
         self.loss = DualBranchLoss(
             box_gain=0.0 if oriented else box_gain,
@@ -1567,23 +1684,16 @@ class DetectionLitModule(LightningModule):
     def _log_oks_map(self) -> None:
         """Score the epoch's accumulated keypoints and clear the buffers.
 
-        The sigma vector is picked by point count, not stated at construction:
-        :data:`~lucid_yolo.eval.coco_eval.COCO_KEYPOINT_OKS_SIGMAS` only when
-        ``num_keypoints == 17`` matches COCO's own human schema exactly, and
-        :data:`~lucid_yolo.eval.coco_eval.SYMBOL_KEYPOINT_OKS_SIGMA` (A67's
-        uniform sigma) for every other count — the same choice
-        ``scripts/overfit_micro.py``'s synthetic gate already makes for its own
-        7-point symbol schema, now shared from one place (WP-137) rather than
-        reimplemented per caller. The buffers are cleared unconditionally, the
+        The sigma vector is picked by point count through
+        :func:`_keypoint_oks_sigmas`, not stated at construction — the same rule
+        the :class:`~lucid_yolo.losses.oks_loss.OKSLoss` training term is built
+        with (WP-178), so the metric and the loss agree on every point's
+        tolerance. The buffers are cleared unconditionally, the
         same reason :meth:`_log_rotated_map` does: a metric that silently
         carried last epoch's detections into this one would improve
         monotonically for reasons that have nothing to do with the model.
         """
-        sigmas = (
-            COCO_KEYPOINT_OKS_SIGMAS
-            if self._num_keypoints == len(COCO_KEYPOINT_OKS_SIGMAS)
-            else (SYMBOL_KEYPOINT_OKS_SIGMA,) * (self._num_keypoints or 0)
-        )
+        sigmas = _keypoint_oks_sigmas(self._num_keypoints)
         stats = evaluate_keypoints(self._val_keypoint_preds, self._val_keypoint_targets, sigmas=sigmas)
         self.log("val/oks_mAP", torch.tensor(stats["AP_all"], dtype=torch.float32), prog_bar=True)
         self._val_keypoint_preds.clear()
@@ -1716,8 +1826,10 @@ class DetectionLitModule(LightningModule):
         angle``, which together with the dual loss's classification term — the only
         term left with a non-zero gain under that task — *is* the whole oriented
         objective rather than an addition to a detection one (module docstring); for
-        ``"keypoints"`` it is ``keypoint_gain * rle``, an addition in the segment
-        sense, with every detection term left at its own gain.
+        ``"keypoints"`` it is ``keypoint_gain * rle + oks_gain * oks``, an addition in
+        the segment sense, with every detection term left at its own gain; both pose
+        terms are computed and logged whatever their gain, so a run at the default
+        ``oks_gain=0`` still reads the OKS term it is not yet training on.
         ``"detect"`` contributes a zero scalar, so its total stays exactly the dual
         detection loss. Every pre-gain term is logged.
 
@@ -1734,9 +1846,10 @@ class DetectionLitModule(LightningModule):
         if self._task == "obb":
             return self._oriented_extra_loss(context, out, stage)
         if self._task == "keypoints":
-            keypoint_term = self._keypoint_term(context, out)
+            keypoint_term, oks_term = self._keypoint_terms(context, out)
             self.log(f"{stage}/keypoint", keypoint_term, batch_size=len(context.targets))
-            return self._keypoint_gain * keypoint_term
+            self.log(f"{stage}/oks", oks_term, batch_size=len(context.targets))
+            return self._keypoint_gain * keypoint_term + self._oks_gain * oks_term
         if context.seg_out is None:
             return torch.zeros_like(out.total)
         mask_term, semantic_term = self._segment_terms(context, out)
@@ -1806,8 +1919,8 @@ class DetectionLitModule(LightningModule):
             form=self._rotated_iou_form,
         )
 
-    def _keypoint_term(self, context: _StepContext, out: DualLossOutput) -> Tensor:
-        """Return the pre-gain R14 residual-log-likelihood term for a pose batch (WP-132).
+    def _keypoint_terms(self, context: _StepContext, out: DualLossOutput) -> tuple[Tensor, Tensor]:
+        """Return the pre-gain ``(rle, oks)`` pose terms for a batch, blended over both branches (WP-132).
 
         Both branches are scored and blended by the WP-035 ``alpha``, exactly as the
         mask and oriented terms are, and for the same reason: the one-to-one branch is
@@ -1815,8 +1928,13 @@ class DetectionLitModule(LightningModule):
         stems alone would ship an untrained keypoint head, and the shared ramp moves
         point supervision *with* box supervision rather than against it.
 
-        The two branches share **one** :class:`~lucid_yolo.losses.rle_loss.RLELoss`,
-        so one flow learns one residual density from both branches' positives. R14
+        Both terms — the R14 residual log-likelihood and the WP-178 OKS term — come
+        out of one :meth:`_score_branch` call per branch, so the point-count check, the
+        decode, the assignment gather and the blend are written once and both terms
+        read the same positives in the same order.
+
+        The two branches share **one** loss instance either way; for the RLE term that
+        means one flow learns one residual density from both branches' positives. R14
         fits a single density to a single regressor's errors; whether two branches
         that disagree early in training are better served by one shared density or by
         two independent ones is a question this project has no measurement for, and
@@ -1829,7 +1947,7 @@ class DetectionLitModule(LightningModule):
             out: The dual-branch loss output supplying both assignments and ``alpha``.
 
         Returns:
-            The pre-gain blended scalar, on the prediction device.
+            The ``(rle, oks)`` pair of pre-gain blended scalars, on the prediction device.
 
         Raises:
             ValueError: If the batch's point count differs from the ``K`` the head was
@@ -1853,35 +1971,65 @@ class DetectionLitModule(LightningModule):
                 f"the head predicts {predicted_points} keypoints but the batch annotates {annotated_points}; "
                 f"num_keypoints must match the dataset's annotation schema"
             )
-        o2m = self._branch_keypoint_loss(o2m_points, o2m_sigma, out.o2m_assign, context)
-        o2o = self._branch_keypoint_loss(o2o_points, o2o_sigma, out.o2o_assign, context)
-        return alpha * o2m + (1.0 - alpha) * o2o
+        o2m_rle, o2m_oks = self._score_branch(o2m_points, o2m_sigma, out.o2m_assign, context)
+        o2o_rle, o2o_oks = self._score_branch(o2o_points, o2o_sigma, out.o2o_assign, context)
+        return alpha * o2m_rle + (1.0 - alpha) * o2o_rle, alpha * o2m_oks + (1.0 - alpha) * o2o_oks
+
+    def _score_branch(
+        self, raw_points: Tensor, raw_sigma: Tensor, assign: AssignResult, context: _StepContext
+    ) -> tuple[Tensor, Tensor]:
+        """Gather one branch's positives once and score them with both pose terms (WP-178).
+
+        The decode and the assignment gather are the shared cost; the two losses read
+        the same :class:`_KeypointPositives` — RLE in the A71 box frame, OKS in input
+        pixels — so a step pays for them once per branch, not once per term.
+
+        Args:
+            raw_points: ``(B, A, K, 2)`` raw point offsets of this branch.
+            raw_sigma: ``(B, A, K, 2)`` raw, unactivated per-axis sigma of this branch.
+            assign: This branch's assignment (``fg_mask`` and ``gt_index``).
+            context: The step's shared quantities, for the anchor grid and the targets.
+
+        Returns:
+            The ``(rle, oks)`` pair of pre-gain scalars for this branch.
+        """
+        positives = self._gather_keypoint_positives(raw_points, raw_sigma, assign, context)
+        return self._rle_on(positives), self._oks_on(positives)
+
+    def _rle_on(self, positives: _KeypointPositives) -> Tensor:
+        """Score gathered positives with the RLE term in the A71 box frame."""
+        assert self.rle_loss is not None  # gated by the caller's task
+        scored = self.rle_loss(
+            normalize_keypoints_to_box(positives.predicted, positives.frame),
+            positives.raw_sigma,
+            normalize_keypoints_to_box(positives.annotated, positives.frame),
+            positives.visibility,
+        )
+        return cast("Tensor", scored)
+
+    def _oks_on(self, positives: _KeypointPositives) -> Tensor:
+        """Score gathered positives with the OKS term in input pixels, the assigned box's area as scale (A75)."""
+        assert self.oks_loss is not None  # gated by the caller's task
+        extent = positives.frame[:, 2:] - positives.frame[:, :2]  # (P, 2) width, height
+        scored = self.oks_loss(positives.predicted, positives.annotated, extent.prod(dim=-1), positives.visibility)
+        return cast("Tensor", scored)
 
     def _branch_keypoint_loss(
         self, raw_points: Tensor, raw_sigma: Tensor, assign: AssignResult, context: _StepContext
     ) -> Tensor:
         """Decode one branch's points and score its assigned positives with the RLE loss.
 
-        The decode is the deployed one
-        (:func:`~lucid_yolo.models.heads.keypoint.decode_keypoints`), so what the loss
-        pulls towards the ground truth is what inference will emit, and sigma is passed
-        on raw — :class:`~lucid_yolo.losses.rle_loss.RLELoss` owns the A65 sigmoid.
+        The positives come from :meth:`_gather_keypoint_positives`, the one gather both
+        pose terms read. Sigma is passed on raw —
+        :class:`~lucid_yolo.losses.rle_loss.RLELoss` owns the A65 sigmoid.
 
-        Both point tensors are then mapped into the assigned instance's box frame by
+        Both point tensors are mapped into the assigned instance's box frame by
         :func:`normalize_keypoints_to_box` before they are scored (A71). The decode
         emits absolute input pixels and R14's ``sigma_hat`` is sigmoid-bounded into
         ``(0, 1)``; scoring the two together unmodified is what makes the residual
         ``O(10^3)`` and the flow non-finite. The normalization is the *loss's* frame
         only — nothing downstream of it is normalized, so what inference emits is
         unchanged.
-
-        Every per-positive quantity is gathered by the **same** assignment, mirroring
-        :meth:`_branch_mask_loss`: the anchor rows by ``fg_mask`` and the instances by
-        ``gt_index``. Pairing positive ``k`` with instance ``k`` instead would supervise
-        an anchor towards another object's pose — a perfectly finite number that no loss
-        value reveals. The gather is the whole batch at once for that method's stated
-        reason: a per-image boolean index makes the device report a data-dependent
-        element count back to the host, once per image per branch.
 
         Args:
             raw_points: ``(B, A, K, 2)`` raw point offsets of this branch.
@@ -1893,7 +2041,62 @@ class DetectionLitModule(LightningModule):
             The scalar :class:`~lucid_yolo.losses.rle_loss.RLELoss` over every positive
             of the batch; a finite zero when there are none.
         """
-        assert self.rle_loss is not None  # gated by the caller's task
+        return self._rle_on(self._gather_keypoint_positives(raw_points, raw_sigma, assign, context))
+
+    def _branch_oks_loss(
+        self, raw_points: Tensor, raw_sigma: Tensor, assign: AssignResult, context: _StepContext
+    ) -> Tensor:
+        """Decode one branch's points and score its assigned positives with the OKS loss (WP-178).
+
+        The same positives, in the same order, as :meth:`_branch_keypoint_loss` reads —
+        through :meth:`_gather_keypoint_positives` — but scored **in input pixels**
+        rather than the A71 box frame: OKS normalizes by the object scale itself, so
+        the assigned box supplies its area ``w * h`` (A75) instead of a frame, and a
+        box-normalized coordinate would be divided by that scale twice. ``raw_sigma``
+        is accepted for signature parity with the RLE scorer and unread: the OKS term
+        has no uncertainty to weight by.
+
+        Args:
+            raw_points: ``(B, A, K, 2)`` raw point offsets of this branch.
+            raw_sigma: ``(B, A, K, 2)`` raw per-axis sigma of this branch; unread.
+            assign: This branch's assignment (``fg_mask`` and ``gt_index``).
+            context: The step's shared quantities, for the anchor grid and the targets.
+
+        Returns:
+            The scalar :class:`~lucid_yolo.losses.oks_loss.OKSLoss` over every positive
+            of the batch; a finite zero when there are none.
+        """
+        return self._oks_on(self._gather_keypoint_positives(raw_points, raw_sigma, assign, context))
+
+    def _gather_keypoint_positives(
+        self, raw_points: Tensor, raw_sigma: Tensor, assign: AssignResult, context: _StepContext
+    ) -> _KeypointPositives:
+        """Decode one branch's points and gather everything its positives are scored with.
+
+        The decode is the deployed one
+        (:func:`~lucid_yolo.models.heads.keypoint.decode_keypoints`), so what a loss
+        pulls towards the ground truth is what inference will emit.
+
+        Every per-positive quantity is gathered by the **same** assignment, mirroring
+        :meth:`_branch_mask_loss`: the anchor rows by ``fg_mask`` and the instances by
+        ``gt_index``. Pairing positive ``k`` with instance ``k`` instead would supervise
+        an anchor towards another object's pose — a perfectly finite number that no loss
+        value reveals. The gather is the whole batch at once for that method's stated
+        reason: a per-image boolean index makes the device report a data-dependent
+        element count back to the host, once per image per branch. It is one method
+        because two pose terms read it (WP-178): a second copy of the pairing logic
+        would be a second place for the pairing to go wrong.
+
+        Args:
+            raw_points: ``(B, A, K, 2)`` raw point offsets of this branch.
+            raw_sigma: ``(B, A, K, 2)`` raw, unactivated per-axis sigma of this branch.
+            assign: This branch's assignment (``fg_mask`` and ``gt_index``).
+            context: The step's shared quantities, for the anchor grid and the targets.
+
+        Returns:
+            The batch's positives, in input pixels, with the assigned instance's box
+            as each one's frame; shaped-but-empty tensors when there are none.
+        """
         gt_keypoints, gt_vis = context.gt_keypoints, context.gt_keypoint_vis
         assert gt_keypoints is not None
         assert gt_vis is not None
@@ -1907,7 +2110,13 @@ class DetectionLitModule(LightningModule):
             # instances pads to K = 0, which broadcasts against the head's K only by
             # accident. Empties shaped like the predictions keep the zero honest.
             empty = decoded.new_zeros((0, num_points, _KEYPOINT_DIM))
-            return cast("Tensor", self.rle_loss(empty, empty, empty, gt_vis.new_zeros((0, num_points))))
+            return _KeypointPositives(
+                predicted=empty,
+                raw_sigma=empty,
+                annotated=empty,
+                frame=decoded.new_zeros((0, _BOX_DIM)),
+                visibility=gt_vis.new_zeros((0, num_points)),
+            )
 
         # Positives first, ascending anchor index within each image (stable sort).
         order = torch.argsort(fg_mask.to(torch.uint8), dim=1, descending=True, stable=True)[:, :max_positives]
@@ -1919,17 +2128,14 @@ class DetectionLitModule(LightningModule):
         keep = valid.reshape(-1)
         image_ids = torch.arange(batch, device=decoded.device).unsqueeze(-1).expand_as(rows)
         # One box per positive — the assigned instance's, so prediction and target are
-        # mapped by the *same* frame and the difference the loss reads stays meaningful.
-        frame = context.gt_boxes[image_ids, rows].flatten(0, 1)[keep]
-        predicted = decoded.gather(1, anchor_index).flatten(0, 1)[keep]
-        annotated = gt_keypoints[image_ids, rows].flatten(0, 1)[keep]
-        scored = self.rle_loss(
-            normalize_keypoints_to_box(predicted, frame),
-            raw_sigma.gather(1, anchor_index).flatten(0, 1)[keep],
-            normalize_keypoints_to_box(annotated, frame),
-            gt_vis[image_ids, rows].flatten(0, 1)[keep],
+        # mapped by the *same* frame and the difference a loss reads stays meaningful.
+        return _KeypointPositives(
+            predicted=decoded.gather(1, anchor_index).flatten(0, 1)[keep],
+            raw_sigma=raw_sigma.gather(1, anchor_index).flatten(0, 1)[keep],
+            annotated=gt_keypoints[image_ids, rows].flatten(0, 1)[keep],
+            frame=context.gt_boxes[image_ids, rows].flatten(0, 1)[keep],
+            visibility=gt_vis[image_ids, rows].flatten(0, 1)[keep],
         )
-        return cast("Tensor", scored)
 
     def _segment_terms(self, context: _StepContext, out: DualLossOutput) -> tuple[Tensor, Tensor]:
         """Return the pre-gain ``(mask, semantic)`` terms for a segmentation batch.
