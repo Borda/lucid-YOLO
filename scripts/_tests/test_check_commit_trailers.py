@@ -139,6 +139,18 @@ Gate: tests/models/test_head.py::test_dual_head_shapes
 Co-authored-by: Claude <209825114+claude[bot]@users.noreply.github.com>
 """
 
+HEADING_IN_BODY_MESSAGE = """feat(models): add dual detection head
+
+## What changed
+
+The head, as described. See section 3 of the paper, not issue tracker entries.
+
+WP: 022
+Provenance: R1
+Assumptions: none
+Gate: tests/models/test_head.py::test_dual_head_shapes
+"""
+
 SIGNOFF_BEFORE_SEPARATOR_MESSAGE = """feat(models): add dual detection head
 
 WP: 022
@@ -183,9 +195,14 @@ def test_unknown_provenance_id_fails() -> None:
 
 
 def test_hash_before_separator_fails() -> None:
-    """A hash-sign in the body before the separator is rejected."""
+    """An issue reference in the body before the separator is rejected."""
     violations = validator.validate_message(HASH_IN_BODY_MESSAGE, VALID_IDS)
     assert any("#" in violation for violation in violations)
+
+
+def test_markdown_heading_before_separator_passes() -> None:
+    """A markdown heading links nothing, so its hash-signs are not an issue reference."""
+    assert validator.validate_message(HEADING_IN_BODY_MESSAGE, VALID_IDS) == []
 
 
 def test_at_sign_after_separator_passes() -> None:

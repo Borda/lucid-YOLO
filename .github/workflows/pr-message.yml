@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: Apache-2.0
+name: PR Message
+
+# Admission layer three (WP-144): the provenance trailers, checked on the message
+# that will land. This repository merges by squash only, so a branch's own commits
+# never reach `main`; what does is one commit whose message GitHub builds from the
+# pull request's title and description. Validating the branch commits -- which the
+# `trailers` job in lint.yml did -- refused work over messages nobody would ever
+# read on `main`, and said nothing about the one message that lands.
+#
+# The title and description are validated as a single commit message: title as the
+# Conventional subject, description as the body carrying the four trailers, with
+# the co-author separator and its lines after it. That is the squash message only
+# when the repository's squash setting is "pull request title and description";
+# with the default commit-list body the check here and the landed message differ.
+#
+# `edited` is in the trigger because a title or description fix must re-run the
+# check without a push; `synchronize` because every new head needs a fresh verdict.
+# A pull request opened by a Bot account (pre-commit.ci, dependabot) is skipped: a
+# pin bump has no derivation to name, and the maintainer writes the landing message.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-message-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  squash-message:
+    if: github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - name: "📥 Check out the repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "🐍 Set up Python"
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      # Title and body reach the shell through the environment, never through the
+      # source of the script: a description holding shell syntax stays data. `tr`
+      # drops the CRLF GitHub stores descriptions with, so `$`-anchored trailer
+      # patterns see the line ends the checker was written for.
+      - name: "🏷️ Validate the pull request title and description as the squash message"
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n\n%s\n' "${PR_TITLE}" "${PR_BODY}" | tr -d '\r' > "${RUNNER_TEMP}/squash-message.txt"
+          python scripts/lint/check_commit_trailers.py --file "${RUNNER_TEMP}/squash-message.txt"

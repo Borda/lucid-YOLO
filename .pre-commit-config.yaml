@@ -81,7 +81,9 @@ repos:
         # but a save-time hook that formats whatever file was just edited does, and
         # reformatting a 681-line design document to fix one number in it is not a trade
         # anyone chose. `docs/` is excluded here because the instance below owns it.
-        exclude: ^(\.(plans|temp|reports|notes|experiments|cache)/|docs/)
+        # The pull request template is a commit message, not a document: its four
+        # trailer lines are one line each, and a paragraph reflow joins them.
+        exclude: ^(\.(plans|temp|reports|notes|experiments|cache)/|docs/|\.github/PULL_REQUEST_TEMPLATE\.md$)
       - id: mdformat
         name: "📚 mdformat (docs/, mkdocs dialect)"
         # mdformat-mkdocs (MIT) formats what the site renders and core mdformat would
@@ -235,8 +237,8 @@ repos:
       # them passed. What it does catch is the case it is for: unpushed local
       # work whose messages were written before this hook existed, or amended
       # after commit-msg accepted them. The job that actually gates a
-      # contribution is `trailers` in `lint.yml`, over the pull request's own
-      # commit range, on a full-history checkout.
+      # contribution is `squash-message` in `pr-message.yml`, over the pull
+      # request's title and description -- the message a squash merge lands.
       - id: commit-trailers-history
         name: "📜 provenance commit trailers (unpushed history)"
         entry: .venv/bin/python scripts/lint/check_commit_trailers.py --range origin/main..HEAD
