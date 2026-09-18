@@ -369,8 +369,8 @@ def _resolve_config_args(args: list[str]) -> list[str]:
     return resolved
 
 
-def main(args: ArgsType = None) -> DetectionCLI:
-    """Run the detection LightningCLI.
+def main(args: ArgsType = None) -> int:
+    """Run the detection LightningCLI and report success as a process exit status.
 
     Builds a :class:`DetectionCLI` with :func:`default_determinism` and a default seed
     of ``0``; every other setting comes from the CLI/config. With no ``args`` the
@@ -389,12 +389,18 @@ def main(args: ArgsType = None) -> DetectionCLI:
             config. ``None`` (the default) reads ``sys.argv``.
 
     Returns:
-        The constructed :class:`DetectionCLI`; when invoked with a run subcommand
-        the fit/validate loop has already executed by the time it is returned.
+        ``0``: by the time it is returned the subcommand's loop has already
+        executed, and every failure on the way raises rather than returns. An
+        ``int`` rather than the constructed :class:`DetectionCLI` because the
+        console-script wrapper hands the value to :func:`sys.exit`, which treats
+        any non-``int`` object as failure — printing it and exiting ``1`` after a
+        successful fit (WP-185). The sibling commands return an ``int`` for the
+        same reason.
 
     Examples:
         >>> from lucid_yolo.cli.train import main
-        >>> cli = main(["fit", "--config", "det_nano_smoke"])  # doctest: +SKIP
+        >>> main(["fit", "--config", "det_nano_smoke"])  # doctest: +SKIP
+        0
     """
     if args is None:
         # Rewrite sys.argv in place and keep args=None: passing an args list while
@@ -406,7 +412,7 @@ def main(args: ArgsType = None) -> DetectionCLI:
         # Lightning's Tensor Core advisory: allow TF32 matmuls for the fp32 ops
         # AMP leaves untouched. CUDA-only effect; CPU/MPS numerics unchanged.
         torch.set_float32_matmul_precision("high")
-    return DetectionCLI(
+    DetectionCLI(
         DetectionLitModule,
         DetectionDataModule,
         trainer_defaults={"deterministic": default_determinism()},
@@ -417,7 +423,8 @@ def main(args: ArgsType = None) -> DetectionCLI:
         },
         args=args,
     )
+    return 0
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__":  # pragma: no cover - `python -m lucid_yolo.cli.train`
+    raise SystemExit(main())

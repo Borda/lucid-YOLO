@@ -115,6 +115,21 @@ def test_every_declared_console_script_resolves() -> None:
         assert callable(getattr(importlib.import_module(module_name), attribute))
 
 
+def test_the_train_command_exits_zero_after_its_subcommand_ran(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``lucid-yolo`` reports success as ``0``, not as the CLI object it built.
+
+    The console-script wrapper calls ``sys.exit(main())``, and :func:`sys.exit`
+    treats any non-``int`` value as failure — it prints the value and exits ``1``.
+    Until WP-185 ``main`` returned the constructed :class:`DetectionCLI`, so a
+    training run that had completed reported failure to every caller that checks
+    the status (a shell ``&&``, a notebook ``subprocess.run(check=True)``, CI).
+    The CLI is stubbed here because building it runs the subcommand.
+    """
+    monkeypatch.setattr(train_cli, "DetectionCLI", lambda *_args, **_kwargs: object())
+
+    assert train_cli.main(["fit"]) == 0
+
+
 def test_the_data_command_offers_the_three_dataset_operations() -> None:
     """``lucid-data`` covers download, check and build-tiles, and nothing task-specific."""
     assert list(data_cli.SUBCOMMANDS) == ["download", "check", "build-tiles"]
