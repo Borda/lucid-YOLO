@@ -1340,7 +1340,10 @@ class DetectionDataModule(LightningDataModule):
         inputs aligned; ``"16-mixed"`` leaves the module float32 and lets autocast
         cast. Already-float images and already-list targets (a non-packed direct
         feed) pass through untouched, so the hook is safe to run over either form.
-        Both the train and val loaders share this single restore.
+        Both the train and val loaders share this single restore. On CUDA the
+        restored images are made ``channels_last``, the layout the module's
+        parameters take in :meth:`DetectionLitModule.setup`; masks and every other
+        device keep the default layout.
 
         Args:
             batch: The transferred ``(uint8 images, PackedTargets)`` transport batch,
@@ -1364,6 +1367,8 @@ class DetectionDataModule(LightningDataModule):
         del dataloader_idx
         images, targets = batch
         images = _dequantize_images(images, self._consumer_dtype())
+        if images.is_cuda:
+            images = images.contiguous(memory_format=torch.channels_last)
         if isinstance(targets, PackedTargets):
             return images, unpack_targets(targets), unpack_masks(targets)
         return images, targets, None
