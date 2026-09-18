@@ -51,6 +51,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import torch
 from torch import Tensor
 from torch.nn import functional as F
 
@@ -205,20 +206,27 @@ class DetectionBranchLoss:
         and let ``l1_gain`` swamp the classification term (the WP-078 Det-smoke
         root cause). CIoU is scale-invariant and needs no normalization.
 
-        Boolean-masking with an all-``False`` ``fg_mask`` yields empty positive
-        tensors whose weighted sums are zero yet stay connected to ``pred_boxes``
-        with zero gradient — so a batch with no positives is finite, not a
-        special case.
+        Both terms are evaluated **densely** over every ``(B, A)`` anchor and
+        selected by ``fg_mask`` afterwards, rather than gathered with
+        ``pred_boxes[fg_mask]`` (WP-183): a boolean gather is a data-dependent
+        shape that ``torch.compile`` cannot trace, so the masked form broke the
+        step graph at every such index. The dense form is loss-identical — the
+        weight is exactly zero off the positives — and the selection is a
+        ``torch.where`` rather than a multiply so a non-finite CIoU on a
+        background anchor (whose target is the all-zero box) reaches neither the
+        sum nor the gradient. A batch with no positives therefore sums exact
+        zeros and stays connected to ``pred_boxes`` with zero gradient — finite,
+        not a special case.
         """
-        fg_mask = assign.fg_mask
-        pred_pos = pred_boxes[fg_mask]  # (P, 4)
-        target_pos = assign.target_boxes[fg_mask]  # (P, 4)
-        weights = assign.align_weights[fg_mask]  # (P,)
-        box_terms = ciou_loss(pred_pos, target_pos)  # (P,)
-        diffs = pred_pos - target_pos  # (P, 4)
+        fg = assign.fg_mask
+        batch, anchors = fg.shape
+        weights = assign.align_weights * fg  # (B, A); exactly zero off the positives
+        box_terms = ciou_loss(pred_boxes.reshape(-1, 4), assign.target_boxes.reshape(-1, 4)).view(batch, anchors)
+        box_terms = torch.where(fg, box_terms, torch.zeros_like(box_terms))
+        diffs = pred_boxes - assign.target_boxes  # (B, A, 4)
         if strides is not None:
-            diffs = diffs / strides.expand(fg_mask.shape)[fg_mask].unsqueeze(-1)
-        l1_terms = diffs.abs().sum(dim=-1)  # (P,)
+            diffs = diffs / strides.expand(fg.shape).unsqueeze(-1)
+        l1_terms = torch.where(fg, diffs.abs().sum(dim=-1), torch.zeros_like(weights))
         l_box = (box_terms * weights).sum() / weight_sum
         l_l1 = (l1_terms * weights).sum() / weight_sum
         return l_box, l_l1

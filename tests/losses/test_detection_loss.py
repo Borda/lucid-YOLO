@@ -19,8 +19,12 @@ from torch import Tensor
 
 from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.losses import DetectionBranchLoss, DetectionLossOutput
+from lucid_yolo.losses.ciou import ciou_loss
 
 _LN2 = math.log(2.0)
+
+#: Per-anchor strides of the random-assignment scenarios, cycled over the anchor axis.
+_LEVEL_STRIDES = (8.0, 16.0, 32.0)
 
 
 @pytest.fixture(autouse=True)
@@ -230,3 +234,177 @@ def test_gradients_flow_to_both_predictions() -> None:
     assert logits.grad is not None and torch.isfinite(logits.grad).all()
     assert boxes_leaf.grad is not None and torch.isfinite(boxes_leaf.grad).all()
     assert not torch.isnan(out.total)
+
+
+def _masked_box_losses_oracle(
+    pred_boxes: Tensor, assign: AssignResult, weight_sum: Tensor, strides: Tensor | None
+) -> tuple[Tensor, Tensor]:
+    """The pre-WP-183 ``_box_losses``, verbatim: boolean gathers over the positives.
+
+    Kept as the reference the dense form is held against. It is the implementation
+    the golden snapshots were captured with, so agreement with it is agreement with
+    every frozen value.
+
+    Examples:
+        >>> assign = _make_assign(
+        ...     fg_mask=torch.tensor([[True, False]]),
+        ...     target_labels=torch.tensor([[0, -1]]),
+        ...     target_boxes=torch.tensor([[[0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 0.0, 0.0]]]),
+        ...     align_weights=torch.tensor([[1.0, 0.0]]),
+        ... )
+        >>> box, l1 = _masked_box_losses_oracle(assign.target_boxes, assign, torch.tensor(1.0), None)
+        >>> float(box), float(l1)
+        (0.0, 0.0)
+    """
+    fg_mask = assign.fg_mask
+    pred_pos = pred_boxes[fg_mask]  # (P, 4)
+    target_pos = assign.target_boxes[fg_mask]  # (P, 4)
+    weights = assign.align_weights[fg_mask]  # (P,)
+    box_terms = ciou_loss(pred_pos, target_pos)  # (P,)
+    diffs = pred_pos - target_pos  # (P, 4)
+    if strides is not None:
+        diffs = diffs / strides.expand(fg_mask.shape)[fg_mask].unsqueeze(-1)
+    l1_terms = diffs.abs().sum(dim=-1)  # (P,)
+    l_box = (box_terms * weights).sum() / weight_sum
+    l_l1 = (l1_terms * weights).sum() / weight_sum
+    return l_box, l_l1
+
+
+def _random_boxes(batch: int, anchors: int) -> Tensor:
+    """Random well-formed ``xyxy`` boxes in a pixel frame, ``(batch, anchors, 4)``.
+
+    Examples:
+        >>> boxes = _random_boxes(2, 3)
+        >>> bool((boxes[..., 2:] > boxes[..., :2]).all())
+        True
+    """
+    corner = torch.rand(batch, anchors, 2) * 100.0
+    size = torch.rand(batch, anchors, 2) * 40.0 + 1.0
+    return torch.cat([corner, corner + size], dim=-1)
+
+
+def _random_assign(fg_mask: Tensor) -> AssignResult:
+    """A contract-conforming assignment over ``fg_mask``: random targets and weights on positives.
+
+    Background anchors carry the documented sentinels — ``-1`` label and index, a zero
+    box, zero weight — which is what makes the dense form's ``torch.where`` load-bearing.
+
+    Examples:
+        >>> assign = _random_assign(torch.tensor([[True, False]]))
+        >>> bool(assign.align_weights[0, 1] == 0.0), bool((assign.target_boxes[0, 1] == 0.0).all())
+        (True, True)
+    """
+    batch, anchors = fg_mask.shape
+    labels = torch.where(fg_mask, torch.randint(0, 3, (batch, anchors)), torch.full((batch, anchors), -1))
+    target_boxes = _random_boxes(batch, anchors) * fg_mask.unsqueeze(-1)
+    align_weights = torch.rand(batch, anchors) * fg_mask
+    return _make_assign(fg_mask=fg_mask, target_labels=labels, target_boxes=target_boxes, align_weights=align_weights)
+
+
+def _mixed_fg_mask() -> Tensor:
+    """``(4, 6)`` mask whose second image has no positive at all.
+
+    Examples:
+        >>> mask = _mixed_fg_mask()
+        >>> tuple(mask.shape), bool(mask[1].any()), bool(mask.any())
+        ((4, 6), False, True)
+    """
+    mask = torch.rand(4, 6) < 0.5
+    mask[1] = False
+    mask[0, 0] = True
+    return mask
+
+
+class TestDenseBoxTermsMatchMaskedReference:
+    """The dense ``(B, A)`` box terms reproduce the masked-gather implementation (WP-183).
+
+    Each scenario builds one random assignment and scores it twice — once with the
+    shipped dense form and once with the pre-change oracle above — on separate leaf
+    tensors so the two backward passes cannot accumulate into each other. Values and
+    gradients must agree to ``1e-6`` and the gradients must be finite.
+    """
+
+    @staticmethod
+    def _score_both(
+        pred_boxes: Tensor, assign: AssignResult, strides: Tensor | None
+    ) -> tuple[tuple[Tensor, Tensor, Tensor], tuple[Tensor, Tensor, Tensor]]:
+        """Return ``(box, l1, grad)`` from the dense form and from the oracle, on separate leaves."""
+        weight_sum = assign.align_weights.sum().clamp(min=1.0)
+        dense_leaf = pred_boxes.clone().requires_grad_(True)
+        dense_box, dense_l1 = DetectionBranchLoss._box_losses(dense_leaf, assign, weight_sum, strides)
+        (dense_box + dense_l1).backward()
+        oracle_leaf = pred_boxes.clone().requires_grad_(True)
+        oracle_box, oracle_l1 = _masked_box_losses_oracle(oracle_leaf, assign, weight_sum, strides)
+        (oracle_box + oracle_l1).backward()
+        assert dense_leaf.grad is not None and oracle_leaf.grad is not None
+        return (dense_box, dense_l1, dense_leaf.grad), (oracle_box, oracle_l1, oracle_leaf.grad)
+
+    @pytest.mark.parametrize(
+        "strides",
+        [
+            pytest.param(None, id="pixel-frame"),
+            pytest.param(torch.tensor(_LEVEL_STRIDES * 2), id="stride-units"),
+        ],
+    )
+    def test_mixed_batch_with_one_empty_image(self, strides: Tensor | None) -> None:
+        """A ``B=4`` batch where one image has no positive scores identically in value and gradient.
+
+        The empty image is the row a masked gather drops outright and the dense form
+        carries as exact zeros; the two must sum to the same number either way.
+        """
+        assign = _random_assign(_mixed_fg_mask())
+        pred_boxes = _random_boxes(4, 6)
+
+        (dense_box, dense_l1, dense_grad), (oracle_box, oracle_l1, oracle_grad) = self._score_both(
+            pred_boxes, assign, strides
+        )
+
+        assert torch.allclose(dense_box, oracle_box, atol=1e-6)
+        assert torch.allclose(dense_l1, oracle_l1, atol=1e-6)
+        assert torch.allclose(dense_grad, oracle_grad, atol=1e-6)
+        assert bool(torch.isfinite(dense_grad).all())
+
+    def test_all_background_batch_is_zero_and_connected(self) -> None:
+        """A batch with no positive anywhere gives exact zeros and a finite, all-zero gradient.
+
+        This is the empty-mask contract the module docstring states; the oracle
+        reaches it through empty gathers and the dense form through an all-``False``
+        selection, and both must land on the same zero.
+        """
+        assign = _random_assign(torch.zeros(4, 6, dtype=torch.bool))
+        pred_boxes = _random_boxes(4, 6)
+
+        (dense_box, dense_l1, dense_grad), (oracle_box, oracle_l1, oracle_grad) = self._score_both(
+            pred_boxes, assign, torch.tensor(_LEVEL_STRIDES * 2)
+        )
+
+        assert float(dense_box.detach()) == 0.0 and float(dense_l1.detach()) == 0.0
+        assert float(oracle_box.detach()) == 0.0 and float(oracle_l1.detach()) == 0.0
+        assert torch.equal(dense_grad, torch.zeros_like(pred_boxes))
+        assert torch.equal(oracle_grad, torch.zeros_like(pred_boxes))
+
+    def test_degenerate_background_predictions_leak_nothing(self) -> None:
+        """Zero-area and inverted predictions on background anchors reach neither the value nor the gradient.
+
+        A background anchor's target is the all-zero box, so a dense CIoU there is
+        scored on a degenerate pair the oracle never evaluates. Planting a zero box, a
+        box equal to that zero target and an inverted box on background anchors proves
+        the ``torch.where`` selection — and the CIoU guards behind it — keep them out.
+        """
+        fg_mask = torch.tensor([[True, False, False, False], [False, True, False, False]])
+        assign = _random_assign(fg_mask)
+        pred_boxes = _random_boxes(2, 4)
+        pred_boxes[0, 1] = torch.tensor([5.0, 5.0, 5.0, 5.0])  # zero area
+        pred_boxes[0, 2] = torch.zeros(4)  # equals the background target exactly
+        pred_boxes[1, 2] = torch.tensor([9.0, 9.0, 3.0, 3.0])  # inverted
+        pred_boxes[1, 3] = torch.zeros(4)
+
+        (dense_box, dense_l1, dense_grad), (oracle_box, oracle_l1, oracle_grad) = self._score_both(
+            pred_boxes, assign, torch.tensor((*_LEVEL_STRIDES, 8.0))
+        )
+
+        assert torch.allclose(dense_box, oracle_box, atol=1e-6)
+        assert torch.allclose(dense_l1, oracle_l1, atol=1e-6)
+        assert bool(torch.isfinite(dense_grad).all())
+        assert torch.allclose(dense_grad, oracle_grad, atol=1e-6)
+        assert torch.equal(dense_grad[~fg_mask], torch.zeros(6, 4))

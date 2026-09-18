@@ -21,6 +21,7 @@ import torch
 from torch import Tensor
 
 from lucid_yolo.assign.tal import AssignResult
+from lucid_yolo.losses.angle_loss import square_angle_loss
 from lucid_yolo.losses.oriented_loss import (
     DEFAULT_ROTATED_IOU_FORM,
     ROTATED_IOU_FORMS,
@@ -236,3 +237,179 @@ class TestNoGroundTruth:
         assert float(terms.angle.detach()) == 0.0
         assert pred.grad is not None
         assert torch.equal(pred.grad, torch.zeros_like(pred))
+
+
+def _masked_oriented_terms_oracle(
+    pred_rboxes: Tensor, pred_theta: Tensor, gt_rboxes: Tensor, assign: AssignResult, strides: Tensor
+) -> OrientedLossOutput:
+    """The pre-WP-183 ``oriented_branch_terms`` body, verbatim: boolean gathers over the positives.
+
+    The Hellinger form only — the reference the dense form is held against, with the
+    ``N == 0`` early return left out because that path did not change.
+
+    Examples:
+        >>> box = torch.tensor([[4.0, 4.0, 8.0, 2.0, 0.25]])
+        >>> terms = _masked_oriented_terms_oracle(
+        ...     box.expand(1, 2, 5), box[:, 4].expand(1, 2), box.unsqueeze(0),
+        ...     _single_positive_assignment(), torch.tensor([_STRIDE, _STRIDE]),
+        ... )
+        >>> float(terms.rbox), float(terms.rl1), float(terms.angle)
+        (0.0, 0.0, 0.0)
+    """
+    rotated_iou_loss = ROTATED_IOU_FORMS["hellinger"]
+    fg_mask = assign.fg_mask
+    weight_sum = assign.align_weights.sum().clamp(min=1.0)
+    instance_index = assign.gt_index.clamp(min=0).unsqueeze(-1).expand(-1, -1, 5)
+    target_pos = gt_rboxes.gather(1, instance_index)[fg_mask]  # (P, 5)
+    pred_pos = pred_rboxes[fg_mask]  # (P, 5)
+    weights = assign.align_weights[fg_mask]  # (P,)
+
+    rbox_terms = rotated_iou_loss(pred_pos, target_pos)  # (P,)
+    stride_pos = strides.expand(fg_mask.shape)[fg_mask].unsqueeze(-1)  # (P, 1)
+    l1_terms = ((pred_pos[:, :4] - target_pos[:, :4]) / stride_pos).abs().sum(dim=-1)  # (P,)
+    return OrientedLossOutput(
+        rbox=(rbox_terms * weights).sum() / weight_sum,
+        rl1=(l1_terms * weights).sum() / weight_sum,
+        angle=square_angle_loss(pred_theta[fg_mask], target_pos[:, 4], target_pos[:, 2], target_pos[:, 3], weights),
+    )
+
+
+def _random_rboxes(*leading: int) -> Tensor:
+    """Random long-edge rotated boxes ``(cx, cy, w, h, theta)`` with positive sides.
+
+    Examples:
+        >>> boxes = _random_rboxes(2, 3)
+        >>> tuple(boxes.shape), bool((boxes[..., 2:4] > 0).all())
+        ((2, 3, 5), True)
+    """
+    centre = torch.rand(*leading, 2) * 100.0
+    sides = torch.rand(*leading, 2) * 40.0 + 1.0
+    theta = (torch.rand(*leading, 1) - 0.5) * torch.pi
+    return torch.cat([centre, sides, theta], dim=-1)
+
+
+def _random_assign(fg_mask: Tensor, num_instances: int) -> AssignResult:
+    """A contract-conforming assignment whose positives index random instances in ``[0, N)``.
+
+    ``gt_index`` is drawn rather than fixed at ``0`` so the ``gather`` over the padded
+    instance axis is exercised, not only its first column.
+
+    Examples:
+        >>> assign = _random_assign(torch.tensor([[True, False]]), num_instances=3)
+        >>> int(assign.gt_index[0, 1]), float(assign.align_weights[0, 1])
+        (-1, 0.0)
+    """
+    batch, anchors = fg_mask.shape
+    background = torch.full((batch, anchors), -1)
+    gt_index = torch.where(fg_mask, torch.randint(0, num_instances, (batch, anchors)), background)
+    return AssignResult(
+        fg_mask=fg_mask,
+        gt_index=gt_index,
+        target_labels=torch.where(fg_mask, torch.zeros_like(gt_index), background),
+        target_boxes=torch.zeros(batch, anchors, 4),
+        align_weights=torch.rand(batch, anchors) * fg_mask,
+    )
+
+
+class TestDenseOrientedTermsMatchMaskedReference:
+    """The dense ``(B, A)`` oriented terms reproduce the masked-gather implementation (WP-183).
+
+    Each scenario scores one random assignment with the shipped dense form and with
+    the pre-change oracle above, on separate leaf tensors for ``pred_rboxes`` and
+    ``pred_theta`` so the two backward passes cannot accumulate. All three terms and
+    both gradients must agree to ``1e-6``, and the gradients must be finite.
+    """
+
+    @staticmethod
+    def _score_both(
+        pred_rboxes: Tensor, pred_theta: Tensor, gt_rboxes: Tensor, assign: AssignResult
+    ) -> tuple[tuple[OrientedLossOutput, Tensor, Tensor], tuple[OrientedLossOutput, Tensor, Tensor]]:
+        """Return ``(terms, d/d pred_rboxes, d/d pred_theta)`` from the dense form and from the oracle."""
+        strides = torch.tensor([8.0, 16.0, 32.0, 8.0, 16.0, 32.0])[: assign.fg_mask.shape[1]]
+        dense_rboxes, dense_theta = pred_rboxes.clone().requires_grad_(True), pred_theta.clone().requires_grad_(True)
+        dense = oriented_branch_terms(dense_rboxes, dense_theta, gt_rboxes, assign, strides)
+        (dense.rbox + dense.rl1 + dense.angle).backward()
+        oracle_rboxes = pred_rboxes.clone().requires_grad_(True)
+        oracle_theta = pred_theta.clone().requires_grad_(True)
+        oracle = _masked_oriented_terms_oracle(oracle_rboxes, oracle_theta, gt_rboxes, assign, strides)
+        (oracle.rbox + oracle.rl1 + oracle.angle).backward()
+        assert dense_rboxes.grad is not None and dense_theta.grad is not None
+        assert oracle_rboxes.grad is not None and oracle_theta.grad is not None
+        return (dense, dense_rboxes.grad, dense_theta.grad), (oracle, oracle_rboxes.grad, oracle_theta.grad)
+
+    @staticmethod
+    def _assert_agree(
+        dense: tuple[OrientedLossOutput, Tensor, Tensor], oracle: tuple[OrientedLossOutput, Tensor, Tensor]
+    ) -> None:
+        """Every term and both gradients agree to ``1e-6``, and the dense gradients are finite."""
+        dense_terms, dense_rbox_grad, dense_theta_grad = dense
+        oracle_terms, oracle_rbox_grad, oracle_theta_grad = oracle
+        assert torch.allclose(dense_terms.rbox, oracle_terms.rbox, atol=1e-6)
+        assert torch.allclose(dense_terms.rl1, oracle_terms.rl1, atol=1e-6)
+        assert torch.allclose(dense_terms.angle, oracle_terms.angle, atol=1e-6)
+        assert bool(torch.isfinite(dense_rbox_grad).all()) and bool(torch.isfinite(dense_theta_grad).all())
+        assert torch.allclose(dense_rbox_grad, oracle_rbox_grad, atol=1e-6)
+        assert torch.allclose(dense_theta_grad, oracle_theta_grad, atol=1e-6)
+
+    def test_mixed_batch_with_one_empty_image(self) -> None:
+        """A ``B=4`` batch where one image has no positive scores identically in value and gradient.
+
+        Positives index three padded instances at random, so the dense gather is held
+        against the masked one on every column of the instance axis. The empty image
+        carries all-zero padded ground truth, as a collated batch does, so every one
+        of its background anchors scores densely against a ``(0, 0, 0, 0, 0)`` box —
+        the row the masked form drops and the dense form must carry as exact zeros.
+        """
+        fg_mask = torch.rand(4, 6) < 0.5
+        fg_mask[1] = False
+        fg_mask[0, 0] = True
+        assign = _random_assign(fg_mask, num_instances=3)
+        pred_rboxes = _random_rboxes(4, 6)
+        gt_rboxes = _random_rboxes(4, 3)
+        gt_rboxes[1] = 0.0
+
+        dense, oracle = self._score_both(pred_rboxes, pred_rboxes[..., 4] * 3.0, gt_rboxes, assign)
+
+        self._assert_agree(dense, oracle)
+
+    def test_all_background_batch_is_zero_and_connected(self) -> None:
+        """No positive anywhere gives three exact zeros and finite, all-zero gradients.
+
+        The ground truth is padded but every anchor is background, so the masked form
+        gathers nothing and the dense form selects nothing — both must be the same
+        zero, still connected to both predictions.
+        """
+        assign = _random_assign(torch.zeros(4, 6, dtype=torch.bool), num_instances=2)
+        pred_rboxes = _random_rboxes(4, 6)
+
+        (dense, rbox_grad, theta_grad), (oracle, _, _) = self._score_both(
+            pred_rboxes, pred_rboxes[..., 4], _random_rboxes(4, 2), assign
+        )
+
+        assert float(dense.rbox.detach()) == 0.0 and float(dense.rl1.detach()) == 0.0
+        assert float(dense.angle.detach()) == 0.0 and float(oracle.angle.detach()) == 0.0
+        assert torch.equal(rbox_grad, torch.zeros_like(pred_rboxes))
+        assert torch.equal(theta_grad, torch.zeros_like(pred_rboxes[..., 4]))
+
+    def test_collapsed_background_predictions_leak_nothing(self) -> None:
+        """Collapsed and zero predictions on background anchors reach neither the value nor the gradient.
+
+        A background anchor scores against instance ``0`` in the dense form and against
+        nothing in the masked one; planting a fully collapsed box and an all-zero box
+        there proves the ``torch.where`` selection keeps whatever ProbIoU makes of them
+        out of the sum and the gradient.
+        """
+        fg_mask = torch.tensor([[True, False, False], [False, True, False]])
+        assign = _random_assign(fg_mask, num_instances=2)
+        pred_rboxes = _random_rboxes(2, 3)
+        pred_rboxes[0, 1] = torch.tensor([4.0, 4.0, 0.0, 0.0, 0.3])  # both sides collapsed
+        pred_rboxes[0, 2] = torch.zeros(5)
+        pred_rboxes[1, 2] = torch.zeros(5)
+
+        (dense, rbox_grad, theta_grad), oracle = self._score_both(
+            pred_rboxes, pred_rboxes[..., 4], _random_rboxes(2, 2), assign
+        )
+
+        self._assert_agree((dense, rbox_grad, theta_grad), oracle)
+        assert torch.equal(rbox_grad[~fg_mask], torch.zeros(4, 5))
+        assert torch.equal(theta_grad[~fg_mask], torch.zeros(4))

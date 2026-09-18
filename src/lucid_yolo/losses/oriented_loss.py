@@ -101,6 +101,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import torch
+
 from lucid_yolo.losses.angle_loss import square_angle_loss
 from lucid_yolo.losses.probiou import probiou_bhattacharyya_loss, probiou_hellinger_loss
 
@@ -216,20 +218,25 @@ def oriented_branch_terms(
     if gt_rboxes.shape[1] == 0:
         return _no_ground_truth(pred_rboxes, pred_theta)
 
-    fg_mask = assign.fg_mask
+    # Dense over every (B, A) anchor, selected by fg_mask afterwards, for the reason
+    # DetectionBranchLoss._box_losses gives (WP-183): a boolean gather is a shape
+    # torch.compile cannot trace. A background anchor gathers instance 0 (clamp maps
+    # its -1 there) -- a real or zero-padded box, finite under ProbIoU's floor -- and
+    # the where keeps whatever it scores out of both the sum and the gradient.
+    fg = assign.fg_mask
     weight_sum = assign.align_weights.sum().clamp(min=1.0)
+    weights = assign.align_weights * fg  # (B, A); exactly zero off the positives
     instance_index = assign.gt_index.clamp(min=0).unsqueeze(-1).expand(-1, -1, _RBOX_DIM)
-    target_pos = gt_rboxes.gather(1, instance_index)[fg_mask]  # (P, 5)
-    pred_pos = pred_rboxes[fg_mask]  # (P, 5)
-    weights = assign.align_weights[fg_mask]  # (P,)
+    targets = gt_rboxes.gather(1, instance_index)  # (B, A, 5)
 
-    rbox_terms = rotated_iou_loss(pred_pos, target_pos)  # (P,)
-    stride_pos = strides.expand(fg_mask.shape)[fg_mask].unsqueeze(-1)  # (P, 1)
-    l1_terms = ((pred_pos[:, :_L1_COLUMNS] - target_pos[:, :_L1_COLUMNS]) / stride_pos).abs().sum(dim=-1)  # (P,)
+    rbox_terms = torch.where(fg, rotated_iou_loss(pred_rboxes, targets), torch.zeros_like(weights))
+    stride = strides.expand(fg.shape).unsqueeze(-1)  # (B, A, 1)
+    l1_terms = ((pred_rboxes[..., :_L1_COLUMNS] - targets[..., :_L1_COLUMNS]) / stride).abs().sum(dim=-1)
+    l1_terms = torch.where(fg, l1_terms, torch.zeros_like(weights))
     return OrientedLossOutput(
         rbox=(rbox_terms * weights).sum() / weight_sum,
         rl1=(l1_terms * weights).sum() / weight_sum,
-        angle=square_angle_loss(pred_theta[fg_mask], target_pos[:, 4], target_pos[:, 2], target_pos[:, 3], weights),
+        angle=square_angle_loss(pred_theta, targets[..., 4], targets[..., 2], targets[..., 3], weights),
     )
 
 

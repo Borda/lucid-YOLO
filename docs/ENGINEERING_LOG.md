@@ -1700,6 +1700,14 @@ An inverted box draws exactly zero from the aspect term, so CIoU can never un-in
 
 **The lesson is a check, not a resolution.** Before the record says a source does not cover something, grep what the record already cites from that source and look for the hole: two adjacent subsections cited and the one between them never is not an absence in the paper. `.notes/lessons.md` carries it as a rule.
 
+### WP-183 — the box terms scored densely, so the step traces as one graph
+
+<a id="wp-183"></a>
+
+**A boolean gather is a shape the compiler cannot know.** `pred_boxes[fg_mask]` lowers to `aten.nonzero`, whose output length is a property of the data, and `torch.compile` answers that with a graph break; the detection step carried seven of them, at the masked gathers. Recorded 2026-09-18. The replacement evaluates every term over the full `(B, A)` anchor grid — CIoU through a `reshape(-1, 4)` since its contract is two-dimensional, ProbIoU directly since it broadcasts, the L1 differences against the dense stride, the angle term over the whole branch — and selects the positives afterwards. The selection is a `torch.where`, not a multiply by the mask: a background anchor's target is the all-zero box, so the dense CIoU there is scored on a degenerate pair, and `0 * NaN` is still `NaN` where `where` is an exact selection in both the value and the backward pass. What remains is a dense sum in which every off-positive term is an exact zero, and `square_angle_loss` already documents whole-branch input with `q_i = 0` background as its intended second use.
+
+**Loss-identical, measured rather than argued.** On a COCO batch the two forms differ by an absolute `0.0` on every term, the gradients stay finite on an image with no positives, and the pre-change CPU step snapshot holds at its existing tolerance; in eager the step is 2% faster, with the seven `nonzero` calls gone. The masked implementation is kept verbatim as a private oracle in each test module, and the dense form is held against it on random assignments — an image with no positives, an all-background batch, and degenerate predictions (zero-area, inverted, all-zero, both sides collapsed) planted on background anchors — to `1e-6` on values and gradients. The oriented oracle draws `gt_index` from `[0, N)` with `N ≥ 2`, so the gather over the padded instance axis is exercised on every column rather than only its first. WP-184 is what the one-graph step is for.
+
 ### Phase 14 — what each row does, and where its boundary is
 
 <a id="phase-14-rows"></a>
