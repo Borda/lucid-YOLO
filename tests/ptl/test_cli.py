@@ -160,6 +160,19 @@ def test_smoke_tier_resolves_variant_n_multipliers_and_gains() -> None:
     assert cli.datamodule._policy == build_scale_policy("n")
 
 
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [
+        pytest.param((), False, id="default-off"),
+        pytest.param(("--model.compile_step", "true"), True, id="flag-on"),
+    ],
+)
+def test_compile_step_flag_reaches_the_module(flags: tuple[str, ...], expected: bool) -> None:
+    """``--model.compile_step`` parses onto the module's hyperparameters, and defaults to off (WP-184)."""
+    cli = _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", *flags)
+    assert cli.model.hparams.compile_step is expected
+
+
 def test_variant_s_resolves_registry_multipliers() -> None:
     """Det-ablations (``variant: s``) expands to the s-row multipliers and s-policy."""
     cli = _config_cli(_CONFIGS_DIR / "det_small_ablations.yaml")

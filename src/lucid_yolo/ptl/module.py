@@ -218,6 +218,8 @@ from lucid_yolo.ptl.coco_backend import build_mean_average_precision
 from lucid_yolo.ptl.seg_targets import instance_mask_targets, scale_boxes_to_grid, semantic_target
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
 
     from lucid_yolo.assign.tal import AssignResult
@@ -867,6 +869,22 @@ class DetectionLitModule(LightningModule):
             ``oks_gain=0`` bit-exactness test is its validation); the pre-gain term
             is still computed and logged as ``train/oks`` so a dose-response run
             against ``(24, 1)`` has its reading before it moves the gain.
+        compile_step: Whether to :func:`torch.compile` the detection objective —
+            forward, both decodes, assignment and the dual loss as **one** Inductor
+            region (WP-184, D24). Defaults to ``False``. Honoured on a CUDA
+            accelerator under ``task="detect"`` only; any other accelerator or task
+            warns once at :meth:`setup` and stays eager (MPS Inductor crashes in
+            ``convolution_backward``, and the three other tasks' extra terms still
+            read tensors on the host). Measured on an RTX PRO 6000 at variant ``n``,
+            COCO, batch 16, deterministic: the training step goes from 74.7 ms to
+            60.9 ms (x1.23) against eager, for 110-140 s of compilation per process
+            plus a handful of recompiles per run (the ``no_grad`` evaluation graph, and
+            one each for a batch with no ground truths, one per image, or one
+            image — Dynamo specialises sizes 0 and 1 whatever is marked). It
+            compiles the bound method rather than the module, so parameter names,
+            the state dict, EMA, checkpoints and export are untouched. Whether the
+            compiled objective trains to the same mAP as eager is A78, still open —
+            which is why the default is off.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
@@ -915,12 +933,24 @@ class DetectionLitModule(LightningModule):
         keypoint_gain: float = 1.0,
         keypoint_loss: str = "rle",
         oks_gain: float = 0.0,
+        compile_step: bool = False,
     ) -> None:
         super().__init__()
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
         self.save_hyperparameters()
         self._task = task
         self._num_keypoints = num_keypoints
+        self._compile_step: bool = compile_step
+        #: The detection objective `_shared_step` calls: the bare bound method until
+        #: `setup` swaps in its `torch.compile` wrapper (WP-184), and the bare method
+        #: for good on every backend and task the wrapper is refused for. Function-level
+        #: rather than `torch.compile(self)`: a compiled module registers as
+        #: `_orig_mod.<name>`, which would rename every state-dict key.
+        self._objective: Callable[..., tuple[DualHeadOutput, DualLossOutput]] = self._detect_objective
+        #: Whether `setup` has already decided on `compile_step` — `fit` then `validate`
+        #: calls it twice, and the decision (compile, or warn and stay eager) is made once.
+        self._compile_step_resolved: bool = False
+        self._objective_compiled: bool = False
         self._mask_gain: float = mask_gain
         self._semantic_gain: float = semantic_gain
         self._angle_gain: float = angle_gain
@@ -1089,7 +1119,12 @@ class DetectionLitModule(LightningModule):
         return self._task
 
     def setup(self, stage: str) -> None:
-        """Pick the CUDA memory layout, then refuse multi-process runs the protocols cannot gather.
+        """Pick the CUDA memory layout and objective, then refuse multi-process runs the protocols cannot gather.
+
+        With ``compile_step`` on, :meth:`_compile_objective` decides once whether the
+        detection objective is compiled (CUDA accelerator, ``"detect"`` task) or stays
+        eager with a warning naming why; a second ``setup`` — ``fit`` then ``validate``
+        — changes nothing.
 
         On a CUDA accelerator the parameters are converted to ``channels_last`` (NHWC),
         the layout cuDNN's convolution kernels prefer: eager training of the ``n`` model
@@ -1132,8 +1167,11 @@ class DetectionLitModule(LightningModule):
         """
         # `_trainer` rather than the `trainer` property: the property raises when nothing
         # is attached, and a bare module (every direct-call test) must stay set-up-able.
-        if self._trainer is not None and isinstance(self._trainer.accelerator, CUDAAccelerator):
+        on_cuda = self._trainer is not None and isinstance(self._trainer.accelerator, CUDAAccelerator)
+        if on_cuda:
             self.to(memory_format=torch.channels_last)
+        if self._compile_step and not self._compile_step_resolved:
+            self._compile_objective(on_cuda)
         if stage == "predict" or self.task not in _RANK_LOCAL_VAL_TASKS:
             return
         # Reached only for the two guarded tasks, and Lightning calls `setup` with the
@@ -1149,6 +1187,107 @@ class DetectionLitModule(LightningModule):
                 "per-rank values. Re-run with devices=1 (and no distributed strategy), or use "
                 "task='detect'/'segment', whose metrics synchronise across ranks."
             )
+
+    def _compile_objective(self, on_cuda: bool) -> None:
+        """Swap the compiled detection objective in, or warn once and stay eager (WP-184, D24).
+
+        The region is :meth:`_detect_objective` — forward, both decodes, assignment
+        and the dual loss — compiled as one Inductor graph through the **bound
+        method**, so the module's parameters keep their names (``torch.compile`` on
+        the module itself would prefix every state-dict key with ``_orig_mod.``).
+        ``capture_scalar_outputs`` is set process-wide, only here: the CUDA bench that
+        earned the flag needed it, while on CPU the region traces without it once
+        :func:`~lucid_yolo.assign.tal._check_labels` is skipped under tracing.
+
+        Refused, with a :class:`UserWarning` naming why, off CUDA (the MPS Inductor
+        backend crashes in ``convolution_backward``; CPU is not the point) and for
+        every task but ``"detect"`` — the other three tasks' extra terms still read
+        tensors on the host inside :meth:`_task_extra_loss`, which the region does not
+        contain and would not trace.
+
+        Args:
+            on_cuda: Whether the attached trainer's accelerator is CUDA.
+        """
+        self._compile_step_resolved = True
+        if self._task != "detect":
+            warnings.warn(
+                f"compile_step=True is ignored for task={self._task!r}: only the 'detect' objective is "
+                "compiled (WP-184); the segment, obb and keypoint terms stay eager",
+                UserWarning,
+                stacklevel=3,
+            )
+            return
+        if not on_cuda:
+            warnings.warn(
+                "compile_step=True is ignored off CUDA: the Inductor backend is only exercised there "
+                "(MPS crashes in convolution_backward, WP-184); the step stays eager",
+                UserWarning,
+                stacklevel=3,
+            )
+            return
+        torch._dynamo.config.capture_scalar_outputs = True
+        self._objective = torch.compile(self._detect_objective, backend="inductor")
+        self._objective_compiled = True
+
+    def _detect_objective(
+        self,
+        images: Tensor,
+        anchor_points: Tensor,
+        strides: Tensor,
+        gt_boxes: Tensor,
+        gt_labels: Tensor,
+        gt_mask: Tensor,
+    ) -> tuple[DualHeadOutput, DualLossOutput]:
+        """Forward, decode both branches and score the dual detection loss — the compiled region.
+
+        Everything the ``"detect"`` task computes between the padded targets and the
+        scalar total, and nothing that reads a tensor on the host: the anchor grid, the
+        padding and the logging stay in :meth:`_shared_step`, on either side of this
+        call, so the whole of it traces as one graph (``tests/ptl/test_compile.py``).
+
+        Args:
+            images: ``(B, 3, H, W)`` input batch.
+            anchor_points: ``(A, 2)`` anchor centres in input pixels.
+            strides: ``(A,)`` per-anchor level stride.
+            gt_boxes: ``(B, N, 4)`` padded ground-truth boxes in input pixels.
+            gt_labels: ``(B, N)`` padded class ids.
+            gt_mask: ``(B, N)`` bool; ``True`` marks a real ground truth.
+
+        Returns:
+            The dense head output and the dual loss output.
+        """
+        head_out = self(images)
+        o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)
+        o2o_boxes = decode_ltrb(head_out.o2o_box, anchor_points, strides)
+        out = self.loss(
+            head_out.o2m_cls,
+            o2m_boxes,
+            head_out.o2o_cls,
+            o2o_boxes,
+            anchor_points,
+            gt_boxes,
+            gt_labels,
+            gt_mask,
+            strides=strides,
+        )
+        return head_out, out
+
+    def _mark_dynamic(self, images: Tensor, gt_boxes: Tensor, gt_labels: Tensor, gt_mask: Tensor) -> None:
+        """Mark the batch and ground-truth counts dynamic before a compiled objective sees them.
+
+        :func:`pad_targets` pads to the batch's largest instance count and the last
+        batch of an epoch is smaller, so without the marks Dynamo would specialise a
+        graph per distinct ``(B, N)`` until ``cache_size_limit`` and then silently fall
+        back to eager. ``B`` is marked on the ground truths as well as the images: the
+        assigner broadcasts the two against each other, and a static ``B`` on either
+        side would pin the symbolic one to it. A no-op while the objective is eager.
+        """
+        if not self._objective_compiled:
+            return
+        torch._dynamo.mark_dynamic(images, 0)
+        for tensor in (gt_boxes, gt_labels, gt_mask):
+            torch._dynamo.mark_dynamic(tensor, 0)
+            torch._dynamo.mark_dynamic(tensor, 1)
 
     @property
     def alpha(self) -> float:
@@ -1792,11 +1931,7 @@ class DetectionLitModule(LightningModule):
             the prototypes, which the head output alone does not carry.
         """
         images, targets, masks = _split_batch(batch)
-        seg_out = self.forward_segmentation(images) if self._task == "segment" else None
-        head_out = self(images) if seg_out is None else seg_out.detect
         anchor_points, strides = self._anchor_grid(images.shape[-2], images.shape[-1], images.device)
-        o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)
-        o2o_boxes = decode_ltrb(head_out.o2o_box, anchor_points, strides)
         gt_boxes, gt_labels, gt_mask = pad_targets(targets)
         gt_boxes = gt_boxes.to(images.device)
         gt_labels = gt_labels.to(images.device)
@@ -1807,18 +1942,29 @@ class DetectionLitModule(LightningModule):
             gt_keypoints, gt_keypoint_vis = pad_keypoints(targets)
             gt_keypoints = gt_keypoints.to(images.device)
             gt_keypoint_vis = gt_keypoint_vis.to(images.device)
-        out = self.loss(
-            head_out.o2m_cls,
-            o2m_boxes,
-            head_out.o2o_cls,
-            o2o_boxes,
-            anchor_points,
-            gt_boxes,
-            gt_labels,
-            gt_mask,
-            strides=strides,
-            gt_rboxes=gt_rboxes,
-        )
+        seg_out = self.forward_segmentation(images) if self._task == "segment" else None
+        if self._task == "detect":
+            # The one task whose whole objective is the region `_objective` may have
+            # compiled (WP-184); the other three keep the inline call below because
+            # their extra terms read on the host and the oriented one feeds `gt_rboxes`.
+            self._mark_dynamic(images, gt_boxes, gt_labels, gt_mask)
+            head_out, out = self._objective(images, anchor_points, strides, gt_boxes, gt_labels, gt_mask)
+        else:
+            head_out = self(images) if seg_out is None else seg_out.detect
+            o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)
+            o2o_boxes = decode_ltrb(head_out.o2o_box, anchor_points, strides)
+            out = self.loss(
+                head_out.o2m_cls,
+                o2m_boxes,
+                head_out.o2o_cls,
+                o2o_boxes,
+                anchor_points,
+                gt_boxes,
+                gt_labels,
+                gt_mask,
+                strides=strides,
+                gt_rboxes=gt_rboxes,
+            )
         context = _StepContext(
             head_out=head_out,
             seg_out=seg_out,

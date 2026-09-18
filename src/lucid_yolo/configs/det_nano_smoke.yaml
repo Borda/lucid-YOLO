@@ -35,6 +35,7 @@ model:
   l1_gain: 6.0 # blueprint sec. 5.7: L1 gain (the legacy dfl field scales L1)
   alpha_init: 0.8 # blueprint sec. 5.7 (R1 Eq. 2-3): ProgLoss ramp start, weights (0.8, 0.2)
   alpha_final: 0.1 # blueprint sec. 5.7: ProgLoss ramp end, weights (0.1, 0.9)
+  compile_step: false # WP-184 opt-in, CUDA + detect only; x1.23 det step on RTX PRO 6000, 110-140 s compile per process
 
 data:
   data_root: /path/to/coco # PLACEHOLDER -- COCO 2017 root (AGENTS.md sec. 3; never downloaded)

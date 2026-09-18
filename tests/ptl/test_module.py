@@ -21,6 +21,7 @@ Batches are synthetic tensors plus hand-built :class:`~lucid_yolo.data.targets.T
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
@@ -40,6 +41,8 @@ from lucid_yolo.ptl.module import _host_split, _StepContext
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+#: Frozen pre-WP-087 state-dict key sequence of a default detection module.
+_PRECHANGE_KEYS_FILE = Path(__file__).parent / "prechange_detect_state_dict_keys.txt"
 #: Class count of the tiny test head.
 _NUM_CLASSES = 4
 #: Point count for the keypoint modules the distributed guard test builds. Small and
@@ -382,6 +385,37 @@ def test_val_map_metric_leaves_state_dict_unchanged() -> None:
     """The WP-077 val mAP metric adds no state_dict entries, so older checkpoints still load."""
     module = _tiny_module()
     assert not [key for key in module.state_dict() if key.startswith("_val_")]
+
+
+def test_compile_step_leaves_state_dict_keys_unchanged() -> None:
+    """``compile_step=True`` keeps the pre-WP-087 key sequence: the flag names no submodule (WP-184)."""
+    expected = tuple(_PRECHANGE_KEYS_FILE.read_text().split())
+
+    keys = tuple(_tiny_module(compile_step=True).state_dict())
+
+    assert keys == expected
+    assert len(keys) == 714
+
+
+def test_compile_step_on_a_cpu_trainer_warns_once_and_stays_eager(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Off CUDA the flag warns at the first ``setup`` only, keeps the bare method and the same loss."""
+    reference = _tiny_module()
+    torch.manual_seed(0)  # same weights as ``reference``, the flag being the only difference
+    module = _tiny_module(compile_step=True)
+    module._trainer = Trainer(accelerator="cpu", devices=1, logger=False, enable_checkpointing=False)
+    monkeypatch.setattr(reference, "log", MagicMock())
+    monkeypatch.setattr(module, "log", MagicMock())
+    images, targets = _synthetic_batch()
+
+    with pytest.warns(UserWarning, match="ignored off CUDA") as record:
+        module.setup("fit")
+        module.setup("validate")
+    total, _head_out, _seg_out = module._shared_step((images, targets), "train")
+    expected, _head_out, _seg_out = reference._shared_step((images, targets), "train")
+
+    assert len(record) == 1
+    assert module._objective == module._detect_objective
+    assert torch.equal(total, expected)
 
 
 class TestHostSplit:

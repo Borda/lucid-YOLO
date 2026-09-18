@@ -48,7 +48,6 @@ from dataclasses import dataclass
 
 import torch
 from torch import Tensor
-from torch.nn import functional as F
 
 from lucid_yolo.data.rotated_geom import points_in_rboxes
 
@@ -335,7 +334,8 @@ class TaskAlignedAssigner:
                 must be below ``C`` — the score gather indexes padded slots too —
                 and every *real* one must also be non-negative; a padded slot may
                 hold any negative value and is ignored. Checked at entry by
-                :func:`_check_labels` unless Python runs with ``-O``.
+                :func:`_check_labels` unless Python runs with ``-O`` or the call is
+                being traced by :func:`torch.compile` (WP-184).
             gt_mask: ``(B, N)`` bool; ``True`` marks a real ground truth, ``False``
                 a padding slot that is never assigned.
             gt_rboxes: Optional ``(B, N, 5)`` rotated ground truths
@@ -379,11 +379,18 @@ class TaskAlignedAssigner:
         """
         with torch.no_grad():
             batch, num_anchors = pred_scores.shape[0], pred_scores.shape[1]
-            # Guarded by `__debug__` because reading the verdict costs a device sync,
-            # and this is the only one the assignment still pays (see
-            # `_resolve_conflicts`). Under `python -O` the assigner runs sync-free and
-            # a bad label reverts to the silent mis-scoring `_check_labels` describes.
-            if __debug__:
+            # Guarded twice, for two costs of the same read. `__debug__`: reading the
+            # verdict is a device sync, the only one the assignment still pays (see
+            # `_resolve_conflicts`), so `python -O` runs sync-free and a bad label
+            # reverts to the silent mis-scoring `_check_labels` describes. `is_compiling`:
+            # under `torch.compile` (WP-184) that same read is a graph break — Dynamo
+            # cannot trace a Python `if` over a tensor value — so the check is skipped
+            # while a compiled region is traced, and since the trace records what ran,
+            # the compiled step never performs it: neither the upper bound nor the
+            # lower bound is checked there, on any batch, the traced first one included.
+            # Every eager step still checks both; a compiled run relies on the loader
+            # producing in-range labels, which its eager counterpart would have refused.
+            if __debug__ and not torch.compiler.is_compiling():
                 _check_labels(gt_labels, gt_mask, pred_scores.shape[-1])
             if gt_boxes.shape[1] == 0:
                 return self._empty_result(batch, num_anchors, pred_boxes.dtype, pred_boxes.device)
@@ -497,7 +504,12 @@ class TaskAlignedAssigner:
         contested = (selected_per_anchor > 1).unsqueeze(1)  # (B, 1, A)
         masked_align = align_metric.masked_fill(~mask_pos, -1.0)
         best_gt = masked_align.argmax(dim=1)  # (B, A) — a GT that selected the anchor
-        is_best = F.one_hot(best_gt, num_gt).permute(0, 2, 1).bool()  # (B, N, A)
+        # A one-hot over the GT axis, written as a comparison rather than
+        # `F.one_hot(best_gt, num_gt)`: `one_hot` takes its class count as a concrete
+        # Python int, which pins `N` to one value inside a compiled graph (WP-184) and
+        # recompiles the step for every distinct padded instance count. Same values.
+        gt_index = torch.arange(num_gt, device=best_gt.device).view(1, -1, 1)
+        is_best = best_gt.unsqueeze(1) == gt_index  # (B, N, A)
         return torch.where(contested, is_best & mask_pos, mask_pos)
 
     def _finalize_mask(self, mask_pos: Tensor, align_metric: Tensor) -> Tensor:
