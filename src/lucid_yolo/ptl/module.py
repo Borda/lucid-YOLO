@@ -1237,6 +1237,7 @@ class DetectionLitModule(LightningModule):
         gt_boxes: Tensor,
         gt_labels: Tensor,
         gt_mask: Tensor,
+        alpha: Tensor,
     ) -> tuple[DualHeadOutput, DualLossOutput]:
         """Forward, decode both branches and score the dual detection loss — the compiled region.
 
@@ -1244,6 +1245,11 @@ class DetectionLitModule(LightningModule):
         scalar total, and nothing that reads a tensor on the host: the anchor grid, the
         padding and the logging stay in :meth:`_shared_step`, on either side of this
         call, so the whole of it traces as one graph (``tests/ptl/test_compile.py``).
+        Nor does it read a Python scalar that training rewrites: the branch weight
+        arrives as a tensor because Dynamo guards on a float attribute's value, and
+        :attr:`alpha` changes every epoch under the WP-035 schedule — read inside the
+        region it recompiled the whole of it per epoch until ``cache_size_limit`` (8)
+        dropped the step to eager, the defect WP-187 found on an A100.
 
         Args:
             images: ``(B, 3, H, W)`` input batch.
@@ -1252,6 +1258,8 @@ class DetectionLitModule(LightningModule):
             gt_boxes: ``(B, N, 4)`` padded ground-truth boxes in input pixels.
             gt_labels: ``(B, N)`` padded class ids.
             gt_mask: ``(B, N)`` bool; ``True`` marks a real ground truth.
+            alpha: 0-d ``float64`` tensor holding :attr:`alpha` for this step, built
+                by :meth:`_alpha_tensor` outside the region.
 
         Returns:
             The dense head output and the dual loss output.
@@ -1269,8 +1277,33 @@ class DetectionLitModule(LightningModule):
             gt_labels,
             gt_mask,
             strides=strides,
+            alpha=alpha,
         )
         return head_out, out
+
+    def _alpha_tensor(self, device: torch.device) -> Tensor:
+        """Lift the current :attr:`alpha` to a 0-d ``float64`` tensor on ``device`` for the compiled region.
+
+        Built once per step on the host, before :meth:`_detect_objective` is entered,
+        so the traced region takes the weight as a tensor input — a dtype and shape
+        guard, never a value guard. ``float64`` so that :class:`DualBranchLoss` can
+        form ``1 - alpha`` in double and cast once, the rounding the Python-float
+        blend does; a ``float32`` scalar would put the eager and compiled totals one
+        ulp apart at ``0.8``.
+
+        Args:
+            device: Where the images, and so the branch totals, live.
+
+        Returns:
+            A ``()``-shaped ``float64`` tensor equal to :attr:`alpha`.
+
+        Examples:
+            >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4)
+            >>> module.alpha = 0.8
+            >>> module._alpha_tensor(torch.device("cpu"))
+            tensor(0.8000, dtype=torch.float64)
+        """
+        return torch.tensor(self.loss.alpha, dtype=torch.float64, device=device)
 
     def _mark_dynamic(self, images: Tensor, gt_boxes: Tensor, gt_labels: Tensor, gt_mask: Tensor) -> None:
         """Mark the batch and ground-truth counts dynamic before a compiled objective sees them.
@@ -1948,7 +1981,8 @@ class DetectionLitModule(LightningModule):
             # compiled (WP-184); the other three keep the inline call below because
             # their extra terms read on the host and the oriented one feeds `gt_rboxes`.
             self._mark_dynamic(images, gt_boxes, gt_labels, gt_mask)
-            head_out, out = self._objective(images, anchor_points, strides, gt_boxes, gt_labels, gt_mask)
+            alpha = self._alpha_tensor(images.device)
+            head_out, out = self._objective(images, anchor_points, strides, gt_boxes, gt_labels, gt_mask, alpha)
         else:
             head_out = self(images) if seg_out is None else seg_out.detect
             o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)

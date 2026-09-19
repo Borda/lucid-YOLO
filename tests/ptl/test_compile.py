@@ -32,6 +32,7 @@ from pytorch_lightning.accelerators import CUDAAccelerator
 from torch import Tensor
 
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.models.heads.detect import decode_ltrb
 from lucid_yolo.ptl import DetectionLitModule, pad_targets
 
 if TYPE_CHECKING:
@@ -85,19 +86,29 @@ def _targets(num_boxes: int) -> Targets:
 
 
 def _region_inputs(module: DetectionLitModule, counts: tuple[int, int]) -> tuple[Tensor, ...]:
-    """Build the six positional inputs of ``_detect_objective`` for a batch with ``counts`` instances.
+    """Build the seven positional inputs of ``_detect_objective`` for a batch with ``counts`` instances.
 
     Examples:
-        >>> images, points, strides, boxes, labels, mask = _region_inputs(_module(), (2, 1))
-        >>> images.shape, boxes.shape
-        (torch.Size([2, 3, 160, 160]), torch.Size([2, 2, 4]))
+        >>> images, points, strides, boxes, labels, mask, alpha = _region_inputs(_module(), (2, 1))
+        >>> images.shape, boxes.shape, alpha.shape
+        (torch.Size([2, 3, 160, 160]), torch.Size([2, 2, 4]), torch.Size([]))
         >>> _region_inputs(_module(), (0, 0))[3].shape
         torch.Size([2, 0, 4])
     """
     images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
     anchor_points, strides = module._anchor_grid(_IMG_SIZE, _IMG_SIZE, images.device)
     gt_boxes, gt_labels, gt_mask = pad_targets([_targets(count) for count in counts])
-    return images, anchor_points, strides, gt_boxes, gt_labels, gt_mask
+    return images, anchor_points, strides, gt_boxes, gt_labels, gt_mask, module._alpha_tensor(images.device)
+
+
+def _compiled_frames() -> int:
+    """Read Dynamo's count of successfully compiled frames — grows by one per (re)compile.
+
+    Examples:
+        >>> isinstance(_compiled_frames(), int)
+        True
+    """
+    return int(torch._dynamo.utils.counters["frames"]["ok"])
 
 
 def _cuda_trainer() -> MagicMock:
@@ -134,11 +145,82 @@ class TestDetectObjectiveTracesAsOneGraph:
         targets = [_targets(2), _targets(1)]
         anchor_points, strides = module._anchor_grid(_IMG_SIZE, _IMG_SIZE, images.device)
         gt_boxes, gt_labels, gt_mask = pad_targets(targets)
+        alpha = module._alpha_tensor(images.device)
 
-        _head_out, out = module._detect_objective(images, anchor_points, strides, gt_boxes, gt_labels, gt_mask)
+        _head_out, out = module._detect_objective(images, anchor_points, strides, gt_boxes, gt_labels, gt_mask, alpha)
         total, _head, _seg = module._shared_step((images, targets), "train")
 
         assert torch.equal(out.total, total)
+
+    @pytest.mark.parametrize("alpha", [0.8, 0.1, 0.25])
+    def test_tensor_alpha_blends_exactly_as_the_eager_float(self, alpha: float) -> None:
+        """The region's tensor-``alpha`` total is bit-equal to the loss called with the float attribute alone.
+
+        ``0.8`` is the schedule's first value and the one a ``float32`` scalar would
+        put one ulp off (``1 - 0.8`` rounds differently in single than in double);
+        the ``float64`` tensor and the in-loss casts keep the goldens' bit-exactness.
+        """
+        module = _module()
+        module.alpha = alpha
+        images, anchor_points, strides, gt_boxes, gt_labels, gt_mask, alpha_t = _region_inputs(module, (2, 1))
+        head_out = module(images)
+        o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)
+        o2o_boxes = decode_ltrb(head_out.o2o_box, anchor_points, strides)
+
+        _head, out = module._detect_objective(images, anchor_points, strides, gt_boxes, gt_labels, gt_mask, alpha_t)
+        expected = module.loss(
+            head_out.o2m_cls,
+            o2m_boxes,
+            head_out.o2o_cls,
+            o2o_boxes,
+            anchor_points,
+            gt_boxes,
+            gt_labels,
+            gt_mask,
+            strides=strides,
+        )
+
+        assert torch.equal(out.total, expected.total)
+        assert out.alpha == alpha
+
+
+class TestAlphaScheduleDoesNotRecompile:
+    """The epoch-written branch weight is a tensor input of the region, never a value guard (WP-187)."""
+
+    def test_three_alpha_values_compile_the_region_once(self) -> None:
+        """Stepping at ``alpha`` 0.8, 0.1 and 0.5 adds no compiled frame after the first, and each total tracks alpha.
+
+        Read as a float attribute inside the region, Dynamo guarded on ``0.8`` and
+        recompiled at ``0.1`` — once here on CPU, where it then unspecialises the
+        float, and every epoch on the A100 run that found it. The count is checked
+        after each later value, not only at the end, so a recompile at either
+        change is caught; the ``0.1`` total is compared bit-for-bit to eager at
+        ``0.1``, so a stale traced ``0.8`` cannot pass either.
+        """
+        module = _module(compile_step=True)
+        module.log = MagicMock()  # type: ignore[method-assign]
+        module._objective = torch.compile(module._detect_objective, backend="eager")
+        module._objective_compiled = True
+        eager = _module()
+        eager.log = MagicMock()  # type: ignore[method-assign]
+        eager.load_state_dict(module.state_dict())
+        images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
+        targets = [_targets(2), _targets(1)]
+
+        module.alpha = 0.8
+        module._shared_step((images, targets), "train")
+        frames = _compiled_frames()
+        module.alpha = eager.alpha = 0.1
+        total_at_0_1, _head, _seg = module._shared_step((images, targets), "train")
+        frames_after_0_1 = _compiled_frames()
+        module.alpha = 0.5
+        module._shared_step((images, targets), "train")
+        frames_after_0_5 = _compiled_frames()
+        expected_at_0_1, _head, _seg = eager._shared_step((images, targets), "train")
+
+        assert frames_after_0_1 == frames
+        assert frames_after_0_5 == frames
+        assert torch.equal(total_at_0_1, expected_at_0_1)
 
 
 class TestSetupDecidesOnce:
@@ -199,7 +281,7 @@ class TestSetupDecidesOnce:
     def test_dynamic_marks_apply_only_to_a_compiled_objective(self) -> None:
         """The marks are a no-op while eager, and mark ``B`` and ``N`` once the wrapper is installed."""
         module = _module(compile_step=True)
-        images, _points, _strides, gt_boxes, gt_labels, gt_mask = _region_inputs(module, (0, 0))
+        images, _points, _strides, gt_boxes, gt_labels, gt_mask, _alpha = _region_inputs(module, (0, 0))
 
         module._mark_dynamic(images, gt_boxes, gt_labels, gt_mask)
         assert not hasattr(images, "_dynamo_dynamic_indices")
@@ -245,7 +327,10 @@ class TestCompiledStepOverChangingShapes:
 
         total, _head, _seg = module._shared_step((images, targets), "train")
         _head, expected = module._detect_objective(
-            images, *module._anchor_grid(_IMG_SIZE, _IMG_SIZE, images.device), *pad_targets(targets)
+            images,
+            *module._anchor_grid(_IMG_SIZE, _IMG_SIZE, images.device),
+            *pad_targets(targets),
+            module._alpha_tensor(images.device),
         )
 
         assert torch.equal(total, expected.total)

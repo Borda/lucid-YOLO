@@ -23,7 +23,11 @@ same gains) against its own assignment, then combines the two totals::
 epoch-scheduled ramp ``(0.8, 0.2) -> (0.1, 0.9)`` (R1 Eq. 2-3) is out of scope
 for this work package: it lands as the WP-035 progressive-loss hook, which sets
 this attribute per epoch. Exposing ``alpha`` as a bare attribute is exactly the
-seam that hook writes to.
+seam that hook writes to. A compiled training step (WP-184) cannot read that
+float inside its traced region without Dynamo guarding on the value and
+recompiling at every epoch of the schedule, so :meth:`DualBranchLoss.__call__`
+also takes the weight as a keyword ``alpha`` tensor built outside the region
+(WP-187); the attribute stays the schedule's record and the logged value.
 
 Oriented ground truths (WP-088) ride through on the optional ``gt_rboxes`` argument
 of :meth:`DualBranchLoss.__call__`, which is forwarded unchanged to both assigners.
@@ -79,7 +83,11 @@ class DualLossOutput:
             backpropagate.
         o2m: One-to-many branch loss output (dense ``topk = 10`` assignment).
         o2o: One-to-one branch loss output (unique ``topk = 7 -> 1`` assignment).
-        alpha: Branch weight applied to the o2m total (o2o gets ``1 - alpha``).
+        alpha: Branch weight applied to the o2m total (o2o gets ``1 - alpha``) —
+            always the :attr:`DualBranchLoss.alpha` attribute, a host float for
+            logging. When the call blended with a tensor ``alpha`` instead (the
+            compiled step's form) the two carry the same schedule value; the
+            tensor is never read back to the host here.
         o2m_assign: The dense assignment the o2m branch was scored against.
         o2o_assign: The unique assignment the o2o branch was scored against.
     """
@@ -164,6 +172,8 @@ class DualBranchLoss:
         gt_mask: Tensor,
         strides: Tensor | None = None,
         gt_rboxes: Tensor | None = None,
+        *,
+        alpha: Tensor | None = None,
     ) -> DualLossOutput:
         """Score both branches against their own assignments and combine them.
 
@@ -190,6 +200,16 @@ class DualBranchLoss:
                 envelopes. Omitted (the default) leaves the assignment, and
                 therefore every tensor operation on this path, exactly as it was —
                 which is what keeps the detection objective bit-identical.
+            alpha: Optional 0-d ``float64`` tensor carrying the branch weight for
+                this call in place of :attr:`alpha`. The compiled detection step
+                (WP-184) passes it because a Python float read inside the traced
+                region is a Dynamo guard on its value, and the WP-035 schedule
+                changes it every epoch — one recompile per epoch until
+                ``cache_size_limit`` dropped the region to eager (WP-187). The
+                blend casts it to each branch total's dtype after forming
+                ``1 - alpha`` in double, which is exactly the arithmetic the
+                Python-float form does, so the total is bit-identical either
+                way. Omitted (the default) blends with the attribute.
 
         Returns:
             A :class:`DualLossOutput` with the combined ``total``, each branch's
@@ -219,7 +239,14 @@ class DualBranchLoss:
         )
         o2m_out = self._o2m_loss(o2m_logits, o2m_boxes, o2m_assign, strides)
         o2o_out = self._o2o_loss(o2o_logits, o2o_boxes, o2o_assign, strides)
-        total = self.alpha * o2m_out.total + (1.0 - self.alpha) * o2o_out.total
+        if alpha is None:
+            total = self.alpha * o2m_out.total + (1.0 - self.alpha) * o2o_out.total
+        else:
+            # `1 - alpha` in float64 then one cast per branch: the same rounding as
+            # the Python-float form above, so eager and compiled totals stay equal.
+            total = (
+                alpha.to(o2m_out.total.dtype) * o2m_out.total + (1.0 - alpha).to(o2o_out.total.dtype) * o2o_out.total
+            )
         return DualLossOutput(
             total=total,
             o2m=o2m_out,

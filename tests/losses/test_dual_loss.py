@@ -113,6 +113,33 @@ def test_alpha_weights_the_two_branch_totals() -> None:
     assert not math.isclose(default.total.item(), changed.total.item())
 
 
+@pytest.mark.parametrize("alpha", [0.8, 0.1, 0.25])
+def test_tensor_alpha_blends_bit_equal_to_the_attribute_and_records_the_attribute(alpha: float) -> None:
+    """A keyword ``alpha`` tensor drives the blend, bit-equal to the float attribute; ``out.alpha`` stays the float.
+
+    The compiled step (WP-187) passes the weight as a ``float64`` 0-d tensor so the
+    region does not guard on its value; the recorded ``alpha`` is the attribute the
+    schedule wrote, which under that step is the same number. ``0.8`` is the case a
+    ``float32`` tensor would put one ulp off.
+    """
+    gt = torch.tensor([[[0.0, 0.0, 32.0, 32.0]]])
+    logits = torch.zeros(1, 16, 1)
+    boxes = gt.expand(1, 16, 4).contiguous()
+    labels = torch.tensor([[0]])
+    mask = torch.tensor([[True]])
+    points = _grid_points()
+    loss = DualBranchLoss(alpha=alpha)
+    tensor_alpha = torch.tensor(alpha, dtype=torch.float64)
+
+    from_attribute = loss(logits, boxes, logits, boxes, points, gt, labels, mask)
+    loss.alpha = 0.5  # a stale attribute must not leak into a tensor-driven blend
+    from_tensor = loss(logits, boxes, logits, boxes, points, gt, labels, mask, alpha=tensor_alpha)
+
+    assert torch.equal(from_tensor.total, from_attribute.total)
+    assert from_tensor.alpha == 0.5
+    assert from_attribute.alpha == alpha
+
+
 def test_zero_gt_batch_is_finite() -> None:
     """A batch with no ground truths produces a finite combined loss."""
     logits = torch.zeros(1, 16, 3)
