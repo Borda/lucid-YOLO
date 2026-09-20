@@ -1710,6 +1710,8 @@ An inverted box draws exactly zero from the aspect term, so CIoU can never un-in
 
 **What the accelerator gate said afterwards (2026-09-19).** On an A100-40GB, two of the five `goldens/gpu/` rows moved out of band under this change alone: keypoints `0.5696 → 0.4919` and oriented `0.9783 → 0.9088`, per-commit on the same machine, with WP-182's layout change accounting for `−0.021 / −0.040` of the path and detection, segmentation and `shapes_regression_det` holding. The arithmetic is the same; the summation order is not, and the overfit gate is a 100-epoch trajectory that amplifies a `1e-7` per-step difference into a different endpoint — the same sensitivity the WP-177 escalation measured across seeds on unchanged code. The principal resealed both rows at the measured values (ESCALATION 2026-09-19, WP-186); the oriented band is now `clamped_tolerance`-narrow at `± 0.0088`.
 
+**And what three seeds said (2026-09-20).** The control the escalation asked for, run per commit on the same A100: the oriented move that looked monotone at HEAD splits into WP-182's `−0.020` (3 of 3 seeds down) and this change's `−0.014` (2 of 3), and keypoints span `0.49`–`0.73` across nine runs of the same objective. A layout change with no arithmetic in it producing the same signature as the loss rewrite is the evidence that the signature is the gate's, not the change's. Full table in ESCALATION 2026-09-19's follow-up.
+
 ### Phase 14 — what each row does, and where its boundary is
 
 <a id="phase-14-rows"></a>
