@@ -1,0 +1,1604 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, oriented-detection, and keypoint-detection methods described in the YOLO26 paper (arXiv:2606.03748)">
+      
+      
+        <meta name="author" content="Jirka Borovec">
+      
+      
+        <link rel="canonical" href="https://borda.github.io/lucid-YOLO/ESCALATION/">
+      
+      
+        <link rel="prev" href="../ENGINEERING_LOG/">
+      
+      
+        <link rel="next" href="../CONTRIBUTING/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Escalation log - lucid-yolo</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#escalation-log" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="lucid-yolo" class="md-header__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lucid-yolo
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Escalation log
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="lucid-yolo" class="md-nav__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lucid-yolo
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running the models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Running the models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TRAINING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching a training run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DATASETS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Results
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../REPRODUCTION_REPORT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproduction report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clean-room record
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Clean-room record
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PROVENANCE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ASSUMPTIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assumption register
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DECISIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decision record
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Execution
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ROADMAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Work-package roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../RESEARCH_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ENGINEERING_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Escalation log
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Escalation log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#entry-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧾 Entry template
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#entries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📌 Entries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-09-03-wp-154b-the-composition-centre-moves-a-frozen-golden" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-09-03 — WP-154b the composition centre moves a frozen golden
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-09-03-wp-155-the-letterbox-resample-moves-the-same-frozen-golden-again" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-09-03 — WP-155 the letterbox resample moves the same frozen golden again
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-09-04-wp-159-the-release-cannot-satisfy-adr-005s-first-condition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-09-04 — WP-159 the release cannot satisfy ADR-005's first condition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-09-15-wp-177-the-keypoint-oks-golden-moves-outside-its-stored-band" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-09-15 — WP-177 the keypoint OKS golden moves outside its stored band
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-09-19-wp-183-the-keypoint-and-oriented-accelerator-goldens-move-outside-their-bands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-09-19 — WP-183 the keypoint and oriented accelerator goldens move outside their bands
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributor guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebooks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/development_gates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development gates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_detect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detection on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_segment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instance segmentation on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Oriented detection on DOTA tiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keypoints on COCO person_keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#entry-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧾 Entry template
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#entries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📌 Entries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-09-03-wp-154b-the-composition-centre-moves-a-frozen-golden" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-09-03 — WP-154b the composition centre moves a frozen golden
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-09-03-wp-155-the-letterbox-resample-moves-the-same-frozen-golden-again" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-09-03 — WP-155 the letterbox resample moves the same frozen golden again
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-09-04-wp-159-the-release-cannot-satisfy-adr-005s-first-condition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-09-04 — WP-159 the release cannot satisfy ADR-005's first condition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-09-15-wp-177-the-keypoint-oks-golden-moves-outside-its-stored-band" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-09-15 — WP-177 the keypoint OKS golden moves outside its stored band
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-09-19-wp-183-the-keypoint-and-oriented-accelerator-goldens-move-outside-their-bands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-09-19 — WP-183 the keypoint and oriented accelerator goldens move outside their bands
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/Borda/lucid-YOLO/edit/main/docs/ESCALATION.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="escalation-log">🚨 Escalation Log<a class="headerlink" href="#escalation-log" title="Permanent link">&para;</a></h1>
+<p>Blocked-WP entries per the anti-guessing rule (AGENTS.md sec. 4). An agent stops and writes an entry here — then waits for a principal decision — when any of these occur:</p>
+<ol>
+<li>A gate fails after <strong>two</strong> documented assumption iterations (each iteration = a recorded ASSUMPTIONS.md revision plus a re-run).</li>
+<li>Answering a question would require a denylisted source. Never resolve an ambiguity by looking at the reference implementation.</li>
+<li>A WP's roadmap spec conflicts with the technical specification, or the specification conflicts with the papers.</li>
+<li>A change would require altering a frozen golden.</li>
+<li>A run would exceed 4 GPU-hours and is not already marked [PRINCIPAL].</li>
+</ol>
+<p>Escalation is success, not failure: this log plus the assumption register is the research output a from-code port could never produce.</p>
+<h2 id="entry-template">🧾 Entry template<a class="headerlink" href="#entry-template" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gu">## &lt;date&gt; — WP-&lt;NNN&gt; &lt;slug&gt;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">-</span><span class="w"> </span><span class="gs">**Symptom**</span>:
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">-</span><span class="w"> </span><span class="gs">**Hypotheses tried**</span> (with ASSUMPTIONS.md revision ids):
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">-</span><span class="w"> </span><span class="gs">**Sources consulted**</span> (allowlisted only):
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="k">-</span><span class="w"> </span><span class="gs">**Decision requested**</span>:
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="k">-</span><span class="w"> </span><span class="gs">**Resolution**</span> (filled by the principal):
+</code></pre></div>
+<h2 id="entries">📌 Entries<a class="headerlink" href="#entries" title="Permanent link">&para;</a></h2>
+<h2 id="2026-09-03-wp-154b-the-composition-centre-moves-a-frozen-golden">2026-09-03 — WP-154b the composition centre moves a frozen golden<a class="headerlink" href="#2026-09-03-wp-154b-the-composition-centre-moves-a-frozen-golden" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Symptom</strong>: WP-154b changes <code>AffineParams.matrix</code>'s composition centre from <code>(W/2, H/2)</code> to <code>((W-1)/2, (H-1)/2)</code>, the convention <code>fuse-augmentations</code> composes about. <code>goldens/frozen/0.6/aug_invariants.json</code> — a pure-code frozen golden written by the v0.6.0 release commit <code>22739e1</code> — pins five metrics the change moves past their tolerance: <code>affine_image_mean</code> 0.5565 → 0.5542 (tol 0.002), <code>affine_bbox_coord_sum</code> 121.3428 → 121.9856 (tol 0.05), <code>affine_polygon_area</code> 276.7792 → 277.6373 (tol 0.5), <code>fused_image_mean</code> 0.5529 → 0.5506 (tol 0.002), <code>fused_bbox_coord_sum</code> 91.0071 → 91.4892 (tol 0.05). Every hook, every one of 2543 unit tests and the other 35 goldens are green; the three residual pytest failures (<code>scripts/_tests/test_check_goldens.py::test_real_goldens_pass</code>, <code>::test_main_exit_code_zero_on_real_goldens</code>, the <code>check_all</code> doctest) all assert "every real golden passes" and resolve with this one file. This is trigger 4: the row cannot be both gate-green and frozen-golden-clean.</li>
+<li><strong>Hypotheses tried</strong> (with ASSUMPTIONS.md revision ids): none — this is not an ambiguity to iterate on. The delta is fully traced rather than guessed: re-running <code>aug_invariants</code> with the centre reverted (and nothing else) reproduces all fifteen stored values bit-exactly, so the whole movement is the centre and there is no second cause to look for. <code>mixup_image_mean</code> (-0.0009) and <code>rotated_rbox_area</code> (-0.0001) move within tolerance from the same cause; every mirror-independent metric is unchanged, the mirror axis not being exercised by this producer.</li>
+<li><strong>Sources consulted</strong> (allowlisted only): <code>docs/ENGINEERING_LOG.md</code> WP-154b and WP-155b scope entries, <code>docs/ROADMAP.md</code> Phase 14 preamble, AGENTS.md sec. 4 and sec. 7, the WP-132 and WP-154 removals of generator-derived frozen goldens.</li>
+<li><strong>Decision requested</strong>: which of three, noting that the ruling covers the phase and not only this row — WP-155b plans to measure the letterbox resampling delta "against the 0.6 frozen goldens" and re-freeze what moves, and the metrics it will move (<code>letterbox_image_mean</code>, <code>letterbox_pad_fraction</code>, the fused pair) live in this same file.<ol>
+<li><strong>Remove <code>goldens/frozen/0.6/aug_invariants.json</code></strong>, on the WP-132/WP-154 precedent. Different in kind from that precedent: those two were generator-derived and could never again be satisfied by any code change, whereas this one is pure-code and would be satisfiable by any release that did not deliberately give up the convention. Recoverable in history; costs a real regression guard for one release.</li>
+<li><strong>Update its five values in place</strong>, which sec. 7 forbids outright and which makes "current code still satisfies every value a past release pinned" mean something weaker than it does today.</li>
+<li><strong>Re-scope</strong>: hold WP-154b until 0.7 is released and freeze the new convention there, leaving 0.6 untouched — which blocks every remaining Phase 14 row, all of which depend on 154b.</li>
+</ol>
+</li>
+<li><strong>Resolution</strong> (filled by the principal): Overriding AGENTS.md §7's standing prohibition on modifying a frozen golden, for this one file, on record — the values are updated in place rather than the file removed. <code>goldens/frozen/0.6/aug_invariants.json</code>'s seven traced metrics (the five past tolerance plus <code>mixup_image_mean</code> and <code>rotated_rbox_area</code>, both moved within tolerance from the same cause) now match the live <code>goldens/aug_invariants.json</code> exactly. Presented with the removal alternative (same mechanism as WP-132/WP-154, no rule override needed) and chose the override instead.</li>
+</ul>
+<h2 id="2026-09-03-wp-155-the-letterbox-resample-moves-the-same-frozen-golden-again">2026-09-03 — WP-155 the letterbox resample moves the same frozen golden again<a class="headerlink" href="#2026-09-03-wp-155-the-letterbox-resample-moves-the-same-frozen-golden-again" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Symptom</strong>: WP-155 delegates <code>Letterbox</code>'s resize-and-pad to <code>fuse-augmentations</code>, replacing an antialiased bilinear <code>F.interpolate</code> plus <code>F.pad</code> with one <code>grid_sample</code> from the source canvas to the letterboxed one. Geometry is bit-unchanged — <code>letterbox_pad_fraction</code> holds at <code>0.4</code>, every coordinate round-trip case passes, <code>goldens/data_checksums.json</code> does not move — and exactly one image-derived value moves: <code>letterbox_image_mean</code> 0.5024 → 0.4994 against a 0.002 tolerance, in the live <code>goldens/aug_invariants.json</code> and in <code>goldens/frozen/0.6/aug_invariants.json</code>. 34 of 36 goldens pass; the two failures are that one metric in those two files. This is trigger 4 again, on the same frozen file WP-154b overrode eight commits ago, whose resolution was recorded as one dated exception and explicitly not a precedent.</li>
+<li><strong>Hypotheses tried</strong> (with ASSUMPTIONS.md revision ids): the delta is measured rather than assumed, and one alternative was tested rather than argued. Upstream's opt-in <code>antialias=True</code> was enabled and the producer re-run: the metric stays at 0.4994, the Gaussian mipmap prefilter not engaging at this producer's downscale, so recovering the old pixels is not available short of keeping the local implementation. A32 is revised in this change (non-antialiased resampling widens from the train path's deviation to the whole pipeline's filter) rather than contradicted.</li>
+<li><strong>Sources consulted</strong> (allowlisted only): the installed <code>fuse_augmentations</code> 0.12.0.dev0 source (<code>affine/matrix.py</code>, <code>affine/segment.py</code>, <code>targets.py</code>, <code>factories.py</code>, <code>pipeline.py</code>), <code>docs/ENGINEERING_LOG.md</code> WP-155 and WP-155b scope entries, <code>docs/ASSUMPTIONS.md</code> A32, AGENTS.md sec. 4 and sec. 7 [<strong>"sec. 6.5" struck 2026-09-06</strong>: AGENTS.md has never had a section 6.5 — it runs 1 to 8, sec. 6 is Naming hygiene and has no subsections, and <code>git log -S "6.5" -- AGENTS.md</code> returns nothing, so no revision of the file ever carried one. The entry is left otherwise as written; what cannot be left is a source list naming a document that does not exist], and the 2026-09-03 WP-154b entry above.</li>
+<li><strong>Decision requested</strong>: four, noting that WP-155 and WP-155b cannot both keep their commit boundary and a green gate — the swap moves the value, so WP-155 alone fails <code>make gate</code> and WP-155b alone has nothing left to measure.<ol>
+<li><strong>Keep the row split</strong>, accepting that WP-155's own commit fails the golden check and <code>main</code> is red between the two commits, which sec. 5 forbids.</li>
+<li><strong>One commit, override the frozen value again</strong>: land the swap, the live re-freeze and <code>frozen/0.6/aug_invariants.json</code>'s <code>letterbox_image_mean</code> together. Gate green, but a second sec. 7 override on the same file, and it merges a delegation swap with a frozen move — the exact pairing [<strong>citation corrected 2026-09-06</strong>, the original read "sec. 6.5", which does not exist in AGENTS.md; the standing rule carrying this content is <strong>ADR-005's migration protocol, step 3</strong> (<code>docs/DECISIONS.md</code>): an expectation that turns red at a swap is diagnosed, and either the integration is fixed or a separate work package argues the old value was wrong — "never both in one commit, because that combination is indistinguishable from adjusting the test until the new code passes", which <code>docs/CONTRIBUTING.md</code> states again for contributors under <em>A golden moved</em>. Identified by matching the rule to the words, not from the author's stated intent, which is not on record] exists to prevent.</li>
+<li><strong>Remove <code>goldens/frozen/0.6/aug_invariants.json</code></strong> on the WP-132/WP-154 precedent, no rule override — at the cost of all fifteen of that file's metrics, fourteen of which are still satisfiable.</li>
+<li><strong>Narrow WP-155</strong> to the keep mask and the letterbox geometry, keeping <code>_resize_pad</code> local and antialiased so nothing moves — leaving two resample implementations in the tree and deferring the delegation to 0.7's freeze.</li>
+</ol>
+</li>
+<li><strong>Resolution</strong> (filled by the principal): Option 2. Overriding sec. 7 a second time, on record: <code>letterbox_image_mean</code> becomes 0.4994 in both the live and the frozen copy, and WP-155 and WP-155b land as one commit. Presented with option 3 (removal, no override needed) and option 4 (no pixel moves at all) and chose the override. Two dated exceptions now stand on this file; neither is a standing waiver, and the next frozen-golden case is a fresh decision rather than one this precedent settles.</li>
+</ul>
+<h2 id="2026-09-04-wp-159-the-release-cannot-satisfy-adr-005s-first-condition">2026-09-04 — WP-159 the release cannot satisfy ADR-005's first condition<a class="headerlink" href="#2026-09-04-wp-159-the-release-cannot-satisfy-adr-005s-first-condition" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Symptom</strong>: WP-159's fourth clause promotes <code>fuse-augmentations</code> from a development pin to a runtime dependency "under the four conditions ADR-005 records". Condition 1 requires real SemVer releases to PyPI. Measured against PyPI's own JSON API: the latest <code>fuse-augmentations</code> there is <code>0.10.0.dev0</code>, there is no 0.11 or 0.12 at all, and every one of the eleven releases is a <code>.dev0</code> pre-release. The capability floor Phase 14 stands on is the commit <code>a5a276a</code>, which is unreleased. <code>pyproject.toml</code> already recorded half of this before the row opened — PyPI forbids re-uploading the <code>0.10.0.dev0</code> version string, so a bare version pin cannot reach the needed code.</li>
+<li><strong>What changed the shape of the question</strong>: ADR-005's stated fallback is that "a refusal returns the dependency story to a SHA pin, which keeps the augmentation stack local rather than making it unpublishable". That was written while the stack was still local. It has moved: <code>src/lucid_yolo/data/{affine,augment,letterbox,mosaic,rotated_aug}.py</code> all import <code>fuse_augmentations</code> at module level, so <code>lucid_yolo.data</code> — and <code>predict</code>, through <code>letterbox</code> — cannot import without it, while the package sat only in the <code>dev</code> group. Refusing promotion therefore no longer returns anything; it leaves a distribution that fails on import for anyone installing without that group. <code>scripts/release_guard.py</code> checks the tag, the changelog section and the gate, and has no notion of dependency tiers, so nothing automated would have caught it.</li>
+<li><strong>Sources consulted</strong> (allowlisted only): PyPI's JSON API for <code>fuse-augmentations</code>, <code>pyproject.toml</code> <code>[project].dependencies</code> and <code>[dependency-groups].dev</code>, <code>.github/workflows/release.yml</code>, <code>scripts/release_guard.py</code>, <code>docs/DECISIONS.md</code> ADR-005 and D19, and the module-level imports listed above, all read at <code>f285af5</code>.</li>
+<li><strong>Decision requested</strong>: four.<ol>
+<li><strong>Hold WP-159</strong> until <code>fuse</code> cuts 0.12 to PyPI, then land the row whole with a <code>&gt;=0.12,&lt;0.13</code> ceiling — the only path satisfying all four conditions as written, at the cost of an unbounded wait on a separate session and a broken-without-<code>dev</code> install in the meantime.</li>
+<li><strong>Promote to a runtime git pin and accept the distribution is unpublishable</strong>: conditions 2, 3 and 4 met, condition 1 knowingly failed, on the grounds that publication is itself an unmade <code>[PRINCIPAL]</code> decision <code>release.yml</code> deliberately omits.</li>
+<li><strong>Split the row</strong>: land 0.7.0 as the version bump, the changelog close and the <code>0.7</code> freeze, and defer the promotion to a new row gated on the PyPI release, documenting the exposure rather than fixing it.</li>
+<li><strong>Stop</strong>, leaving WP-159 untouched alongside the four contributor-admission rows already blocked on principal preconditions.</li>
+</ol>
+</li>
+<li><strong>Resolution</strong> (filled by the principal): Option 2. The runtime pin lands as a direct reference and the distribution is unpublishable to PyPI until a 0.12 exists there; recorded as D20. This is a decision about <em>this</em> dependency at <em>this</em> moment, not a general waiver of ADR-005 condition 1 — a second package arriving in the same state is a fresh decision.</li>
+</ul>
+<h2 id="2026-09-15-wp-177-the-keypoint-oks-golden-moves-outside-its-stored-band">2026-09-15 — WP-177 the keypoint OKS golden moves outside its stored band<a class="headerlink" href="#2026-09-15-wp-177-the-keypoint-oks-golden-moves-outside-its-stored-band" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Symptom</strong>: WP-177 batches equal-shape MuSGD matrices (PR #3, <code>38b30ac</code>). <code>make gate</code> is 50/50 offline-green; <code>make gate-gpu</code> is 54/55 — <code>goldens/gpu/overfit_micro_kp.json</code>'s <code>train_oks_ap</code> is frozen at <code>0.574728</code> with tolerance <code>0.05</code> (band <code>0.524728</code>–<code>0.624728</code>), and the patched run measures <code>0.691134</code>, <code>0.1164</code> above the band ceiling. A same-L4 ABBA control isolates the cause to this patch alone: unchanged <code>f8de2e2</code> scores <code>0.5315, 0.5315</code>; this patch scores <code>0.6911, 0.6911</code> — deterministic and repeated, not run noise. This is trigger 4: closing WP-177 as specified requires either altering the frozen golden or accepting a value outside it, and <code>docs/ROADMAP.md</code> row 177's own DoD ("<code>make gate</code> and <code>make gate-gpu</code> green") is consequently unmet — its status stays <code>🔄</code>.</li>
+<li><strong>Hypotheses tried</strong> (with ASSUMPTIONS.md revision ids): none opened — the PR's own multi-seed <em>baseline</em> sweep (unpatched code) already shows the stored band is seed-sensitive: seed 0 <code>0.5315</code> (inside band), seed 1 <code>0.595869</code> (inside), seed 2 <code>0.408795</code> (<strong>outside</strong> the same <code>0.574728 ± 0.05</code> band, on code that has not changed). That is evidence the band's reliability is separate from this PR's correctness, not a hypothesis to iterate — no seed-1/seed-2 run of the <em>patched</em> code exists yet, so whether the patch shifts the trajectory or only widens it under the same seed noise is undetermined either way.</li>
+<li><strong>Sources consulted</strong> (allowlisted only): PR #3 body and its measurement section; <code>/oss:review</code> report <code>.reports/review/2026-09-15T18-47-30Z/review-report.md</code> (<code>[blocking] HIGH — keypoint OKS AP golden shift unresolved</code>, corroborated independently by solution-architect, challenger and Codex, with a documented sw-engineer dissent); <code>goldens/gpu/overfit_micro_kp.json</code>; <code>docs/ROADMAP.md</code> row 177; <code>docs/ENGINEERING_LOG.md</code> WP-177 entry.</li>
+<li><strong>Decision requested</strong>: three, per the review's shared unblock path (solution-architect and challenger independently proposed the same GPU experiment) plus the sw-engineer dissent as a fourth framing of the same underlying gap:<ol>
+<li><strong>Run the patched code at seeds 1 and 2 on GPU</strong> before deciding anything else. Lands inside the sampled baseline cloud (<code>0.409</code>–<code>0.596</code>) → the band itself is miscalibrated (single-seed), fix the band under option 3 and merge; lands systematically higher at all three seeds → the batched path shifts the trajectory rather than moving within float-scheduling noise, and needs a mechanism explanation before merge. Requires L4 GPU access this workflow does not have.</li>
+<li><strong>Accept <code>0.691134</code> outside the frozen band now</strong>, per sec. 7's sanctioned override route: <code>python scripts/freeze_goldens.py --reseal</code> after this entry is answered — same mechanism as the two 2026-09-03 <code>aug_invariants.json</code> overrides above. A short-horizon overfit metric moving up is not evidence of quality gain (both PR body and review agree on this), so accepting the movement is a statement about gate calibration, not about the change being good.</li>
+<li><strong>Re-freeze <code>overfit_micro_kp.json</code> on a multi-seed band</strong> (sw-engineer's dissent) — derive the tolerance from observed multi-seed spread rather than a single fixed seed, since the <em>unpatched</em> baseline already escapes the current band at seed 2. Fixes the measuring instrument independent of whether WP-177's patch is accepted, at the cost of leaving WP-177 open until the new band exists.</li>
+</ol>
+</li>
+<li><strong>Resolution</strong> (filled by the principal): <em>pending — awaiting decision; WP-177 stays <code>🔄</code> in <code>docs/ROADMAP.md</code> until answered.</em></li>
+</ul>
+<h2 id="2026-09-19-wp-183-the-keypoint-and-oriented-accelerator-goldens-move-outside-their-bands">2026-09-19 — WP-183 the keypoint and oriented accelerator goldens move outside their bands<a class="headerlink" href="#2026-09-19-wp-183-the-keypoint-and-oriented-accelerator-goldens-move-outside-their-bands" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Symptom</strong>: WP-183 scores the box terms densely over every anchor instead of gathering the positives (loss-identical per step: the masked form is kept as an oracle in the tests and the dense form matches it to <code>1e-6</code> on values and gradients; the CPU step golden holds). <code>make gate</code> is 50/50; <code>make gate-gpu</code> on an A100-40GB (venv torch 2.14.0+cu130) is 53/55 — <code>goldens/gpu/overfit_micro_kp.json</code> <code>train_oks_ap</code> measures <code>0.491935</code> against the band <code>0.574728 ± 0.05</code>, and <code>goldens/gpu/overfit_micro_obb.json</code> <code>train_rotated_map50</code> measures <code>0.908802</code> against <code>0.964928 ± 0.05</code>; detection, segmentation and <code>shapes_regression_det</code> pass on the same dense loss. A same-machine per-commit control attributes the move: pre-WP baseline <code>30aea93</code> scores <code>0.5696 / 0.9783</code> (both in band); WP-182 <code>channels_last</code> alone <code>0.5486 / 0.9388</code> (in band, a <code>−0.021 / −0.040</code> move from a layout change that alters no arithmetic); WP-183 <code>0.4919 / 0.9088</code> (out); WP-184 with the flag off repeats WP-183 to four decimals. Deterministic on the machine, repeated across two rounds. This is trigger 4.</li>
+<li><strong>Hypotheses tried</strong> (with ASSUMPTIONS.md revision ids): none opened. The per-step arithmetic is proven identical; what differs on the accelerator is the order of a sum over <code>B × A</code> terms carrying exact zeros against a sum over the <code>P</code> positives — a <code>~1e-7</code> relative difference per step that a 100-epoch overfit on 100 images amplifies into a different endpoint. WP-182's own <code>−0.040</code> on obb from a pure kernel-selection change, and the WP-177 entry above (unpatched code at seeds 0, 1, 2: <code>0.5315</code>, <code>0.5959</code>, <code>0.4088</code> — the last outside the same band), put both moves inside the spread this metric shows on code that has not changed. A single seed per commit cannot separate that from a bias; det/seg/shapes passing on the same <code>_box_losses</code> is the evidence against one.</li>
+<li><strong>Sources consulted</strong> (allowlisted only): <code>.plans/closed/results_compile-gate_run{2,3}.ipynb</code> (the two rounds' outputs); the WP-177 entry above and its seed sweep; <code>goldens/gpu/overfit_micro_{kp,obb}.json</code>; <code>scripts/overfit_micro.py</code> (<code>clamped_tolerance</code>); <code>docs/ENGINEERING_LOG.md</code> WP-183.</li>
+<li><strong>Decision requested</strong>: (1) a three-seed control, baseline against WP-183, on both tasks, before deciding (about two A100-hours); (2) reseal both goldens on the current tree at the measured values — a statement about gate calibration on this machine, not about WP-183; (3) re-freeze on a multi-seed band (the WP-177 entry's option 3), which would resolve both entries at once. Reverting WP-183 is not offered: it is what lets the training step trace as one graph (WP-184), and it is loss-identical per step.</li>
+<li><strong>Resolution</strong> (filled by the principal, 2026-09-19): Option 2. <code>goldens/gpu/overfit_micro_kp.json</code> is resealed at <code>0.491935 ± 0.05</code> and <code>goldens/gpu/overfit_micro_obb.json</code> at <code>0.908802 ± 0.008802</code> — the oriented tolerance is <code>clamped_tolerance</code>'s <code>min(0.05, score − 0.9)</code>, so that band is now as narrow as the score's headroom above its floor, and the next environmental move on obb will be reported rather than absorbed. Recorded as WP-186. The WP-177 entry stays pending on its own question; this resolution does not answer it.</li>
+<li><strong>Follow-up (2026-09-20, Colab rounds 4–5, same A100)</strong>: the three-seed control the entry asked for was run afterwards, per commit — baseline <code>30aea93</code>, WP-182 <code>16f4101</code>, HEAD <code>37f3ce5</code> (WP-183 plus the compile flag off) — at seeds 0, 1, 2. Keypoints <code>train_oks_ap</code>: baseline <code>0.5696 / 0.6187 / 0.5331</code>, WP-182 <code>0.5486 / 0.7259 / 0.5858</code>, HEAD <code>0.4919 / 0.5668 / 0.5715</code>; oriented <code>train_rotated_map50</code>: baseline <code>0.9783 / 0.9690 / 0.9696</code>, WP-182 <code>0.9388 / 0.9628 / 0.9544</code>, HEAD <code>0.9088 / 0.9379 / 0.9670</code>. The oriented move that looked monotone at HEAD (3 of 3 seeds down, mean <code>−0.034</code>) belongs to WP-182 (<code>−0.020</code>, 3 of 3) and not to WP-183 (<code>−0.014</code>, 2 of 3, seed 2 up) — a memory-layout change that alters no arithmetic produces the same signature as the loss rewrite, which is the control that says the signature is trajectory chaos rather than a bias. Keypoints span <code>0.49</code>–<code>0.73</code> across the nine runs; the two 3-of-3 sign results out of four comparisons, one per WP, are what a null with <code>p = 0.125</code> each expects. Reading: no evidence of a systematic move on either WP; the reseal stands as calibration; the band widths (<code>± 0.05</code> inside a <code>± 0.12</code> process, <code>± 0.0088</code> inside <code>± 0.03</code>) are the WP-177 entry's question and remain with it. Notebooks <code>results/compile_gate.ipynb</code>, <code>results/compile_gate_round5.ipynb</code>.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright 2026 Jirka Borovec — Apache-2.0 (see LICENSE and NOTICE)
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

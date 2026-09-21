@@ -1,0 +1,1956 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, oriented-detection, and keypoint-detection methods described in the YOLO26 paper (arXiv:2606.03748)">
+      
+      
+        <meta name="author" content="Jirka Borovec">
+      
+      
+        <link rel="canonical" href="https://borda.github.io/lucid-YOLO/PROVENANCE/">
+      
+      
+        <link rel="prev" href="../model_cards/keypoints/">
+      
+      
+        <link rel="next" href="../ASSUMPTIONS/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Provenance log - lucid-yolo</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#provenance-log" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="lucid-yolo" class="md-header__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lucid-yolo
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Provenance log
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="lucid-yolo" class="md-nav__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lucid-yolo
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running the models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Running the models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TRAINING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching a training run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DATASETS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Results
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../REPRODUCTION_REPORT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproduction report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clean-room record
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Clean-room record
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance log
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#source-allowlist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✅ Source allowlist
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="✅ Source allowlist">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#papers-under-reproduction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Papers under reproduction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cited-primary-literature" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cited primary literature
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dataset-and-tooling-documentation-ultralytics-unrelated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dataset and tooling documentation (Ultralytics-unrelated)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#project-internal-governing-documents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project-internal governing documents
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#placeholders" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Placeholders
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#naming-evidence-record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🏷️ Naming evidence record
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#audit-record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔍 Audit record
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📝 Usage log
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ASSUMPTIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assumption register
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DECISIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decision record
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Execution
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ROADMAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Work-package roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../RESEARCH_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ENGINEERING_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ESCALATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Escalation log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributor guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebooks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/development_gates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development gates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_detect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detection on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_segment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instance segmentation on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Oriented detection on DOTA tiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keypoints on COCO person_keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#source-allowlist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✅ Source allowlist
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="✅ Source allowlist">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#papers-under-reproduction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Papers under reproduction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cited-primary-literature" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cited primary literature
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dataset-and-tooling-documentation-ultralytics-unrelated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dataset and tooling documentation (Ultralytics-unrelated)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#project-internal-governing-documents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project-internal governing documents
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#placeholders" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Placeholders
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#naming-evidence-record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🏷️ Naming evidence record
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#audit-record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔍 Audit record
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📝 Usage log
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/Borda/lucid-YOLO/edit/main/docs/PROVENANCE.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="provenance-log">📚 Provenance Log<a class="headerlink" href="#provenance-log" title="Permanent link">&para;</a></h1>
+<p>Every design decision in this repository cites its public source. This file is the clean-room evidence record: sources are logged here on first use, and every commit carries a <code>Provenance:</code> trailer referencing the source ids below. No Ultralytics code surface, config, weight, or web property (including docs.ultralytics.com) has been consulted at any point — see the denylist in AGENTS.md.</p>
+<h2 id="source-allowlist">✅ Source allowlist<a class="headerlink" href="#source-allowlist" title="Permanent link">&para;</a></h2>
+<p>Admissible references. Anything not on this list requires a DECISIONS.md entry before first use; denylisted surfaces are never admissible.</p>
+<p>Reference <em>implementations</em> (R25–R28, R36) are admitted under D13/ADR-004 on two standing conditions. <strong>Licence:</strong> MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause or ISC only — copyleft (AGPL, GPL, LGPL), source-available, research-only, non-commercial, commercially licensed and unlicensed code are inadmissible at any cost, and an unestablished licence counts as inadmissible rather than permissive. <strong>Use:</strong> reading for diagnosis only; copying code from any external detection repository remains prohibited (AGENTS.md sec. 7). A per-use provenance check still applies to individual files — the entries below record licence verification, not a blanket clearance of every file in the repository.</p>
+<h3 id="papers-under-reproduction">Papers under reproduction<a class="headerlink" href="#papers-under-reproduction" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Reference</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R1</td>
+<td>Jocher, G. et al., <em>Ultralytics YOLO26: Unified Real-Time End-to-End Vision Models</em>, arXiv:2606.03748 (2026)</td>
+<td>Method source: Eq. 1–15, Figs. S1/S2, Tables 2–11, S1–S11. Sec. 3.4.2 (pose objective: sigma branch, Eq. 10–11, the OKS + RLE composition), Table 9 (its weight split) and Table S10 (pose sizes) were inside this role from the start and unread until 2026-09-17 (D22, A75–A77)</td>
+</tr>
+<tr>
+<td>R2</td>
+<td>Sapkota, R. et al., <em>YOLO26: Key Architectural Enhancements and Performance Benchmarking for Real-Time Object Detection</em>, arXiv:2509.25164 (2026)</td>
+<td>Independent analysis; benchmark corroboration (incl. seg/OBB tables)</td>
+</tr>
+<tr>
+<td>R3</td>
+<td>Hidayatullah, P., Tubagus, R., <em>YOLO26: A Comprehensive Architecture Overview and Key Improvements</em>, arXiv:2602.14582 (2026)</td>
+<td>Third-party architectural specification: variant multipliers, block diagram, SPPF shortcut, Top-K decoding, STAL minimum-anchor behavior</td>
+</tr>
+</tbody>
+</table>
+<h3 id="cited-primary-literature">Cited primary literature<a class="headerlink" href="#cited-primary-literature" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Reference</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R4</td>
+<td>Feng, C. et al., <em>TOOD: Task-Aligned One-Stage Object Detection</em>, arXiv:2108.07755 (ICCV 2021)</td>
+<td>TAL formulation and alpha/beta defaults (A2)</td>
+</tr>
+<tr>
+<td>R5</td>
+<td>Li, X. et al., <em>Generalized Focal Loss</em>, arXiv:2006.04388 (NeurIPS 2020)</td>
+<td>DFL definition (the mechanism being removed)</td>
+</tr>
+<tr>
+<td>R6</td>
+<td>Wang, A. et al., <em>YOLOv10: Real-Time End-to-End Object Detection</em>, arXiv:2405.14458 (NeurIPS 2024)</td>
+<td>Consistent dual assignment</td>
+</tr>
+<tr>
+<td>R7</td>
+<td>Liu, J. et al., <em>Muon is Scalable for LLM Training</em>, arXiv:2502.16982 (2025)</td>
+<td>Muon update, Newton–Schulz orthogonalization</td>
+</tr>
+<tr>
+<td>R8</td>
+<td>Jordan, K., <em>Muon: An optimizer for hidden layers in neural networks</em>, kellerjordan.github.io/posts/muon (2024)</td>
+<td>Reference NS iteration count and step scaling (A5, A6)</td>
+</tr>
+<tr>
+<td>R9</td>
+<td>Bochkovskiy, A. et al., <em>YOLOv4</em>, arXiv:2004.10934 (2020)</td>
+<td>Mosaic augmentation; CIoU adoption in the lineage</td>
+</tr>
+<tr>
+<td>R10</td>
+<td>Zheng, Z. et al., <em>Distance-IoU Loss</em>, arXiv:1911.08287 (AAAI 2020)</td>
+<td>CIoU definition (A1)</td>
+</tr>
+<tr>
+<td>R11</td>
+<td>Hidayatullah, P. et al., <em>YOLOv8 to YOLO11: A Comprehensive Architecture In-depth Comparative Review</em>, arXiv:2501.13400 (2025)</td>
+<td>C3k2/C2PSA/SPPF internals in the YOLO11 lineage (A3)</td>
+</tr>
+<tr>
+<td>R13</td>
+<td>Zhou, Y. et al., <em>MMRotate</em>, arXiv:2204.13317 (ACM MM 2022)</td>
+<td>Long-edge angle convention; rotated-box tooling conventions (A21, A23)</td>
+</tr>
+<tr>
+<td>R14</td>
+<td>Li, J. et al., <em>Human Pose Regression with Residual Log-Likelihood Estimation</em>, arXiv:2107.11291 (ICCV 2021)</td>
+<td>RLE keypoint loss (Eq. 8, sec. 3.2–3.3, Appendix A Eq. 12) and its Table 7 flow-free ablation baseline (A65, A66). The origin of the RLE term R1 sec. 3.4.2 composes into its pose objective (R1 cites it as such); where R1 Eq. 11 and R14 Eq. 8 differ, A76 records which form the code carries</td>
+</tr>
+<tr>
+<td>R16</td>
+<td>Bolya, D. et al., <em>YOLACT: Real-time Instance Segmentation</em>, arXiv:1904.02689 (ICCV 2019)</td>
+<td>Prototype–coefficient mask formulation; protonet, K, coefficient, mask-loss conventions (A14–A18)</td>
+</tr>
+<tr>
+<td>R17</td>
+<td>Llerena, J. M. et al., <em>Gaussian Bounding Boxes and Probabilistic IoU</em>, arXiv:2106.06072 (2021)</td>
+<td>ProbIoU rotated loss (A19)</td>
+</tr>
+<tr>
+<td>R20</td>
+<td>Redmon, J. et al., <em>You Only Look Once: Unified, Real-Time Object Detection</em>, arXiv:1506.02640 (CVPR 2016)</td>
+<td>Origin of the YOLO family term; MIT-licensed Darknet lineage (naming attribution)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="dataset-and-tooling-documentation-ultralytics-unrelated">Dataset and tooling documentation (Ultralytics-unrelated)<a class="headerlink" href="#dataset-and-tooling-documentation-ultralytics-unrelated" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Reference</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R12</td>
+<td>Lin, T.-Y. et al., <em>Microsoft COCO</em>, arXiv:1405.0312 (ECCV 2014); cocodataset.org</td>
+<td>Dataset and eval protocol (bbox + segm)</td>
+</tr>
+<tr>
+<td>R18</td>
+<td>Xia, G.-S. et al., <em>DOTA: A Large-scale Dataset for Object Detection in Aerial Images</em>, arXiv:1711.10398 (CVPR 2018) + official devkit</td>
+<td>Dataset, crop convention, val evaluation protocol, license terms</td>
+</tr>
+<tr>
+<td>R21</td>
+<td>fuse-augmentations, github.com/Borda/fuse-augmentations, commit a5a276addf38e2dfd80ecaf287b2328445e545a6, Apache-2.0</td>
+<td>Two roles, acquired in that order. <strong>Synthetic scene generator</strong> for test fixtures and dataset stand-ins (A26) since WP-131, and since Phase 14 <strong>this project's augmentation engine</strong> as well (ADR-005): the letterbox fit, matrix and resample (WP-155), the post-warp instance keep mask replacing two local copies that had to agree (WP-155), the affine warp as one composed geometric segment (WP-156), the rotated-box transports and the keypoint left/right permutation (WP-157). The division ADR-005 records is convention upstream, policy here — <code>fuse</code> owns how a matrix is built, composed and sampled, <code>lucid-yolo</code> owns which numbers go into it, the <code>Targets</code> container, the composition order and the R1 Table S3 recipe. Nothing about the second role changes the clean-room position: this is a permissively licensed general-purpose augmentation package with no YOLO-implementation lineage, admitted as a dependency and not as a source to read a method from. Pinned via git commit (WP-131) rather than a PyPI version since the version string does not move release to release. Advanced from commit 74af9855 to fedde0c1 by WP-132, which needs <code>SymbolShape</code> — the keypoint-bearing shapes the pose overfit gate draws — and lands two upstream commits, <code>0a0cc640</code> (SymbolShape) and <code>fedde0c1</code> (LetterShape, plus the category-scoping and <code>ClassMode</code> coercion fixes). The row named <code>0a0cc640</code> until WP-146 reconciled it with <code>pyproject.toml</code>, which has pinned <code>fedde0c1</code> since WP-132. That bump is not fixture-neutral, and <code>0a0cc640</code> is the whole of why: it redefines <code>GeomShape.TRIANGLE</code> from equilateral to obtuse-scalene and re-centres every outline on its area centroid, moving the det/obb/seg fixtures' instance counts and box sums (WP-132's log carries the deltas and what was re-frozen). <code>fedde0c1</code> is fixture-neutral, measured rather than assumed — both generator-derived goldens produce identical values at either commit (WP-146). Advanced from <code>fedde0c1</code> to <code>a5a276a</code> (the tree upstream tags <code>v0.12.0</code> from) by WP-154, which the Phase 14 augmentation upstreaming is gated on; this bump spans fifteen upstream commits of which only two touch the generator. <code>964fd07</code> (registry, SVG assets, <code>Fill</code> type) removes the <code>animal_shapes</code> helper — replaced here by the <code>tuple(AnimalShape)[:n]</code> selection it performed — and is fixture-neutral, measured at the commit. <code>abbf1f2</code> (upright OBB, triangle) is the whole of what moves: <code>PrimitiveShape.TRIANGLE</code> becomes equilateral again and <code>polygon_to_obb</code> is re-derived in the shape's upright frame instead of by minimum-area calipers, returning all sixteen moved golden values bit-exactly to the figures frozen before <code>0a0cc640</code> (WP-154's log carries the per-commit trace). The remaining eleven commits are augmentation-engine work and move no fixture value. No YOLO-implementation lineage; verified Apache-2.0</td>
+</tr>
+<tr>
+<td>R22</td>
+<td>torchmetrics, Lightning AI, github.com/Lightning-AI/torchmetrics, Apache-2.0</td>
+<td><code>MeanAveragePrecision</code> bbox mAP engine for the detection acceptance instrument (WP-069). Apache-2.0 verified from the installed 1.9.0 wheel dist-info <code>licenses/LICENSE</code></td>
+</tr>
+<tr>
+<td>R23</td>
+<td>faster-coco-eval, github.com/MiXaiLL76/faster_coco_eval, Apache-2.0</td>
+<td>COCOeval-faithful, pycocotools-free backend for <code>MeanAveragePrecision</code> (WP-069). Apache-2.0 verified from the installed 1.7.2 wheel dist-info <code>licenses/LICENSE</code> (PyPI metadata omits the license field)</td>
+</tr>
+<tr>
+<td>R24</td>
+<td>Lin, T.-Y. et al., <em>Focal Loss for Dense Object Detection</em>, arXiv:1708.02002 (ICCV 2017)</td>
+<td>Prior-probability classification bias initialization (sec. 5.1, pi = 0.01) for dense one-stage heads (A30)</td>
+</tr>
+<tr>
+<td>R25</td>
+<td>torchvision, github.com/pytorch/vision, BSD-3-Clause</td>
+<td>Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). BSD-3-Clause verified 2026-08-05 from the repository <code>LICENSE</code> ("Copyright (c) Soumith Chintala 2016"). No Ultralytics lineage: PyTorch-project detection stack, independent of the YOLO family</td>
+</tr>
+<tr>
+<td>R26</td>
+<td>YOLOX, Megvii-BaseDetection, github.com/Megvii-BaseDetection/YOLOX, Apache-2.0</td>
+<td>Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). Apache-2.0 verified 2026-08-05 from the repository <code>LICENSE</code> ("Copyright (c) 2021-2022 Megvii Inc."). Independent anchor-free YOLO lineage (arXiv:2107.08430), no Ultralytics code</td>
+</tr>
+<tr>
+<td>R27</td>
+<td>MMDetection, OpenMMLab, github.com/open-mmlab/mmdetection, Apache-2.0</td>
+<td>Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). Apache-2.0 verified 2026-08-05 from the repository <code>LICENSE</code> ("Copyright 2018-2023 OpenMMLab"). <strong>Core <code>mmdetection</code> only</strong> — the sibling <code>mmyolo</code> repository reimplements Ultralytics-family models and is deliberately excluded pending a provenance check it has not been given</td>
+</tr>
+<tr>
+<td>R28</td>
+<td>PaddleDetection (PP-YOLOE), PaddlePaddle, github.com/PaddlePaddle/PaddleDetection, Apache-2.0</td>
+<td>Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). Apache-2.0 verified 2026-08-05 from the repository <code>LICENSE</code> (unmodified Apache template, no named holder in the file). Independent PaddlePaddle detection stack</td>
+</tr>
+<tr>
+<td>R29</td>
+<td>matplotlib, github.com/matplotlib/matplotlib, PSF-based Matplotlib License</td>
+<td>Vector figure rendering for the reproduction report (WP-080), a dev-extra tool only — not a runtime dependency. Permissive PSF-derived license verified 2026-08-06 from the installed 3.11.1 wheel dist-info <code>LICENSE</code> ("Copyright (c) 2012- Matplotlib Development Team; All Rights Reserved")</td>
+</tr>
+<tr>
+<td>R30</td>
+<td>mdformat, github.com/hukkin/mdformat, MIT, with its <code>mdformat-gfm</code> plugin, github.com/hukkin/mdformat-gfm, MIT</td>
+<td>Markdown formatter run as a commit-time hook, a pre-commit tool only — installed in the hook's own environment, never a project dependency. MIT verified 2026-08-11 from each repository's <code>LICENSE</code> ("Copyright (c) 2021 Taneli Hukkinen" and "Copyright (c) 2020 Taneli Hukkinen"). The plugin is what makes the formatter table-aware: core mdformat is CommonMark-only and would read a GFM table as prose</td>
+</tr>
+<tr>
+<td>R31</td>
+<td>shapely, github.com/shapely/shapely, BSD-3-Clause</td>
+<td>Polygon-intersection oracle for the WP-063 rotated-IoU gate (A24). A <code>dev</code> dependency-group package only — <code>src/</code> never imports it, and A24 places the oracle in tests precisely so it stays an independent implementation rather than our own float64 code checking our own float32 code. BSD-3-Clause verified 2026-08-11 from the installed 2.1.2 wheel dist-info <code>licenses/LICENSE.txt</code> ("Copyright (c) 2007, Sean C. Gillies. 2019, Casper van der Wel. 2007-2022, Shapely Contributors"), corroborated by the <code>License: BSD 3-Clause</code> metadata field and the <code>License :: OSI Approved :: BSD License</code> classifier. <strong>Disclosure:</strong> the same wheel bundles the GEOS native library, whose <code>licenses/LICENSE_GEOS</code> declares <strong>LGPLv2.1</strong> — dynamically linked, present only in the development and test environment, never vendored into this repository, never linked into any published artifact, and absent from the runtime dependency set. Allowed under D15, which also made the license audit read bundled <code>License-File</code> documents rather than metadata fields alone; that change immediately surfaced the same class of exposure in <code>numpy</code>, a runtime dependency, which no audit here had ever seen</td>
+</tr>
+<tr>
+<td>R32</td>
+<td>Roboflow Universe dataset <em>Cars</em>, workspace <code>gongx</code>, project <code>cars-jnnoy</code>, version 1, YOLO-format export, CC BY 4.0 (licence stated in the export's own <code>README.dataset.txt</code> and <code>data.yaml</code>)</td>
+<td>The YOLO label format as a <strong>dataset artifact</strong>, read for WP-099: a <code>data.yaml</code> (<code>names</code> as an index-ordered list, <code>nc</code>, split entries written <code>../train/images</code> beside a real <code>&lt;root&gt;/train/images</code> tree) and a 70-image train split of normalized <code>cls cx cy w h</code> rows. Registered because the format has no specification on the paper allowlist while AGENTS.md forbids reading any implementation's reader — a published export is the format "as published by the datasets themselves". Data only: no code, no configuration written by a detector implementation, no weights. Verified 2026-08-14 by reading the export on disk</td>
+</tr>
+<tr>
+<td>R33</td>
+<td>MkDocs, github.com/mkdocs/mkdocs, BSD-2-Clause; MkDocs Material, github.com/squidfunk/mkdocs-material, MIT; <code>mdformat-mkdocs</code>, github.com/KyleKing/mdformat-mkdocs, MIT</td>
+<td>Documentation-site toolchain (WP-114), a publishing tool only — installed through the <code>docs</code> dependency group and the pre-commit hook's own environment, never imported by <code>src/</code> and never by a gate. Licences verified 2026-08-16 from each repository's <code>LICENSE</code> ("Copyright © 2014-present, Tom Christie", "Copyright (c) 2016-2025 Martin Donath", "Copyright (c) 2024 Kyle King"). The site renders the same markdown files GitHub does; nothing here generates a page from source</td>
+</tr>
+<tr>
+<td>R34</td>
+<td><code>packaging</code>, github.com/pypa/packaging, dual Apache-2.0 OR BSD-2-Clause</td>
+<td>Requirement, marker and extras parsing for the dependency-tier walk in <code>scripts/lint/audit_licenses.py</code> (WP-115; the script sat at <code>scripts/audit_licenses.py</code> when this row was written and moved in WP-129). A <code>dev</code> dependency-group package only -- <code>src/</code> never imports it, and it arrived transitively (pytest and mkdocs both require it) before it was declared. Licence verified 2026-08-16 from the installed distribution's own <code>License-Expression</code> field, <code>Apache-2.0 OR BSD-2-Clause</code>, with both texts shipped as <code>LICENSE.APACHE</code> and <code>LICENSE.BSD</code>; GitHub's licence detector reports NOASSERTION for the dual grant, which is why the wheel rather than the API is what this row cites</td>
+</tr>
+<tr>
+<td>R35</td>
+<td>docformatter, github.com/PyCQA/docformatter, MIT</td>
+<td>PEP 257 docstring formatter run as a commit-time hook (WP-116), a pre-commit tool only -- installed in the hook's own environment, never a project dependency. MIT verified 2026-08-17 from the repository's own <code>LICENSE</code>; its PyPI metadata declares <code>Expat</code> and carries <strong>two</strong> licence classifiers, MIT beside <code>License :: Other/Proprietary License</code>, which the repository text does not support and which is recorded here rather than smoothed over. It splits a summary at the first period it reads as a sentence end, which is why 32 summary lines were rephrased to spell out <code>Eq.</code> and <code>sec.</code></td>
+</tr>
+<tr>
+<td>R36</td>
+<td>RF-DETR, Roboflow, github.com/roboflow/rf-detr, Apache-2.0</td>
+<td>Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). Apache-2.0 verified 2026-09-04 from the local checkout's <code>LICENSE</code> ("Copyright 2025 Roboflow, Inc." in the filled appendix). Independent DETR lineage (arXiv:2304.08069 lineage, LW-DETR/Deformable-DETR family), no Ultralytics code. <strong>What was read:</strong> the commit range <code>1.9.0..develop</code> (tag <code>a700efc7</code>; 137 non-merge commits at the time of reading on 2026-09-04, the branch has advanced since), surveyed for training- and validation-throughput changes after WP-162. Changelog and commit prose only — every mechanism this project acted on was restated in its own words from that prose, and the three candidates it produced were re-derived here and measured here before any of them landed (WP-163, WP-164, WP-165). <strong>What was not read, and stays unread:</strong> <code>rfdetr_plus</code> and the RF-DETR XL/2XL models it gates, which <code>docs/reference/xlarge.md</code> licenses under the Platform Model License (PML-1.0) from a separate repository — non-permissive, so inadmissible at any cost. The sibling checkout at <code>~/Workspace/rf-detr-internal</code> was likewise never opened; it was set aside during the survey on the stated ground that its licence was unestablished, and that ground turns out to be wrong — it carries an Apache-2.0 <code>LICENSE</code> file. The record says so rather than keeping the tidier reason. It remains unread, and admitting it would be a fresh decision this row does not make</td>
+</tr>
+</tbody>
+</table>
+<h3 id="project-internal-governing-documents">Project-internal governing documents<a class="headerlink" href="#project-internal-governing-documents" title="Permanent link">&para;</a></h3>
+<p>Not an external source and not admissible as one: this row exists because the register is what a reader checks a citation against, and a document cited 133 times from <code>src/</code> with no row here is a citation that resolves to nothing.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Reference</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R37</td>
+<td>The governing blueprint, v1.5 (2026-07-10), authored by this project's principal (Jirka Borovec, the copyright holder <code>NOTICE</code> names). <strong>Unpublished and non-public</strong>, held outside this repository and never distributed with it; it carries no licence grant, so no part of it is redistributable and nothing in it may be quoted here beyond what a decision record already restates.</td>
+<td>The project's own specification, not a method source. It states the layout (sec. 7), the variant table (sec. 5.1, itself sourced from R3 Fig. 1), the block stack (sec. 5.2, 5.3), the loss composition (sec. 5.7), the augmentation recipe (sec. 5.9), the dataset layout (sec. 14.3) and D1–D11, which <code>docs/DECISIONS.md</code> transcribes. Cited from code by section: 133 <code>blueprint</code> references across 36 files under <code>src/</code>, 107 of them in the <code>blueprint sec. N</code> form (measured 2026-09-05). <strong>Every method claim it carries is downstream of R1–R36</strong> — where a blueprint section and a paper disagree the paper governs, and where the blueprint is the only source the choice is an assumption and belongs in <code>ASSUMPTIONS.md</code>. Registered by WP-175; the amendments made after it are D12.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="placeholders">Placeholders<a class="headerlink" href="#placeholders" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R15</td>
+<td>Withdrawn (blueprint v1.4). Formerly the prose pages of docs.ultralytics.com; removed because the site is generated from the AGPL repository. Retained as a numbered placeholder so R16–R21 ids stay stable. No page was ever consulted.</td>
+</tr>
+<tr>
+<td>R19</td>
+<td>Legal-evidence citation only, never an implementation source: Ultralytics GitHub org discussion 14008 (public, non-code) stating licensing terms "apply to the specific implementation of the YOLO models, not the conceptual model itself." Collected at planning time by the planning role.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="naming-evidence-record">🏷️ Naming evidence record<a class="headerlink" href="#naming-evidence-record" title="Permanent link">&para;</a></h2>
+<p>Package name <code>lucid-yolo</code> uses "YOLO" as a model-family/category term. Evidence:</p>
+<ol>
+<li><strong>Origin</strong>: "YOLO" coined by Redmon et al. (2016) [R20]; the original Darknet implementations are MIT-licensed.</li>
+<li><strong>Multi-party generic usage</strong>: YOLOX (Megvii), YOLOv6 (Meituan), YOLOv7/v9 (Wang et al.), PP-YOLOE (Baidu), YOLO-NAS (Deci), YOLOv13 (Lei et al.) — a decade of unrelated parties using the family name.</li>
+<li><strong>Ultralytics' own position</strong> [R19]: licensing terms "apply to the specific implementation of the YOLO models, not the conceptual model itself."</li>
+<li><strong>Word-mark status</strong>: the bare "YOLO" US software word mark is registered to an unrelated entity (Next Computer Inc., Reg. 6927573), itself subject to a pending cancellation proceeding.</li>
+</ol>
+<p><strong>Usage discipline</strong> — the rule cited across this repository as <em>sec. 3.5</em>. This document carries no section numbers, so that citation resolves to nothing on its own; it is recorded here, at the paragraph it names, so the existing citations resolve rather than being rewritten one by one. Cite it as <code>PROVENANCE.md</code>'s usage discipline in anything written from now on.</p>
+<p>"YOLO26", "YOLO11", "Ultralytics", and their logos never appear in package names, module paths, class names, or model identifiers. Nominative references to the paper ("the YOLO26 paper, arXiv:2606.03748") are the only usage. The YOLO26 method implementation is exposed under the feature name <code>e2e</code> (variants <code>lucid-yolo-e2e-{n,s,m,l,x}</code>), never a version number.</p>
+<h2 id="audit-record">🔍 Audit record<a class="headerlink" href="#audit-record" title="Permanent link">&para;</a></h2>
+<p>Periodic audits of the clean-room contract (AGENTS.md denylist) against the full execution record. Method and detailed findings live in the project's design document (sec. 12); this table is the versioned summary.</p>
+<table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Scope</th>
+<th>Evidence layers</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2026-08-02</td>
+<td>WP-001–WP-069, 56 commits, audited at <code>975ff50</code></td>
+<td>codebase/dependency sweep · commit provenance trail — <strong>this cell read "55/56 trailers, all allowlist-cited"; its second half is withdrawn, corrected 2026-09-06 from the messages themselves.</strong> The count stands: 55 of the 56 messages carry a trailer block, the initial commit <code>5aa88a7</code> ("Initial commit") being the one that does not. "All allowlist-cited" does not. Three messages in the range fail on their citation rather than their formatting: <code>e335c69</code> cites <code>D12c</code>, a decision id, where the field takes a source id from the register below; <code>1198209</code> writes "Provenance: not applicable", which neither names a source nor denies one — the case the rule refuses outright, <code>none</code> being a value and a paraphrase of it not being one (its <code>WP: none (cross-cutting user directive, 2026-08-02)</code> is present, and fails only on the annotation, so it belongs with the format defects below rather than here); and <code>6db2b30</code> cites <code>R19</code> to mean <em>pycocotools</em>, where R19 is the Placeholders row for a legal-evidence citation, inadmissible as an implementation source and naming something else entirely. Re-walking the range today with <code>scripts/lint/check_commit_trailers.py --range 5aa88a7..975ff50</code> reports <strong>7 of 55</strong> invalid — 8 of 56 with the initial commit — the four beyond those three being annotation inside a trailer's value field (<code>A30 (new)</code>, <code>none (official host only, no mirrors)</code>, <code>A26 (synthetic stand-in)</code>) and one <code>@</code> before the separator. Those four are format rules the checker tightened after this range was written, and the checker itself postdates it; the three citation defects were checkable by hand on 2026-08-02 and are what this row got wrong. The commits are not amended and the count is not restated as a pass — the record of what was audited stands, and what it certified is corrected · complete session fetch log (only R1, R7, R8, R12, R21 endpoints; zero denylisted domains) · delegated-work hand-over records · persistent agent memory</td>
+<td>Upheld — no Ultralytics code, config, weights, or docs consulted at any point; every design input traces to R1–R24 or a registered assumption. <strong>The clean-room verdict is unchanged by the correction beside it</strong> (2026-09-06): the three defects are citations that do not resolve, not sources that should not have been read, and <code>6db2b30</code>'s stray <code>R19</code> names pycocotools in its own parenthesis rather than the discussion page that row registers. What the correction costs is the strength of the evidence, not the finding — the trail was certified as fully resolving and did not</td>
+</tr>
+<tr>
+<td>2026-09-05</td>
+<td>The 193 commits in <code>975ff50..f6ec3e1</code>, the whole execution record after the first audit's endpoint</td>
+<td>commit provenance trail re-walked with <code>scripts/lint/check_commit_trailers.py --range</code> (193 messages; the 15 written since <code>b4f3e03</code> wired the contract into CI are clean, and the 27 refusals all predate that wiring — each refusal is recorded here as unexamined rather than characterised) · dependency and shipped-binary sweep with <code>scripts/lint/audit_licenses.py</code> (107 distributions, 344 shipped binaries, no GPL-family licence declared, bundled or shipped, none unreadable) · vendor-attribution sweep of every prose surface, which is what this row was opened by: the phrase <em>the Ultralytics YOLO26 paper</em> survived sec. 3.5's discipline in <code>NOTICE</code>, <code>docs/index.md</code> and all four model cards after WP-161 corrected it in the README alone · source-allowlist reconciliation, which added R37 and confirmed R36's registration on 2026-09-04</td>
+<td>Upheld with one wording defect fixed rather than waived — no Ultralytics code, configuration, weights or documentation surface consulted; the defect was a citation naming the vendor as the method's owner, corrected to the nominative form and now pinned as a required fragment in <code>scripts/lint/audit_license_headers.py</code> so it cannot drift back unnoticed. Not re-verified here: the pre-<code>975ff50</code> window, and the session fetch logs the first row could read, which do not exist for delegated work in this range</td>
+</tr>
+</tbody>
+</table>
+<h2 id="usage-log">📝 Usage log<a class="headerlink" href="#usage-log" title="Permanent link">&para;</a></h2>
+<p>First-use log of sources consulted during implementation. Papers are cited by arXiv id; access dates recorded per session.</p>
+<p><strong>Two properties of this table a reader should not have to infer.</strong> It is a <em>first-use</em> log, not a coverage index: a source appears once, on the day it was first read, and every later use of it is traced through the <code>Provenance:</code> trailers and the register rows above rather than by another line here. And it has lagged the allowlist — the rows below were reconciled against the register on 2026-09-06, which added every source that had been registered without a usage line and marked the ones with no consultation to record. Registration and use are different acts, and this table only ever recorded the second; where it recorded neither, that was the defect, not evidence of a quiet read.</p>
+<p>The <code>R1–R20</code> row is a genuine collapse and stays one. Those twenty were transcribed into the policy documents in a single seeding pass (WP-003) from the blueprint's own reference list, not read one at a time, so splitting the row into twenty dated lines would invent twenty first-use events that never happened. Which of them a given decision actually rests on is in the register's Role column and in each commit's trailer, and that is the resolution this table cannot supply.</p>
+<table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Source</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2026-07-31</td>
+<td>R20</td>
+<td>NOTICE attribution, README disclaimer (WP-002)</td>
+</tr>
+<tr>
+<td>2026-08-01</td>
+<td>R1–R20</td>
+<td>Policy docs seeded from the blueprint (WP-003)</td>
+</tr>
+<tr>
+<td>2026-08-01</td>
+<td>R21</td>
+<td>Synthetic fixture/dataset generator decision (A26, D12)</td>
+</tr>
+<tr>
+<td>2026-08-02</td>
+<td>R22, R23</td>
+<td>torchmetrics <code>MeanAveragePrecision</code> + <code>faster_coco_eval</code> backend replace pycocotools in the bbox evaluator (WP-069)</td>
+</tr>
+<tr>
+<td>2026-08-02</td>
+<td>R24</td>
+<td>Prior-probability cls bias init adopted after the Det-smoke collapse diagnosis (A30)</td>
+</tr>
+<tr>
+<td>2026-08-05</td>
+<td>R25, R26, R27, R28</td>
+<td><strong>Admitted, not consulted.</strong> All four were licence- and provenance-verified on this date and registered under D13/ADR-004 as readable diagnostic references. Nothing is recorded as having been read from any of them: no <code>Provenance:</code> trailer in the history cites one (the three commits that mention these ids at all are the D13 registration itself, whose own trailers cite the user decision and the LICENSE files fetched that day), and the four ids appear in no other file in the tree — no entry in <code>ENGINEERING_LOG.md</code>, <code>RESEARCH_LOG.md</code> or <code>ESCALATION.md</code> names one. Checked 2026-09-06. The two Det-smoke root causes that motivated the widening were found by measurement instead (WP-078 pixel-frame L1, WP-079 augmentation-RNG collapse), which ADR-004's own Context already says. The allowance stands and remains unexercised; a first read is a line in this table</td>
+</tr>
+<tr>
+<td>2026-08-06</td>
+<td>R29</td>
+<td>matplotlib adopted for the reproduction report's vector figures (WP-080), and again as the drawing library for WP-067's example after <code>supervision</code> was refused on the D16 finding</td>
+</tr>
+<tr>
+<td>2026-08-11</td>
+<td>R30</td>
+<td>mdformat + mdformat-gfm adopted as the markdown commit hook (WP-001)</td>
+</tr>
+<tr>
+<td>2026-08-11</td>
+<td>R31</td>
+<td>shapely as the independent polygon-intersection oracle for the rotated-IoU gate (A24, WP-063); its bundled GEOS binaries are what opened D15</td>
+</tr>
+<tr>
+<td>2026-08-14</td>
+<td>R32</td>
+<td>The YOLO label format read as a dataset artifact — <code>data.yaml</code> shape and normalized <code>cls cx cy w h</code> rows — for the reader and its validation rules (A54–A58, WP-099)</td>
+</tr>
+<tr>
+<td>2026-08-16</td>
+<td>R33</td>
+<td>MkDocs + Material + <code>mdformat-mkdocs</code> adopted as the documentation-site toolchain (WP-114)</td>
+</tr>
+<tr>
+<td>2026-08-16</td>
+<td>R34</td>
+<td><code>packaging</code> used for requirement, marker and extras parsing in the licence audit's dependency-tier walk (WP-115)</td>
+</tr>
+<tr>
+<td>2026-08-17</td>
+<td>R35</td>
+<td>docformatter adopted as the PEP 257 docstring commit hook (WP-116)</td>
+</tr>
+<tr>
+<td>2026-09-04</td>
+<td>R36</td>
+<td>Throughput survey of the <code>1.9.0..develop</code> range, read for validation-path candidates; three landed after being re-derived and measured here (WP-163, WP-164, WP-165)</td>
+</tr>
+<tr>
+<td>2026-09-05</td>
+<td>R37</td>
+<td>The governing blueprint, registered on the date its <code>src/</code> citations were counted (WP-175). Not an external source and never a first <em>use</em>: it has been cited since the first commit, and this line records when it became resolvable against this register rather than when it was first read</td>
+</tr>
+<tr>
+<td>2026-09-17</td>
+<td>R1 sec. 3.4.2, Table 9, Table S10</td>
+<td><strong>First read</strong>, forty-seven days after the source was registered and inside its role the whole time. The pose objective, its weight ablation and its size table; read from the arXiv PDF after issue 2 on the tracker named them, and what they change is D22, A65–A68 and A75–A77 (WP-178). The 2026-08-01 row above stands as written: the seeding pass registered R1 from the blueprint's reference list without reading every section, and this line is what that cost</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright 2026 Jirka Borovec — Apache-2.0 (see LICENSE and NOTICE)
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

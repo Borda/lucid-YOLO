@@ -1,0 +1,1736 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, oriented-detection, and keypoint-detection methods described in the YOLO26 paper (arXiv:2606.03748)">
+      
+      
+        <meta name="author" content="Jirka Borovec">
+      
+      
+        <link rel="canonical" href="https://borda.github.io/lucid-YOLO/model_cards/keypoints/">
+      
+      
+        <link rel="prev" href="../obb/">
+      
+      
+        <link rel="next" href="../../PROVENANCE/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Model card — keypoints - lucid-yolo</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#model-card-lucid-yolo-keypoint-detector-n-scale" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="lucid-yolo" class="md-header__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lucid-yolo
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Model card — keypoints
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="lucid-yolo" class="md-nav__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lucid-yolo
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running the models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Running the models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TRAINING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching a training run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DATASETS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Results
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../REPRODUCTION_REPORT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproduction report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — keypoints
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#model-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📇 Model details
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#intended-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧭 Intended use
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#training-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🗂️ Training data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#training-procedure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🏋️ Training procedure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📊 Evaluation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚠️ Limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ethical-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🤝 Ethical considerations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#licensing-and-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📜 Licensing and provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#citation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔖 Citation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clean-room record
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Clean-room record
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROVENANCE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ASSUMPTIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assumption register
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DECISIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decision record
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Execution
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ROADMAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Work-package roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RESEARCH_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ENGINEERING_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ESCALATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Escalation log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributor guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebooks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/development_gates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development gates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/demo_detect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detection on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/demo_segment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instance segmentation on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/demo_obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Oriented detection on DOTA tiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/demo_keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keypoints on COCO person_keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#model-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📇 Model details
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#intended-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧭 Intended use
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#training-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🗂️ Training data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#training-procedure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🏋️ Training procedure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📊 Evaluation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚠️ Limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ethical-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🤝 Ethical considerations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#licensing-and-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📜 Licensing and provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#citation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔖 Citation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/Borda/lucid-YOLO/edit/main/docs/model_cards/keypoints.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="model-card-lucid-yolo-keypoint-detector-n-scale">🕺 Model card — lucid-yolo keypoint detector (n scale)<a class="headerlink" href="#model-card-lucid-yolo-keypoint-detector-n-scale" title="Permanent link">&para;</a></h1>
+<p>Covers the keypoint model produced by the Pose-smoke tier run, released as <code>0.5.0</code>. That tier was accepted at roadmap 125 on 2026-08-25, on the mechanism-claim evidence recorded in <code>RESEARCH_LOG.md</code> and the acceptance table in <code>REPRODUCTION_REPORT.md</code>. One card per task family; detection, instance segmentation and oriented detection each have their own.</p>
+<p><strong>The task is keypoints; human pose is one instantiation of it.</strong> <code>K</code> is a constructor argument the way the class count is — nothing in the head, the loss or the decode path knows what a point <em>means</em>, and the project's own wiring gate runs a 7-point synthetic symbol schema (R21) rather than a human one. This card describes the checkpoint that trained on COCO's 17-point <code>person</code> schema, so everything below is stated in pose terms because that is what this particular model learned — not because the architecture is pose-specific. That checkpoint is not distributed: <strong>releases publish no weights (D14)</strong>, so "this checkpoint" throughout this card names a run whose artifacts are the numbers and the recipe, never a file you can fetch.</p>
+<p><strong>Where the genericity stops.</strong> <code>K</code> generalizes the <em>model</em>; it does not generalize the <em>protocol</em>. Scoring a schema under OKS needs a per-point sigma vector and the left/right pairs a horizontal flip must swap, and <code>K</code> supplies neither. R12 publishes exactly one sigma table — the 17 human values, derived from measured annotator standard deviations — and this project adds a single uniform fallback at R12's median for schemas that have no annotator to derive variance from (A67), which is an honest default rather than a general derivation; an OKS quoted under it is not comparable to a published COCO pose OKS despite sharing a scale. The flip pairs are read off the annotation file's own keypoint <em>names</em> (<code>_build_keypoint_flip_pairs</code>, <code>data/coco.py</code>), which means a COCO file that names its points supplies them, a file that does not gets "mirror coordinates only", two categories declaring different name lists is a hard error, and a <strong>YOLO root never supplies them at all</strong>. The shipped scorer says as much by refusing: <code>lucid-eval</code>'s pose path checks the checkpoint's <code>num_keypoints</code> against 17 and <strong>rejects any other <code>K</code></strong> rather than scoring it against a schema it does not share (<code>eval/pose_eval.py</code>) — point <em>i</em> of a different schema's prediction is not point <em>i</em> of COCO's annotation, and R12's sigmas measure annotator variance on joints that are not the ones being predicted. Training a new <code>K</code> is a flag; scoring it is a modelling decision you own, and the tooling makes you own it explicitly.</p>
+<h2 id="model-details">📇 Model details<a class="headerlink" href="#model-details" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Developed by</td>
+<td>Independent reproduction, single operator; see <code>PROVENANCE.md</code></td>
+</tr>
+<tr>
+<td>Model type</td>
+<td>Single-stage anchor-free keypoint detector, <code>K</code> generic — the same DFL-free dual detection head as the other three tasks, with a third point-regression stem (R14) predicting <code>(x, y)</code> offsets and a per-axis uncertainty, integrated over a hand-written normalizing flow (RLE, R14 Eq. 12) rather than a fixed loss. This checkpoint is that architecture at <code>K = 17</code>, COCO's human-pose schema</td>
+</tr>
+<tr>
+<td>Scale</td>
+<td><code>n</code> — 2.378M parameters, 5.514 GFLOPs at 640×640, <code>num_classes=1</code>. Measured, not gated. A published table does exist — R1 Table S10 lists 2.9M / 7.5G for the paper's <code>n</code> pose model (this card said otherwise until 2026-09-17; D22) — and at its protocol (640 px, 1 class, 17 points, the full two-branch model as every other size gate counts it) this model measures 2.524M / 5.514G, 13.0% and 26.5% under: the point stem is several times narrower than the paper's at this scale (A77), and no gate ships until a width is chosen against the table, as the angle stem's was against Table S11. Holding <code>num_classes</code> fixed at 1 against an otherwise-identical detector isolates the point stem's own cost: +0.055M params (+2.4%), +0.124 GFLOPs (+2.3%)</td>
+</tr>
+<tr>
+<td>Input</td>
+<td>RGB, letterboxed to 640×640, float32 in <code>[0, 1]</code></td>
+</tr>
+<tr>
+<td>Output</td>
+<td>Per detection: box, score, class, and 17 <code>(x, y)</code> keypoints in COCO's human-pose order (nose, eyes, ears, shoulders, elbows, wrists, hips, knees, ankles), each inverse-letterboxed into the original image (A10). Same two decode paths as the other three tasks — NMS-free end-to-end and one-to-many with NMS — with points gathered by anchor index, never re-ranked separately (<code>eval/coco_eval.py::gather_keypoints</code>)</td>
+</tr>
+<tr>
+<td>Point decode</td>
+<td><code>decode_keypoints</code> composes the head's raw offsets with the anchor centre and stride, unbounded by construction — a point is representable anywhere in the input, including off-canvas (A70)</td>
+</tr>
+<tr>
+<td>Version</td>
+<td>Run v11 checkpoint <code>keypoints_n_epoch=49-step=46250.ckpt</code>, 2026-08-24, trained under <code>0.5.0.dev1</code></td>
+</tr>
+<tr>
+<td>License</td>
+<td>Apache-2.0 (code and report). Weights derive from COCO 2017's <code>person_keypoints</code> annotations — see Licensing below</td>
+</tr>
+<tr>
+<td>Paper</td>
+<td>Pose objective per the YOLO26 paper, arXiv:2606.03748 (R1) sec. 3.4.2 — reproduced <strong>in part</strong>: the RLE term (R1 Eq. 10–11), transcribed from its origin, Li et al., <em>Human Pose Regression with Residual Log-Likelihood Estimation</em>, arXiv:2107.11291 (R14), without the OKS term R1 composes it with (A75; available since WP-178 at <code>oks_gain = 0.0</code>, so this checkpoint's objective is unchanged); detection backbone/neck/head per R1. Independent implementation; not affiliated with, endorsed by, or derived from Ultralytics, the RLE authors, or their codebases</td>
+</tr>
+</tbody>
+</table>
+<p>The keypoint objective replaces nothing — box and classification terms are unchanged, and the point term rides beside them at <code>keypoint_gain = 1.0</code> (A68). RLE's own trainable-weight loss, a 6-layer RealNVP flow over the standardized residual, is a submodule of the training module rather than a stateless function (WP-123): it is the only loss in this project carrying parameters. A Laplace-NLL control with the flow term removed (WP-135) exists as a <code>keypoint_loss</code> switch on the training module, defaulting to <code>rle</code>; the checkpoint this card describes trained under that default. That control is not this model — see WP-125's acceptance run in <code>RESEARCH_LOG.md#wp-125</code> for the paired comparison.</p>
+<p>Only a <code>task="keypoints"</code> module carries any of this. A <code>"detect"</code>/<code>"segment"</code>/<code>"obb"</code> checkpoint's state dict is untouched by the flow, the point stem, or the switch — the same "opt-in changes nothing else" property WP-087 established for the mask head.</p>
+<h2 id="intended-use">🧭 Intended use<a class="headerlink" href="#intended-use" title="Permanent link">&para;</a></h2>
+<p><strong>Intended.</strong> Reproduction research: verifying RLE's mechanism claim against a non-flow control, and serving as a readable from-scratch implementation of a normalizing-flow keypoint loss composed onto an NMS-free detector. The <code>e2e</code> path is the interesting artifact, as for the other three tasks — points come out of a forward containing no suppression op.</p>
+<p><strong>Walk-through.</strong> The pipeline this card describes — data, a short fit, <code>lucid-eval</code>, predictions drawn over the ground truth — runs end to end in <a href="../../notebooks/demo_keypoints/">the keypoints demo notebook</a>, short enough for a Colab session and not a reproduction of the numbers here.</p>
+<p><strong>Not intended.</strong> Any operational use, and this is a stronger statement than for the other three tasks — see Ethical considerations below. This is a smoke-tier reproduction at the smallest scale, one seed, evaluated on exactly one benchmark, with an e2e OKS AP of 0.25 on a single category. Production use of any kind, safety-critical or rights-affecting decisions, biometric identification, activity or gait recognition, surveillance of any kind, or any deployment where an OKS AP of 0.25 would be mistaken for a reliable perception system.</p>
+<h2 id="training-data">🗂️ Training data<a class="headerlink" href="#training-data" title="Permanent link">&para;</a></h2>
+<p>COCO 2017 <code>person_keypoints_train2017</code> — the <code>person</code> category only, 17-point human-pose annotations under CC-BY-4.0 with images under their original Flickr terms. No other data; no pretraining (D2: no Objects365 initialization).</p>
+<p>The same composition limits <code>detection.md</code>/<code>segmentation.md</code> record for COCO's <code>person</code> category apply here with more force, since this task's entire training signal is that category: web photography skewed toward particular geographies and contexts, no documented demographic balance, and no fairness evaluation across subgroups has been run. A point annotated <code>v=1</code> (labeled but occluded, R12) supervises the model to infer a location it cannot see (A66) — the model is trained, by design, to guess where an occluded body part is.</p>
+<h2 id="training-procedure">🏋️ Training procedure<a class="headerlink" href="#training-procedure" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Recipe</td>
+<td>batch 128, 50 epochs (46,250 steps), MuSGD (<code>w_muon 0.5 / w_sgd 0.5</code>), lr 0.02 with 3-epoch warmup then linear decay to <code>lr0 × 0.01</code>, weight decay 5e-4, momentum 0.95, gradient clip 10.0</td>
+</tr>
+<tr>
+<td>Loss</td>
+<td>detection unchanged — per branch CIoU 7.5 / classification 0.5 / L1 6.0 (stride units), Progressive branch weight <code>0.8 → 0.1</code> — plus RLE's flow-plus-Laplace NLL at <code>keypoint_gain = 1.0</code> (A68), formed in the assigned box's own per-axis frame (A71)</td>
+</tr>
+<tr>
+<td>Keypoint supervision</td>
+<td><code>v=0</code> excluded, <code>v∈{1,2}</code> both included at equal weight — occlusion is exactly the case a regression model must learn to infer from context, and COCO's own OKS protocol scores against <code>v≥1</code> regardless of visibility (A66)</td>
+</tr>
+<tr>
+<td>Assignment</td>
+<td>TAL (<code>alpha 1, beta 6</code>) with STAL small-target surrogates, one assignment shared by every term including the keypoint one</td>
+</tr>
+<tr>
+<td>Augmentation</td>
+<td>mosaic <code>p=1.0</code> (disabled for the final 10 epochs), fused affine+letterbox, size-aware mixup and copy-paste, HSV jitter, horizontal flip <code>p=0.5</code> with COCO's 17-point left/right pairing (A64) — the first tier-scale run to train with that pairing actually wired in, rather than through <code>overfit_micro.py --task keypoints</code>'s augmentation-off gate</td>
+</tr>
+<tr>
+<td>Precision / seed</td>
+<td>bf16-mixed, seed 0, <code>deterministic: true</code></td>
+</tr>
+<tr>
+<td>Hardware</td>
+<td>one unrecorded Colab GPU (<code>default_root_dir</code> under <code>/content/</code>); wall clock 13:30→20:36 on 2026-08-24, about 8m30s an epoch, derived from artifact timestamps rather than logged</td>
+</tr>
+<tr>
+<td>EMA</td>
+<td>decay 0.9999, tau 2000</td>
+</tr>
+</tbody>
+</table>
+<p>The wiring gate that precedes any COCO launch is <code>scripts/overfit_micro.py --task keypoints</code>: 100 images, 548 instances, 1 class, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train OKS AP <strong>0.3357</strong> against a 0.30 floor (<code>goldens/gpu/overfit_micro_kp.json</code>) — a floor set low relative to the sibling gates' because OKS at A67's uniform sigma is a cliff on symbols a few dozen pixels across, not because the loop learns less.</p>
+<h2 id="evaluation">📊 Evaluation<a class="headerlink" href="#evaluation" title="Permanent link">&para;</a></h2>
+<p>COCO val2017, all 5000 images, <code>person_keypoints_val2017</code> ground truth, at 640 px through <code>lucid-eval</code>, one forward per batch decoding both paths. Boxes are scored by <code>faster_coco_eval</code>'s <code>COCOeval_faster</code>; points by the same engine's <code>iouType="keypoints"</code> protocol at R12's 17-value sigma table. EMA weights; raw weights were not evaluated for this run.</p>
+<table>
+<thead>
+<tr>
+<th>path</th>
+<th>box mAP50-95</th>
+<th>box mAP50</th>
+<th>box mAP75</th>
+<th>OKS AP</th>
+<th>OKS AP50</th>
+<th>OKS AP75</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>E2E</td>
+<td><strong>0.5030</strong></td>
+<td>0.7683</td>
+<td>0.5323</td>
+<td><strong>0.2738</strong></td>
+<td>0.6094</td>
+<td>0.2138</td>
+</tr>
+<tr>
+<td>NMS</td>
+<td>0.5119</td>
+<td>0.7764</td>
+<td>0.5417</td>
+<td>0.2688</td>
+<td>0.6066</td>
+<td>0.2042</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>e2e</code> row is the one comparable to the training run's own <code>val/mAP</code> (box branch) and <code>val/oks_mAP</code> (point branch, WP-137) — the same convention <code>detection.md</code>/<code>segmentation.md</code> state for their own tables. Unlike box mAP, where <code>nms</code> scored marginally higher here, the point branch reverses: <code>e2e</code> OKS beats <code>nms</code> OKS on every threshold, though the gap (0.005 AP) is small enough that a second seed could plausibly move it either way.</p>
+<p><strong>Not comparable to R1 Table 9's mAP=63.0.</strong> That figure is the paper this project reproduces — not, as this card said until 2026-09-17, "a different paper" (D22) — but it is YOLO26s at full budget under the full objective, OKS + RLE at <code>(24, 1)</code>, and Table S10 puts the <code>n</code> scale this run trained at 57.2. This run is <code>n</code>, 50 epochs, RLE alone (<code>oks_gain = 0</code>, A75), on a point stem narrower than the paper's (A77); its acceptance criterion was never a pose figure — see Acceptance below.</p>
+<h2 id="limitations">⚠️ Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
+<p><strong>Smoke tier, one category.</strong> 50 epochs at the smallest scale, one seed, one benchmark, <code>person</code> only. An OKS AP of 0.27 is well below a well-trained pose model's range, and this run was never intended to close that gap — WP-125's acceptance is RLE's mechanism claim against a non-flow control, not an absolute pose figure.</p>
+<p><strong>Box branch and point branch are trained jointly but scored separately, and neither bounds the other.</strong> <code>val/mAP</code> (box) and <code>val/oks_mAP</code> (point) log beside each other, not one instead of the other (WP-137) — a checkpoint could in principle detect people well and localize their joints poorly, or the reverse, and the two curves would not say so to each other.</p>
+<p><strong>Uniform-weight visibility policy is untested against the alternative.</strong> <code>v=1</code> (occluded) and <code>v=2</code> (visible) supervise identically (A66); no ablation here measures whether down-weighting occluded points would change the result.</p>
+<p><strong>The gain is un-tuned.</strong> <code>keypoint_gain = 1.0</code> is the deliberately unoptimized starting point (A68) — this run is evidence the value does not swamp or get swamped by the detection objective, not evidence it is well-balanced. No sweep has run.</p>
+<p><strong>One flow, not measured against two.</strong> The one-to-many and one-to-one branches share a single RLE flow (A69) rather than training one each; whether that matters is untested, and the overfit gate cannot tell, since a 100-image memorization run drives both branches to the same near-zero residual.</p>
+<p><strong>One device, and reproducibility narrower than <code>deterministic: true</code> reads.</strong> This tier trained on a single unrecorded Colab GPU; no run in this project has spanned more than one accelerator. For this task it could not have: <code>lucid-yolo fit</code> <strong>refuses <code>task: keypoints</code> on more than one process</strong> at setup, because <code>val/oks_mAP</code> accumulates plain Python lists nothing gathers across ranks and a per-rank average precision cannot be averaged back into the split's. <code>default_determinism</code> (<code>cli/train.py</code>) resolves <code>deterministic</code> to <code>"warn_only"</code> whenever MPS is the auto-picked accelerator — MPS ships no deterministic kernel for some backwards this model hits — so an Apple-silicon run is reproducible only up to those kernels while CPU and CUDA keep strict <code>True</code>. Separately, the seed reproduces a run only at the same <code>--data.num_workers</code>: 0 workers replays one augmentation stream byte for byte, <code>N</code> workers replays a different one re-seeded per worker and per epoch (WP-079). Both are determined by <code>seed</code>; 32 workers does not reproduce 0.</p>
+<h2 id="ethical-considerations">🤝 Ethical considerations<a class="headerlink" href="#ethical-considerations" title="Permanent link">&para;</a></h2>
+<p>This model predicts the full skeletal pose of every detected person in an image — not a box, not a silhouette, but the location of each joint. That is a materially more identifying and more sensitive readout than either the detector's box or the segmenter's mask: gait, posture and body configuration are usable for re-identification and activity inference in ways neither of those outputs directly supports. Any deployment reading pose from people carries surveillance, tracking and biometric-inference implications well beyond what this project has assessed, and none is planned. The intended-use section above is a boundary, not a disclaimer: the model has no evaluation supporting use on real people outside this benchmark, and an OKS AP of 0.27 means roughly three in four joints are not usefully localized at COCO's own strict thresholds.</p>
+<p>Failure modes are unbounded in the sense that matters — no calibration study exists, so per-point scores should not be read as confidence, an occluded joint is trained to be guessed rather than flagged as unknown (A66), and the model gives no signal when it is operating outside its training distribution or on a body configuration COCO's <code>person</code> category under-represents.</p>
+<h2 id="licensing-and-provenance">📜 Licensing and provenance<a class="headerlink" href="#licensing-and-provenance" title="Permanent link">&para;</a></h2>
+<p>Code and this report: Apache-2.0. Weights derive from COCO 2017; no trained weights are published (D14).</p>
+<p><strong>Clean-room statement.</strong> No file, configuration, weight, or code fragment from any Ultralytics repository, package, documentation site, or released checkpoint — nor from any RLE reference implementation — was opened, downloaded, imported, or consulted at any point in this project's history. Every design input traces to a paper, its cited primary literature, a registered assumption, or — for diagnosis only, never copying — a permissively licensed independent implementation registered under D13/ADR-004. The audit trail is <code>PROVENANCE.md</code>; the standing prohibitions are <code>AGENTS.md</code> sec. 7.</p>
+<h2 id="citation">🔖 Citation<a class="headerlink" href="#citation" title="Permanent link">&para;</a></h2>
+<p>This reproduction has no publication. Cite the papers it reproduces:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nc">@article</span><span class="p">{</span><span class="nl">yolo26</span><span class="p">,</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="na">title</span><span class="w">  </span><span class="p">=</span><span class="w"> </span><span class="s">{YOLO26}</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="na">note</span><span class="w">   </span><span class="p">=</span><span class="w"> </span><span class="s">{arXiv:2606.03748}</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="na">year</span><span class="w">   </span><span class="p">=</span><span class="w"> </span><span class="s">{2026}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="p">}</span>
+</code></pre></div>
+<p>The keypoint loss follows RLE:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nc">@inproceedings</span><span class="p">{</span><span class="nl">li2021rle</span><span class="p">,</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="na">title</span><span class="w">     </span><span class="p">=</span><span class="w"> </span><span class="s">{Human Pose Regression with Residual Log-Likelihood Estimation}</span><span class="p">,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="na">author</span><span class="w">    </span><span class="p">=</span><span class="w"> </span><span class="s">{Li, Jiefeng and Bian, Siyuan and Zeng, Ailing and Wang, Can and Pang, Bo and Liu, Wentao and Lu, Cewu}</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="na">booktitle</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">{ICCV}</span><span class="p">,</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="na">note</span><span class="w">      </span><span class="p">=</span><span class="w"> </span><span class="s">{arXiv:2107.11291}</span><span class="p">,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="na">year</span><span class="w">      </span><span class="p">=</span><span class="w"> </span><span class="s">{2021}</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="p">}</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright 2026 Jirka Borovec — Apache-2.0 (see LICENSE and NOTICE)
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

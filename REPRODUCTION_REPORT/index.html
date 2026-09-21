@@ -1,0 +1,3731 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, oriented-detection, and keypoint-detection methods described in the YOLO26 paper (arXiv:2606.03748)">
+      
+      
+        <meta name="author" content="Jirka Borovec">
+      
+      
+        <link rel="canonical" href="https://borda.github.io/lucid-YOLO/REPRODUCTION_REPORT/">
+      
+      
+        <link rel="prev" href="../DATASETS/">
+      
+      
+        <link rel="next" href="../model_cards/detection/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Reproduction report - lucid-yolo</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#reproduction-report" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="lucid-yolo" class="md-header__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lucid-yolo
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Reproduction report
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="lucid-yolo" class="md-nav__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lucid-yolo
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running the models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Running the models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TRAINING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching a training run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DATASETS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Results
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproduction report
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproduction report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#010-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🎯 0.1.0 — Detection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🎯 0.1.0 — Detection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-was-reproduced" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What was reproduced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#det-smoke-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Det-smoke acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-went-wrong-first-and-why-it-matters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What went wrong first, and why it matters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assumption-outcomes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assumption outcomes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deviations-from-the-paper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deviations from the paper
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducing-this-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducing this result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#020-instance-segmentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🖌️ 0.2.0 — Instance segmentation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🖌️ 0.2.0 — Instance segmentation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-was-reproduced_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What was reproduced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-seg-smoke-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Seg-smoke run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#seg-smoke-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Seg-smoke acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-the-training-curves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the training curves
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assumption-outcomes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assumption outcomes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deviations-from-the-paper-and-from-det-smoke" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deviations from the paper, and from Det-smoke
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducing-this-result_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducing this result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#030-oriented-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔄 0.3.0 — Oriented detection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🔄 0.3.0 — Oriented detection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-was-reproduced_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What was reproduced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-obb-smoke-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The OBB-smoke run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-whole-image-figure-roadmap-111" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The whole-image figure (roadmap 111)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#acceptance-and-a-criterion-that-no-longer-fits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acceptance, and a criterion that no longer fits
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-the-training-curves_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the training curves
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assumption-outcomes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assumption outcomes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deviations-from-the-paper-and-from-the-earlier-tiers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deviations from the paper, and from the earlier tiers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducing-this-result_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducing this result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#consolidated-note-detection-segmentation-oriented-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧾 Consolidated note — detection, segmentation, oriented detection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🧾 Consolidated note — detection, segmentation, oriented detection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-trunk-three-heads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One trunk, three heads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assumption-outcomes-consolidated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assumption outcomes, consolidated
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deviations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deviations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hypotheses-the-record-supports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hypotheses the record supports
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#050-keypoint-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🕺 0.5.0 — Keypoint detection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🕺 0.5.0 — Keypoint detection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-was-reproduced_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What was reproduced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-pose-smoke-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Pose-smoke run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-the-training-curves_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the training curves
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assumption-outcomes_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assumption outcomes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deviations-from-the-paper-and-from-the-earlier-tiers_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deviations from the paper, and from the earlier tiers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducing-this-result_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducing this result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#correcting-note-which-engine-scored-each-tier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚙️ Correcting note — which engine scored each tier
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="⚙️ Correcting note — which engine scored each tier">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-the-record-left-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the record left out
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#engine-per-tier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Engine per tier
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducing-a-figure-above" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducing a figure above
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-close-the-two-engines-are" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How close the two engines are
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#correcting-note-the-050-sections-source-claims" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📐 Correcting note — the 0.5.0 section's source claims
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="📐 Correcting note — the 0.5.0 section&#39;s source claims">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-the-section-says-and-what-r1-says" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the section says, and what R1 says
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-is-true-instead" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is true instead
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-this-note-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this note does not do
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clean-room record
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Clean-room record
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PROVENANCE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ASSUMPTIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assumption register
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DECISIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decision record
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Execution
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ROADMAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Work-package roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../RESEARCH_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ENGINEERING_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ESCALATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Escalation log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributor guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebooks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/development_gates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development gates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_detect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detection on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_segment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instance segmentation on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Oriented detection on DOTA tiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keypoints on COCO person_keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#010-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🎯 0.1.0 — Detection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🎯 0.1.0 — Detection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-was-reproduced" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What was reproduced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#det-smoke-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Det-smoke acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-went-wrong-first-and-why-it-matters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What went wrong first, and why it matters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assumption-outcomes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assumption outcomes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deviations-from-the-paper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deviations from the paper
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducing-this-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducing this result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#020-instance-segmentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🖌️ 0.2.0 — Instance segmentation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🖌️ 0.2.0 — Instance segmentation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-was-reproduced_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What was reproduced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-seg-smoke-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Seg-smoke run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#seg-smoke-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Seg-smoke acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-the-training-curves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the training curves
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assumption-outcomes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assumption outcomes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deviations-from-the-paper-and-from-det-smoke" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deviations from the paper, and from Det-smoke
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducing-this-result_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducing this result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#030-oriented-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔄 0.3.0 — Oriented detection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🔄 0.3.0 — Oriented detection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-was-reproduced_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What was reproduced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-obb-smoke-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The OBB-smoke run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-whole-image-figure-roadmap-111" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The whole-image figure (roadmap 111)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#acceptance-and-a-criterion-that-no-longer-fits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acceptance, and a criterion that no longer fits
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-the-training-curves_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the training curves
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assumption-outcomes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assumption outcomes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deviations-from-the-paper-and-from-the-earlier-tiers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deviations from the paper, and from the earlier tiers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducing-this-result_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducing this result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#consolidated-note-detection-segmentation-oriented-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧾 Consolidated note — detection, segmentation, oriented detection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🧾 Consolidated note — detection, segmentation, oriented detection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-trunk-three-heads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One trunk, three heads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assumption-outcomes-consolidated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assumption outcomes, consolidated
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deviations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deviations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hypotheses-the-record-supports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hypotheses the record supports
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#050-keypoint-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🕺 0.5.0 — Keypoint detection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🕺 0.5.0 — Keypoint detection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-was-reproduced_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What was reproduced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-pose-smoke-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Pose-smoke run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-the-training-curves_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the training curves
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assumption-outcomes_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assumption outcomes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deviations-from-the-paper-and-from-the-earlier-tiers_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deviations from the paper, and from the earlier tiers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducing-this-result_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducing this result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#correcting-note-which-engine-scored-each-tier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚙️ Correcting note — which engine scored each tier
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="⚙️ Correcting note — which engine scored each tier">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-the-record-left-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the record left out
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#engine-per-tier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Engine per tier
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducing-a-figure-above" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducing a figure above
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-close-the-two-engines-are" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How close the two engines are
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#correcting-note-the-050-sections-source-claims" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📐 Correcting note — the 0.5.0 section's source claims
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="📐 Correcting note — the 0.5.0 section&#39;s source claims">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-the-section-says-and-what-r1-says" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the section says, and what R1 says
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-is-true-instead" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is true instead
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-this-note-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this note does not do
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/Borda/lucid-YOLO/edit/main/docs/REPRODUCTION_REPORT.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="reproduction-report">📈 Reproduction report<a class="headerlink" href="#reproduction-report" title="Permanent link">&para;</a></h1>
+<p>A living document (D10): one section lands with each <code>0.MINOR</code>, recording what was reproduced, what was assumed, and what diverged. Sections are append-only — a later release corrects an earlier claim by adding to it, never by editing the record away.</p>
+<p>Independent, from-scratch implementation of the methods described in the YOLO26 paper (arXiv:2606.03748, [R1]). No Ultralytics source code, configuration, or weights were consulted at any point; see <code>PROVENANCE.md</code> for the source allowlist and the audit trail.</p>
+<hr />
+<h2 id="010-detection">🎯 0.1.0 — Detection<a class="headerlink" href="#010-detection" title="Permanent link">&para;</a></h2>
+<h3 id="what-was-reproduced">What was reproduced<a class="headerlink" href="#what-was-reproduced" title="Permanent link">&para;</a></h3>
+<p>The detector as [R1] describes it: a DFL-free dual-head architecture whose one-to-one branch supports NMS-free inference, trained with Small-Target-Aware label assignment, Progressive Loss branch reweighting, and the MuSGD hybrid optimizer.</p>
+<table>
+<thead>
+<tr>
+<th>mechanism</th>
+<th>[R1] reference</th>
+<th>implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>dual head, DFL-free</td>
+<td>sec. 3.2, Fig. S2</td>
+<td><code>models/heads/detect.py</code> — one-to-many and one-to-one branches share a backbone/neck forward; boxes are direct ltrb distances, no distribution bins</td>
+</tr>
+<tr>
+<td>NMS-free E2E decode</td>
+<td>sec. 3.2.2</td>
+<td><code>decode/topk_e2e.py</code> — top-k over the one-to-one branch, no suppression op</td>
+</tr>
+<tr>
+<td>TAL assignment</td>
+<td>R4 (arXiv:2108.07755)</td>
+<td><code>assign/tal.py</code> — <code>t = s^alpha * u^beta</code>, alpha 1, beta 6, per-GT target normalization</td>
+</tr>
+<tr>
+<td>STAL small-target assignment</td>
+<td>sec. 3.3.3</td>
+<td><code>assign/stal.py</code> — size-aware surrogate boxes widen the candidate set for small ground truths</td>
+</tr>
+<tr>
+<td>Progressive Loss</td>
+<td>sec. 3.3.1</td>
+<td><code>losses/progressive.py</code> — branch weight ramps <code>alpha_init 0.8 -&gt; alpha_final 0.1</code> as a fraction of the epoch budget</td>
+</tr>
+<tr>
+<td>MuSGD</td>
+<td>sec. 3.5</td>
+<td><code>optim/musgd.py</code> + <code>optim/newton_schulz.py</code> — Muon/SGD hybrid at <code>w_muon 0.5 / w_sgd 0.5</code></td>
+</tr>
+</tbody>
+</table>
+<p>Architectural fidelity is gated rather than asserted: <code>test_param_flops.py</code> holds all five scales within ±2% params and ±5% FLOPs of [R1, Table 7] (n: 2.4M/5.4G … x: 55.7M/193.9G).</p>
+<h3 id="det-smoke-acceptance">Det-smoke acceptance<a class="headerlink" href="#det-smoke-acceptance" title="Permanent link">&para;</a></h3>
+<p>The Det-smoke tier (blueprint sec. 10 tier A): n-scale, ~50 COCO epochs, ~1 GPU-day.</p>
+<p><strong>Run v8</strong> — dev12, COCO 2017 train, batch 128, lr 0.02, MuSGD, warmup 3 epochs then linear decay to <code>lr0 * 0.01</code>, close-mosaic for the final 10, EMA (decay 0.9999, tau 2000), 16-mixed, seed 0, 50 epochs = 46,250 steps on one RTX PRO 6000, ~8m45s/epoch.</p>
+<p>Evaluated on the full COCO val2017 (5000 images) with <code>scripts/eval_det.py</code>, which runs one forward per batch and decodes both paths from it, scoring with <code>torchmetrics</code> <code>MeanAveragePrecision</code> on the <code>faster_coco_eval</code> backend:</p>
+<table>
+<thead>
+<tr>
+<th>weights</th>
+<th>path</th>
+<th>mAP50-95</th>
+<th>mAP50</th>
+<th>mAP75</th>
+<th>mAP_S</th>
+<th>mAP_M</th>
+<th>mAP_L</th>
+<th>mAR_100</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EMA</td>
+<td>NMS</td>
+<td><strong>25.30</strong></td>
+<td>38.12</td>
+<td>26.94</td>
+<td>11.86</td>
+<td>27.09</td>
+<td>33.88</td>
+<td>—</td>
+</tr>
+<tr>
+<td>EMA</td>
+<td>E2E</td>
+<td>23.84</td>
+<td>36.00</td>
+<td>25.15</td>
+<td>11.64</td>
+<td>25.86</td>
+<td>31.38</td>
+<td>46.07</td>
+</tr>
+<tr>
+<td>raw</td>
+<td>NMS</td>
+<td>25.33</td>
+<td>38.45</td>
+<td>27.05</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>raw</td>
+<td>E2E</td>
+<td>24.23</td>
+<td>36.72</td>
+<td>25.82</td>
+<td>11.24</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>criterion</th>
+<th>required</th>
+<th>observed</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>stable training</td>
+<td>no divergence</td>
+<td>monotonic validation descent, 50/50 epochs</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>val mAP50-95</td>
+<td>&gt; 25</td>
+<td><strong>25.30</strong> EMA-NMS, 25.33 raw-NMS</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>E2E within NMS path</td>
+<td>~1.5 AP</td>
+<td>1.46 EMA, <strong>1.11 raw</strong></td>
+<td>✓</td>
+</tr>
+<tr>
+<td>Phase ≤5 gates</td>
+<td>green</td>
+<td>474 tests, 5/5 goldens</td>
+<td>✓</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The E2E deficit is itself a reproducible claim.</strong> [R1 sec. 4.4] reports 0.6–0.8 AP between the NMS-free and NMS paths. This run measures 1.11 AP on raw weights and 1.46 on EMA — the right sign and the right order of magnitude, wider than the paper's figure. Whether the residual gap closes at longer schedules is a Det-ablations question, recorded here rather than explained away.</p>
+<p><img alt="Det-smoke training curves" src="../figures/det_smoke_training.svg" /></p>
+<p><em>Run v8. Left: the epoch-end E2E mAP proxy logged during training (letterbox coordinates — the acceptance figure above comes from the standalone evaluator). Middle: epoch-mean totals, log axis. Right: the one-to-one branch's pre-gain components; the L1 term is in stride units.</em></p>
+<h3 id="what-went-wrong-first-and-why-it-matters">What went wrong first, and why it matters<a class="headerlink" href="#what-went-wrong-first-and-why-it-matters" title="Permanent link">&para;</a></h3>
+<p>Three earlier attempts failed the same criterion, and the failure is more instructive than the pass.</p>
+<table>
+<thead>
+<tr>
+<th>run</th>
+<th>epochs</th>
+<th>mAP50-95 (EMA NMS)</th>
+<th>mAR_100</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>v2 — attempt 1</td>
+<td>44/50</td>
+<td>3.96</td>
+<td>16.6</td>
+</tr>
+<tr>
+<td>v4 — attempt 2</td>
+<td>100</td>
+<td>6.28</td>
+<td>23.7</td>
+</tr>
+<tr>
+<td>v7 — stale wheel</td>
+<td>100</td>
+<td>4.00</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>v8 — attempt 3</strong></td>
+<td><strong>50</strong></td>
+<td><strong>25.30</strong></td>
+<td><strong>46.07</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Attempt 2's curves carry the signature plainly: the total loss descends the whole way while the components sit flat — its validation L1 term never moves from ~39 between epochs 30 and 90, and validation classification <em>worsens</em> from 6.88 to 7.31 while the training figure falls. A loss going down while nothing underneath it moves is what a mis-scaled term looks like.</p>
+<p><strong>Root cause 1 — coordinate frame of the L1 term (A13, WP-078).</strong> The head predicts ltrb distances in <em>stride units</em>; the module fed the loss <em>pixel</em> boxes. The legacy DFL-field gain (6.0) is calibrated for the stride frame, so the term ran 8–32× large. Measured on the attempt-2 endpoint, the one-to-one objective decomposed as <strong>97.1% L1, 1.7% classification, 1.1% CIoU</strong> — and the gain-weighted arithmetic reproduces the logged validation total exactly, which is what turned a hypothesis into a diagnosis.</p>
+<p>The consequence was visible in the classifier, not the boxes. Probed on the pre-fix checkpoint: predicted probability <strong>0.076</strong> at the assigned positive's own class, only <strong>8 of 67,200</strong> anchors above 0.25 confidence, and a mean per-anchor confidence <em>below</em> the 0.01 prior the head was initialized to (A30). Boxes were tight; the scores that rank them were noise. mAP is a ranking metric, so the runs sat in single digits regardless of localization quality.</p>
+<p>Dividing the L1 differences by each positive anchor's stride moved classification from 1.7% to <strong>23.0%</strong> of the objective.</p>
+<p><strong>Root cause 2 — augmentation RNG collapse (WP-079).</strong> <code>_TrainPipeline</code> seeds one generator at construction, in the parent process, and that copy never advances because the parent never calls <code>__getitem__</code> when workers are used. Every worker therefore replayed one identical augmentation-parameter stream (diversity <code>1/num_workers</code>), and once workers became non-persistent for unrelated memory reasons (WP-076) they restarted from that same state every epoch. At 32 workers × 100 epochs the run drew roughly <code>1/3200</code> of the intended augmentation parameters. Re-seeding each worker from <code>WorkerInfo.seed</code> restores per-worker, per-epoch streams while keeping the run reproducible from the datamodule seed.</p>
+<p><strong>What this cost, and the lesson taken.</strong> Both defects are semantic — nothing crashed, no test failed, every gate stayed green through three failed runs totalling ~35 GPU-hours. Unit tests that check shapes and finiteness cannot see a term that is the wrong size or a random stream that repeats. The regression net for 0.2.0 onward therefore pins <em>invariants</em> (loss-term balance, augmentation stream divergence) rather than only shapes, so that a semantic break fails in minutes instead of surfacing as a disappointing mAP a day later.</p>
+<h3 id="assumption-outcomes">Assumption outcomes<a class="headerlink" href="#assumption-outcomes" title="Permanent link">&para;</a></h3>
+<p>Assumptions the detector tier exercised. Full register in <code>ASSUMPTIONS.md</code>.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>subject</th>
+<th>outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A8</td>
+<td>LR schedule shape</td>
+<td><strong>validated</strong> — warmup 3 epochs + linear decay to <code>lr0*lrf</code> carries the acceptance run; the constant-LR deferral it replaced plateaued at 3.96</td>
+</tr>
+<tr>
+<td>A13</td>
+<td>loss gains and L1 coordinate frame</td>
+<td><strong>revised, then validated</strong> — gains 7.5/0.5/6.0 from [R1 Table S2] kept; frame corrected from pixels to stride units</td>
+</tr>
+<tr>
+<td>A30</td>
+<td>classification bias prior init</td>
+<td><strong>validated</strong> — <code>-log((1-pi)/pi)</code>, pi 0.01, per R24 sec. 5.1; without it the first MuSGD step killed the network</td>
+</tr>
+<tr>
+<td>A2</td>
+<td>TAL exponents</td>
+<td>held at alpha 1, beta 6; not independently ablated at A-tier</td>
+</tr>
+<tr>
+<td>A31</td>
+<td>warmup convention</td>
+<td>absorbed into A8</td>
+</tr>
+<tr>
+<td>A32</td>
+<td>train-time resampling filter</td>
+<td>non-antialiased fused warp; no acceptance-visible effect</td>
+</tr>
+<tr>
+<td>A33</td>
+<td>uint8 batch transport</td>
+<td>validated — no acceptance-visible effect, 4× smaller IPC</td>
+</tr>
+</tbody>
+</table>
+<h3 id="deviations-from-the-paper">Deviations from the paper<a class="headerlink" href="#deviations-from-the-paper" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Epoch budget.</strong> ~50 epochs at n-scale, against the paper's from-scratch 500/600-epoch schedules. Det-smoke is a smoke tier by design; the headline comparison against [R1 Table 4] is Det-C and remains a stretch goal.</li>
+<li><strong>No Objects365 pretraining, no evolutionary hyperparameter search</strong> (D2).</li>
+<li><strong>Batch-scaled learning rate.</strong> lr 0.02 at batch 128, linear scaling from the batch-64 recipe. The unscaled lr 0.01 run at the same batch is attempt 2's configuration and is not separable from the loss-frame defect it also carried, so this project has no clean measurement of the scaling on its own.</li>
+<li><strong>E2E deficit wider than published</strong> — 1.11 AP raw against 0.6–0.8 in [R1 sec. 4.4]; see above.</li>
+</ol>
+<h3 id="reproducing-this-result">Reproducing this result<a class="headerlink" href="#reproducing-this-result" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>lucid-yolo<span class="o">==</span><span class="m">0</span>.0.1.dev12
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>lucid-download<span class="w"> </span>--data-root<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--splits<span class="w"> </span>train<span class="w"> </span>val<span class="w"> </span>--verify
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>lucid-yolo<span class="w"> </span>fit<span class="w"> </span>--config<span class="w"> </span>det_smoke.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>--data.data_root<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--data.batch_size<span class="w"> </span><span class="m">128</span><span class="w"> </span>--data.num_workers<span class="w"> </span><span class="m">32</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span>--data.prefetch_factor<span class="w"> </span><span class="m">1</span><span class="w"> </span>--model.lr<span class="w"> </span><span class="m">0</span>.02<span class="w"> </span>--trainer.max_epochs<span class="w"> </span><span class="m">50</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span>--trainer.precision<span class="w"> </span><span class="m">16</span>-mixed
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>python<span class="w"> </span>scripts/eval_det.py<span class="w"> </span>&lt;checkpoint&gt;<span class="w"> </span>--data-root<span class="w"> </span>&lt;root&gt;
+</code></pre></div>
+<p>These are the commands <strong>as run</strong>, at the version named, and are left unedited for that reason. On 0.3.0 and later the same three steps are <code>lucid-data download --data_root &lt;root&gt; --splits '[train,val]' --verify true</code>, the unchanged <code>lucid-yolo fit</code>, and <code>lucid-eval --checkpoint &lt;checkpoint&gt; --data_root &lt;root&gt;</code> (WP-096). <code>lucid-download</code> kept accepting the dashed flags above through 0.3.0; it was removed in 0.4.0 as that release said it would be (WP-110), so on 0.4.0 and later the block above must be read through those replacements rather than run as written.</p>
+<p>Seed 0 throughout. Cross-platform bitwise reproduction is not claimed (A26: libm last-bit rounding differs across OS and architecture); the run config, seeds, and metric reports are archived under <code>.experiments/det_smoke/</code>.</p>
+<hr />
+<h2 id="020-instance-segmentation">🖌️ 0.2.0 — Instance segmentation<a class="headerlink" href="#020-instance-segmentation" title="Permanent link">&para;</a></h2>
+<p>The Seg-smoke tier has run and was <strong>accepted 2026-08-10</strong> at roadmap 054's <code>[PRINCIPAL]</code> gate, together with the numeric criterion below, which <code>seg_smoke.yaml</code> had stated only qualitatively. This section records what the run measured and what it was measured against.</p>
+<h3 id="what-was-reproduced_1">What was reproduced<a class="headerlink" href="#what-was-reproduced_1" title="Permanent link">&para;</a></h3>
+<p>Instance segmentation as [R1] describes it: prototype masks assembled by per-instance coefficients, read out of the same one-to-one branch the NMS-free detector deploys, with a training-only auxiliary semantic branch shaping the shared features.</p>
+<table>
+<thead>
+<tr>
+<th>mechanism</th>
+<th>reference</th>
+<th>implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>prototype–coefficient masks</td>
+<td>[R1 Eq. 7], R16</td>
+<td><code>models/heads/proto.py</code> — <code>ProtoFusion</code> builds the shared feature, <code>ProtoNet</code> emits K=32 prototypes at 160×160 (A15), <code>assemble_masks</code> is the einsum of Eq. 7</td>
+</tr>
+<tr>
+<td>coefficient stems on the dual head</td>
+<td>A14, A34</td>
+<td><code>models/build.py</code> — <code>num_coeffs</code> enables a coefficient stem on each branch; tanh activation per A16</td>
+</tr>
+<tr>
+<td>instance mask loss</td>
+<td>A16</td>
+<td><code>losses/mask_loss.py</code> — per-pixel BCE cropped to the GT box, normalized by box area, sharing the A11 half-open pixel-centre rule</td>
+</tr>
+<tr>
+<td>auxiliary semantic branch</td>
+<td>[R1 sec. 3.4.1], A17</td>
+<td><code>models/heads/semantic.py</code> — one 1×1 convolution, A30 prior bias, <code>forward</code> returning <code>None</code> in eval mode; <code>losses/semantic_loss.py</code> supervises it with BCE + soft Dice</td>
+</tr>
+<tr>
+<td>mask decode</td>
+<td>A37</td>
+<td><code>eval/segment_decode.py</code> — assemble, sigmoid, bilinear upsample, box crop, threshold 0.5, nearest-neighbour inverse letterbox</td>
+</tr>
+</tbody>
+</table>
+<p>Parameter and FLOP fidelity is gated, not asserted: <code>test_param_flops.py</code> holds all five segmentation scales within ±3% params and ±5% FLOPs of [R1 Table S9] (n: 2.72M/9.00G). The parameter tolerance is wider than detection's ±2% because the head's sizing rests on five assumptions (A14, A15, A18, A34, A35) rather than on published structure.</p>
+<p>The fast wiring gate runs before any COCO launch: <code>scripts/overfit_micro.py --task segment</code> reaches train mask IoU <strong>0.8146</strong> over 592 instances against a 0.7 floor, decoded through the deployed one-to-one path (<code>goldens/gpu/overfit_micro_seg.json</code>).</p>
+<h3 id="the-seg-smoke-run">The Seg-smoke run<a class="headerlink" href="#the-seg-smoke-run" title="Permanent link">&para;</a></h3>
+<p><strong>Run v9</strong> — COCO 2017 train, <code>task: segment</code>, n scale, batch 128, lr 0.02, MuSGD, warmup 3 epochs then linear decay to <code>lr0 * 0.01</code>, close-mosaic for the final 10, EMA (decay 0.9999, tau 2000), gradient clip 10.0, bf16-mixed, seed 0, <code>deterministic: true</code>, 50 epochs = 46,250 steps on an unrecorded Colab GPU. <code>mask_gain 2.5</code>, <code>semantic_gain 0.5</code> (A38).</p>
+<p>Evaluated on the full COCO val2017 (5000 images) at 640 px with <code>scripts/eval_det.py</code>, one forward per batch decoding both paths, boxes and masks scored by separate <code>torchmetrics</code> <code>MeanAveragePrecision</code> instances on the <code>faster_coco_eval</code> backend — masks at original image resolution against ground truth decoded from the COCO polygons (R12). EMA weights; raw weights were not evaluated for this run.</p>
+<table>
+<thead>
+<tr>
+<th>path</th>
+<th>box mAP50-95</th>
+<th>box mAP50</th>
+<th>box mAP75</th>
+<th>segm mAP50-95</th>
+<th>segm mAP50</th>
+<th>segm mAP75</th>
+<th>segm mAR_100</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NMS</td>
+<td><strong>26.12</strong></td>
+<td>39.12</td>
+<td>27.93</td>
+<td><strong>19.01</strong></td>
+<td>34.40</td>
+<td>18.63</td>
+<td>32.75</td>
+</tr>
+<tr>
+<td>E2E</td>
+<td>24.85</td>
+<td>37.25</td>
+<td>26.59</td>
+<td>18.20</td>
+<td>32.72</td>
+<td>18.03</td>
+<td>32.50</td>
+</tr>
+</tbody>
+</table>
+<p>By size bucket, segm against box on the NMS path: <strong>3.74 / 20.06 / 31.79</strong> segm against 12.33 / 28.54 / 34.86 box for small / medium / large.</p>
+<p>The NMS-free path costs 1.27 box AP and 0.81 segm AP.</p>
+<h3 id="seg-smoke-acceptance">Seg-smoke acceptance<a class="headerlink" href="#seg-smoke-acceptance" title="Permanent link">&para;</a></h3>
+<p><code>seg_smoke.yaml</code> asks for "stable training and a segm mAP that tracks the box mAP". That is a ratio statement, and a ratio is the right shape: it survives a change of scale or schedule where an absolute floor would have to be re-derived for every tier. What it lacked is a number.</p>
+<p><strong>Accepted 2026-08-10</strong> at roadmap 054, the criterion below with it: it is the standing Seg-tier criterion from here, not a reading of this run alone.</p>
+<table>
+<thead>
+<tr>
+<th>criterion</th>
+<th>required</th>
+<th>observed</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>stable training</td>
+<td>no divergence</td>
+<td><code>val/loss</code> strictly decreasing across all 49 logged epochs, 19.739 → 10.403</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>wiring gate</td>
+<td>train mask IoU ≥ 0.7</td>
+<td><strong>0.8146</strong></td>
+<td>✓</td>
+</tr>
+<tr>
+<td>box mAP50-95</td>
+<td>&gt; 25, the Det-smoke floor unchanged</td>
+<td><strong>26.12</strong> EMA-NMS</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>mask-to-box ratio</td>
+<td>segm mAP50-95 ≥ <strong>0.65 ×</strong> box mAP50-95, same weights, same path</td>
+<td><strong>0.728</strong> NMS, <strong>0.732</strong> E2E</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>Phase ≤6 gates</td>
+<td>green</td>
+<td>867 tests, 12/12 goldens — the six live sets and the <code>frozen/0.2</code> snapshot this release cut from them</td>
+<td>✓</td>
+</tr>
+</tbody>
+</table>
+<p>The box floor is carried over from Det-smoke rather than dropped, because a ratio alone cannot fail a run that collapsed: halve both numbers and the ratio is unchanged. The two criteria answer different questions — the floor asks whether the detector still works, the ratio asks whether the masks followed it — and a tier that supervises masks <em>on top of</em> the detection objective needs both, or a regression in the shared trunk passes as a segmentation success.</p>
+<p>The ratio is bounded above by construction: every mask starts from a detection this same model produced and is cropped to it, so segm mAP could equal box mAP only if every mask were exact inside its own box. The question is only how far below, and the run answers it in a way that says where the loss comes from. The mask-to-box ratio is <strong>0.879</strong> at IoU 0.50 — identical to three decimals on both decode paths — and falls to 0.667 (NMS) / 0.678 (E2E) at IoU 0.75. Across sizes it is 0.30 small, 0.70 medium, 0.91 large. The model finds and labels instances about as well as its boxes do; it pays at the boundary, and it pays most where the prototype grid is coarsest relative to the object. At 160×160 for a 640-pixel input (A15), one prototype cell is 4 input pixels: a 32-pixel object spans 8 cells, and below that quantization dominates whatever the coefficients predict.</p>
+<p>A floor at 0.65 leaves about 11% relative headroom under the observed 0.728. That band is wide enough to absorb what legitimately moves the aggregate ratio — a different small/medium/large mix, since the buckets themselves span 0.30 to 0.91, plus seed and precision noise — and it is far above where the failures this gate exists to catch would land. Coefficients gathered against the wrong anchors, thresholding before upsampling (A37 ii), a crop in the wrong frame, or an unsupervised one-to-one coefficient stem (A38 ii) do not shave a tenth off the ratio; they collapse it, because the mask either degenerates or lands on the wrong object. A criterion has to separate the failure it names from the noise it should tolerate, and 0.65 does.</p>
+<p><strong>An observation, offered as one.</strong> The segmentation run's box accuracy is above Det-smoke's: 26.12 against 25.30 on EMA-NMS, 24.85 against 23.84 on EMA-E2E. So mask supervision did not cost box accuracy here. It is not a measurement of what mask supervision costs, because the two runs differ in more than the task — bf16-mixed against 16-mixed, different hardware, and the data-pipeline work that landed in between — and each is a single seed. It belongs in the record, not in the criterion table.</p>
+<h3 id="reading-the-training-curves">Reading the training curves<a class="headerlink" href="#reading-the-training-curves" title="Permanent link">&para;</a></h3>
+<p><img alt="Seg-smoke training curves" src="../figures/seg_smoke_training.svg" /></p>
+<p><em>Run v9, four panels. The epoch-end E2E mAP proxy logged during training (letterbox coordinates — the figures above come from the standalone evaluator); epoch-mean totals; the one-to-one branch's pre-gain components, the L1 term in stride units; and the pre-gain segmentation terms, epoch-mean. The last panel plots the mask term for both splits and the semantic term for training only — the eval-mode branch produces nothing to plot.</em></p>
+<p>Three things a reader should not misread.</p>
+<p><strong><code>val/semantic</code> is 0.0 at every logged epoch, and that is correct.</strong> The auxiliary semantic branch is training-only by design: <code>forward</code> returns <code>None</code> whenever the module is not in training mode, keyed on module mode and never on grad mode (A17), so at validation there is no logit to score and the term contributes nothing. A flat zero is the branch being provably absent, not a branch that failed to learn. The branch that <em>is</em> learning shows up in <code>train/semantic</code>, which falls from 0.826 at epoch 0 to 0.057 at epoch 49. The same design is what lets the fused-parameter gate account for exactly one convolution disappearing at deploy.</p>
+<p><strong><code>val/mAP</code> is a letterbox-frame proxy, not the acceptance figure.</strong> It scores the E2E path in letterbox coordinates during validation; IoU is invariant to each image's uniform letterbox scaling, so it tracks the original-coordinate protocol closely — 0.2442 at epoch 49 against the standalone evaluator's 0.2485 E2E — but the authoritative number is <code>scripts/eval_det.py</code> at original resolution, as it is for Det-smoke. <code>val/mask</code> (0.5338 → 0.3783) is the mask loss term, not a mask metric.</p>
+<p><strong>One validation row is missing from the log, not from the run.</strong> The CSV carries 49 validation rows for 50 epochs: epoch 29's is absent. The training rows run continuously across that boundary (step 27,699 to 27,799) and <code>val/mAP</code> resumes its ascent at epoch 30, so this is a logging gap.</p>
+<p>A <code>val/segm_mAP</code> metric now exists, decoding the kept detections' masks through the deployed A37 path and scoring them at the prototype grid — a proxy in exactly the sense <code>val/mAP</code> already is. It landed after this run, so <strong>no epoch of run v9 carries it</strong>; it is available to future segmentation runs, where it removes the situation this one was in, of a segmentation run whose only epoch metric was about its boxes.</p>
+<h3 id="assumption-outcomes_1">Assumption outcomes<a class="headerlink" href="#assumption-outcomes_1" title="Permanent link">&para;</a></h3>
+<p>Assumptions the segmentation tier exercised. Full register in <code>ASSUMPTIONS.md</code>.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>subject</th>
+<th>outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A15</td>
+<td>prototype resolution, 160×160 at 640 input</td>
+<td><strong>held</strong> — carries the run; the size-bucket split (0.30 small against 0.91 large mask-to-box) is where its cost is visible, and it is the first thing to ablate if masks are the target</td>
+</tr>
+<tr>
+<td>A16</td>
+<td>tanh coefficients, box-cropped area-normalized BCE</td>
+<td><strong>validated at the wiring scale</strong> — train mask IoU 0.8146 against a 0.7 floor; COCO-scale masks train stably under it</td>
+</tr>
+<tr>
+<td>A17</td>
+<td>training-only auxiliary semantic branch</td>
+<td><strong>validated</strong> — <code>val/semantic</code> 0.0 at every logged epoch is the branch's eval-mode absence, and <code>train/semantic</code> falls 0.826 → 0.057, so the branch trains and disappears exactly as specified</td>
+</tr>
+<tr>
+<td>A37</td>
+<td>mask-decode numerics the papers leave open</td>
+<td><strong>held</strong> — the full-val2017 segm figures are produced by this decode; a wrong threshold order or crop frame would show as a collapsed ratio, and the ratio is 0.73</td>
+</tr>
+<tr>
+<td>A38</td>
+<td>mask/semantic gains and which branch is supervised</td>
+<td><strong>held</strong> — 2.5 / 0.5 keep both terms live without displacing the detection objective; box accuracy did not regress against Det-smoke</td>
+</tr>
+<tr>
+<td>A11</td>
+<td>anchor centre placement</td>
+<td>unchanged from detection; the mask crop reuses its <code>+0.5</code> half-open rule rather than defining a second one</td>
+</tr>
+</tbody>
+</table>
+<h3 id="deviations-from-the-paper-and-from-det-smoke">Deviations from the paper, and from Det-smoke<a class="headerlink" href="#deviations-from-the-paper-and-from-det-smoke" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Epoch budget.</strong> 50 epochs at n scale, against the paper's from-scratch 500/600-epoch schedules. Seg-smoke is a smoke tier by design.</li>
+<li><strong>No Objects365 pretraining, no evolutionary hyperparameter search</strong> (D2).</li>
+<li><strong>bf16-mixed, where Det-smoke ran 16-mixed.</strong> A hardware-driven choice, not a measured one; the two precisions have not been compared on this codebase.</li>
+<li><strong>lr 0.02, overriding <code>seg_smoke.yaml</code>'s 0.01.</strong> The file carries the batch-64 recipe value; the run used the batch-128 linear scaling that Det-smoke settled on. As there, the unscaled value has no clean measurement of its own.</li>
+<li><strong>The mask gains are this project's, not the paper's.</strong> [R1] gives no gain for either segmentation term; 2.5 and 0.5 are A38's reasoning, argued from where the terms sit in the converged regime rather than from a published number.</li>
+<li><strong>Raw weights unevaluated</strong>, so the EMA contribution is unmeasured for this run — Det-smoke reports both.</li>
+</ol>
+<h3 id="reproducing-this-result_1">Reproducing this result<a class="headerlink" href="#reproducing-this-result_1" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>lucid-download<span class="w"> </span>--data-root<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--splits<span class="w"> </span>train<span class="w"> </span>val<span class="w"> </span>--verify
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>lucid-yolo<span class="w"> </span>fit<span class="w"> </span>--config<span class="w"> </span>seg_smoke.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>--data.data_root<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--data.batch_size<span class="w"> </span><span class="m">128</span><span class="w"> </span>--data.num_workers<span class="w"> </span><span class="m">32</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>--data.prefetch_factor<span class="w"> </span><span class="m">2</span><span class="w"> </span>--model.lr<span class="w"> </span><span class="m">0</span>.02<span class="w"> </span>--trainer.max_epochs<span class="w"> </span><span class="m">50</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span>--trainer.precision<span class="w"> </span>bf16-mixed
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>python<span class="w"> </span>scripts/eval_det.py<span class="w"> </span>&lt;checkpoint&gt;<span class="w"> </span>--data-root<span class="w"> </span>&lt;root&gt;
+</code></pre></div>
+<p>As above, these are the commands as run and are left unedited; the 0.3.0 spellings are <code>lucid-data download</code> and <code>lucid-eval</code> (WP-096).</p>
+<p>Seed 0 throughout. The package version installed for run v9 is not recorded in any of its artifacts. Cross-platform bitwise reproduction is not claimed (A26); the metric report is archived under <code>.experiments/seg_smoke/</code>, and the run config, hyperparameters and epoch metrics under <code>lightning_logs/version_9/</code>.</p>
+<hr />
+<h2 id="030-oriented-detection">🔄 0.3.0 — Oriented detection<a class="headerlink" href="#030-oriented-detection" title="Permanent link">&para;</a></h2>
+<p>The OBB-smoke tier has run and was <strong>accepted 2026-08-14</strong> at roadmap 064's <code>[PRINCIPAL]</code> gate. This section records what the run measured, what it can and cannot be compared against, and where the criterion <code>obb_smoke.yaml</code> stated no longer fits the instruments — the acceptance was given on the first two, and explicitly not on the third.</p>
+<h3 id="what-was-reproduced_2">What was reproduced<a class="headerlink" href="#what-was-reproduced_2" title="Permanent link">&para;</a></h3>
+<p>Oriented detection as [R1] describes it: the same DFL-free dual head and NMS-free one-to-one deploy path, with per-branch angle stems, the axis-aligned box terms replaced by rotated ones, and R1 Eq. 15's angle term added.</p>
+<table>
+<thead>
+<tr>
+<th>mechanism</th>
+<th>reference</th>
+<th>implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>oriented head</td>
+<td>[R1] sec. 3.4.3, A44, A45</td>
+<td><code>models/heads/obb.py</code> — <code>decode_rboxes</code> composes the ltrb rectangle with the predicted heading; <code>o2o_rotated_topk</code> ranks boxes and gathers each angle by the anchor its own box was ranked by</td>
+</tr>
+<tr>
+<td>rotated IoU loss</td>
+<td>R17, A49</td>
+<td><code>losses/probiou.py</code> — the bounded Hellinger form, restructured so it needs no float64 (MPS has none)</td>
+</tr>
+<tr>
+<td>retargeted L1</td>
+<td>A50</td>
+<td>the L1 slot moved onto the rotated box's own <code>(cx, cy, w, h)</code>; the axis-aligned envelope target fights the rotated term at every non-zero <code>theta</code></td>
+</tr>
+<tr>
+<td>angle term</td>
+<td>[R1] Eq. 15, A22</td>
+<td><code>losses/oriented_loss.py</code> at gain 0.25, lowered from 1.0 by WP-093</td>
+</tr>
+<tr>
+<td>rotated assignment</td>
+<td>A25</td>
+<td>one assignment shared by every term, with rotated <strong>candidacy</strong> only: <code>gt_rboxes</code> reaches the assigners and nothing else</td>
+</tr>
+<tr>
+<td>rotated mAP</td>
+<td>A24</td>
+<td><code>eval/dota_eval.py</code> — exact polygon-intersection IoU by Sutherland-Hodgman clipping, ten thresholds, 101-point interpolated recall, 300 detections per tile, R18's difficult rule (A48)</td>
+</tr>
+<tr>
+<td>1024 px tiling</td>
+<td>R18 sec. 4, A21, A52</td>
+<td><code>data/tiling.py</code> + <code>lucid-data build-tiles</code> — overlapping crops, parts below 70% of original area flagged difficult</td>
+</tr>
+</tbody>
+</table>
+<p>Parameter and FLOP fidelity is gated against <strong>this project's own frozen goldens</strong>, not against the paper: [R1] publishes no oriented parameter table (n: 2.56M/14.68G at 1024 px, <code>goldens/params_flops_obb.json</code>). Those numbers catch drift; they corroborate nothing.</p>
+<p>The fast wiring gate runs before any DOTA launch: <code>scripts/overfit_micro.py --task obb</code> reaches train rotated mAP50 <strong>0.9390</strong> over 592 instances against a 0.9 floor, decoded through the deployed one-to-one path (<code>goldens/gpu/overfit_micro_obb.json</code>).</p>
+<h3 id="the-obb-smoke-run">The OBB-smoke run<a class="headerlink" href="#the-obb-smoke-run" title="Permanent link">&para;</a></h3>
+<p><strong>Run v10</strong> — <code>0.3.0.dev5</code>, DOTA-v1.0 train tiled at 1024 px with 512 px overlap, <code>task: obb</code>, n scale, batch 64, lr 0.01, MuSGD, warmup 3 epochs then linear decay to <code>lr0 * 0.01</code>, close-mosaic for the final 10, EMA (decay 0.9999, tau 2000), gradient clip 10.0, bf16-mixed, seed 0, <code>deterministic: true</code>, 50 epochs = 23,050 steps on one RTX PRO 6000 (operator-reported; the run artifacts record no device), 7h29m wall clock — about 9 minutes an epoch, derived from the artifact timestamps rather than logged, since no per-epoch timing was recorded here either. Gains: ProbIoU 7.5 (A49, Hellinger), rotated L1 6.0 (A50), angle 0.25 (A22), classification 0.5 unchanged.</p>
+<p>The tiling overlap is <strong>512 px, R18's own protocol figure, not A21's 200 px default</strong> — a choice the tier made and the register did not, which is recorded here because the two differ by a factor of 2.6 in tiles per image and therefore in everything downstream of tile count.</p>
+<p>Evaluated by <code>lucid-eval</code> on the DOTA-v1.0 val split, tiled identically: 10,132 tiles, 101,209 instances, 16,528 of them difficult.</p>
+<table>
+<thead>
+<tr>
+<th>weights</th>
+<th>rotated mAP50-95</th>
+<th>rotated mAP50</th>
+<th>rotated mAP75</th>
+<th>rotated mAR_300</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EMA</td>
+<td><strong>0.2914</strong></td>
+<td>0.5242</td>
+<td>0.2770</td>
+<td>0.5075</td>
+</tr>
+<tr>
+<td>raw</td>
+<td>0.2867</td>
+<td>0.5140</td>
+<td>0.2734</td>
+<td>0.5013</td>
+</tr>
+</tbody>
+</table>
+<p>EMA is worth <code>+0.0047</code> mAP50-95 — small, positive, and the opposite sign to Det-smoke, where raw scored marginally higher.</p>
+<p><strong>Every figure above is per tile.</strong> Detections from overlapping tiles are not merged back onto whole images here: on an NMS-free path two tiles detecting one object have nothing to suppress the duplicate, so the merge is a policy that must be decided rather than inherited. WP-107 built that policy and roadmap 111 runs it against this checkpoint, below. A per-tile score never pays the duplicate cost whole-image evaluation charges, so <strong>these numbers are not comparable to published DOTA results</strong>. That is a property of the measurement, not a hedge about its precision.</p>
+<p><strong>Two independent measurements agree to four decimals.</strong> The same checkpoint scores 0.2914 / 0.5242 on Apple MPS here and 0.2914 / 0.5243 on CUDA in the operator's own run — two accelerators, two tile builds from the same source archive, two machines. That is evidence about the evaluator and the tiler, not about the model, and it is the strongest cross-platform agreement this project has recorded; A26 still declines to claim bitwise reproduction.</p>
+<h3 id="the-whole-image-figure-roadmap-111">The whole-image figure (roadmap 111)<a class="headerlink" href="#the-whole-image-figure-roadmap-111" title="Permanent link">&para;</a></h3>
+<p>The same checkpoint, re-scored through <code>merge_whole_images</code> (WP-107) on the same DOTA-v1.0 val split, CUDA, 458 source images:</p>
+<table>
+<thead>
+<tr>
+<th>weights</th>
+<th>scope</th>
+<th>rotated mAP50-95</th>
+<th>rotated mAP50</th>
+<th>rotated mAP75</th>
+<th>rotated mAR_300</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EMA</td>
+<td>per tile</td>
+<td>0.2914</td>
+<td>0.5242</td>
+<td>0.2770</td>
+<td>0.5075</td>
+</tr>
+<tr>
+<td>EMA</td>
+<td>whole image</td>
+<td><strong>0.3146</strong></td>
+<td>0.5484</td>
+<td>0.3111</td>
+<td>0.5193</td>
+</tr>
+</tbody>
+</table>
+<p>Every figure rises, not falls. WP-107's own log entry states the merge in isolation "can only <em>lower</em>" a per-tile number, and that remains true of core ownership alone — the reason this run runs the other way is A60, exercised here for the first time against real data: whole-image scoring drops the per-tile 300-detection cap (<code>o2o_rotated_topk</code>'s own emission limit, A47), because a source image assembled from roughly 22 tiles is not one forward pass and re-imposing 300 on it would measure a truncation rather than the model. That cap-lifting and the core-ownership merge run together in this measurement rather than separately, so the split between them is not isolated here — see <a href="../RESEARCH_LOG/#wp-111">research log</a>.</p>
+<p>This is, for the first time, a figure of the same <em>statistic</em> [R1 Tables 10-11] report — whole-image rotated mAP. It is still not compared against those tables in this section: the deviations below (epoch budget, no pretraining, batch/resolution choices) stand regardless of which statistic is quoted, and the design's own target is the paper's relative claims, not its absolute ones (design doc §5.11, §7).</p>
+<h3 id="acceptance-and-a-criterion-that-no-longer-fits">Acceptance, and a criterion that no longer fits<a class="headerlink" href="#acceptance-and-a-criterion-that-no-longer-fits" title="Permanent link">&para;</a></h3>
+<p><code>obb_smoke.yaml</code> asks for "stable training and a rotated mAP50 that tracks the box mAP". The second half <strong>cannot be evaluated on this run, by construction</strong>: WP-102 stopped logging <code>val/mAP</code> for oriented runs, because that figure reads the A44 composition's pre-rotation rectangle and therefore scores a run with correct orientations and one with random orientations identically. A criterion asking a rotated metric to track a number that was removed for being uninformative is a criterion that outlived its instrument.</p>
+<p>What the acceptance was given on:</p>
+<table>
+<thead>
+<tr>
+<th>criterion</th>
+<th>required</th>
+<th>observed</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>wiring gate</td>
+<td>train rotated mAP50 ≥ 0.9</td>
+<td><strong>0.9390</strong></td>
+<td>✓</td>
+</tr>
+<tr>
+<td>training completed</td>
+<td>50/50 epochs, all logged</td>
+<td>50 validation rows, no gaps</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>no divergence</td>
+<td>—</td>
+<td><code>val/loss</code> 103.79 → 11.2470, minimum 11.2447 at epoch 48; 15 of 49 steps rise, the largest 8.4% at epoch 9, every rise after epoch 32 at most 0.15%</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>rotated mAP50</td>
+<td><em>criterion unfit — see above</em>; recorded, not cleared</td>
+<td><strong>0.5242</strong> EMA, per tile</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Phase ≤8 gates</td>
+<td>green</td>
+<td>1,555 tests, 20/20 goldens — the seven live sets, <code>frozen/0.2</code> and the <code>frozen/0.3</code> snapshot this release cut</td>
+<td>✓</td>
+</tr>
+</tbody>
+</table>
+<p>The stability row is stated precisely because Det-smoke and Seg-smoke both recorded strictly monotone validation descent and this run did not. Fifteen of forty-nine epoch-to-epoch steps rise, and the shape of that set is what makes it noise rather than divergence: the only two rises worth a number are 5.7% at epoch 3 and 8.4% at epoch 9, inside the warmup and just after it, while every rise from epoch 32 onward is at most 0.15% — six of them, on a curve that is by then flat to three decimals. The minimum is at epoch 48 rather than 49, by 0.0023. This is a different observation from the earlier two tiers, so it is written as one rather than folded into the same "monotonic" phrase.</p>
+<p><strong>What a fit criterion would need.</strong> Roadmap 111, below, delivers the whole-image number this project could compare against anything published — but no such comparison is drawn in this section, deliberately (design doc §5.11, §7): the smoke tier's epoch budget, missing pretraining and resolution choices stand whichever statistic is quoted. The honest statement remains the one this section makes: a per-tile rotated mAP50 of 0.52 from a 50-epoch n-scale run, on a task whose wiring gate passes at 0.94, with no external reference point.</p>
+<h3 id="reading-the-training-curves_1">Reading the training curves<a class="headerlink" href="#reading-the-training-curves_1" title="Permanent link">&para;</a></h3>
+<p><img alt="OBB-smoke training curves" src="../figures/obb_smoke_training.svg" /></p>
+<p><em>Run v10, four panels. The per-tile rotated mAP (both mAP50 and mAP50-95) logged at each epoch end; epoch-mean totals; the one-to-one branch's pre-gain components; and the oriented terms that replace two of them.</em></p>
+<p>Three things a reader should not misread.</p>
+<p><strong>Panels 3 and 4 overlap, and panel 3's box curves are inert.</strong> <code>val/o2o_box</code> and <code>val/o2o_l1</code> are computed and logged as diagnostics, but the dual loss is constructed with <code>box_gain = 0</code> and <code>l1_gain = 0</code> under this task, so no gradient ever followed them; the live terms are <code>rbox</code> and <code>rl1</code> in panel 4. <code>val/o2o_box</code> drifting 0.61 → 0.41 is the axis-aligned envelope of boxes that improved for other reasons. The zeroing is done inside the dual loss rather than by subtracting afterwards, because <code>(c + b) - b</code> is not <code>c</code> in floating point.</p>
+<p><strong>The opening loss is the classification term, not a defect.</strong> <code>train/loss</code> starts at 365 and <code>val/loss</code> at 104, against Det-smoke's tens. Nearly all of it is classification at initialization — <code>train/o2o_cls</code> starts at 2085 and ends at 1.94, <code>val/o2o_cls</code> at 436 and ends at 5.44 — which is what a 15-class objective over the anchor count of a 1024 px input looks like before the prior bias is learned. The rotated terms never show that scale: <code>rbox</code> starts at 0.51, <code>rl1</code> at 1.91, <code>angle</code> at 0.40.</p>
+<p><strong>The metric is flat for the last ten epochs, and that is a finding.</strong> <code>val/rotated_mAP50</code> peaks at 0.5262 at epoch 40 — the epoch close-mosaic fires — and ends at 0.5257, a change of <code>-0.0001</code> across the whole close-mosaic window. The curve had converged before mosaic was disabled, so this run shows <strong>none</strong> of the late-epoch lift close-mosaic exists to produce. On Det-smoke that window was worth real accuracy. Two readings are available and this run cannot separate them: either 50 epochs is past the point where this n-scale model has anything left to gain on this data, or the oriented objective's ceiling is set by something the schedule does not touch — A44 being the candidate. Whichever it is, more epochs is not the obvious next experiment.</p>
+<h3 id="assumption-outcomes_2">Assumption outcomes<a class="headerlink" href="#assumption-outcomes_2" title="Permanent link">&para;</a></h3>
+<p>Assumptions the oriented tier exercised. Full register in <code>ASSUMPTIONS.md</code>.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>subject</th>
+<th>outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A21</td>
+<td>DOTA crop overlap</td>
+<td><strong>not exercised at its recorded value</strong> — the tier ran at R18's 512 px, not the register's 200 px default. The parameter carried the change without incident; the assumption's own value remains unmeasured</td>
+</tr>
+<tr>
+<td>A22</td>
+<td>angle-term weight, 0.25</td>
+<td><strong>held</strong> — the term falls 0.40 → 0.049 (train) and 0.28 → 0.088 (val) without displacing the box terms; WP-093's reduction from 1.0 is what this run trained under</td>
+</tr>
+<tr>
+<td>A24</td>
+<td>rotated-IoU metric and its protocol</td>
+<td><strong>held</strong> — produces the figures above, and agrees to four decimals across MPS and CUDA</td>
+</tr>
+<tr>
+<td>A25</td>
+<td>rotated candidacy in TAL/STAL</td>
+<td><strong>held</strong> — one assignment, rotated containment only; the wiring gate at 0.94 is the evidence that positives reach the right anchors</td>
+</tr>
+<tr>
+<td>A44</td>
+<td>how the angle composes with ltrb</td>
+<td><strong>carries the run, and bounds it</strong> — every number here is produced by this composition. It is the first thing to ablate, and its cost cannot be read off any metric this run logs, since the axis-aligned view of it is exactly the view WP-102 removed</td>
+</tr>
+<tr>
+<td>A45</td>
+<td>oriented output tuple, width 7</td>
+<td><strong>held</strong> — the deployed decode and the metric adapter share it</td>
+</tr>
+<tr>
+<td>A48</td>
+<td>difficult-instance matching</td>
+<td><strong>exercised at scale</strong> — 16,528 of 101,209 val instances are difficult, so 16% of the ground truth is governed by this rule; a wrong reading of it would move the reported number materially</td>
+</tr>
+<tr>
+<td>A49</td>
+<td>Hellinger ProbIoU at gain 7.5</td>
+<td><strong>held</strong> — <code>rbox</code> falls 0.51 → 0.14 (train), 0.42 → 0.17 (val), stably, at the gain A13 set for the axis-aligned term</td>
+</tr>
+<tr>
+<td>A50</td>
+<td>retargeted L1 at gain 6.0</td>
+<td><strong>held</strong> — <code>rl1</code> falls 1.91 → 0.40 (train), 2.15 → 1.20 (val); the retargeting is what makes those two terms agree rather than fight</td>
+</tr>
+<tr>
+<td>A52</td>
+<td>object-free crops kept</td>
+<td><strong>exercised</strong> — 3,956 of 10,132 val tiles carry no annotation. Nearly 40% of the split is background-only, which is a large share of what both training and evaluation saw</td>
+</tr>
+</tbody>
+</table>
+<h3 id="deviations-from-the-paper-and-from-the-earlier-tiers">Deviations from the paper, and from the earlier tiers<a class="headerlink" href="#deviations-from-the-paper-and-from-the-earlier-tiers" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Epoch budget.</strong> 50 epochs at n scale, against the paper's from-scratch schedules. A smoke tier by design.</li>
+<li><strong>No Objects365 pretraining, no evolutionary hyperparameter search</strong> (D2).</li>
+<li><strong>No comparison to the paper's oriented numbers.</strong> [R1 Tables 10-11] report whole-image rotated mAP50-95 on DOTA-v1.0 val; this section now reports that statistic too (roadmap 111), but deliberately does not set it beside R1's figures — the epoch budget, missing pretraining and other deviations in this list apply regardless of which statistic is quoted, and the design's own target is the paper's relative claims (design doc §5.11, §7).</li>
+<li><strong>Batch 64 at 1024 px</strong>, against 128 at 640 for the COCO tiers — 2.56× the pixels per image, so a third more pixels per step than Det-smoke's budget rather than a match for it. <code>lr</code> stayed at the config's 0.01 rather than being scaled.</li>
+<li><strong>512 px tiling overlap</strong>, R18's figure rather than A21's default; see above.</li>
+<li><strong>The angle gain is this project's, not the paper's.</strong> [R1] states Eq. 15 and its internal lambda and never its weight against the other terms; 0.25 is A22's reasoning, revised once already.</li>
+<li><strong>The parameter gate has no published reference</strong> for this task family, unlike detection ([R1 Table 7]) and segmentation ([R1 Table S9]).</li>
+</ol>
+<h3 id="reproducing-this-result_2">Reproducing this result<a class="headerlink" href="#reproducing-this-result_2" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>lucid-data<span class="w"> </span>check<span class="w">       </span>--data_root<span class="w"> </span>&lt;dota&gt;<span class="w"> </span>--dataset<span class="w"> </span>dota<span class="w"> </span>--expected_images<span class="w"> </span><span class="m">1869</span><span class="w"> </span>--expected_instances<span class="w"> </span><span class="m">127843</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>lucid-data<span class="w"> </span>build-tiles<span class="w"> </span>--root<span class="w"> </span>&lt;dota&gt;<span class="w"> </span>--out<span class="w"> </span>&lt;tiles&gt;<span class="w"> </span>--splits<span class="w"> </span>train,val<span class="w"> </span>--patch<span class="w"> </span><span class="m">1024</span><span class="w"> </span>--overlap<span class="w"> </span><span class="m">512</span><span class="w"> </span>--workers<span class="w"> </span><span class="m">8</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>lucid-yolo<span class="w"> </span>fit<span class="w"> </span>--config<span class="w"> </span>obb_smoke.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--data.data_root<span class="w"> </span>&lt;tiles&gt;<span class="w"> </span>--data.batch_size<span class="w"> </span><span class="m">64</span><span class="w"> </span>--data.num_workers<span class="w"> </span><span class="m">32</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>--data.prefetch_factor<span class="w"> </span><span class="m">4</span><span class="w"> </span>--data.persistent_workers<span class="w"> </span><span class="nb">true</span><span class="w"> </span>--model.lr<span class="w"> </span><span class="m">0</span>.01<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span>--trainer.max_epochs<span class="w"> </span><span class="m">50</span><span class="w"> </span>--trainer.precision<span class="w"> </span>bf16-mixed
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>lucid-eval<span class="w"> </span>--checkpoint<span class="w"> </span>&lt;checkpoint&gt;<span class="w"> </span>--data_root<span class="w"> </span>&lt;tiles&gt;<span class="w"> </span>--split<span class="w"> </span>val<span class="w"> </span>--output<span class="w"> </span>obb_report.json
+</code></pre></div>
+<p>DOTA is provisioned by hand — see <code>DATASETS.md</code>; it is neither downloaded by this project nor redistributable through it, and its terms are academic use only.</p>
+<p>Seed 0 throughout. Cross-platform bitwise reproduction is not claimed (A26), though this tier's two independent evaluations agree to four decimals. The metric reports are archived under <code>.experiments/obb_smoke/</code>, and the run config, hyperparameters and epoch metrics under <code>lightning_logs/version_10/</code>.</p>
+<hr />
+<h2 id="consolidated-note-detection-segmentation-oriented-detection">🧾 Consolidated note — detection, segmentation, oriented detection<a class="headerlink" href="#consolidated-note-detection-segmentation-oriented-detection" title="Permanent link">&para;</a></h2>
+<p>This is not a fourth tier. No run stands behind it; it reads the three sections above against each other and states what only becomes visible once they sit side by side. Nothing here revises a claim those sections make — a correction to any of them belongs in a future section, named as one (D10) — and every number below already appears in <code>## 0.1.0</code>, <code>## 0.2.0</code> or <code>## 0.3.0</code>.</p>
+<h3 id="one-trunk-three-heads">One trunk, three heads<a class="headerlink" href="#one-trunk-three-heads" title="Permanent link">&para;</a></h3>
+<p>Det-smoke, Seg-smoke and OBB-smoke share the same DFL-free dual head, the same NMS-free one-to-one deploy path, the same TAL/STAL assignment, the same MuSGD optimizer, Progressive Loss, EMA, close-mosaic and warmup-then-linear-decay schedule. Each later tier adds a task-specific branch on top of that trunk rather than a new one: Seg-smoke adds prototype–coefficient masks (<code>ProtoNet</code>/<code>ProtoFusion</code>) and a training-only auxiliary semantic branch; OBB-smoke adds per-branch angle stems, a rotated ProbIoU term, a retargeted L1 target, and R1 Eq. 15's angle term.</p>
+<p>The NMS-free deploy path's cost is the one quantity all three tiers could have reported in the same units, and reading the three rows together is what shows that only two of them did:</p>
+<table>
+<thead>
+<tr>
+<th>tier</th>
+<th>path cost</th>
+<th>source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Det-smoke</td>
+<td>1.11 AP (raw), 1.46 AP (EMA)</td>
+<td>"E2E within NMS path" acceptance row</td>
+</tr>
+<tr>
+<td>Seg-smoke</td>
+<td>1.27 box AP, 0.81 segm AP</td>
+<td>"The NMS-free path costs 1.27 box AP and 0.81 segm AP"</td>
+</tr>
+<tr>
+<td>OBB-smoke</td>
+<td>not measured</td>
+<td>the run reports EMA and raw weights only; no NMS baseline was evaluated for the oriented path, so the one figure comparable across the first two tiers does not exist for the third</td>
+</tr>
+</tbody>
+</table>
+<p>The absence in the third row is itself the finding, not a gap in this note: OBB-smoke deploys the same NMS-free architecture Det-smoke and Seg-smoke measure the cost of, and this project has never reported what that cost is for orientation.</p>
+<p>No other cross-tier comparison is attempted here. Det-smoke and Seg-smoke differ in more than task — 16-mixed against bf16-mixed, different hardware, and the data-pipeline work that landed in between (0.2.0's own "offered as one" observation) — and OBB-smoke's figures are per tile, comparable to nothing outside this project (0.3.0's "not comparable to published DOTA results"). Consolidating three sections does not manufacture the comparisons those sections declined to make.</p>
+<h3 id="assumption-outcomes-consolidated">Assumption outcomes, consolidated<a class="headerlink" href="#assumption-outcomes-consolidated" title="Permanent link">&para;</a></h3>
+<p>Union of the three per-tier tables, 23 rows, one per id — no id repeats across tiers by direct table membership. Two ids cross tiers only by textual reference rather than a second table row: A11 is Det-smoke's anchor-centre rule, and Seg-smoke's own row says its mask crop leaves that rule "unchanged from detection" rather than defining a second one; A13 sets Det-smoke's loss gains, and OBB-smoke's A49 row names it directly — the rotated ProbIoU term is carried "at the gain A13 set for the axis-aligned term". Outcome wording is quoted from each tier's own table, not restated. <code>†</code> marks <strong>held</strong> or <strong>not exercised at its recorded value</strong> — a value that carried a run without being isolated, not one that was checked.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>subject</th>
+<th>tier(s)</th>
+<th>outcome, as recorded</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A2</td>
+<td>TAL exponents</td>
+<td>det</td>
+<td>held at alpha 1, beta 6; not independently ablated at A-tier <code>†</code></td>
+</tr>
+<tr>
+<td>A8</td>
+<td>LR schedule shape</td>
+<td>det</td>
+<td>validated</td>
+</tr>
+<tr>
+<td>A11</td>
+<td>anchor centre placement</td>
+<td>det, seg</td>
+<td>unchanged from detection; the mask crop reuses its <code>+0.5</code> half-open rule</td>
+</tr>
+<tr>
+<td>A13</td>
+<td>loss gains and L1 coordinate frame</td>
+<td>det (obb's A49 reuses its gain)</td>
+<td>revised, then validated</td>
+</tr>
+<tr>
+<td>A15</td>
+<td>prototype resolution, 160×160 at 640 input</td>
+<td>seg</td>
+<td>held — the size-bucket split is where its cost is visible <code>†</code></td>
+</tr>
+<tr>
+<td>A16</td>
+<td>tanh coefficients, box-cropped area-normalized BCE</td>
+<td>seg</td>
+<td>validated at the wiring scale</td>
+</tr>
+<tr>
+<td>A17</td>
+<td>training-only auxiliary semantic branch</td>
+<td>seg</td>
+<td>validated</td>
+</tr>
+<tr>
+<td>A21</td>
+<td>DOTA crop overlap</td>
+<td>obb</td>
+<td>not exercised at its recorded value — the tier ran at R18's 512 px, not the register's 200 px default <code>†</code></td>
+</tr>
+<tr>
+<td>A22</td>
+<td>angle-term weight, 0.25</td>
+<td>obb</td>
+<td>held <code>†</code></td>
+</tr>
+<tr>
+<td>A24</td>
+<td>rotated-IoU metric and its protocol</td>
+<td>obb</td>
+<td>held <code>†</code></td>
+</tr>
+<tr>
+<td>A25</td>
+<td>rotated candidacy in TAL/STAL</td>
+<td>obb</td>
+<td>held <code>†</code></td>
+</tr>
+<tr>
+<td>A30</td>
+<td>classification bias prior init</td>
+<td>det</td>
+<td>validated</td>
+</tr>
+<tr>
+<td>A31</td>
+<td>warmup convention</td>
+<td>det</td>
+<td>absorbed into A8</td>
+</tr>
+<tr>
+<td>A32</td>
+<td>train-time resampling filter</td>
+<td>det</td>
+<td>non-antialiased fused warp; no acceptance-visible effect</td>
+</tr>
+<tr>
+<td>A33</td>
+<td>uint8 batch transport</td>
+<td>det</td>
+<td>validated — no acceptance-visible effect, 4× smaller IPC</td>
+</tr>
+<tr>
+<td>A37</td>
+<td>mask-decode numerics the papers leave open</td>
+<td>seg</td>
+<td>held <code>†</code></td>
+</tr>
+<tr>
+<td>A38</td>
+<td>mask/semantic gains and which branch is supervised</td>
+<td>seg</td>
+<td>held <code>†</code></td>
+</tr>
+<tr>
+<td>A44</td>
+<td>how the angle composes with ltrb</td>
+<td>obb</td>
+<td>carries the run, and bounds it</td>
+</tr>
+<tr>
+<td>A45</td>
+<td>oriented output tuple, width 7</td>
+<td>obb</td>
+<td>held <code>†</code></td>
+</tr>
+<tr>
+<td>A48</td>
+<td>difficult-instance matching</td>
+<td>obb</td>
+<td>exercised at scale</td>
+</tr>
+<tr>
+<td>A49</td>
+<td>Hellinger ProbIoU at gain 7.5</td>
+<td>obb</td>
+<td>held <code>†</code></td>
+</tr>
+<tr>
+<td>A50</td>
+<td>retargeted L1 at gain 6.0</td>
+<td>obb</td>
+<td>held <code>†</code></td>
+</tr>
+<tr>
+<td>A52</td>
+<td>object-free crops kept</td>
+<td>obb</td>
+<td>exercised</td>
+</tr>
+</tbody>
+</table>
+<p>Eleven rows carry <code>†</code>. That is not eleven weak results — the wiring gates and acceptance criteria those runs cleared are real — but it is eleven assumptions a passing run has not, by itself, isolated. A25's own row states the sharpest version of this for its own id: the wiring gate at 0.94 is "the evidence that positives reach the right anchors", which is a statement about candidacy, not proof that every clause of the assumption is correct. A21 is the one row where the record explicitly says the assumption itself remains unmeasured even though the run it was supposed to govern completed without incident.</p>
+<h3 id="deviations">Deviations<a class="headerlink" href="#deviations" title="Permanent link">&para;</a></h3>
+<p><strong>Common to all three tiers</strong>, each stated once per section and repeated here because a deviation three runs share is a property of the project, not of any one run: ~50 epochs at n-scale against the paper's 500/600-epoch from-scratch schedules (a smoke tier by design in every case); no Objects365 pretraining and no evolutionary hyperparameter search (D2); single seed, seed 0, throughout every run.</p>
+<p><strong>Specific to one tier:</strong></p>
+<ul>
+<li>Det-smoke — batch-scaled learning rate (lr 0.02 at batch 128, linear-scaled from the batch-64 recipe) with no clean measurement of the unscaled value, since the one run that carried it also carried the loss-frame defect; the E2E deficit itself measured wider than [R1 sec. 4.4]'s published 0.6–0.8 AP.</li>
+<li>Seg-smoke — bf16-mixed where Det-smoke ran 16-mixed, a hardware-driven choice never measured against the alternative; <code>lr</code> overridden to 0.02 against <code>seg_smoke.yaml</code>'s 0.01, the same batch-128 scaling Det-smoke settled on; the mask and semantic gains (2.5, 0.5) are this project's own, R1 giving neither; raw weights were not evaluated for this run, so the EMA contribution is unmeasured here where Det-smoke reports both.</li>
+<li>OBB-smoke — per-tile evaluation only, not the whole-image statistic [R1 Tables 10-11] report; batch 64 at 1024 px against 128 at 640 for the COCO tiers, 2.56× the pixels per image, with <code>lr</code> left at the config's 0.01 rather than scaled the way Det-smoke and Seg-smoke scaled theirs; 512 px tiling overlap, R18's own protocol figure rather than A21's 200 px register default; the angle gain (0.25) is this project's own, revised once already (WP-093); the parameter gate has no published reference for this task family, unlike [R1 Table 7] and [R1 Table S9].</li>
+</ul>
+<p>The learning-rate line is worth reading across tiers rather than within one: Det-smoke and Seg-smoke both scale lr with batch size from a batch-64 recipe; OBB-smoke, at half that batch and 2.56× the pixels per step, does not. No section argues the choice either way; it sits in three places as three separate facts until this note puts them next to each other.</p>
+<h3 id="hypotheses-the-record-supports">Hypotheses the record supports<a class="headerlink" href="#hypotheses-the-record-supports" title="Permanent link">&para;</a></h3>
+<p>Stated as hypotheses, each with the evidence already in this file and what would test it — none of them cleared to a conclusion here.</p>
+<ol>
+<li><strong>The E2E-against-NMS deficit may be a genuine, reproducible excess over [R1 sec. 4.4]'s figure, not measurement noise.</strong> Evidence: Det-smoke measures 1.11 AP (raw) / 1.46 AP (EMA) against the paper's reported 0.6–0.8 AP — right sign, right order of magnitude, wider. Test: the Det-smoke section already names this a Det-ablations question — whether the residual gap narrows at the paper's own 500/600-epoch schedule, which this project has not yet run.</li>
+<li><strong>A15's prototype resolution (160×160 at 640 input) sets the small-object mask ceiling.</strong> Evidence: the mask-to-box ratio by size bucket is 0.30 small / 0.70 medium / 0.91 large; at 160×160 one prototype cell covers 4 input pixels, so a 32-pixel object spans only 8 cells before quantization dominates whatever the coefficients predict. Test: Seg-smoke's own row names it as the first thing to ablate if masks are the target — rerun at a higher prototype resolution and re-read the same size-bucket split.</li>
+<li><strong>A44's angle composition sets the oriented ceiling.</strong> Evidence: <code>val/rotated_mAP50</code> is flat across the entire close-mosaic window (<code>-0.0001</code> from epoch 40 to 49), where the same window measurably lifted Det-smoke's accuracy. The section records two readings it cannot separate — the model has nothing left to gain at 50 epochs, or the ceiling is set by something the schedule does not touch — and names A44 as the candidate for the second. Test: an ablation of the composition itself (A44 records that the alternative readings — rotated-frame distances, or a rotated anchor offset — are foreclosed only by choice, not by R1), since more epochs is, in the section's own words, not the obvious next experiment.</li>
+<li><strong>Not upgraded, stated as the confound it is: whether mask supervision costs box accuracy remains unmeasured.</strong> Seg-smoke's box mAP is higher than Det-smoke's (26.12 against 25.30, EMA-NMS), but the two runs differ in precision, hardware and the data-pipeline work that landed between them, and each is a single seed — the section calls this "not a measurement of what mask supervision costs" and this note does not call it one either. Test: a paired run on matched hardware and precision, same seed set, isolating only the presence of the mask/semantic terms.</li>
+</ol>
+<hr />
+<h2 id="050-keypoint-detection">🕺 0.5.0 — Keypoint detection<a class="headerlink" href="#050-keypoint-detection" title="Permanent link">&para;</a></h2>
+<p>The Pose-smoke tier has run and was <strong>accepted 2026-08-25</strong> at roadmap 125. This section records what the run measured, and states plainly what it was and was not accepted on: the acceptance criterion is R14's mechanism claim — that RLE's learned residual density earns real accuracy over a non-flow control — not a pose figure, and not R1 Table 9's mAP=63.0, which no run in this project has ever targeted.</p>
+<h3 id="what-was-reproduced_3">What was reproduced<a class="headerlink" href="#what-was-reproduced_3" title="Permanent link">&para;</a></h3>
+<p>RLE (R14) composed onto the same dual head, NMS-free deploy path and training loop the other three tasks share, plus COCO's own OKS evaluation protocol (R12).</p>
+<table>
+<thead>
+<tr>
+<th>mechanism</th>
+<th>reference</th>
+<th>implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>keypoint targets, left/right flip pairing</td>
+<td>R12 (17-point schema), A64</td>
+<td><code>data/targets.py</code> — <code>Targets.keypoints</code>/<code>keypoint_vis</code>; <code>HorizontalFlip(keypoint_flip_pairs=...)</code> swaps identity rather than mirroring coordinates alone, dataset-supplied rather than hardcoded</td>
+</tr>
+<tr>
+<td>point head stem, decode</td>
+<td>R14, WP-122</td>
+<td><code>models/heads/detect.py</code> — a third stem per branch, raw <code>(x, y)</code> offset plus raw per-axis sigma; <code>decode_keypoints</code> composes with the anchor-centre/stride convention <code>decode_ltrb</code> already uses</td>
+</tr>
+<tr>
+<td>RLE loss</td>
+<td>R14 Eq. 8, Eq. 12, sec. 3.2–3.3, A65, A66, A71, A72</td>
+<td><code>losses/rle_loss.py</code> — a hand-written 6-layer RealNVP flow over the per-axis-normalized residual, summed with a fixed unit Laplace NLL; the only trainable-weight loss in the project</td>
+</tr>
+<tr>
+<td>Laplace-NLL control</td>
+<td>R14 Table 7, WP-135</td>
+<td><code>losses/keypoint_nll_loss.py</code> — the same residual likelihood with the flow term removed, everything else held; a <code>keypoint_loss</code> switch, default <code>rle</code></td>
+</tr>
+<tr>
+<td>OKS evaluation</td>
+<td>R12, A67</td>
+<td><code>eval/coco_eval.py::evaluate_keypoints</code> — <code>faster_coco_eval.COCOeval_faster(iouType="keypoints", ...)</code>, R12's 17-value sigma table when <code>num_keypoints == 17</code>, A67's uniform sigma otherwise; ground truth's own <code>area</code>/<code>iscrowd</code>/<code>num_keypoints</code>/<code>bbox</code> used directly rather than reconstructed</td>
+</tr>
+<tr>
+<td>epoch-level pose signal</td>
+<td>WP-137</td>
+<td><code>val/oks_mAP</code>, accumulated per validation step and scored once per epoch, beside <code>val/mAP</code> rather than instead of it</td>
+</tr>
+<tr>
+<td>standalone report</td>
+<td>WP-134</td>
+<td><code>lucid-eval</code> dispatches on the checkpoint's own <code>task</code>, scoring both decode paths from one forward</td>
+</tr>
+</tbody>
+</table>
+<p>No published or gated parameter/FLOP reference exists for this task family: R14 states a loss and an evaluation protocol, never an architecture, so unlike detection ([R1 Table 7]) and segmentation ([R1 Table S9]) there is nothing to hold the point stem's cost against beyond this project's own measurement — see <code>model_cards/keypoints.md</code>.</p>
+<p>The fast wiring gate runs before any COCO launch: <code>scripts/overfit_micro.py --task keypoints</code> reaches train OKS AP <strong>0.3357</strong> over 548 instances against a 0.30 floor, on R21's synthetic <code>SymbolShape</code> schema (<code>goldens/gpu/overfit_micro_kp.json</code>) — not COCO's 17-point schema, since the gate's fixture family is geometric shapes throughout, and A67 records the sigma substitution that makes an OKS figure meaningful on it at all.</p>
+<h3 id="the-pose-smoke-run">The Pose-smoke run<a class="headerlink" href="#the-pose-smoke-run" title="Permanent link">&para;</a></h3>
+<p><strong>Run v11</strong> — <code>0.5.0.dev1</code>, COCO <code>person_keypoints_{train,val}2017</code>, <code>task: keypoints</code>, <code>num_keypoints: 17</code>, <code>keypoint_loss: rle</code> (default), n scale, batch 128, lr 0.02, MuSGD, warmup 3 epochs then linear decay to <code>lr0 * 0.01</code>, close-mosaic for the final 10, EMA (decay 0.9999, tau 2000), gradient clip 10.0, <code>keypoint_gain = 1.0</code> (A68), bf16-mixed, seed 0, <code>deterministic: true</code>, 50 epochs = 46,250 steps on one unrecorded Colab GPU, 7h06m wall clock — about 8m30s an epoch, derived from artifact timestamps rather than logged, matching the other COCO tiers' own unrecorded-hardware pattern.</p>
+<p>The Laplace-NLL control (<code>version_14</code>, read together with this run in Acceptance below) trained the next day under an identical config but for <code>keypoint_loss: laplace_nll</code>, at <code>0.5.0.dev2</code>; two attempts to launch it (<code>version_12</code>, <code>version_13</code>) wrote only a TensorBoard writer's opening record and nothing else — no config, no step — before exiting, 11 seconds apart. Their cause is not in what synced to Drive; the third attempt (<code>version_14</code>) ran to completion without incident.</p>
+<p>Evaluated by <code>lucid-eval</code> on COCO val2017, all 5000 images, <code>person_keypoints_val2017</code> ground truth:</p>
+<table>
+<thead>
+<tr>
+<th>path</th>
+<th>box mAP50-95</th>
+<th>box mAP50</th>
+<th>box mAP75</th>
+<th>OKS AP</th>
+<th>OKS AP50</th>
+<th>OKS AP75</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>E2E</td>
+<td><strong>0.5030</strong></td>
+<td>0.7683</td>
+<td>0.5323</td>
+<td><strong>0.2738</strong></td>
+<td>0.6094</td>
+<td>0.2138</td>
+</tr>
+<tr>
+<td>NMS</td>
+<td>0.5119</td>
+<td>0.7764</td>
+<td>0.5417</td>
+<td>0.2688</td>
+<td>0.6066</td>
+<td>0.2042</td>
+</tr>
+</tbody>
+</table>
+<p><code>e2e</code> is the row comparable to the training run's own <code>val/mAP</code> and <code>val/oks_mAP</code> — the same convention the earlier three tiers state for their own tables. The box branch's ranking (<code>nms</code> above <code>e2e</code>) and the point branch's (<code>e2e</code> above <code>nms</code>, by 0.005 AP) run opposite directions on this checkpoint; neither has been checked against a second seed.</p>
+<h3 id="reading-the-training-curves_2">Reading the training curves<a class="headerlink" href="#reading-the-training-curves_2" title="Permanent link">&para;</a></h3>
+<p><img alt="Pose-smoke training curves" src="../figures/pose_smoke_training.svg" /></p>
+<p><em>Run v11, four panels. The validation box mAP50-95 (the same E2E proxy the other three tiers log); epoch-mean loss totals; the one-to-one branch's pre-gain box/classification/L1 components; and the RLE keypoint term, train and validation.</em></p>
+<p><strong>The metric is still rising at epoch 49.</strong> <code>val/mAP</code> (box) has not plateaued the way Det-smoke's or Seg-smoke's had by this point in the schedule — its last epoch-to-epoch step is still positive. Fifty epochs may not be this run's ceiling the way it plausibly is for the oriented tier; no further epochs have been run to check.</p>
+<p><strong>Validation loss descends almost without exception.</strong> Two of forty-nine epoch-to-epoch steps rise, the larger by 0.30% — an order of magnitude cleaner than the oriented tier's own curve, and closer to Det-smoke's and Seg-smoke's monotone descent. The minimum sits at the final epoch, 49, unlike the oriented run's epoch 48.</p>
+<p><strong>The keypoint term crosses zero, and that is expected, not a fault.</strong> <code>val/keypoint</code> opens at 1.37 and closes at -0.79 — a negative log-likelihood, unlike every other logged term, is a normalized density's log and has no floor at zero the way a squared error or an IoU term does. A more negative value is a tighter fit, and this run's own trajectory is monotone toward it with the same two-rise exception the loss panel shows.</p>
+<h3 id="acceptance">Acceptance<a class="headerlink" href="#acceptance" title="Permanent link">&para;</a></h3>
+<p>Not accepted on a pose figure. <code>pose_nano_smoke.yaml</code> names training completion and stability, and — the criterion actually decisive for this tier — RLE's mechanism claim against WP-135's Laplace-NLL control, read in full in <code>RESEARCH_LOG.md#wp-125</code>.</p>
+<table>
+<thead>
+<tr>
+<th>criterion</th>
+<th>required</th>
+<th>observed</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>wiring gate</td>
+<td>train OKS AP ≥ 0.30</td>
+<td><strong>0.3357</strong></td>
+<td>✓</td>
+</tr>
+<tr>
+<td>training completed</td>
+<td>50/50 epochs, all logged</td>
+<td>50 validation rows, no gaps</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>no divergence</td>
+<td>—</td>
+<td><code>val/loss</code> 18.47 → 6.65, minimum at epoch 49; 2 of 49 steps rise, the largest 0.30%</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>RLE beats the Laplace-NLL control</td>
+<td>direction of effect, not a magnitude</td>
+<td>e2e OKS AP <strong>0.2738</strong> vs <strong>0.2527</strong> (<code>version_14</code>) — same sign as R14 Table 7's 70.5-vs-67.4 AP</td>
+<td>✓</td>
+</tr>
+<tr>
+<td><code>keypoint_flip_pairs</code> exercised live, tier scale</td>
+<td>not a mechanism failure</td>
+<td>trained without incident, both arms (A64)</td>
+<td>✓</td>
+</tr>
+<tr>
+<td><code>keypoint_gain = 1.0</code> exercised, tier scale</td>
+<td>not a mechanism failure</td>
+<td>trained without incident, both arms; tuned adequacy unmeasured (A68)</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>Phase ≤11 gates</td>
+<td>green</td>
+<td>full suite and 21/21 goldens at commit time</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>pose figure itself</td>
+<td><em>not the criterion</em> — recorded, not cleared</td>
+<td>0.2738 e2e OKS AP, 0.5030 e2e box mAP</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3 id="assumption-outcomes_3">Assumption outcomes<a class="headerlink" href="#assumption-outcomes_3" title="Permanent link">&para;</a></h3>
+<p>Assumptions the keypoint phase exercised. Full register in <code>ASSUMPTIONS.md</code>.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>subject</th>
+<th>outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A64</td>
+<td>dataset-supplied flip pairing</td>
+<td><strong>held, first exercised live at tier scale here</strong> — resolved by WP-132's own reading of the training path; this run is the first to train with it through real augmentation rather than through the overfit gate's augmentation-off path</td>
+</tr>
+<tr>
+<td>A65</td>
+<td>sigma via sigmoid</td>
+<td><strong>held</strong> — resolved by WP-123 directly from R14 sec. 3.3; unexercised further by this run beyond what WP-132's gate already confirmed</td>
+</tr>
+<tr>
+<td>A66</td>
+<td><code>v=0</code> excluded, <code>v≥1</code> included equally</td>
+<td><strong>held, exercised at COCO scale</strong> — this run is the first to train the policy against real annotation visibility rather than synthetic fixtures</td>
+</tr>
+<tr>
+<td>A67</td>
+<td>uniform sigma for non-COCO schemas</td>
+<td><strong>not exercised</strong> — this run's <code>num_keypoints == 17</code> takes R12's own table, the branch A67 governs</td>
+</tr>
+<tr>
+<td>A68</td>
+<td><code>keypoint_gain = 1.0</code>, un-tuned</td>
+<td><strong>the mechanism-failure exposure did not happen</strong> — a real pose head trained in both arms rather than one swamped by or swamping the detection objective; tuned adequacy stays unmeasured, no sweep ran</td>
+</tr>
+<tr>
+<td>A69</td>
+<td>one shared RLE flow across both branches</td>
+<td><strong>untested against the alternative</strong> — this run trains one flow, as every run does; nothing here compares it to two</td>
+</tr>
+<tr>
+<td>A70</td>
+<td>off-canvas points carried through unchanged</td>
+<td><strong>exercised, unmeasured</strong> — real augmentation ran, so some points left the canvas on kept instances; no measurement of how often or with what effect</td>
+</tr>
+<tr>
+<td>A71</td>
+<td>per-axis residual frame</td>
+<td><strong>held</strong> — resolved by WP-132's numerical check; this run trained without the non-finite failure the un-normalized frame produced</td>
+</tr>
+<tr>
+<td>A72</td>
+<td>RealNVP's tanh-bounded log-scale</td>
+<td><strong>held</strong> — resolved by WP-123/WP-132; no runaway observed across 46,250 steps</td>
+</tr>
+<tr>
+<td>A73</td>
+<td>keypoints stays hand-driven, not forked onto torchmetrics</td>
+<td><strong>unaffected by this run</strong> — a WP-138 decision about the standalone evaluator, not the training path this run exercises</td>
+</tr>
+</tbody>
+</table>
+<h3 id="deviations-from-the-paper-and-from-the-earlier-tiers_1">Deviations from the paper, and from the earlier tiers<a class="headerlink" href="#deviations-from-the-paper-and-from-the-earlier-tiers_1" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Epoch budget.</strong> 50 epochs at n scale, one seed — a smoke tier by design, and R14's own schedule is a from-scratch top-down crop regressor, not a directly comparable budget to begin with.</li>
+<li><strong>No Objects365 pretraining, no evolutionary hyperparameter search</strong> (D2).</li>
+<li><strong>No comparison to any published pose figure.</strong> R14 reports on a top-down, cropped-input architecture; this project's dense one-stage detector with a bottom-up point stem is not the same architecture family, and no attempt is made here to set this run's OKS beside R14's own numbers or R1 Table 9's mAP=63.0 (a different paper's different architecture). The acceptance criterion is the mechanism's direction of effect, read from the paired run in <code>RESEARCH_LOG.md#wp-125</code>, not an absolute figure.</li>
+<li><strong>The keypoint gain is this project's, not the paper's.</strong> R14 states the loss and never a multi-task weight — it trains a pose-only network. <code>keypoint_gain = 1.0</code> (A68) is this project's own un-tuned starting point, the same shape of choice A22 made for the oriented tier's angle gain.</li>
+<li><strong>The parameter/FLOP gate has no published reference for this task family</strong>, unlike detection ([R1 Table 7]) and segmentation ([R1 Table S9]) — R14 states no architecture at all.</li>
+<li><strong>Single flow, not measured against two per branch</strong> (A69) — untested here, as in every run so far.</li>
+</ol>
+<h3 id="reproducing-this-result_3">Reproducing this result<a class="headerlink" href="#reproducing-this-result_3" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>lucid-data<span class="w"> </span>download<span class="w"> </span>--data_root<span class="w"> </span>/content/coco2017<span class="w"> </span>--splits<span class="w"> </span><span class="s1">'[train,val]'</span><span class="w"> </span>--verify<span class="w"> </span><span class="nb">true</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>lucid-data<span class="w"> </span>check<span class="w">    </span>--data_root<span class="w"> </span>/content/coco2017
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>lucid-yolo<span class="w"> </span>fit<span class="w"> </span>--config<span class="w"> </span>pose_nano_smoke.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>--data.data_root<span class="w"> </span>/content/coco2017<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span>--data.batch_size<span class="w"> </span><span class="m">128</span><span class="w"> </span>--data.num_workers<span class="w"> </span><span class="m">32</span><span class="w"> </span>--data.prefetch_factor<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span>--model.lr<span class="w"> </span><span class="m">0</span>.02<span class="w"> </span>--trainer.max_epochs<span class="w"> </span><span class="m">50</span><span class="w"> </span>--trainer.precision<span class="w"> </span>bf16-mixed<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span>--trainer.default_root_dir<span class="w"> </span>/content/drive/MyDrive/lucid_runs
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>lucid-eval<span class="w"> </span>--checkpoint<span class="w"> </span>&lt;checkpoint&gt;<span class="w"> </span>--data_root<span class="w"> </span>/content/coco2017<span class="w"> </span>--output<span class="w"> </span>pose_report.json
+</code></pre></div>
+<p>The Laplace-NLL control arm is the same command against <code>pose_nano_smoke_laplace_nll.yaml</code>, byte-identical but for <code>keypoint_loss</code>.</p>
+<p>Seed 0 throughout. Cross-platform bitwise reproduction is not claimed (A26). The metric reports are archived beside each run's own checkpoint, and the run config, hyperparameters and epoch metrics under <code>lightning_logs/version_11/</code> (RLE) and <code>lightning_logs/version_14/</code> (Laplace-NLL control).</p>
+<hr />
+<h2 id="correcting-note-which-engine-scored-each-tier">⚙️ Correcting note — which engine scored each tier<a class="headerlink" href="#correcting-note-which-engine-scored-each-tier" title="Permanent link">&para;</a></h2>
+<p>Appended, not merged (D10): this adds a fact the four sections above never recorded and revises no number any of them states. It is not a fifth tier — no run stands behind it.</p>
+<h3 id="what-the-record-left-out">What the record left out<a class="headerlink" href="#what-the-record-left-out" title="Permanent link">&para;</a></h3>
+<p>Every <code>lucid-eval</code> invocation printed above names a checkpoint, a data root and sometimes an output path, and none names a scoring engine. That was unambiguous when they were written and stopped being so when WP-138 landed in 0.5.0: since then <code>--eval_backend</code> defaults to <code>auto</code>, which takes <code>hotcoco</code> on any host where hotcoco is usable and falls back to <code>faster_coco_eval</code> only where it is not. A reader running the printed commands today therefore scores with a different engine than the one that produced the figures above, on most machines, with nothing in the command or the output to say so. The engine each run actually used is written to <code>info["eval_backend"]</code> in the report JSON (<code>detect_eval.py</code>, <code>pose_eval.py</code>) — but those JSONs are archived off-repo under <code>.experiments/</code>, so the repository alone could not answer the question.</p>
+<p>This is a prospective reproducibility gap, not a retroactive falsification: no figure above is wrong, and none moves.</p>
+<h3 id="engine-per-tier">Engine per tier<a class="headerlink" href="#engine-per-tier" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>tier</th>
+<th>box/mask engine</th>
+<th>how it is known</th>
+<th>affected figures</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.1.0 Det-smoke</td>
+<td><code>faster_coco_eval</code></td>
+<td>the run predates WP-138; no other engine existed in the package</td>
+<td>every mAP/mAR figure in the Det-smoke table</td>
+</tr>
+<tr>
+<td>0.2.0 Seg-smoke</td>
+<td><code>faster_coco_eval</code></td>
+<td>same</td>
+<td>box and <code>segm_</code> figures alike</td>
+</tr>
+<tr>
+<td>0.3.0 OBB-smoke</td>
+<td>not applicable</td>
+<td>the rotated protocol is WP-063's own mAP, not COCOeval; <code>lucid-eval</code> ignores <code>--eval_backend</code> for an <code>obb</code> checkpoint</td>
+<td>none</td>
+</tr>
+<tr>
+<td>0.5.0 Pose-smoke</td>
+<td><strong>not determinable from this repository</strong></td>
+<td>the run was accepted the day WP-138 landed, so <code>auto</code> may have resolved either way on the machine that scored it; the answer is in that run's archived report JSON, not here</td>
+<td>the box mAP only — <code>0.5030 e2e box mAP</code> in the acceptance table</td>
+</tr>
+</tbody>
+</table>
+<p>The ten OKS keypoint statistics are unaffected in every tier: keypoint scoring is hand-driven <code>faster_coco_eval</code> regardless of <code>--eval_backend</code> (A73), so <code>0.2738 e2e OKS AP</code>, <code>0.3357 train OKS AP</code> and the RLE-versus-Laplace-NLL comparison are engine-independent by construction.</p>
+<h3 id="reproducing-a-figure-above">Reproducing a figure above<a class="headerlink" href="#reproducing-a-figure-above" title="Permanent link">&para;</a></h3>
+<p>Add the engine to the printed command rather than taking today's default:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>lucid-eval<span class="w"> </span>--checkpoint<span class="w"> </span>&lt;checkpoint&gt;<span class="w"> </span>--data_root<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--eval_backend<span class="w"> </span>faster_coco_eval
+</code></pre></div>
+<p>That is required for 0.1.0 and 0.2.0, where the recorded figures are <code>faster_coco_eval</code> figures. For 0.5.0 it is the conservative choice rather than a known match, for the reason the table gives. The printed command blocks in the sections above are left unedited, as those sections' own notes say they are.</p>
+<h3 id="how-close-the-two-engines-are">How close the two engines are<a class="headerlink" href="#how-close-the-two-engines-are" title="Permanent link">&para;</a></h3>
+<p>Held equal by <code>tests/eval/test_coco_eval.py::TestHotcocoParity</code>, to <code>1e-6</code> absolute on CPU: the 12 box statistics, the 24 box-plus-mask statistics, targets carrying their own <code>iscrowd</code> and <code>area</code> through the box pass and the mask pass, the never-updated all-zero case, and one end-to-end <code>DualPathEvaluator</code> run over a fixture. Not held by anything: the per-class entries the report drops, and any device other than CPU. The <code>iscrowd</code>/<code>area</code> cases are what closed a real divergence — the hotcoco path once rebuilt both fields from the box, so its size buckets and crowd-ignore rule were not COCO's; that was fixed in 0.8.0 (WP-166), which is after every tier above was accepted and therefore changes none of their numbers.</p>
+<hr />
+<h2 id="correcting-note-the-050-sections-source-claims">📐 Correcting note — the 0.5.0 section's source claims<a class="headerlink" href="#correcting-note-the-050-sections-source-claims" title="Permanent link">&para;</a></h2>
+<p>Appended, not merged (D10): the 0.5.0 section above is left byte-identical, and this note states which of its sentences are false and what is true instead. No figure moves; no run stands behind this note. Reported as issue 2 on the tracker, confirmed against the arXiv PDF on 2026-09-17, and recorded as D22 (WP-178).</p>
+<h3 id="what-the-section-says-and-what-r1-says">What the section says, and what R1 says<a class="headerlink" href="#what-the-section-says-and-what-r1-says" title="Permanent link">&para;</a></h3>
+<p>The 0.5.0 section was written as if R1 had no pose section. It says the acceptance criterion is "not R1 Table 9's mAP=63.0" and, in the deviations list, calls that figure "a different paper's different architecture"; it says twice that "no published or gated parameter/FLOP reference exists for this task family" because "R14 states no architecture at all"; and its mechanism table sources the point stem and the RLE loss to R14 alone. Every one of those clauses rests on the premise that R1 addresses no keypoint task.</p>
+<p>R1 sec. 3.4.2 "Pose Estimation" states the objective: "a parallel sigma branch predicts per-axis uncertainty sigma = (sigma_x, sigma_y) in (0, 1)^2 for each joint", the residual is normalized as Eq. 10, "a shared RealNVP normalizing flow estimates log phi(eps)", and Eq. 11 gives the RLE term; "training uses an Object Keypoint Similarity (OKS)-based loss", and "YOLO26 extends this scheme with Residual Log-Likelihood Estimation". R1 Table 9 ablates the weight split on YOLO26s — <code>(24, 1)</code> 63.0, RLE alone <code>(0, 1)</code> 61.9 and <code>(0, 2)</code> 62.4, OKS alone <code>(48, 0)</code> 61.5 — and R1 Table S10 publishes params and FLOPs for every pose scale at 640 px, <code>n</code> at 2.9 M / 7.5 G and 57.2 AP. All of it was inside R1's allowlisted role from the day the source was registered.</p>
+<h3 id="what-is-true-instead">What is true instead<a class="headerlink" href="#what-is-true-instead" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>the section's claim</th>
+<th>the correction</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Table 9's 63.0 is "a different paper's different architecture"</td>
+<td>R1 is <em>this</em> paper and Table S10's <code>n</code> row, 57.2, is the same architecture family at full budget under the full objective. The gap to this run's 0.27 is budget (50 epochs at <code>n</code>), objective (RLE alone) and stem width (A77); the run was never entitled to close it, and its acceptance — the mechanism's direction of effect — is unchanged</td>
+</tr>
+<tr>
+<td>"no published or gated parameter/FLOP reference exists for this task family" (stated twice)</td>
+<td>R1 Table S10 is that reference. Measured at its protocol (640 px, 1 class, 17 points) the point stem is 13.0% under the paper's <code>n</code> params and 26.5% under its FLOPs, narrowing to -3.0% / +1.0% at <code>x</code> — A77 holds every scale. No gate ships until a width is chosen against the table (roadmap WP-180)</td>
+</tr>
+<tr>
+<td>point stem sourced to "R14, WP-122"</td>
+<td>R1 sec. 3.4.2 names the branch ("a parallel sigma branch") and gives no width; R14 remains the source of what the branch emits</td>
+</tr>
+<tr>
+<td>RLE loss sourced to "R14 Eq. 8, Eq. 12, sec. 3.2–3.3"</td>
+<td>Also R1 sec. 3.4.2, Eq. 10–11 — the composition this term belongs to. R1's printed Eq. 11 carries <code>log sigma</code> twice, R14 Eq. 8 once; the code carries R14's form and A76 records the discrepancy</td>
+</tr>
+<tr>
+<td>"The keypoint gain is this project's, not the paper's ... R14 states the loss and never a multi-task weight"</td>
+<td>R1 Table 9 does state a weight, <code>wRLE = 1</code> beside <code>wOKS = 24</code>. <code>keypoint_gain = 1.0</code> coincides with it in value only — Table 9's weights sit beside R1 Table S5's box/cls gains (9.83 / 0.65 at <code>s</code>), this project's beside 7.5 / 0.5 — and the OKS term it is weighed against was absent from this run (A68, A75)</td>
+</tr>
+<tr>
+<td>"RLE (R14) composed onto the same dual head" is the whole of what was reproduced</td>
+<td>That is the RLE half of R1 sec. 3.4.2's objective. The tier is a <strong>partial</strong> reproduction: R1's RLE term, transcribed from R14 where R1 draws it, without the OKS term R1 composes it with. <code>losses/oks_loss.py</code> lands that term at <code>oks_gain = 0.0</code> after this run (A75), so the objective every figure above was measured under is unchanged</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-this-note-does-not-do">What this note does not do<a class="headerlink" href="#what-this-note-does-not-do" title="Permanent link">&para;</a></h3>
+<p>It does not re-score the run, move a golden, or change the acceptance the section records: WP-125's criterion was RLE's mechanism claim against a non-flow control, that comparison is R14 Table 7's ablation and is valid as run. The runs that would make the tier a full reproduction — the Table 9 split at smoke scale, the stem width against Table S10, Eq. 11's second <code>log sigma</code> — are roadmap Phase 17, each waiting on an accelerator or a principal.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright 2026 Jirka Borovec — Apache-2.0 (see LICENSE and NOTICE)
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

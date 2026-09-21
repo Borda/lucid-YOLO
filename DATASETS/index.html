@@ -1,0 +1,2041 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, oriented-detection, and keypoint-detection methods described in the YOLO26 paper (arXiv:2606.03748)">
+      
+      
+        <meta name="author" content="Jirka Borovec">
+      
+      
+        <link rel="canonical" href="https://borda.github.io/lucid-YOLO/DATASETS/">
+      
+      
+        <link rel="prev" href="../TRAINING/">
+      
+      
+        <link rel="next" href="../REPRODUCTION_REPORT/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Provisioning the datasets - lucid-yolo</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#provisioning-the-datasets" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="lucid-yolo" class="md-header__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lucid-yolo
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Provisioning the datasets
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="lucid-yolo" class="md-nav__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lucid-yolo
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running the models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Running the models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TRAINING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching a training run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#coco-2017-r12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🖼️ COCO 2017 (R12)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🖼️ COCO 2017 (R12)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-keypoint-tier-needs-a-second-annotation-file-and-must-be-told-so" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The keypoint tier needs a second annotation file, and must be told so
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dota-v10-r18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🛰️ DOTA-v1.0 (R18)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🛰️ DOTA-v1.0 (R18)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-has-to-be-on-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What has to be on disk
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#then-build-the-tiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Then build the tiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dataset-formats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧩 Dataset formats
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🧩 Dataset formats">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#coco" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        COCO
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="COCO">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#yolo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        YOLO
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="YOLO">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#layout_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#format_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resolving-which-format-a-bare-root-uses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolving which format a bare root uses
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-a-provisioned-tree-belongs-on-a-hosted-runtime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ☁️ Where a provisioned tree belongs on a hosted runtime
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#license-terms-and-what-they-constrain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📜 License terms, and what they constrain
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Results
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../REPRODUCTION_REPORT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproduction report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clean-room record
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Clean-room record
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PROVENANCE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ASSUMPTIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assumption register
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DECISIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decision record
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Execution
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ROADMAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Work-package roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../RESEARCH_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ENGINEERING_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ESCALATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Escalation log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributor guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebooks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/development_gates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development gates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_detect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detection on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_segment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instance segmentation on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Oriented detection on DOTA tiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keypoints on COCO person_keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#coco-2017-r12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🖼️ COCO 2017 (R12)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🖼️ COCO 2017 (R12)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-keypoint-tier-needs-a-second-annotation-file-and-must-be-told-so" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The keypoint tier needs a second annotation file, and must be told so
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dota-v10-r18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🛰️ DOTA-v1.0 (R18)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🛰️ DOTA-v1.0 (R18)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-has-to-be-on-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What has to be on disk
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#then-build-the-tiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Then build the tiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dataset-formats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧩 Dataset formats
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🧩 Dataset formats">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#coco" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        COCO
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="COCO">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#yolo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        YOLO
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="YOLO">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#layout_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#format_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resolving-which-format-a-bare-root-uses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolving which format a bare root uses
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-a-provisioned-tree-belongs-on-a-hosted-runtime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ☁️ Where a provisioned tree belongs on a hosted runtime
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#license-terms-and-what-they-constrain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📜 License terms, and what they constrain
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/Borda/lucid-YOLO/edit/main/docs/DATASETS.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="provisioning-the-datasets">🗂️ Provisioning the datasets<a class="headerlink" href="#provisioning-the-datasets" title="Permanent link">&para;</a></h1>
+<p>Datasets are never committed to this repository and never downloaded by test code (AGENTS.md sec. 3). Every unit gate runs offline against synthetic fixtures (A26/D12b); only the WPs marked <code>[DATA]</code> need a real tree, and a tier acceptance run needs one that passes <code>lucid-data check</code>.</p>
+<p>This file says where each dataset comes from, what has to be on disk before a run starts, and — since WP-099d — how the two dataset formats lay out on disk and what their annotations actually contain. None of it is restated from memory: the provisioning sections follow what <code>lucid_yolo.data.check</code> validates, and the <strong>Dataset formats</strong> reference below follows <code>lucid_yolo.data.layout</code>, <code>.coco</code>, <code>.yolo</code> and <code>.dota</code> — those modules are the specification, and every claim below cites the one it came from.</p>
+<h2 id="coco-2017-r12">🖼️ COCO 2017 (R12)<a class="headerlink" href="#coco-2017-r12" title="Permanent link">&para;</a></h2>
+<p>Automated, because the archives are served from a stable public host (<code>images.cocodataset.org</code>) at fixed URLs:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>lucid-data<span class="w"> </span>download<span class="w"> </span>--data_root<span class="w"> </span>/data/coco<span class="w">                       </span><span class="c1"># val + annotations, ~1 GB</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>lucid-data<span class="w"> </span>download<span class="w"> </span>--data_root<span class="w"> </span>/data/coco<span class="w"> </span>--splits<span class="w"> </span><span class="s1">'[train,val]'</span><span class="w">  </span><span class="c1"># adds the 18 GB train archive</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>lucid-data<span class="w"> </span>check<span class="w">    </span>--data_root<span class="w"> </span>/data/coco
+</code></pre></div>
+<p>Transfers stream to a <code>.part</code> file and are renamed on completion, so a killed run resumes rather than leaving a truncated archive, and an already-extracted split is skipped without touching the network. A <code>.part</code> carries a sidecar naming the URL and the expected total size; a partial that disagrees with it, or that has no sidecar at all, is discarded and the transfer restarts rather than resuming into a file of unknown provenance. The official archives publish no authoritative SHA-256 digests, so none are hard-coded; the computed digest of every archive is printed, and an expected one may be enforced per archive with <code>--sha256</code>.</p>
+<p><code>--sha256</code> enforces on what a run downloads. A split that is already extracted is skipped before any transfer, and the <code>.zip</code> it would hash is gone (removed after extraction unless <code>--keep_archives</code> was set), so a digest supplied for it prints <code>checksum not verified: … already extracted</code> instead of being checked — <code>--force true</code> re-downloads and re-verifies.</p>
+<h3 id="the-keypoint-tier-needs-a-second-annotation-file-and-must-be-told-so">The keypoint tier needs a second annotation file, and must be told so<a class="headerlink" href="#the-keypoint-tier-needs-a-second-annotation-file-and-must-be-told-so" title="Permanent link">&para;</a></h3>
+<p>Three of the four tiers read <code>annotations/instances_{split}2017.json</code>. The keypoint tier does not: it trains and scores on <strong><code>annotations/person_keypoints_{split}2017.json</code></strong>, the <code>person</code>-only 17-point human-pose annotations.</p>
+<p>Nothing extra has to be downloaded. <code>person_keypoints_train2017.json</code> and <code>person_keypoints_val2017.json</code> ship inside <code>annotations_trainval2017.zip</code> — the same archive <code>lucid-data download</code> already fetches — and land beside the <code>instances_</code> files in <code>annotations/</code>.</p>
+<p>What <em>is</em> required is naming them. <code>lucid_yolo.data.layout</code> resolves only the <code>instances_</code> spelling, in every one of its <code>CANDIDATES</code> rows, so the keypoint config carries two overrides that are <strong>mandatory rather than optional</strong>, unlike every other tier's <code>data:</code> block:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">data</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">data_root</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/coco</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">train_ann_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/coco/annotations/person_keypoints_train2017.json</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">val_ann_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/coco/annotations/person_keypoints_val2017.json</span>
+</code></pre></div>
+<p>Those two lines are already in <code>pose_nano_smoke.yaml</code> as placeholders; point them at your own root before launching. Leaving them at the placeholder paths, or dropping them, leaves the layout probe to resolve the <code>instances_</code> files, whose annotations carry no <code>keypoints</code> field — <code>parse_coco_keypoints</code> rejects that by name, reporting the file and image rather than raising a bare <code>KeyError</code> (L-29). It fails at dataset construction, not silently, but it fails after you have queued the run.</p>
+<p><code>lucid-data check</code> validates the layout, which is the <code>instances_</code> question; it does not verify that the keypoint annotation files are present or readable. Confirm both paths exist before spending GPU hours on the tier.</p>
+<h2 id="dota-v10-r18">🛰️ DOTA-v1.0 (R18)<a class="headerlink" href="#dota-v10-r18" title="Permanent link">&para;</a></h2>
+<p><strong>Manual, and it stays manual.</strong> The distribution has no equivalent of <code>images.cocodataset.org</code>: the dataset page offers Google Drive and Baidu Drive folders, which are interactive pages rather than archive URLs. A folder link cannot be resolved to a stable file URL without rendering JavaScript, the Drive large-file path adds a confirmation interstitial, and Baidu Drive requires an account. A downloader written against any of that is a scraper of someone else's UI, which breaks silently and off-repository. So <code>lucid-data download</code> covers COCO only, and DOTA provisioning is an operator step.</p>
+<h3 id="where">Where<a class="headerlink" href="#where" title="Permanent link">&para;</a></h3>
+<p>Start at the dataset page of the official DOTA site, maintained by the authors of R18:</p>
+<ul>
+<li><a href="https://captain-whu.github.io/DOTA/dataset.html">https://captain-whu.github.io/DOTA/dataset.html</a></li>
+</ul>
+<p>Under <strong>Data Download</strong>, take the <strong>DOTA-v1.0</strong> section — the page also carries DOTA-v1.5 and DOTA-v2.0 sections, and those are different label sets. Each version section offers the same three items, on either host:</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Contains</th>
+<th>Needed here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Training set</td>
+<td>images plus their <code>labelTxt</code> annotations</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Validation set</td>
+<td>images plus their <code>labelTxt</code> annotations</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Testing images</td>
+<td>images only</td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<p>The testing images are not needed and not downloaded: R18 states that ground truth is released for the training and validation sets <em>"but not for the testing set. For testing, we are currently building an evaluation server."</em> The tier is scored on val (WP-063), so nothing here depends on the withheld annotations.</p>
+<p>Two cautions from the page as it stands:</p>
+<ul>
+<li>The v1.5 section links the <strong>same</strong> Drive folders as the v1.0 section. Whichever link is followed, take the DOTA-v1.0 label archive, not a v1.5 one: v1.5 adds a sixteenth category (<code>container crane</code>), and <code>lucid_yolo.data.dota</code> reads the fifteen of R18 in their published order, where the index <em>is</em> the class id. A v1.5 label file fails the read with the offending file and line named rather than being silently dropped.</li>
+<li>The Drive folder listings are rendered client-side, so the archive filenames inside them are not quoted here — they have not been read, and a filename copied from memory is the kind of detail that sends an operator to the wrong file. Take what the folder offers for the version and item named above.</li>
+</ul>
+<h3 id="what-has-to-be-on-disk">What has to be on disk<a class="headerlink" href="#what-has-to-be-on-disk" title="Permanent link">&para;</a></h3>
+<p>Unpack so that each split directory holds an <code>images/</code> and a <code>labelTxt/</code> directory, with one label file per image sharing its stem:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>&lt;dota_root&gt;/
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    train/
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>        images/P0000.png ...
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>        labelTxt/P0000.txt ...
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    val/
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>        images/P0003.png ...
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>        labelTxt/P0003.txt ...
+</code></pre></div>
+<p>The archives do not necessarily unpack into this shape; moving directories after extraction is expected. <code>lucid-data check --data_root &lt;dota_root&gt; --dataset dota</code> is what decides whether the result is usable: it verifies both directories exist per split, that images and label files pair one-to-one in both directions, and that every object line parses, naming the file and line of the first that does not.</p>
+<p>A complete train-plus-val provisioning from the official distribution reports:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>  PASS train — 1411 images, 98990 instances, 15 classes
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  PASS val — 458 images, 28853 instances, 15 classes
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  NOTE totals across ['train', 'val']: 1869 images, 127843 instances, 15 classes
+</code></pre></div>
+<p>Those are measured, not published — R18 gives whole-dataset totals only, and 2,806 minus 1,869 is exactly the 937 images of the withheld testing third. Compare against them, and pass them to make the comparison a gate:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>lucid-data<span class="w"> </span>check<span class="w"> </span>--data_root<span class="w"> </span>&lt;dota_root&gt;<span class="w"> </span>--dataset<span class="w"> </span>dota<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--expected_images<span class="w"> </span><span class="m">1869</span><span class="w"> </span>--expected_instances<span class="w"> </span><span class="m">127843</span>
+</code></pre></div>
+<p><strong>What it does not check by default, and why.</strong> The totals across the checked splits are reported, not required. The published 2,806 images / 188,282 instances / 15 classes describe DOTA-v1.0 <em>whole</em>, and R18 splits it as "half of the original images as the training set, 1/6 as validation set, and 1/3 as the testing set" while releasing ground truth for the first two only — so an annotated root holds about two thirds of that and can never sum to it. Requiring those totals by default is what the check did until WP-097, which made it fail on every correct download. The line to read is now <code>NOTE totals across ...</code>; once the counts for a given provisioning are known they can be asserted with <code>--expected_images</code>, <code>--expected_instances</code> and <code>--expected_classes</code>, and are then enforced exactly as before.</p>
+<h3 id="then-build-the-tiles">Then build the tiles<a class="headerlink" href="#then-build-the-tiles" title="Permanent link">&para;</a></h3>
+<p>The tier trains on 1024 px tiles, never on the original tree — DOTA images run to several thousand pixels a side in PNG, which has no random-access region decode, so cropping per sample would decode a whole image to yield one window (WP-094):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>lucid-data<span class="w"> </span>build-tiles<span class="w"> </span>--root<span class="w"> </span>&lt;dota_root&gt;<span class="w"> </span>--out<span class="w"> </span>&lt;tiles_root&gt;<span class="w"> </span>--splits<span class="w"> </span>train,val<span class="w"> </span>--overlap<span class="w"> </span><span class="m">512</span><span class="w"> </span>--workers<span class="w"> </span><span class="m">8</span>
+</code></pre></div>
+<p>Tiles are PNG by default, matching the lossless source. <code>--suffix .jpg --quality 92</code> trades that for decode speed, and the trade is worth weighing: the loader decodes every tile once per epoch and mosaic pulls four source tiles per training sample, so a 64-image step at 1024 px is around 250 decodes and PNG is where a run starves before the GPU does. Annotations are unaffected by the choice.</p>
+<p>The tiles are a build artifact and are never committed. The output is a COCO container with quadrilateral rings, in the layout <code>obb_nano_smoke.yaml</code> names, so training and evaluation read it through the same dataset class as COCO.</p>
+<p>Overlap is a real choice, not a default to accept unread. Pixels are amplified by <code>(patch / (patch - overlap))²</code>: 512 px of overlap is R18's own crop stride and costs 4.0x, while the 200 px of A21 costs about 1.55x. Larger overlap means fewer objects severed by a tile edge and a longer epoch.</p>
+<h2 id="dataset-formats">🧩 Dataset formats<a class="headerlink" href="#dataset-formats" title="Permanent link">&para;</a></h2>
+<p>This is a reader's map, not a restatement: every claim below cites the module that enforces it, and none of it substitutes for reading that module when something is unclear.</p>
+<p>Two words matter here and the code keeps them apart. <em>Layout</em> is where a split's files sit on disk. <code>lucid_yolo.data.layout</code> decides it from directory and file names alone: <code>detect_layout</code>'s two probes test only <code>is_dir()</code>, <code>is_file()</code> and (for a YOLO root) whether <code>data.yaml</code> exists — they never open an annotation to make the call (<code>_probe_coco</code>/<code>_probe_yolo</code>, <code>lucid_yolo/data/layout.py</code>). <em>Format</em> is what one annotation actually encodes once a reader has been chosen — field count, units, coordinate range, what an empty file means — and that is a property of <code>lucid_yolo.data.coco</code>, <code>.yolo</code> and <code>.dota</code>, not of the layout that pointed a reader at the root.</p>
+<p><code>lucid_yolo.data.layout</code> keeps each format's directory convention in its own table — <code>CANDIDATES</code> for COCO, <code>YOLO_CANDIDATES</code> for YOLO — rather than as rows of one merged table, because a YOLO split's annotations are a <em>directory</em>, not a file: the "both halves exist" predicate that lets <code>CANDIDATES</code> fall back safely would have to become an existence check that accepts either kind of thing, and a root satisfying both conventions would then resolve to whichever table came first — handing a labels directory to the COCO reader or an <code>instances_*.json</code> to the YOLO one (<code>lucid_yolo/data/layout.py</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>COCO format</th>
+<th>YOLO format</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>detect</td>
+<td><code>bbox</code>: pixel <code>[x, y, w, h]</code>, converted to <code>xyxy</code> on read</td>
+<td>five normalized fields: <code>cls cx cy w h</code></td>
+</tr>
+<tr>
+<td>segment</td>
+<td>first ring of <code>segmentation</code>: pixel <code>(P, 2)</code> polygon, <code>P &gt;= 3</code></td>
+<td>not expressible — the format carries no rings</td>
+</tr>
+<tr>
+<td>obb</td>
+<td>four-point <code>segmentation</code> ring, plus four non-schema keys (A53)</td>
+<td>nine normalized fields: <code>cls x1 y1 x2 y2 x3 y3 x4 y4</code></td>
+</tr>
+</tbody>
+</table>
+<p>The structural difference is one file against many: COCO keeps a split's whole annotation set — and its class list — in a single JSON beside the images, while YOLO writes one text file per image and keeps the class list in a separate <code>data.yaml</code>. The two trees below are the same <code>val</code> split of the same two images in each format.</p>
+<h3 id="coco">COCO<a class="headerlink" href="#coco" title="Permanent link">&para;</a></h3>
+<h4 id="layout">Layout<a class="headerlink" href="#layout" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>data_root/
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>├── annotations/
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>│   └── instances_val.json      one file per split: "images", "categories", "annotations"
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>└── val/                        images only — the JSON names them and holds every box
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    ├── 000000000139.jpg
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    └── 000000000285.jpg
+</code></pre></div>
+<p>Class ids come from the JSON's own <code>categories</code>, remapped to contiguous labels in sorted-id order rather than used raw (<code>_build_category_maps</code>, <code>lucid_yolo/data/coco.py</code>). An image with no annotations is still listed under <code>"images"</code>, so the split knows it exists.</p>
+<p><code>CANDIDATES</code>, tried in this order for a split (<code>val</code> below), the first row whose directory <em>and</em> file both exist winning (<code>resolve_split</code>, <code>lucid_yolo/data/layout.py</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Convention</th>
+<th>Images directory</th>
+<th>Annotation file</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>COCO 2017</td>
+<td><code>val2017/</code></td>
+<td><code>annotations/instances_val2017.json</code></td>
+</tr>
+<tr>
+<td>plain COCO / tiled</td>
+<td><code>val/</code></td>
+<td><code>annotations/instances_val.json</code></td>
+</tr>
+<tr>
+<td>images-subdirectory</td>
+<td><code>images/val/</code></td>
+<td><code>annotations/instances_val.json</code></td>
+</tr>
+<tr>
+<td>per-split export</td>
+<td><code>val/</code></td>
+<td><code>val/_annotations.coco.json</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>resolve_split</code> never raises on a miss: when nothing matches, it returns the first row unchanged, leaving the "no such file" to the reader that actually opens the path (<code>lucid_yolo/data/layout.py</code>).</p>
+<p>DOTA-v1.0's own <code>images/</code> + <code>labelTxt/</code> layout, documented above under <strong>DOTA-v1.0 (R18)</strong>, is not a row of this table — it is read directly by <code>lucid_yolo.data.dota</code>, not through <code>lucid_yolo.data.layout</code>, and only becomes a COCO-layout root (one of the rows above) after <code>lucid-data build-tiles</code> writes it out.</p>
+<h4 id="format">Format<a class="headerlink" href="#format" title="Permanent link">&para;</a></h4>
+<p><strong>Detect.</strong> An annotation's <code>bbox</code> is <code>[x, y, w, h]</code> in pixels, top-left corner plus width and height; the reader converts it to this project's <code>xyxy</code> convention and clamps it to the image bounds (<code>_xywh_to_xyxy</code>, <code>lucid_yolo/data/coco.py</code>). On a 100x50px image, <code>"bbox": [10, 5, 20, 10]</code> reads as <code>xyxy = [10, 5, 30, 15]</code> (<code>x2 = x + w = 30</code>, <code>y2 = y + h = 15</code>).</p>
+<p><strong>Segment.</strong> <code>segmentation</code> is a list of flat polygon rings; only the <em>first</em> ring of an ordinary (list-typed) annotation is kept, reshaped to <code>(P, 2)</code>, and only when it has at least three points (<code>_parse_ring</code>, <code>lucid_yolo/data/coco.py</code>). Any <code>iscrowd=1</code> annotation, and any <code>segmentation</code> value that is <em>present but unusable</em> — a run-length dict, an empty list, or a shorter ring — is always skipped entirely, in every mode: neither is ever a real countable instance. The same object as above, <code>"segmentation": [[10, 5, 30, 5, 30, 15, 10, 15]]</code>, parses to the ring <code>[[10, 5], [30, 5], [30, 15], [10, 15]]</code> — the envelope of that ring is the same box <code>bbox</code> gives above, though the (non-oriented) reader does not derive one from the other here; it does on the oriented reading below.</p>
+<p>A <code>segmentation</code> key that is <strong>absent entirely</strong> is different (WP-121b): it is fatal only for an oriented reading, which has no other source for the rotated box; a plain or keypoints reading keeps the box instead — when any instance in an image has no <code>segmentation</code> key at all, that image's <code>Targets.polygons</code> comes back empty (<code>[]</code>) rather than one instance being silently dropped, matching <code>Targets.polygons</code>'s "0 (no masks) or N" contract (<code>lucid_yolo/data/targets.py</code>). Requesting <code>mask_targets=True</code> against such an image still raises in <code>instance_mask_targets</code> (<code>lucid_yolo/ptl/seg_targets.py</code>), the same way it does for a genuinely maskless dataset — this reader relaxation does not weaken that guard.</p>
+<p><strong>Obb.</strong> Under <code>oriented=True</code> the <code>segmentation</code> ring is read as a rotated box's quadrilateral rather than a free polygon: it must be exactly four points, fitted to a canonical long-edge box <code>(cx, cy, w, h, theta)</code> (<code>lucid_yolo/data/rotated_geom.py</code>), and <code>boxes</code> is recomputed as the <strong>envelope of that same ring</strong> rather than read from <code>bbox</code> — so <code>boxes[i]</code> and <code>rboxes[i]</code> describe one object by construction (<code>_oriented_targets</code>, <code>lucid_yolo/data/coco.py</code>). An annotation with no usable ring is skipped entirely under <code>oriented=True</code>, since there is no other source for the rotated box. The module's own worked example: the ring <code>[[3, 2], [7, 2], [7, 4], [3, 4]]</code> yields <code>boxes = [[3.0, 2.0, 7.0, 4.0]]</code> and <code>rboxes[0] = [5.0, 3.0, 4.0, 2.0, 0.0]</code> (<code>_oriented_targets</code>'s own doctest, <code>lucid_yolo/data/coco.py</code>).</p>
+<p>A53 adds four keys the COCO schema has none for, written by <code>lucid-data build-tiles</code> and read back by name — never by a standard COCO reader, which sees an ordinary detection set and ignores all four:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Scope</th>
+<th>Written at</th>
+<th>Read by this project's reader</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>difficult</code></td>
+<td>per annotation</td>
+<td><code>annotation_records</code> (<code>lucid_yolo/data/tiles.py</code>)</td>
+<td>yes — forwarded onto <code>Targets.difficult</code>; absent reads as <code>False</code> (<code>_parse_annotation</code>, <code>lucid_yolo/data/coco.py</code>)</td>
+</tr>
+<tr>
+<td><code>visible_fraction</code></td>
+<td>per annotation</td>
+<td><code>annotation_records</code> (<code>lucid_yolo/data/tiles.py</code>)</td>
+<td>no — not read by <code>CocoDetectionDataset</code></td>
+</tr>
+<tr>
+<td><code>source_image</code></td>
+<td>per image</td>
+<td><code>_image_record</code> (<code>lucid_yolo/data/tiles.py</code>)</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>window</code></td>
+<td>per image</td>
+<td><code>_image_record</code> (<code>lucid_yolo/data/tiles.py</code>), a <code>(x0, y0, x1, y1)</code> pixel box (<code>tile_file_name</code>, <code>lucid_yolo/data/tiles.py</code>)</td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<h3 id="yolo">YOLO<a class="headerlink" href="#yolo" title="Permanent link">&para;</a></h3>
+<h4 id="layout_1">Layout<a class="headerlink" href="#layout_1" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>data_root/
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>├── data.yaml                   names + one line per split; outranks the table below
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>└── val/
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    ├── images/
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    │   ├── 000000000139.jpg
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    │   └── 000000000285.jpg
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    └── labels/                 one .txt per image, paired by stem
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>        ├── 000000000139.txt
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>        └── 000000000285.txt    an empty file is a background image, not a missing one
+</code></pre></div>
+<p>A class id is an index into <code>data.yaml</code>'s <code>names</code> list — the position <em>is</em> the label, so nothing is remapped (<code>YoloDataConfig</code>, <code>lucid_yolo/data/yolo.py</code>). The pairing is by stem and nothing else: the reader opens <code>labels_dir / f"{image_path.stem}.txt"</code>, and a missing file raises naming both paths rather than reading as empty, because a tree with no image manifest cannot tell a background image from a truncated export — <code>allow_missing_labels=True</code> is the opt-in that says the absences are deliberate (<code>_load_targets</code>, <code>lucid_yolo/data/yolo.py</code>).</p>
+<p><code>YOLO_CANDIDATES</code>, the same rule over two rows, both halves directories so both are tested with <code>is_dir()</code> (<code>resolve_yolo_split</code>, <code>lucid_yolo/data/layout.py</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Convention</th>
+<th>Images directory</th>
+<th>Labels directory</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>per-split export</td>
+<td><code>val/images/</code></td>
+<td><code>val/labels/</code></td>
+</tr>
+<tr>
+<td>split-subdirectory</td>
+<td><code>images/val/</code></td>
+<td><code>labels/val/</code></td>
+</tr>
+</tbody>
+</table>
+<p>Same rule as COCO's table: <code>resolve_yolo_split</code> returns the first row unchanged on a miss rather than raising.</p>
+<p>A YOLO root's own <code>data.yaml</code> outranks this table for any split it names. <code>resolve_split_dirs</code> is what <code>YoloDetectionDataset.from_root</code> actually calls to get a split's directories: a split the file names resolves through <code>YoloDataConfig.images_dir</code> — the literal reading against the file's own directory first, then the same entry with leading <code>..</code> components dropped, since the published export writes <code>../train/images</code> for a directory that actually sits beside the yaml (<code>YoloDataConfig.images_dir</code>, <code>lucid_yolo/data/yolo.py</code>) — and only a split the file leaves unnamed falls back to <code>YOLO_CANDIDATES</code> above (A58; <code>resolve_split_dirs</code>, <code>from_root</code>, <code>lucid_yolo/data/yolo.py</code>).</p>
+<h4 id="format_1">Format<a class="headerlink" href="#format_1" title="Permanent link">&para;</a></h4>
+<p><strong>Detect.</strong> Each non-blank label line is five whitespace-separated fields, class index first, the rest <code>cx cy w h</code> normalized by the image's own width/height (<code>lucid_yolo/data/yolo.py</code>). At <code>width=100, height=40</code>, the row <code>1 0.5 0.5 0.5 0.25</code> denormalizes to <code>xyxy = [25.0, 15.0, 75.0, 25.0]</code> — <code>cx=50, w=50 -&gt; x1=25, x2=75</code>; <code>cy=20, h=10 -&gt; y1=15, y2=25</code> (<code>load_yolo_targets</code>'s own doctest, <code>lucid_yolo/data/yolo.py</code>).</p>
+<p><strong>Obb.</strong> The oriented row is exactly nine fields — class index, then four normalized <code>(x, y)</code> corners — and a ten-field row (R18's own label lines append a trailing <code>difficult</code> flag the normalized variant has no published spelling for) is rejected naming the file and line, never assumed away (A56; <code>_parse_row</code>, <code>lucid_yolo/data/yolo.py</code>). At <code>width=10, height=10</code>, the row <code>0 0.1 0.1 0.5 0.1 0.5 0.3 0.1 0.3</code> denormalizes to the quadrilateral <code>[[1, 1], [5, 1], [5, 3], [1, 3]]</code>, giving <code>boxes = [[1.0, 1.0, 5.0, 3.0]]</code> and <code>rboxes[0] = [3.0, 2.0, 4.0, 2.0, 0.0]</code> (<code>_oriented_targets</code>'s own doctest in <code>lucid_yolo/data/yolo.py</code>, distinct from the COCO reader's function of the same name).</p>
+<p><strong>Segment.</strong> Not expressible. A label line carries five or nine normalized numbers and never a polygon ring — the format has no rings to rasterize a mask from (<code>lucid_yolo/data/yolo.py</code>). <code>DetectionDataModule</code> refuses <code>mask_targets=True</code> on a YOLO root rather than rasterizing empty masks and reporting a plausible detection number off a segmentation head trained on nothing: "<code>mask_targets=True is unavailable on a YOLO root: the format carries no per-instance polygon rings, so there is nothing to rasterise masks from</code>" (<code>_check_layout_support</code>, <code>lucid_yolo/ptl/datamodule.py</code>).</p>
+<h3 id="resolving-which-format-a-bare-root-uses">Resolving which format a bare root uses<a class="headerlink" href="#resolving-which-format-a-bare-root-uses" title="Permanent link">&para;</a></h3>
+<p><code>lucid-data check</code> is the other caller. It named <code>--dataset coco</code> as its default until WP-099c, which is a pre-flight answering a different question than the run it precedes: a COCO-shaped verdict on a YOLO root reports a missing <code>train2017</code> for a tree that trains fine. With <code>--dataset</code> unstated it now probes, so the check dispatches exactly as <code>fit</code> does; <code>--dataset dota</code> still has to be named, because no run reads a DOTA root directly and no probe covers it. Both of the probe's undecidable states come back as report lines and exit 1 rather than a traceback (<code>_infer_dataset</code>, <code>lucid_yolo/data/check.py</code>).</p>
+<p><code>detect_layout</code> is the one caller with no reader of its own to ask — <code>DetectionDataModule</code> is handed a bare <code>data_root</code> and has to decide which reader it calls for, which is the question neither table above answers on its own. It probes both layout tables in full — by directory and file existence only, per the <em>layout</em>/<em>format</em> distinction above — and raises if neither is satisfied, naming every path tried, or if <strong>both</strong> are, since across the two tables the loser is a different label space and a different image set, not another spelling of the same reader (A63; <code>detect_layout</code>, <code>lucid_yolo/data/layout.py</code>).</p>
+<h2 id="where-a-provisioned-tree-belongs-on-a-hosted-runtime">☁️ Where a provisioned tree belongs on a hosted runtime<a class="headerlink" href="#where-a-provisioned-tree-belongs-on-a-hosted-runtime" title="Permanent link">&para;</a></h2>
+<p>A hosted runtime is ephemeral and its local disk goes with it, so the two halves of a run belong in different places.</p>
+<p><strong>The dataset and the tiles stay on the runtime's local disk</strong> (<code>/content/...</code>), not on a mounted Drive. Every epoch reads every tile, and Drive is a network filesystem mounted through FUSE — putting the training set there turns each sample fetch into a round trip and starves the loader workers the epoch-recycling path exists to keep busy.</p>
+<p><strong>Checkpoints and logs go the other way</strong>, onto storage that outlives the runtime. That is <code>--trainer.default_root_dir</code>, and it belongs to the launch rather than to provisioning: docs/TRAINING.md carries it, along with the four tiers' commands.</p>
+<h2 id="license-terms-and-what-they-constrain">📜 License terms, and what they constrain<a class="headerlink" href="#license-terms-and-what-they-constrain" title="Permanent link">&para;</a></h2>
+<p>DOTA is not permissively licensed. The dataset page states:</p>
+<blockquote>
+<p>All images and their associated annotations in DOTA can be used for academic purposes only, but any commercial use is prohibited.</p>
+</blockquote>
+<p>and separately that use of the Google Earth imagery within it must respect the Google Earth terms of use. This project's dependency policy — permissive licenses only, never AGPL or a commercial license — is about code that ships inside the wheel, and DOTA is neither shipped nor vendored. What the terms do constrain is what may be derived from it: releases publish no trained weights (D14), datasets are never committed (AGENTS.md sec. 3), and the oriented tier's outputs are the reported metrics and the frozen goldens. Anyone reusing this repository for anything other than academic work should read the terms before provisioning DOTA at all.</p>
+<p>COCO 2017 carries its own terms, published on <code>cocodataset.org</code> and not restated here — the annotations and the images they describe are covered separately, and the wording on that page is the authority. Neither dataset is redistributed by this repository.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright 2026 Jirka Borovec — Apache-2.0 (see LICENSE and NOTICE)
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

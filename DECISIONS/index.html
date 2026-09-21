@@ -1,0 +1,1728 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, oriented-detection, and keypoint-detection methods described in the YOLO26 paper (arXiv:2606.03748)">
+      
+      
+        <meta name="author" content="Jirka Borovec">
+      
+      
+        <link rel="canonical" href="https://borda.github.io/lucid-YOLO/DECISIONS/">
+      
+      
+        <link rel="prev" href="../ASSUMPTIONS/">
+      
+      
+        <link rel="next" href="../ROADMAP/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Decision record - lucid-yolo</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#decision-record" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="lucid-yolo" class="md-header__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lucid-yolo
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Decision record
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="lucid-yolo" class="md-nav__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lucid-yolo
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running the models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Running the models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TRAINING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching a training run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DATASETS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Results
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../REPRODUCTION_REPORT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproduction report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clean-room record
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Clean-room record
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PROVENANCE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ASSUMPTIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assumption register
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decision record
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decision record
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📌 Decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adr-001-architecture-in-code-yaml-for-experiments-only-d9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🏗️ ADR-001 — Architecture in code; YAML for experiments only (D9)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adr-002-perpetual-0x-release-train-d10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🚂 ADR-002 — Perpetual 0.x release train (D10)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adr-003-autonomous-execution-under-principal-gates-d11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🚦 ADR-003 — Autonomous execution under principal gates (D11)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adr-004-reference-implementations-readable-never-copyable-d13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔒 ADR-004 — Reference implementations readable, never copyable (D13)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adr-005-the-fuse-boundary-and-the-battle-test-contract-d19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧩 ADR-005 — The fuse boundary and the battle-test contract (D19)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-items" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🕗 Open items
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Execution
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ROADMAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Work-package roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../RESEARCH_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ENGINEERING_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ESCALATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Escalation log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributor guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebooks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/development_gates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development gates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_detect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detection on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_segment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instance segmentation on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Oriented detection on DOTA tiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keypoints on COCO person_keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📌 Decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adr-001-architecture-in-code-yaml-for-experiments-only-d9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🏗️ ADR-001 — Architecture in code; YAML for experiments only (D9)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adr-002-perpetual-0x-release-train-d10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🚂 ADR-002 — Perpetual 0.x release train (D10)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adr-003-autonomous-execution-under-principal-gates-d11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🚦 ADR-003 — Autonomous execution under principal gates (D11)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adr-004-reference-implementations-readable-never-copyable-d13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔒 ADR-004 — Reference implementations readable, never copyable (D13)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adr-005-the-fuse-boundary-and-the-battle-test-contract-d19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧩 ADR-005 — The fuse boundary and the battle-test contract (D19)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-items" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🕗 Open items
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/Borda/lucid-YOLO/edit/main/docs/DECISIONS.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="decision-record">⚖️ Decision Record<a class="headerlink" href="#decision-record" title="Permanent link">&para;</a></h1>
+<p>Architecture- and policy-level decisions. D1–D11 are transcribed from the governing blueprint (v1.5, 2026-07-10); D12 records execution-session amendments (2026-07-31). ADRs expand the decisions with lasting architectural consequences.</p>
+<h2 id="decisions">📌 Decisions<a class="headerlink" href="#decisions" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Decision</th>
+<th>Resolution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D1</td>
+<td>Scope</td>
+<td>Detection + instance segmentation + OBB, delivered as sequential release-train milestones (0.1 → 0.2 → 0.3, see D10) on top of the fully gated detector. Pose and classification remain future 0.x work; YOLOE-26 out of scope entirely.</td>
+</tr>
+<tr>
+<td>D2</td>
+<td>Reproduction claim</td>
+<td>Faithful method reproduction (from-scratch training), not exact-number reproduction. Targets are the paper's relative/ablation claims and the from-scratch reference in R1 Table 4. No Objects365 pretraining, no evolutionary hyperparameter search.</td>
+</tr>
+<tr>
+<td>D3</td>
+<td>Scale strategy</td>
+<td>Family-generic code. Iterate/debug at n-scale, headline runs at s-scale (all paper ablations are s-scale, including seg and OBB).</td>
+</tr>
+<tr>
+<td>D4</td>
+<td>Framework</td>
+<td>PyTorch Lightning LightningModule + Trainer, automatic optimization. MuSGD is a single custom torch.optim.Optimizer; ProgLoss is an epoch hook; close-mosaic and EMA are callbacks. Task heads reuse the same LightningModule with task-conditional loss composition.</td>
+</tr>
+<tr>
+<td>D5</td>
+<td>Source allowlist</td>
+<td>Strict: the three papers + their cited primary literature + neutral dataset/tooling documentation only. All Ultralytics web properties — including docs.ultralytics.com — are inadmissible, alongside source code, YAML model configs, and released weights. Full policy in AGENTS.md and docs/PROVENANCE.md.</td>
+</tr>
+<tr>
+<td>D6</td>
+<td>Muon core</td>
+<td>Implement Newton–Schulz orthogonalization from scratch per R7/R8; no third-party optimizer dependency.</td>
+</tr>
+<tr>
+<td>D7</td>
+<td>Identity</td>
+<td>Repository/package name <code>lucid-yolo</code> (personal repository; employer sign-off required before any organizational nexus). "YOLO" used as the model-family/category term; naming evidence in docs/PROVENANCE.md. "YOLO26" and "Ultralytics" never appear in package, module, or model identifiers.</td>
+</tr>
+<tr>
+<td>D8</td>
+<td>Verification</td>
+<td>Published tables only. Fidelity gates use printed param counts, FLOPs, and mAP values from R1/R2 — Table 7 (detection), Table S9 (segmentation), Table S11 (OBB). No black-box runs of the reference package anywhere in the 0.x series.</td>
+</tr>
+<tr>
+<td>D9</td>
+<td>Configuration strategy</td>
+<td>Architecture in code; YAML for experiments only. See ADR-001.</td>
+</tr>
+<tr>
+<td>D10</td>
+<td>Versioning and release policy</td>
+<td>Perpetual 0.x — no 1.0 milestone is planned. See ADR-002.</td>
+</tr>
+<tr>
+<td>D11</td>
+<td>Execution model</td>
+<td>Autonomous agent execution under principal gates. See ADR-003.</td>
+</tr>
+<tr>
+<td>D12</td>
+<td>Execution-session amendments (2026-07-31)</td>
+<td>(a) <strong>Git flow</strong>: work lands as one commit per WP directly on local <code>main</code>; <code>make gate</code> green is the merge gate (replacing the blueprint's PR/squash-merge flow — single-operator repository, no branch protection available locally); pushes to the remote are batched at phase boundaries and each push requires explicit principal confirmation. (b) <strong>Synthetic fixtures and data stand-ins</strong>: test fixtures and offline [DATA]-WP development stand-ins are generated with fuse-augmentations (R21, Apache-2.0, pinned commit) instead of hand-annotated images — recorded as A26; real COCO/DOTA remain mandatory for tier acceptance. (c) <strong>Accelerator</strong>: [GPU] WPs attempt Apple MPS locally first; CUDA runs remain [PRINCIPAL]-gated. (d) <strong>Lint routing</strong>: all linters (ruff check/format, mypy, hygiene hooks) run exclusively through <code>pre-commit run --all-files</code>; <code>make gate</code> = precommit + test + golden. (e) <strong>Subpackage naming</strong> (2026-08-01): the Lightning-integration subpackage is <code>src/lucid_yolo/ptl/</code> (blueprint sec. 7 named it <code>lit/</code>; renamed to avoid <code>lucid_yolo.lit</code> stutter); Phase 5 commit scopes use <code>feat(ptl)</code>. (f) <strong>Package rename</strong> (2026-08-02): distribution <code>lit-yolo</code> -&gt; <code>lucid-yolo</code>, import <code>lit_yolo</code> -&gt; <code>lucid_yolo</code>, console scripts <code>lucid-yolo</code>/<code>lucid-download</code>, variants <code>lucid-yolo-e2e-{n..x}</code>. Rationale: the <code>lit-</code> prefix is Lightning AI's own project-naming convention (lit-llama, lit-gpt) and the project must not borrow any third party's branding; <code>lucid-</code> states the project's education/readability goal. Alternatives ruled out during the decision: <code>open-yolo</code> (occupied PyPI name) and plural <code>*-yolos</code> forms (collide with the unrelated YOLOS ViT detector, hustvl "You Only Look at One Sequence"). Verified at decision time: <code>lucid-yolo</code> free on PyPI (404) and one inactive hobby repository on GitHub. Naming-evidence record and its usage discipline (<code>docs/PROVENANCE.md</code>, the section this repository cites as "sec. 3.5") unchanged. <strong>What (f) names is what existed on 2026-08-02, and is left as the record of that date</strong>: <code>lucid-download</code> was removed in 0.4.0, as 0.3.0 said it would be, and the shipped console scripts are now four — <code>lucid-yolo</code>, <code>lucid-data</code>, <code>lucid-eval</code>, <code>lucid-predict</code> — declared in <code>pyproject.toml</code>'s <code>[project.scripts]</code>, which is where the current set is read. The <code>lucid-yolo-e2e-{n..x}</code> forms were never console scripts and are not declared anywhere: <code>e2e</code> is the feature name the decode path carries in code (<code>DECODE_PATHS</code> in <code>predict.py</code>), and the hyphenated variants are the model-identifier spelling the naming-evidence record reserves. The renames the row actually decided — the distribution, the import package, the ban on a version number in a model identifier — all stand.</td>
+</tr>
+<tr>
+<td>D13</td>
+<td>Reference-implementation consultation (2026-08-05)</td>
+<td><strong>Allowlist widened, denylist unchanged.</strong> Detection implementations under a <strong>permissive</strong> license with no Ultralytics lineage may be <strong>read for reference</strong> when diagnosing a structural defect. Admissible licenses are exhaustively: <strong>MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC</strong> (e.g. torchvision, YOLOX, MMDetection, PP-YOLOE). <strong>Inadmissible at any cost, regardless of how useful the content is: AGPL, GPL, LGPL and every other copyleft license; source-available, research-only and non-commercial licenses; anything commercially licensed or of unstated license.</strong> Unlicensed or ambiguously licensed code is treated as inadmissible, not as permissive. Three further conditions apply: (i) the repository's LICENSE and independent provenance are verified before it is opened, (ii) it is registered in PROVENANCE.md with the access date and what it informed, (iii) <strong>no code is ever copied</strong> — the sec. 7 prohibition on copying from external detection repositories is unchanged, as is the absolute Ultralytics denylist. Rationale: three Det-smoke attempts stalled at 4-6 mAP with the failure mechanisms only identifiable by comparison against a working reference; the papers alone under-specify normalization and assignment conventions. User decision, requested 2026-08-05. See ADR-004.</td>
+</tr>
+<tr>
+<td>D14</td>
+<td>Releases ship no trained weights (2026-08-07)</td>
+<td><strong>Source, goldens and the reproduction report are the release artifacts; trained checkpoints are not published.</strong> The reproduction's claim is that the <em>method</em> reproduces from the papers, and that claim is carried by the frozen goldens and the fidelity gates, not by a binary anyone can retrain from the recipe. Publishing checkpoints would additionally require a provenance story for every artifact and a hosting commitment, neither of which serves the clean-room goal. Supersedes the "weights published" clause in the WP-046, WP-054 and WP-064 definitions of done, which predate this decision.</td>
+</tr>
+<tr>
+<td>D15</td>
+<td>Bundled native libraries are audited; recognized license exceptions pass, and two vendored libraries are allowlisted (2026-08-11)</td>
+<td><strong>The license audit reads bundled <code>License-File</code> entries, not only the metadata license fields.</strong> Three rules follow. (a) A GPL-family declaration carrying a <em>recognized exception</em> is permissive by construction and is not a finding for any package — currently the GCC Runtime Library Exception, matched by expression rather than by package name, so a future dependency built by gcc needs no allowlist entry. (b) <code>shapely</code> is allowlisted for the LGPLv2.1 GEOS binaries its wheel carries. (c) <code>numpy</code> is allowlisted for <code>libquadmath</code> (LGPL-2.1-or-later) alone; its sibling <code>libgfortran</code>/<code>libgcc</code> pass under rule (a), and the exception is tested <em>before</em> the allowlist so that a package listed for one vendored library is not silently excused for every other one it ships. The numpy exposure was found by the very check this decision adds, on its first run — it is a runtime dependency whose declared license is BSD-3-Clause, and the GCC runtime it vendors was invisible to every audit the project had run until then. Found during WP-063: shapely declares <code>License: BSD 3-Clause</code> and its wheel bundles GEOS shared libraries under LGPLv2.1, so the audit — which read only <code>License</code>, <code>License-Expression</code> and <code>License ::</code> classifiers — passed while an LGPL binary sat in the environment. The blind spot is general, not shapely's: any wheel may vendor a native library under a license its own metadata never mentions, and the audit is the gate that is supposed to see it. The allowance is narrow and rests on four facts, each of which would have to stay true: shapely is a <code>dev</code> dependency-group package, <code>src/</code> never imports it, GEOS is dynamically linked at test time only, and neither is vendored into this repository or present in any published artifact. LGPL is also not what the policy bans outright — AGPL and commercial licenses are — and a test-only dynamically-linked dependency is the weakest form of contact with weak copyleft. The oracle it provides is the point: A24's validation is an <em>independent</em> polygon implementation, and replacing it with our own float64 code would leave the kernel checked against something sharing its assumptions. Recorded rather than waved through, because the allowlist in <code>scripts/lint/audit_licenses.py</code> requires a decision entry before any entry is added.</td>
+</tr>
+<tr>
+<td>D16</td>
+<td>Shipped binaries are audited by filename against a named table (2026-08-15)</td>
+<td><strong>The license audit reads a third surface: the files a wheel says it installs, not only what it declares and what its license documents say.</strong> <code>supervision</code>, sourced as the drawing library for WP-067's example, hard-requires <code>av&gt;=14.2</code>; the <code>av</code> wheel declares <code>BSD-3-Clause</code>, ships a <code>licenses/LICENSE.txt</code> with no GPL mention anywhere in it, and ships <code>av/.dylibs/libx264.165.dylib</code> — x264 is GPL-2.0, offered commercially as the alternative. Both existing checks pass it clean, so the gate would have admitted a GPL binary in silence. <code>supervision</code> is refused on that basis and WP-067's example is drawn with <code>matplotlib</code> (R29), already a dependency. Three parts follow. (a) The scan matches shipped filenames against <code>COPYLEFT_BINARIES</code>, a table naming x264, x265, mp3lame, GEOS and the eight FFmpeg libraries, each entry carrying its license and where that license was read. (b) <strong>It narrows the hole rather than closing it</strong>, and the module docstring says so in those terms: a copyleft library the table has never heard of passes exactly as <code>av</code> did. The alternative — failing on every unrecognized binary — is not available, since <code>torch</code> alone ships hundreds and a gate that fires on every commit is a gate that gets disabled; a green run is evidence that no <em>listed</em> library is present and nothing more. (c) Its allowlist is keyed on <code>(distribution, library)</code> where the bundled-document allowlist beside it is keyed on the package alone, because D15's own rule is that a package excused for one vendored library is not excused for the next one it ships — the two entries it carries are D15's shapely/GEOS allowance reached by the file list instead of by the license document, not a widening of it. Additions require an entry here, as for both other allowlists.</td>
+</tr>
+<tr>
+<td>D17</td>
+<td>The accelerator environment is not a dependency, and an unreadable licence is allowlisted by name (2026-08-17)</td>
+<td><strong>WP-115 made the absence of a licence a finding, and the first thing it found was <code>cuda-toolkit</code>.</strong> The wheel's <code>dist-info</code> holds METADATA, WHEEL and RECORD and nothing else — no <code>License</code>, no <code>License-Expression</code>, no <code>License ::</code> classifier, no licence document of any kind, verified from the wheel itself rather than from an index page. So the finding is correct: nothing in that distribution states its terms. Two things follow, and they are separate. (a) <strong>CUDA is out of scope as an environment, not admitted as a licence.</strong> The NVIDIA CUDA EULA is proprietary, which the permissive-only policy would otherwise refuse; the exemption is that <code>pyproject.toml</code> declares no CUDA package, this project redistributes no part of the toolkit, and it publishes no trained weights (D14), so what CUDA licenses is the machine an accelerator run happens on rather than anything this repository ships. Stated here so the exemption is a decision on record instead of a silence. (b) <strong>The mechanism is a fourth allowlist, <code>UNREADABLE_ALLOWLIST</code>, keyed by distribution.</strong> Kept separate from the three beside it because the exposures differ: <code>ALLOWLIST</code> excuses a package's own copyleft declaration, <code>BUNDLED_ALLOWLIST</code> and <code>BUNDLED_BINARY_ALLOWLIST</code> excuse a vendored copyleft library, and this one excuses metadata that says nothing at all. Folding them together would let one package's silence excuse another package's declaration. Additions require an entry here, as for all three others. <code>cuda-toolkit</code> is its only entry.</td>
+</tr>
+<tr>
+<td>D18</td>
+<td>The WP contract ends with the reproduction; a new task restarts it (2026-09-02)</td>
+<td><strong>The one-WP-one-commit contract is a reproduction instrument, not a permanent process.</strong> It exists so that a from-scratch reproduction of three papers is auditable row by row, and once the reproduction report carries all four accepted tiers that purpose is served. Three preconditions, all outside any single row: O3 cleared, the repository made public, and WP-125 accepted at its principal gate. (a) <strong>What relaxes.</strong> A change that alters no shipped behaviour, adds or removes no public symbol, moves no golden and changes no documented assumption lands as an ordinary commit under the same <code>make gate</code> — typo fixes, docstrings, lint and CI maintenance, added tests. Everything else still opens a WP, and the gate itself never relaxes. (b) <strong>What restarts it.</strong> Adding a <strong>task</strong> to the model family — a fifth head after detection, segmentation, oriented detection and keypoints — re-triggers the full procedure: its own phase, numbered WPs, a smoke tier, a principal gate on a relative mechanism claim, and its own 0.MINOR. A new task is a new reproduction claim, and D2's standard applies to it exactly as it applied to the first four. (c) <strong>Git flow.</strong> D12a is unchanged for the principal: work still lands as one commit per WP directly on local <code>main</code>. Outside contributions arrive as pull requests against the same gate. (d) <strong>Admission is three layers, because one is not enough.</strong> The exposure is not Ultralytics specifically but any source this project cannot redistribute under Apache-2.0 — copyleft (AGPL, GPL, LGPL, SSPL), source-available (BSL, Elastic, PolyForm), paid, proprietary, or with a licence that cannot be read (D13, D17). No signature detects such code arriving, so the layers are chosen for how differently they fail. <strong>A DCO sign-off</strong> (WP-142) records ownership and right to submit: it makes the contributor's claim explicit and durable, which is what recourse and a good-faith record are built on, and it is enforced by a check in this repository rather than a third-party app, since every free hosted CLA service surveyed on 2026-09-02 was either archived, years stale, or a two-star project. <strong>A generalized attestation</strong> (WP-143) fixes what the claim covers — today's pull-request template names one vendor where the rule is a whole licence class. <strong>A provenance trailer on every contributor commit</strong> (WP-144) is the only layer producing evidence instead of a promise: a contributor must name what an algorithmic change derives from, resolvable against <code>docs/PROVENANCE.md</code>, and an unnamed derivation on a loss or an assigner is then visible at review. A signature is a liability instrument — it says who answers if the work was not theirs. It does not cure infringement in a published release, and it does not stand in for reviewing the diff. Whether a Contributor License Agreement is also required is a question for counsel alongside O3; the DCO is the floor, not the ceiling.</td>
+</tr>
+<tr>
+<td>D19</td>
+<td>The augmentation engine moves to <code>fuse-augmentations</code>, behind a stated boundary (2026-09-02)</td>
+<td><strong>Resampling and the coordinate transport riding with it are a general-purpose subject; task semantics are not.</strong> This project implements both today, and the augmentation half is a second implementation of a package the same author maintains. <code>fuse</code> becomes the engine and <code>lucid-yolo</code> becomes its first real-project consumer, under a boundary written down before any code moves. Nine sub-questions were put to the principal and accepted on 2026-09-02: <code>fuse</code>-side work runs in a separate session, so every capability arrives as a released pin rather than a same-session edit; multi-image assemblies and polygon rings stay local while rotated boxes move; a runtime dependency is accepted under four conditions; the guard is captured before any swap and keypoint export parity lands between them; and the effort spans at least two releases, the guard's own and the swaps'. See ADR-005.</td>
+</tr>
+<tr>
+<td>D20</td>
+<td><code>fuse-augmentations</code> becomes a runtime dependency on a commit pin, and the distribution becomes unpublishable to PyPI (2026-09-04)</td>
+<td><strong>ADR-005's first condition is knowingly not met, and the alternative was worse.</strong> Promotion was gated on four conditions, the first being real SemVer releases to PyPI. PyPI's latest <code>fuse-augmentations</code> is <code>0.10.0.dev0</code>, it carries no 0.11 or 0.12 at all, and every release there is a <code>.dev0</code> pre-release; the capability floor Phase 14 stands on is the commit <code>a5a276a</code>. A direct-reference requirement is legal to build and install and illegal to upload, so this pin makes the distribution unpublishable to PyPI. What made refusal untenable is that Phase 14 already moved: five modules under <code>data/</code> import <code>fuse_augmentations</code> at module level, so <code>lucid_yolo.data</code> — and <code>predict</code>, through <code>letterbox</code> — cannot import without it. Leaving it in the <code>dev</code> group meant every install without that group produced a package failing at import rather than one missing an optional extra, and ADR-005's own stated fallback ("a refusal returns the dependency story to a SHA pin, which keeps the augmentation stack local") was written while the stack was still local and no longer describes anything. The condition is accepted as failed because it protects nothing this project currently does: <code>release.yml</code> states publication to PyPI is itself an unmade <code>[PRINCIPAL]</code> decision and deliberately omits it, so no upload exists to be rejected. Conditions 2, 3 and 4 are met — the exact SHA is a stricter ceiling than a range, the promotion landed in its own work package with its own gate and licence-audit run, and this row is the record. Alpha-status runtime dependency accepted deliberately; revisit the day a 0.12 reaches PyPI, when the fix is a <code>&gt;=0.12,&lt;0.13</code> range and nothing else changes. <strong>The build target named for PyPI outlives the ability to use it, and is kept rather than removed.</strong> <code>make dist-pypi TAG=v0.M.P</code> — the <code>absolutize_readme.py</code> rewrite that makes the long description's figures and links resolve off <code>pypi.org</code> — still exists and still works, and since this row it cannot produce an artifact PyPI would accept: the direct reference is legal to build and install and is refused at upload. It stays because what the rewrite fixes is the long description's broken relative links, which are broken for any reader who meets the distribution outside the repository — and <code>release.yml</code> runs it ahead of <code>uv build</code> for a distribution set it uploads as inspectable workflow artifacts, publishing to no index at all, exactly as that workflow's own comments say. Read its name as <em>the build shaped for a package index</em>, not as evidence that publishing to one is available; the target that would consume it is the unmade <code>[PRINCIPAL]</code> publication decision <code>release.yml</code> omits, and that decision now has this pin in front of it as well. Presented to the principal with three alternatives — hold the release until PyPI catches up, or split the promotion into a later row and ship 0.7.0 with the exposure documented rather than fixed — and this was chosen. See <code>docs/ESCALATION.md</code>, 2026-09-04.</td>
+</tr>
+<tr>
+<td>D21</td>
+<td>D1's scope clause is spent on its keypoint half, and D1 is not edited (2026-09-05)</td>
+<td><strong>The keypoint tier shipped at 0.5.0; D1 still reads "pose and classification remain future 0.x work".</strong> D1 is transcribed from the governing blueprint and is a record of a decision taken on 2026-07-10, not a description of the repository, so it is left exactly as written — a decision log whose entries are rewritten to match what later happened stops being evidence that anything was decided. This row supersedes the keypoint half of that clause and nothing else: <strong>classification and YOLOE-26 remain out of scope entirely</strong>, and no row proposes them. Two qualifications the original wording could not carry. The shipped tier is <strong>keypoints, not pose</strong> — <code>K</code> is a constructor argument the way the class count is, and nothing in the head, the loss or the decode knows what a point means; human pose is one instantiation. And it is the one accepted tier not drawn from R1: its loss and evaluation protocol come from RLE (R14, arXiv:2107.11291) composed onto the same trunk, because no allowlisted paper publishes a keypoint architecture or parameter table to check the head against (A65, A66). D1's "pose" therefore never named what shipped, which is the second reason to supersede rather than amend.</td>
+</tr>
+<tr>
+<td>D22</td>
+<td>D21's rationale clause is withdrawn: R1 does publish a pose objective, and the keypoint tier is a partial reproduction of it (2026-09-17)</td>
+<td><strong>D21 states that the keypoint tier is "the one accepted tier not drawn from R1" because "no allowlisted paper publishes a keypoint architecture or parameter table". That premise is false, and this row withdraws it; D21's other two clauses stand.</strong> Reported as issue 2 on the tracker and confirmed against the paper on 2026-09-17: R1 sec. 3.4.2 "Pose Estimation" states the pose objective — a parallel sigma branch bounded into <code>(0, 1)^2</code> by a sigmoid, the normalized residual (Eq. 10), the RLE term (Eq. 11), and an OKS-based loss the two are combined with — R1 Table 9 ablates the weight split (<code>wOKS = 24, wRLE = 1</code> gives 63.0 mAP on YOLO26s; RLE alone 61.9–62.4, OKS alone 61.5), and R1 Table S10 publishes params and FLOPs for every pose scale. All of it sits inside R1's allowlisted role (<code>PROVENANCE.md</code>: Eq. 1–15, Tables 2–11, S1–S11). The section was never read: the record cites sec. 3.4.1 and 3.4.3 and Eq. 7–9 and 13–15, and nothing in between — the gap was visible from the citation map alone, and <code>model_cards/keypoints.md</code> had quoted Table 9's figure since 0.5.0 while calling it "a different paper". What stands: the tier is <strong>keypoints, not pose</strong> — <code>K</code> is still a constructor argument nothing interprets — and classification and YOLOE-26 stay out of scope. What changes: the tier is a <strong>partial</strong> reproduction of R1's objective — Eq. 11's RLE term, transcribed from R14 (where R1 itself draws it from) without the OKS term R1 composes it with. Three consequences are recorded rather than argued away. (i) R1 gives the OKS loss no formula and cites it to a paper outside the allowlist, so the OKS term is derived from R12's own OKS definition and registered as A75, landing at <code>oks_gain = 0.0</code> so the shipped objective is bit-exact and WP-125's paired-run evidence keeps its meaning; Table 9's <code>(24, 1)</code> is the published target no run here has tested. (ii) R1 Eq. 11 as printed carries <code>log sigma</code> twice — once as the reparameterization Jacobian and once inside the Laplace term written in the un-normalized frame — where R14 Eq. 8, which the code follows, carries it once; A76 records the discrepancy and keeps R14's form until a paired run measures the other. (iii) Table S10 is a size gate this tier never had: measured at 640 px, 1 class, 17 points the point stem is 13.0% under Table S10's params and 26.5% under its FLOPs at <code>n</code>, narrowing to -3.0% / +1.0% at <code>x</code> — A77 records the numbers; no width is tuned here, as A20's angle-stem width was not tuned before its gate existed either. D21 is not edited, for D21's own reason: a decision log whose entries are rewritten to match what was later found stops being evidence of what was believed when. A65, A66 and A68 carry dated corrections in place, since an assumption register is a live record and its rows are meant to move.</td>
+</tr>
+<tr>
+<td>D23</td>
+<td><code>channels_last</code> is the default memory format on CUDA, with no flag (2026-09-18)</td>
+<td><strong>On a CUDA accelerator the module's parameters and the datamodule's images are <code>channels_last</code> (NHWC), and nothing configures it.</strong> cuDNN's convolution kernels prefer that layout, and the whole trunk is convolutions: measured on an RTX PRO 6000 at variant <code>n</code>, COCO, batch 16, in eager mode with no compile, the training step is 8% faster with no other change. The conversion happens in <code>DetectionLitModule.setup</code>, which runs before device placement and before every callback's <code>on_fit_start</code>, so the EMA shadow cloned there inherits the layout instead of averaging across a permute; the transfer hook makes the images match on CUDA alone. The policy reads the trainer's accelerator, not <code>torch.cuda.is_available()</code>, so <code>accelerator="cpu"</code> on a CUDA box keeps the default layout. There is no flag because there is nothing to choose: the layout is a property of the backend, the numerics are the same convolutions over a permuted layout, and CPU and MPS are untouched — their goldens stay bit-identical. What may move is <code>goldens/gpu/</code>: cuDNN picks its kernel per layout, so a GPU golden may shift within the tolerance the layout change earns and is re-baselined on its own, if <code>make gate-gpu</code> says so, rather than folded into this row.</td>
+</tr>
+<tr>
+<td>D24</td>
+<td><code>torch.compile</code> of the detection step is opt-in, default off, CUDA + <code>detect</code> only (2026-09-18)</td>
+<td><strong><code>compile_step: true</code> compiles one region — forward, both decodes, assignment, dual loss — through the bound method <code>DetectionLitModule._detect_objective</code>, on a CUDA accelerator under <code>task="detect"</code>, and nothing else changes.</strong> Function-level rather than <code>torch.compile(module)</code> so the state dict keeps its 714 keys — a compiled module registers as <code>_orig_mod.&lt;name&gt;</code> and would invalidate every checkpoint, the EMA shadow's names and the export path; <code>tests/ptl/test_compile.py</code> and <code>test_module.py</code> pin the keys with the flag on. Model-half compile alone measured x1.09–1.16 and did not earn a flag; the whole region, once WP-183 made the box terms dense and the label check was skipped under tracing, traces as 1 graph / 0 breaks (18 graphs / 17 breaks before) and steps x1.23 against eager on an RTX PRO 6000 at variant <code>n</code>, COCO b16, deterministic (74.7 → 60.9 ms), for 110–140 s of compilation per process. <code>torch._dynamo.config.capture_scalar_outputs = True</code> is set process-wide in the compiled branch only, because the CUDA bench (torch 2.11+cu128) reported needing it with <code>_check_labels</code> removed; the site was then searched for and <strong>not found</strong>: with the check guarded by <code>torch.compiler.is_compiling()</code> the region traces with the flag off on torch 2.13/CPU in train, eval/<code>no_grad</code>, <code>channels_last</code> and zero-GT (<code>test_compile.py</code> asserts both flag values), the only scalar reads in the region being <code>_check_labels</code>'s own two <code>bool(.any())</code>. The flag stays as belt-and-braces until <code>TORCH_LOGS=graph_breaks</code> on the bench with it off says otherwise. Batch size and padded instance count are <code>mark_dynamic</code> — the enforcing form — on the images (dim 0) and on all three ground-truth tensors (dims 0 and 1) before each compiled call: <code>pad_targets</code> pads to the batch's largest count and the last batch is smaller, so without the marks Dynamo specialises per <code>(B, N)</code> until <code>cache_size_limit</code> (8) and then silently runs eager. Enforcing rather than <code>maybe_mark_dynamic</code> because the marks found two pins the hint would have hidden as recompiles: <code>F.one_hot(best_gt, num_gt)</code> in <code>_resolve_conflicts</code> takes a concrete <code>N</code> and is now an <code>arange</code> comparison of the same values, and an unmarked ground-truth <code>B</code> pinned the images' symbolic <code>B</code> through the assigner's broadcast. <code>tests/ptl/test_compile.py</code> runs the compiled step over five batch shapes on CPU (<code>eager</code> backend) and it costs four graphs: the general one plus one each for <code>N == 0</code>, <code>N == 1</code> and <code>B == 1</code>, which Dynamo specialises whatever is marked; the first <code>no_grad</code> evaluation step is one more, so expect five in a run that meets every shape. Off CUDA it warns once and stays eager (MPS Inductor crashes in <code>convolution_backward</code>); under the other three tasks likewise, since their <code>_task_extra_loss</code> terms read on the host outside the region. The label check is the one thing a compiled step does not do: <code>_check_labels</code> runs on every eager step and never inside the traced region, so a compiled run trusts the loader's label range. <strong>What flips the default to on</strong>: A78 validated — one <code>det_nano_smoke</code> epoch plus validation at <code>compile_step</code> true vs false to the same mAP within run noise, ≤ 3 recompiles under <code>TORCH_LOGS=recompiles</code> — and a full-epoch step-time confirmation of the x1.15 or better the bench promised, on the tier's own batch shape rather than the bench's. <strong>Amended 2026-09-19 (WP-187)</strong>: a 2-epoch <code>det_nano_smoke</code> run on an A100 under <code>TORCH_LOGS=recompiles</code> recompiled the region at every epoch on the guard <code>self.loss.alpha == 0.8</code> — the WP-035 schedule rewrites that Python float per epoch and Dynamo guards on its value, so a 50-epoch run would have hit <code>cache_size_limit</code> and silently gone eager by epoch 7 — and the fix is that <code>alpha</code> now enters the region as a 0-d <code>float64</code> tensor argument built by <code>_shared_step</code> on the host (a dtype/shape guard, not a value guard), the loss casting it per branch after forming <code>1 - alpha</code> in double so the eager and compiled totals stay bit-identical; <code>alpha</code> is the one schedule-written scalar the region reads, every other attribute on the loss and both assigners being constructor-fixed. <strong>Amended 2026-09-20 (Colab rounds 4–5, A100-40GB)</strong>: the alpha fix holds — 1 recompile over 4 epochs, the evaluation graph — and A78 is <code>validated</code> on a paired run (step x1.25, loss parity <code>3.6e-5</code> through the training path with TF32 off), so the condition for flipping the default is met on the numbers; the default stays <strong>off</strong> for now on cost: compilation added 210 s of wall to a 4-epoch run of 313 steps per epoch, a break-even near 19 epochs at that size and under one epoch on COCO train, which makes the flag a per-recipe choice rather than a policy. Two further reads for whoever compares the arms: with TF32 on, eager and compiled <code>train/loss</code> differ by <code>1e-2</code>–<code>1e-1</code> per batch — the task-aligned assignment is discrete and TF32 rounding of the alignment metric moves its top-k set, so the cls terms jump while the box terms stay — and the gap collapses to <code>3.6e-5</code> with <code>torch.set_float32_matmul_precision("highest")</code>; and <code>use_deterministic_algorithms</code> changes nothing about it (bit-identical rows either way).</td>
+</tr>
+<tr>
+<td>D25</td>
+<td>Notebooks are <code>.py</code> sources; the <code>.ipynb</code> is a build product on the <code>gh-pages</code> branch only (2026-09-21)</td>
+<td><strong>A notebook is committed as a jupytext percent-format <code>notebooks/&lt;name&gt;.py</code>, and no <code>.ipynb</code> is ever committed to <code>main</code>.</strong> The source is a Python file, so it is diffable, ruff-linted, SPDX-headed and run by the gate like any other; a committed <code>.ipynb</code> carries outputs and kernel metadata that rot on every re-run and diff as opaque JSON, which is the failure the format choice removes. The <code>.ipynb</code> exists in two derived places: <code>docs/notebooks/</code>, gitignored, written by <code>make notebooks</code> for the site, and <code>notebooks/&lt;name&gt;.ipynb</code> on the <code>gh-pages</code> branch, where the <code>Docs</code> workflow publishes it beside the built site on push to <code>main</code>. That second place is why site publishing switched in the same row from the Pages artifact flow (<code>upload-pages-artifact</code> + <code>deploy-pages</code>, no branch anywhere) to a branch deploy: Colab's GitHub loader opens a notebook by <code>blob/&lt;branch&gt;/&lt;path&gt;</code>, <code>main</code> has no <code>.ipynb</code> to offer by construction, and a branch that already has to exist for the badge may as well be the one Pages serves -- <code>ghp-import</code>, which arrives with mkdocs, commits <code>site/</code> onto <code>gh-pages</code> on top of its history, a plain push and never a forced one, with the notebooks copied into <code>site/notebooks/</code> first. One branch, one job, one thing to keep in step; the cost is a one-time Pages setting (Source: deploy from a branch, <code>gh-pages</code>, root) in place of the artifact flow's own one-time enablement. The renderer is <code>mkdocs-jupyter</code> over the converted file rather than a jupytext <code>.md</code> export because the page then carries the <code>.ipynb</code> itself (<code>include_source</code>) for download, and the same file is what the badge opens -- one artifact, two readers. Rendering is unexecuted (<code>execute: false</code>): docs CI stays torch-free, and the site is not where a notebook is proven to run. What proves it is <code>tests/notebooks/test_notebooks_run.py</code>, which runs every source as a script twice -- under <code>LUCID_NOTEBOOK_FAST=1</code> on CPU in <code>make test</code> (synthetic slice, one epoch, no figure, no download), and in full under <code>gpu</code>+<code>data</code> in <code>make test-gpu</code> -- so a notebook that rots fails in the suite rather than in a page nobody re-reads. The Colab run is the third layer and a human one, once per notebook WP. <code>.gitignore</code> is not the gate: <code>no-ipynb-tracked</code> reads the index on every commit and refuses what <code>git add -f</code> let through. <code>notebooks/</code> is a root directory, not <code>docs/notebooks/</code>, because every <code>^docs/</code> hook would fire on a <code>.py</code> there and MkDocs would copy it as an asset. Amends the <code>mkdocs.yml</code> header's "no plugin generates pages from source": one plugin now renders a generated file, and the prose is still the repository's.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="adr-001-architecture-in-code-yaml-for-experiments-only-d9">🏗️ ADR-001 — Architecture in code; YAML for experiments only (D9)<a class="headerlink" href="#adr-001-architecture-in-code-yaml-for-experiments-only-d9" title="Permanent link">&para;</a></h2>
+<p><strong>Status</strong>: accepted (blueprint v1.2).</p>
+<p><strong>Context</strong>: YOLO-lineage reference implementations describe model topology in YAML DSLs. This project must neither consult nor resemble that expressive artifact.</p>
+<p><strong>Decision</strong>: model topology and blocks are typed Python — builder functions plus a 5-row scale-multiplier dataclass registry. YAML (via LightningCLI/jsonargparse) covers only run-level configuration: data paths, tier schedules, optimizer/loss gains, augmentation strengths.</p>
+<p><strong>Consequences</strong>: (i) clean-room — a layer-list YAML DSL would structurally converge on the reference implementation's model-YAML format; (ii) the paper defines exactly one topology with five multiplier rows — a configurable graph engine is over-engineering; (iii) the Phase 2/7/8 param/FLOP gates test Python constructors directly, and mypy covers what a DSL cannot. No model-topology config format may ever be created (standing prohibition, AGENTS.md).</p>
+<h2 id="adr-002-perpetual-0x-release-train-d10">🚂 ADR-002 — Perpetual 0.x release train (D10)<a class="headerlink" href="#adr-002-perpetual-0x-release-train-d10" title="Permanent link">&para;</a></h2>
+<p><strong>Status</strong>: accepted (blueprint v1.3); the <strong>weights clause of its Consequences is superseded by D14</strong> (2026-08-07). Where the two disagree, D14 governs.</p>
+<p><strong>Context</strong>: the project tracks a living specification — the paper plus this project's assumption register. A 1.0 would imply an API-stability contract and a completeness claim a research reproduction should not make.</p>
+<p><strong>Decision</strong>: SemVer 0.MINOR.PATCH forever. Each 0.MINOR is a gated capability milestone (breaking changes permitted, called out in release notes); PATCH covers fixes, docs, and assumption-register revisions whose results stay within golden tolerances. Release train: 0.1.0 = detector (Phase 6 gate), 0.2.0 = +segmentation (Phase 7), 0.3.0 = +OBB (Phase 8), 0.4.0+ = rolling.</p>
+<p><strong>Consequences</strong>: each 0.MINOR freezes its golden metrics; later releases must never regress any frozen golden — frozen goldens are immutable, a genuine correction ships as the next 0.MINOR with an explicit changelog note. <strong>Immutable has one recorded route through it and two recorded uses of that route</strong>: escalation trigger 4 (AGENTS.md sec. 4), answered by the principal, which was granted twice on 2026-09-03 for <code>goldens/frozen/0.6/aug_invariants.json</code> — WP-154b and WP-155, both entries in <code>docs/ESCALATION.md</code>. Both are dated exceptions and neither is a standing waiver; the rule is stated here with its exceptions named because a rule whose exceptions live only elsewhere reads as either false or absolute, and it is neither. Every release ships with resolved run configs + seeds, its report section, a changelog, and — as this ADR was written — weights where dataset licenses permit. <strong>That last clause no longer holds and is left standing rather than edited away</strong>: D14 (2026-08-07) settles that releases ship no trained weights at all, on grounds that are not about dataset terms, so the licence condition is not narrowed by it but replaced. The ADR records what was decided at blueprint v1.3; D14 records what is done. No 1.0 is ever planned, promised, or tagged.</p>
+<h2 id="adr-003-autonomous-execution-under-principal-gates-d11">🚦 ADR-003 — Autonomous execution under principal gates (D11)<a class="headerlink" href="#adr-003-autonomous-execution-under-principal-gates-d11" title="Permanent link">&para;</a></h2>
+<p><strong>Status</strong>: accepted (blueprint v1.5); amended by D12(a) for local git flow.</p>
+<p><strong>Context</strong>: the roadmap decomposes into numbered work packages (docs/ROADMAP.md), each independently implementable and gateable — 67 of them when this ADR was written at blueprint v1.5, and it has grown by a phase at a time since. The current figure is a property of <code>docs/ROADMAP.md</code> and is read there, never restated here: a count copied into a decision record is stale by the next row that lands, and this one was.</p>
+<p><strong>Decision</strong>: an agent executes WPs in dependency order without per-step approval, subject to the contract in AGENTS.md. Each WP is one commit that must leave <code>main</code> green. Three classes require explicit principal action and are marked [PRINCIPAL]: (a) compute-heavy tier runs (&gt;4 GPU-hours), (b) release tags, (c) legal/nexus review (O3) and dataset-licensed weight publication (O4).</p>
+<p><strong>Consequences</strong>: agents never widen the source allowlist, never create model-topology configs, and stop rather than guess (escalation protocol in AGENTS.md and docs/ESCALATION.md). The assumption register plus the escalation log is itself research output a from-code port could not produce.</p>
+<h2 id="adr-004-reference-implementations-readable-never-copyable-d13">🔒 ADR-004 — Reference implementations readable, never copyable (D13)<a class="headerlink" href="#adr-004-reference-implementations-readable-never-copyable-d13" title="Permanent link">&para;</a></h2>
+<p><strong>Context.</strong> The blueprint's v1.4 tightening (D5) restricted implementation sources to the three papers, their cited primary literature, and neutral tooling documentation. Three Det-smoke attempts then stalled at 4-6 val mAP50-95 against a</p>
+<blockquote>
+<p>25 criterion. Two root causes were found by measurement alone (WP-078 pixel-frame L1, WP-079 augmentation-RNG collapse), but the papers do not fix every normalization and assignment convention precisely enough to rule out a third.</p>
+</blockquote>
+<p><strong>Decision.</strong> Ultralytics-independent detection implementations under a permissive license — MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, and nothing else — are admissible as <strong>reading</strong> references for diagnosis. Each must be LICENSE- and provenance-verified before it is opened and registered in PROVENANCE.md. Copyleft (AGPL, GPL, LGPL), source-available, research-only, non-commercial, commercially licensed and unlicensed code stay inadmissible at any cost: the licence gate is decided before the content is known, so no diagnostic value can ever justify opening one. A repository whose license cannot be established is inadmissible by default. Copying code from any external detection repository remains prohibited (sec. 7), and the Ultralytics denylist stays absolute in every form: repository surfaces, package contents, docs site, and released weights.</p>
+<p><strong>Consequences.</strong> The clean-room position now rests on two claims instead of one: nothing from Ultralytics was consulted (unchanged, auditable via the fetch log), and nothing from any external repository was copied (enforced by the standing prohibition and the provenance trail). Reading a permissively licensed implementation to learn a convention is the ordinary practice the two-team clean-room pattern already contemplates for the specification side; what it must never become is transcription.</p>
+<h2 id="adr-005-the-fuse-boundary-and-the-battle-test-contract-d19">🧩 ADR-005 — The <code>fuse</code> boundary and the battle-test contract (D19)<a class="headerlink" href="#adr-005-the-fuse-boundary-and-the-battle-test-contract-d19" title="Permanent link">&para;</a></h2>
+<p><strong>Status</strong>: accepted 2026-09-02. Records the agreement; consumes nothing yet. Phase 13 builds the guard, Phase 14 performs the swaps.</p>
+<p><strong>Context.</strong> <code>src/lucid_yolo/data/</code> implements an augmentation engine — matrix sampling and composition, warping, letterboxing, per-modality target transport, photometric jitter, a post-warp instance filter — alongside the things that make it <em>this project's</em> pipeline: the <code>Targets</code> container, the R1 Table S3 recipe, dataset IO, DOTA tiling. The first half is not specific to detection, and <code>fuse-augmentations</code> (R21) exists to solve exactly it: composing compatible transforms into a single resampling pass instead of interpolating repeatedly. Maintaining both means maintaining two implementations of one subject, and the local one is the weaker of the two by design — it was written to serve a reproduction, not to be an engine.</p>
+<p><strong>Decision — the boundary.</strong> <code>fuse</code> owns the pixel-and-geometry engine: matrix sampling and composition, single-pass resampling, per-modality transport of boxes, keypoints, masks and rotated boxes, photometric ops, constant-fill padding, an aspect-preserving letterbox segment with an exact analytic inverse, and the post-warp instance filter. <code>lucid-yolo</code> owns the <code>Targets</code> container, the composition order, the R1 Table S3 recipe (<code>build_scale_policy</code>, <code>close_mosaic</code>), dataset IO and validation, DOTA tiling, polygon rings, multi-image assemblies, and everything from <code>assign/</code> inward — model, losses, decode, evaluation, export, prediction. The rule that settles every case not enumerated: <strong>convention lives upstream, policy lives here.</strong> <code>fuse</code> owns how a matrix is built, composed and sampled; this project owns which numbers go into it. A specification that pushes a YOLO constant upstream is written wrong.</p>
+<p>Three capabilities were argued and stay local. <strong>Multi-image assemblies</strong> — mosaic, mixup, copy-paste — do not resample at all, so a fusion engine gains nothing by holding them, and mosaic's four-images-in shape would need a second calling convention beside the one-image-in contract. <strong>Polygon rings</strong> are ragged, and clipping one at a canvas edge adds vertices, so upstreaming them would force a padded-tensor or list-of-tensors design onto a package whose every target is fixed-shape; it is avoidable, because under a single fused geometric segment the composed matrix <code>fuse</code> already returns is the same mapping it applied to the image, and applying that matrix to rings here makes the alignment invariant hold by construction rather than by agreement. <strong>Polygon rasterisation</strong> follows the rings. Rotated boxes move: five numbers, fixed-shape, batch-leading, exactly like the targets <code>fuse</code> already transports, and oriented detection is a field with its own literature rather than a YOLO idiom.</p>
+<p><strong>Decision — the migration protocol.</strong> Per capability, in this order and never out of it: (1) the upstream capability lands in <code>fuse</code> with its own acceptance tests; (2) a work package here bumps the pin and updates R21; (3) the frozen expectation suite passes unchanged against the newly pinned path, with the same explicit parameters; (4) the call site is swapped; (5) the local implementation and its now-duplicated tests are deleted. Steps 4 and 5 never precede 1–3. Step 3 never re-freezes: an expectation that turns red at a swap is diagnosed, and either the integration is fixed or a separate work package argues the old value was wrong — never both in one commit, because that combination is indistinguishable from adjusting the test until the new code passes. No capability ships half: an upstream release adding an API without its own tests cannot be pinned here, since a frozen suite proves the integration did not change behaviour and can never prove the upstream implementation correct in cases this project does not exercise.</p>
+<p><strong>Decision — the reciprocal battle-test contract.</strong> This project's smoke tiers, goldens and frozen augmentation expectations are the real-project evidence <code>fuse</code> is tested against, and that evidence stays here. The exchange is symmetric and worth stating so neither side later assumes the other holds it: <code>fuse</code> supplies an engine with its own unit acceptance, and <code>lucid-yolo</code> supplies the thing no unit test provides — four tasks, two datasets, published-number fidelity gates and trained tiers exercising the engine end to end. Neither substitutes for the other, and a capability is not considered proven until both have run.</p>
+<p><strong>Decision — four conditions on a runtime dependency.</strong> Promotion from a development pin to a runtime dependency is accepted, and gated on all four: (1) <code>fuse</code> cuts real SemVer releases to PyPI, one per capability landing — a git-URL requirement is legal in a dependency group and illegal in <code>[project].dependencies</code>, so a SHA pin is not publishable; (2) this project pins a range with a ceiling, on the <code>hotcoco&gt;=0.5,&lt;0.6</code> precedent and for A73's reason, that a package whose incompatibilities fail silently needs re-verification per minor; (3) the promotion lands in its own work package with its own gate and licence-audit run, never folded into a capability swap; (4) it is recorded as a decision stating that an Alpha-status runtime dependency was accepted deliberately with the ceiling as the mitigation, so a later reader finds a judgement rather than an oversight. Condition 1 is an upstream commitment this project can state and cannot satisfy; it is unconfirmed at the time of writing, and a refusal returns the dependency story to a SHA pin, which keeps the augmentation stack local rather than making it unpublishable.</p>
+<p><strong>Consequences.</strong> The cost of the dependency itself is zero new packages: <code>fuse</code> requires <code>numpy</code>, <code>pillow</code> and <code>torch</code>, of which the first and third are already declared here and the second already arrives through four declared dependencies; its backends are optional extras and none is needed; Apache-2.0 clears the licence policy. The cost that is real is the coupling — this project's augmentation behaviour becomes a function of an upstream release cadence it does not control, which is why the guard is published as its own release before anything it guards moves, and why the boundary is written here rather than discovered per swap. What this project keeps after the move is what it was always for: architecture, task semantics, supervision targets, experimentation, export and inference.</p>
+<h2 id="open-items">🕗 Open items<a class="headerlink" href="#open-items" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Question</th>
+<th>Deadline</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>O1</td>
+<td>GPU budget → tier commitment per task</td>
+<td>before Phase 6</td>
+<td>All three A+B tiers, B on rented spot instances, sequenced Det → Seg → OBB; each 0.MINOR ships at A-tier if B still queued</td>
+</tr>
+<tr>
+<td>O2</td>
+<td>Project name</td>
+<td>resolved 2026-08-02 (D12f)</td>
+<td><code>lucid-yolo</code>; YOLO26 implementation exposed under feature name <code>e2e</code></td>
+</tr>
+<tr>
+<td>O3</td>
+<td>Employer nexus + counsel review of README/NOTICE naming</td>
+<td>before the repository or any tag is public (before v0.1.0)</td>
+<td>blocked-on-principal</td>
+</tr>
+<tr>
+<td>O4</td>
+<td>OBB weight release policy given DOTA academic-use terms</td>
+<td>resolved 2026-08-14 (v0.3.0)</td>
+<td>Code + report Apache-2.0; DOTA-trained weights withheld, documented reproduction recipe</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright 2026 Jirka Borovec — Apache-2.0 (see LICENSE and NOTICE)
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

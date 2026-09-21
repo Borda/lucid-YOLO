@@ -1,0 +1,1748 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, oriented-detection, and keypoint-detection methods described in the YOLO26 paper (arXiv:2606.03748)">
+      
+      
+        <meta name="author" content="Jirka Borovec">
+      
+      
+        <link rel="canonical" href="https://borda.github.io/lucid-YOLO/CONTRIBUTING/">
+      
+      
+        <link rel="prev" href="../ESCALATION/">
+      
+      
+        <link rel="next" href="../notebooks/development_gates/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Contributor guide - lucid-yolo</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#contributing" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="lucid-yolo" class="md-header__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lucid-yolo
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Contributor guide
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="lucid-yolo" class="md-nav__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lucid-yolo
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running the models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Running the models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TRAINING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching a training run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DATASETS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Results
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../REPRODUCTION_REPORT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproduction report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model card — keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clean-room record
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Clean-room record
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PROVENANCE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ASSUMPTIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assumption register
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DECISIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decision record
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Execution
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ROADMAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Work-package roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../RESEARCH_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ENGINEERING_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ESCALATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Escalation log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributor guide
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributor guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#before-you-write-anything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧭 Before you write anything
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-three-admission-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🚪 The three admission layers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🚪 The three admission layers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#signing-off" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signing off
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-a-change-needs-a-work-package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📐 When a change needs a work package
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-the-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✅ Running the gate
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="✅ Running the gate">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-green-does-not-mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What green does not mean
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-commit-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✍️ The commit message
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adding-a-notebook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📓 Adding a notebook
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reporting-a-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🐛 Reporting a problem
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔒 Security
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#licence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📜 Licence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebooks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/development_gates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development gates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_detect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detection on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_segment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instance segmentation on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Oriented detection on DOTA tiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/demo_keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keypoints on COCO person_keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#before-you-write-anything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧭 Before you write anything
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-three-admission-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🚪 The three admission layers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🚪 The three admission layers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#signing-off" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signing off
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-a-change-needs-a-work-package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📐 When a change needs a work package
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-the-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✅ Running the gate
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="✅ Running the gate">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-green-does-not-mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What green does not mean
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-commit-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✍️ The commit message
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adding-a-notebook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📓 Adding a notebook
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reporting-a-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🐛 Reporting a problem
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔒 Security
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#licence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📜 Licence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/Borda/lucid-YOLO/edit/main/docs/CONTRIBUTING.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+<h1 id="contributing">🤝 Contributing<a class="headerlink" href="#contributing" title="Permanent link">&para;</a></h1>
+<p>This is a clean-room reproduction. That single fact decides almost everything below, so it is worth stating plainly before any process: <strong>the value of this repository is not that the code works — it is that the code's lineage is known.</strong> A patch that improves a number while making its own derivation unclear costs more than it adds, because it converts a traceable artifact into an ordinary one.</p>
+<p>So the contribution process asks for two things that most projects do not: where your change came from, and your representation that you had the right to submit it. Everything else here is the usual: run the gate, write the commit, open the pull request.</p>
+<h2 id="before-you-write-anything">🧭 Before you write anything<a class="headerlink" href="#before-you-write-anything" title="Permanent link">&para;</a></h2>
+<p><strong>Never read a reference implementation of YOLO.</strong> Not the Ultralytics repository, not a mirror, not a vendored copy inside another package, not <code>docs.ultralytics.com</code>. This is the prime directive and it has no exception for "just to check". The admissible sources are the papers and the small set of permissively licensed implementations enumerated in <a href="../PROVENANCE/"><code>PROVENANCE.md</code></a>, each admitted by name under D13 and ADR-004, and each admitted for diagnostics rather than for method.</p>
+<p>The rule is broader than its most famous instance. What you must not copy from is <strong>any</strong> source that is copyleft (AGPL, GPL, LGPL, SSPL), source-available (BSL, Elastic, PolyForm), paid or proprietary, or whose licence cannot be read at all (D17). Ultralytics is enumerated because it is the one a YOLO contributor reaches for by reflex, not because it is the definition.</p>
+<p>If you have already read one, that is not a disaster and it is not something to conceal — say so in the pull request. What cannot be repaired is a derivation nobody knew about.</p>
+<h2 id="the-three-admission-layers">🚪 The three admission layers<a class="headerlink" href="#the-three-admission-layers" title="Permanent link">&para;</a></h2>
+<p>Each layer answers a different question, and none of them answers the other two. That is why there are three rather than one.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Mechanism</th>
+<th>What it establishes</th>
+<th>What it does <strong>not</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>DCO sign-off</strong></td>
+<td><code>Signed-off-by:</code> on every commit a person authored, checked by the DCO GitHub App</td>
+<td>Ownership and right to submit — your own representation, on the record, per commit</td>
+<td>Nothing about what the work derives from</td>
+</tr>
+<tr>
+<td><strong>Licence attestation</strong></td>
+<td>The clean-room checklist in the pull-request template</td>
+<td>That you did not copy from a non-permissive source</td>
+<td>Nothing reviewable — it is a promise, not an artifact</td>
+</tr>
+<tr>
+<td><strong>Provenance trailers</strong></td>
+<td><code>WP:</code>/<code>Provenance:</code>/<code>Assumptions:</code>/<code>Gate:</code> in the pull request's title and description, validated by a job in this repository</td>
+<td>What an algorithmic change is derived from, in a form a reviewer can check against the register</td>
+<td>Nothing about your right to submit</td>
+</tr>
+</tbody>
+</table>
+<p>The third is the only one producing a reviewable artifact rather than a promise, which is why an unnamed derivation on a loss or an assigner becomes visible at review rather than after release. The first two are cheap and they are still worth having: a promise on the record is a different thing from silence.</p>
+<h3 id="signing-off">Signing off<a class="headerlink" href="#signing-off" title="Permanent link">&para;</a></h3>
+<p>Add <code>-s</code> to your commit, or write the trailer yourself:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>commit<span class="w"> </span>-s<span class="w"> </span>-m<span class="w"> </span><span class="s2">"fix(data): ..."</span>
+</code></pre></div>
+<p>The line must name you and reach you, <strong>at the address the commit is authored under</strong>: <code>Signed-off-by: Ada Lovelace &lt;ada@example.com&gt;</code>, on a commit whose author is <code>ada@example.com</code>. It means you agree to the <a href="https://developercertificate.org/">Developer Certificate of Origin</a> — that you wrote the patch, or have the right to pass it on. The check is the <a href="https://github.com/apps/dco">DCO GitHub App</a>, which posts a <code>DCO</code> status on every pull request: it reads every commit, not just the last one, skips merge commits and commits an automation authored (pre-commit.ci's autoupdate, a dependabot bump), and fails the status when a sign-off is missing or names an address other than the author's. The address rule is the app's, and it is stricter than the check this repository ran itself until the app was installed — that one accepted any well-formed sign-off, on the argument that a sign-off is a representation rather than an identity proof. Two checks with two rules on one line was the worse state, so the in-repo one is gone; if you commit under one address and sign under another, the app will tell you which commit to amend.</p>
+<p>The sign-off is checked <strong>on pull requests and nowhere else</strong>, and there is deliberately no local <code>commit-msg</code> hook for it — unlike the provenance trailers, which have one. The reason is history: this repository's own commits predate the requirement and carry no sign-off, so a local hook would refuse to let a contributor rebase, amend or cherry-pick any of them, and a push to <code>main</code> has no contributor range to check in the first place. The practical consequence for you is that a missing <code>-s</code> surfaces on the pull request rather than at commit time, so it is worth making <code>-s</code> automatic in your own clone — Git has no config switch that adds it (<code>format.signOff</code> applies to <code>git format-patch</code>, not to <code>git commit</code>), so an alias such as <code>git config alias.ci "commit -s"</code> is the usual way — rather than discovering a fifteen-commit branch needs a rebase.</p>
+<p>The provenance trailers are checked on the pull request's <strong>title and description</strong>, not on its commits. This repository merges by squash only, so a branch's commits never reach <code>main</code>; the one commit that does takes its subject from the title and its body from the description, and that is the message the <code>squash-message</code> job in <code>pr-message.yml</code> validates — title as the Conventional subject, description as the body with the four trailers, co-authors after a <code>---</code> line. Edit either and the check re-runs. Your own commits are yours to shape; the local <code>commit-msg</code> hook still validates them for the commits you keep on your own branches. A pull request an automation opens (pre-commit.ci, dependabot) is skipped on the same reasoning as the sign-off: a pin bump has no derivation to name, and the maintainer writes the landing message.</p>
+<h2 id="when-a-change-needs-a-work-package">📐 When a change needs a work package<a class="headerlink" href="#when-a-change-needs-a-work-package" title="Permanent link">&para;</a></h2>
+<p>Most of this repository's history is one work package per commit: a numbered row in <a href="../ROADMAP/"><code>ROADMAP.md</code></a>, a definition of done, a green gate, and a commit carrying provenance trailers. That contract is a <strong>reproduction instrument, not a permanent process</strong> (D18), and it has an end condition.</p>
+<p>Once the reproduction report carries all four accepted tiers <em>and this repository is public</em>, a change that</p>
+<ul>
+<li>alters no shipped behaviour,</li>
+<li>adds or removes no public symbol,</li>
+<li>moves no golden, and</li>
+<li>changes no documented assumption</li>
+</ul>
+<p>lands as an ordinary gated commit. A typo fix, a clearer docstring, a test that covers an existing branch: open a pull request, no roadmap row needed.</p>
+<p>Everything else still opens one. And adding a new <strong>task</strong> to the model family — a fifth alongside detection, segmentation, oriented detection and keypoints — restarts the full procedure: its own phase, numbered work packages, a smoke tier, a principal gate and a <code>0.MINOR</code> release. A new task is a new reproduction claim, and a claim is what this contract exists to substantiate.</p>
+<p><strong>The gate never relaxes</strong>, under either regime. That is the part D18 does not touch.</p>
+<h2 id="running-the-gate">✅ Running the gate<a class="headerlink" href="#running-the-gate" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>make<span class="w"> </span>setup<span class="w">        </span><span class="c1"># create .venv and install the dev dependency group</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>make<span class="w"> </span>gate<span class="w">         </span><span class="c1"># every linter, strict typing, the full offline suite, the offline goldens</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>make<span class="w"> </span>gate-gpu<span class="w">     </span><span class="c1"># the other half — needs an accelerator; not part of the merge bar</span>
+</code></pre></div>
+<p><code>make gate</code> is the merge bar and it runs offline. It must be green <strong>locally</strong> before you open a pull request — CI re-runs it, but a red gate discovered in CI is a round trip that costs a reviewer's attention for something your own machine could have told you.</p>
+<h3 id="what-green-does-not-mean">What green does not mean<a class="headerlink" href="#what-green-does-not-mean" title="Permanent link">&para;</a></h3>
+<p><code>make gate</code> is a structural verdict. Read it as a quality signal and you will ship the exact class of defect the 0.8.0 audit was opened for — an assigner whose one-to-many localization objective was annihilated at <code>4.12e-09</code> while every offline golden passed.</p>
+<ul>
+<li><strong>It pins no learned-quality number.</strong> The accuracy floors — the per-task <code>overfit_micro</code> gates whose figures the model cards quote — live under <code>goldens/gpu/</code>, and <code>scripts/check_goldens.py</code> deliberately keeps that subtree out of default discovery: its producers retrain a model on a local accelerator. <code>make gate</code> never passes <code>--include-gpu</code>. What it verifies is that the architecture, the assignment cases, the optimizer toy problem and the frozen per-release goldens still reproduce — not that the models detect anything.</li>
+<li><strong>The accelerator half has a schedule, and the schedule may be inert.</strong> <code>make gate-gpu</code> runs the <code>gpu</code>- and <code>data</code>-marked tests plus the <code>goldens/gpu/</code> floors. In CI that is <code>.github/workflows/gate-gpu.yml</code>, nightly plus manual dispatch — but the job carries <code>if: vars.GPU_RUNNER_LABEL != ''</code> and runs on that same label. With the repository variable unset, which is its state on any fork and on any checkout without a self-hosted CUDA runner, both triggers resolve to a <strong>visible skipped job</strong>. That is deliberate (a queued job against a label no machine answers to is worse), but it means a green Actions tab is compatible with the accelerator gate never having run. If your change touches the loss, the assignment, the decode or the optimizer, run <code>make gate-gpu</code> on a machine that has an accelerator and say in the pull request that you did.</li>
+<li><strong>Its data is synthetic by policy.</strong> Every offline test runs against micro-datasets generated by <code>fuse-augmentations</code>, never against COCO or DOTA (A26 / D12b) — the suite is offline by design and downloads nothing. The consequence is that the gate exercises the code on data this project drew, so a defect only real annotations elicit is outside its reach. Real data enters at tier acceptance and nowhere earlier.</li>
+</ul>
+<p>Two failures deserve a specific response rather than a retry:</p>
+<ul>
+<li><strong>A golden moved.</strong> Do not re-freeze it. A frozen expectation may change only in a change whose subject <em>is</em> that expectation, with the reason recorded in <a href="../ENGINEERING_LOG/"><code>ENGINEERING_LOG.md</code></a>: what moved, from which value to which, and why the new value is correct. A frozen value moving in the same commit as an implementation swap is indistinguishable from "the new code disagreed and we adjusted the test", which is why it is refused. Two such moves are on record, both on <code>goldens/frozen/0.6/aug_invariants.json</code> and both principal-authorized under escalation trigger 4 (<a href="../ESCALATION/"><code>ESCALATION.md</code></a>, 2026-09-03); neither is a precedent.</li>
+<li><strong>An assumption is in your way.</strong> The register in <a href="../ASSUMPTIONS/"><code>ASSUMPTIONS.md</code></a> records every place where the papers underdetermine the implementation. If your change depends on reading one differently, revise the row and say why in the same change. Do not work around it silently — the register being complete is the point.</li>
+</ul>
+<h2 id="the-commit-message">✍️ The commit message<a class="headerlink" href="#the-commit-message" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>&lt;type&gt;(&lt;scope&gt;): &lt;detail&gt;          # &lt;= 72 characters
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>&lt;body: what changed and why, in prose&gt;
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>WP: 160                            # the roadmap row, when there is one
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>Provenance: R1 sec. 3.2.1          # at least one source id from PROVENANCE.md
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>Assumptions: A22, A40              # A-ids touched, or `none`
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>Gate: tests/data/test_x.py::test_y # what proves the definition of done
+</code></pre></div>
+<p><code>type</code> is one of <code>feat</code>, <code>fix</code>, <code>test</code>, <code>ci</code>, <code>docs</code>, <code>chore</code>, <code>perf</code>, <code>refactor</code>, <code>refine</code>, <code>exp</code>, <code>release</code>. Trailers are validated against the register, so a <code>Provenance:</code> id that does not resolve fails the check rather than the review.</p>
+<p>Under D18's relaxation a change with no roadmap row writes <code>WP: none</code> — the literal word, matching how <code>Assumptions:</code> states its own absence, so the message says no row applies rather than leaving a reader to decide whether one was forgotten. The other three trailers stay mandatory: the derivation question does not go away just because the tracking did.</p>
+<p>Reworking a message across a range rewrites history, and the safe way to do that is to take a <code>backup-*</code> or <code>backup/*</code> ref first. Those refs are local and are never pushed, so nothing in CI or on the remote will ever tell you they have gone stale — delete each one by hand (<code>git branch -D &lt;name&gt;</code>) once the rewritten branch is confirmed, in the same sitting. Left alone they accumulate silently, and a clone that carries a dozen of them offers a dozen plausible-looking answers to "what did this look like before", only one of which is the branch you actually want.</p>
+<h2 id="adding-a-notebook">📓 Adding a notebook<a class="headerlink" href="#adding-a-notebook" title="Permanent link">&para;</a></h2>
+<p>A notebook here is a Python file. Write <code>notebooks/&lt;name&gt;.py</code> in jupytext's percent format — <code># %%</code> opens a code cell, <code># %% [markdown]</code> a prose cell — and the toolchain does the rest: <code>make notebooks</code> converts it to <code>docs/notebooks/&lt;name&gt;.ipynb</code>, the site renders that file unexecuted, and the <code>Docs</code> workflow publishes it with the built site onto the <code>gh-pages</code> branch on push to <code>main</code>, at <code>notebooks/&lt;name&gt;.ipynb</code>, which is where the Colab badge in the title cell opens (D25). The <code>.ipynb</code> is never committed: <code>docs/notebooks/</code> is gitignored and the <code>no-ipynb-tracked</code> hook refuses one that reaches the index anyway.</p>
+<p>Four things every source carries, in this order: the SPDX header (<code>license-headers</code> scopes <code>notebooks/</code>); a title cell with the badge, <code>https://colab.research.google.com/github/Borda/lucid-YOLO/blob/gh-pages/notebooks/&lt;name&gt;.ipynb</code>; a bootstrap cell guarded on <code>"google.colab" in sys.modules</code> whose clone and install are shell lines — <code>!git clone ...</code> and <code>%pip install -e lucid-YOLO</code>, written into the <code>.py</code> by jupytext as <code># !git clone ...</code> and <code># %pip ...</code>, with the <code>os.chdir</code> and <code>sys.path</code> statements after them so the guarded block is not comments alone; and, read once at the top, <code>FAST = os.environ.get("LUCID_NOTEBOOK_FAST") == "1"</code>.</p>
+<p>Every step the notebook takes is a call into <code>lucid_yolo</code> on an object the kernel holds — <code>download_coco</code> or <code>build_tiles</code>, <code>DetectionLitModule</code> and <code>DetectionDataModule</code> built from the values the tier's <code>*_nano_smoke.yaml</code> carries and named in the prose, a <code>Trainer</code> for <code>fit</code> and <code>validate</code>, <code>lucid_yolo.predict</code> and <code>lucid_yolo._viz</code> for the answer and the figure — with the fast budget a conditional argument (<code>batch_size=4 if FAST else 64</code>). The console command the documentation spells is quoted as prose, never run: no <code>lucid_yolo.cli</code> import, no <code>DetectionCLI</code>, no <code>subprocess</code>, no <code>%%bash</code> cell, no checkpoint reload. The gate still executes the <code>.py</code> through a kernel rather than as a script — converting it with jupytext and running the result on the venv's own interpreter, with no kernel to install (<code>notebooks/README.md</code>, "Building and checking", has the mechanism) — because the bootstrap's <code>!git clone</code> and <code>%pip install</code> are magics a script run reads as comments. That is why the earlier rule, "use <code>subprocess</code>, not a <code>!</code> magic", is withdrawn: it protected a script run the gate no longer makes. A full run's dataset lives under the gitignored <code>data/</code> — <code>data/coco2017</code>, <code>data/dota</code> — and its checkpoints under <code>results/demo_&lt;task&gt;</code>; the fast run writes only into <code>tempfile.TemporaryDirectory()</code>, and the smoke test points <code>TMPDIR</code> at its own <code>tmp_path</code>, since a kernel nbclient shuts down runs no finalizer and pytest prunes what it owns.</p>
+<p><code>FAST</code> is the contract the gate holds you to. <code>tests/notebooks/test_notebooks_run.py</code> runs every source with that variable set, on CPU, on every <code>make test</code>: under it the notebook swaps its dataset for the synthetic slice, trains one epoch on a small batch, draws no figure and downloads nothing, and finishes within the ceiling the test sets. Without the variable the same file does what it is for — that run is marked <code>gpu</code> and <code>data</code> and belongs to <code>make test-gpu</code>. The Colab run is the third layer and yours to make by hand, once, after the push; until then the badge is dead by construction.</p>
+<p>Add the page to <code>mkdocs.yml</code> under the <code>Notebooks</code> nav section as <code>- &lt;Title&gt;: notebooks/&lt;name&gt;.ipynb</code> (uncommenting the section for the first one). <code>docs-site</code> fails a source with no entry; <code>mkdocs build --strict</code> fails an entry with no source. <code>notebooks/README.md</code> has the full shape, including the one ruff rule relaxed for the directory.</p>
+<h2 id="reporting-a-problem">🐛 Reporting a problem<a class="headerlink" href="#reporting-a-problem" title="Permanent link">&para;</a></h2>
+<p>Issue templates are in the repository. Two things make a report actionable here that are easy to leave out:</p>
+<ul>
+<li><strong>The commit or release you are on.</strong> "Latest" is not a version; this project ships release commits ahead of its own tags, so name the commit.</li>
+<li><strong>Whether <code>make gate</code> is green on your machine before your change.</strong> A gate that is already red locally usually means an environment problem rather than a defect, and it is the fastest thing to rule out.</li>
+</ul>
+<p>For a numeric disagreement — a metric that does not reproduce — the useful report names the golden or the reported figure, the value you got, the hardware, and <code>--data.num_workers</code>. Three divergences are expected and documented rather than defects:</p>
+<ul>
+<li><strong>Cross-platform last-bit rounding</strong> (A26): libm differs across OS and architecture, which is why the goldens assert structural metrics with tolerance rather than byte hashes.</li>
+<li><strong>The worker count is part of the seed.</strong> A seeded run is byte-identical only against another run at the <em>same</em> <code>num_workers</code>. At <code>0</code> the pipeline draws from one generator in-process; with workers each is re-seeded per worker and per epoch from the loader's own generator (WP-079). Both streams are fully determined by <code>seed</code> and they are not the same stream — so 32 workers does not reproduce 0 workers, or 16.</li>
+<li><strong>MPS is not strictly deterministic.</strong> <code>deterministic: true</code> in a config is a request; <code>default_determinism</code> (<code>cli/train.py</code>) downgrades it to <code>"warn_only"</code> when MPS is the auto-picked accelerator, because MPS has no deterministic kernel for some backwards this model reaches. CPU and CUDA keep strict determinism.</li>
+</ul>
+<p>A structural difference — a different number of detections, an inverted ordering, a metric off by more than tolerance — is none of those, and is worth reporting.</p>
+<h2 id="security">🔒 Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h2>
+<p>Do not open a public issue for a vulnerability. This project ships no trained weights (D14) and has no network surface at inference, so the realistic classes are dependency-borne and deserialization-borne. Report privately through the repository's security advisory form.</p>
+<h2 id="licence">📜 Licence<a class="headerlink" href="#licence" title="Permanent link">&para;</a></h2>
+<p>Contributions are Apache-2.0, matching the project. Signing off is your statement that you are entitled to submit them under those terms.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright 2026 Jirka Borovec — Apache-2.0 (see LICENSE and NOTICE)
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
