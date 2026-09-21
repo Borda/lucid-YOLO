@@ -28,6 +28,8 @@ Only a `task="keypoints"` module carries any of this. A `"detect"`/`"segment"`/`
 
 **Intended.** Reproduction research: verifying RLE's mechanism claim against a non-flow control, and serving as a readable from-scratch implementation of a normalizing-flow keypoint loss composed onto an NMS-free detector. The `e2e` path is the interesting artifact, as for the other three tasks — points come out of a forward containing no suppression op.
 
+**Walk-through.** The pipeline this card describes — data, a short fit, `lucid-eval`, predictions drawn over the ground truth — runs end to end in [the keypoints demo notebook](../notebooks/demo_keypoints.ipynb), short enough for a Colab session and not a reproduction of the numbers here.
+
 **Not intended.** Any operational use, and this is a stronger statement than for the other three tasks — see Ethical considerations below. This is a smoke-tier reproduction at the smallest scale, one seed, evaluated on exactly one benchmark, with an e2e OKS AP of 0.25 on a single category. Production use of any kind, safety-critical or rights-affecting decisions, biometric identification, activity or gait recognition, surveillance of any kind, or any deployment where an OKS AP of 0.25 would be mistaken for a reliable perception system.
 
 ## 🗂️ Training data

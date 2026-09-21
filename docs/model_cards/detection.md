@@ -21,6 +21,8 @@ The architecture is typed Python, not a config DSL (ADR-001): five scale rows (`
 
 **Intended.** Reproduction research: verifying the paper's architectural and training claims, ablating its mechanisms, and serving as a readable from-scratch implementation of NMS-free detection. The `e2e` path is the interesting artifact — it exports without suppression ops.
 
+**Walk-through.** The pipeline this card describes — data, a short fit, `lucid-eval`, predictions drawn over the ground truth — runs end to end in [the detection demo notebook](../notebooks/demo_detect.ipynb), short enough for a Colab session and not a reproduction of the numbers here.
+
 **Not intended.** Production detection, safety-critical or rights-affecting decisions, surveillance, biometric identification, or any deployment where 25 mAP on 80 common object categories would be mistaken for a reliable perception system. This is a smoke-tier reproduction at the smallest scale, roughly half the accuracy of a well-trained detector of this family, and it has been evaluated on exactly one benchmark.
 
 ## 🗂️ Training data

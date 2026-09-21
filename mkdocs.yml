@@ -154,3 +154,7 @@ nav:
   # the nav is valid on a checkout that has never run the converter.
   - Notebooks:
       - Development gates: notebooks/development_gates.ipynb
+      - Detection on COCO 2017: notebooks/demo_detect.ipynb
+      - Instance segmentation on COCO 2017: notebooks/demo_segment.ipynb
+      - Oriented detection on DOTA tiles: notebooks/demo_obb.ipynb
+      - Keypoints on COCO person_keypoints: notebooks/demo_keypoints.ipynb

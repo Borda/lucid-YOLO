@@ -26,6 +26,8 @@ Parameter and FLOP fidelity is gated rather than asserted, and against [R1]'s ow
 
 **Intended.** Reproduction research: verifying the paper's oriented-detection claims, ablating the A44 composition and the A49/A50 term choices, and serving as a readable from-scratch implementation of NMS-free oriented detection. As with the detector, the `e2e` path is the interesting artifact — oriented boxes come out of a forward containing no suppression op.
 
+**Walk-through.** The pipeline this card describes — data, a short fit, `lucid-eval`, predictions drawn over the ground truth — runs end to end in [the oriented-detection demo notebook](../notebooks/demo_obb.ipynb), short enough for a Colab session and not a reproduction of the numbers here.
+
 **Not intended.** Any operational use, and this is a stronger statement than for the COCO models. DOTA is aerial imagery; the categories are vehicles, ships, aircraft, storage tanks, harbours and sports facilities. Applications of aerial object detection include surveillance and targeting, and nothing about this model's licence, provenance or quality supports deployment for them. DOTA's own terms permit academic use only. Beyond that: production use of any kind, safety-critical or rights-affecting decisions, measurement of real-world object dimensions from predicted boxes, or any setting where a per-tile rotated mAP50 of 0.52 on 15 aerial categories would be read as a reliable perception system.
 
 ## 🗂️ Training data

@@ -109,6 +109,11 @@ nosetests.xml
 tests/fixtures/_generated/
 lightning_logs/
 results/
+# Where the demo notebooks put a downloaded or tiled dataset (`data/coco2017`,
+# `data/dota_tiles`, WP-191): gigabytes that belong to the reader's machine, never
+# to the tree. A tier run points `--data.data_root` wherever it likes; this is only
+# the default the notebooks write to from a checkout.
+data/
 
 # --- Documentation builds --------------------------------------------------
 # mkdocs writes site/; Sphinx writes docs/_build/

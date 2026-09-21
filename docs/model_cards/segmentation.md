@@ -24,6 +24,8 @@ Parameter and FLOP fidelity is gated rather than asserted: `test_param_flops.py`
 
 **Intended.** Reproduction research: verifying the paper's segmentation claims, ablating the prototype–coefficient mechanism, and serving as a readable from-scratch implementation of NMS-free instance segmentation. As with the detector, the `e2e` path is the interesting artifact — masks come out of a forward that contains no suppression op.
 
+**Walk-through.** The pipeline this card describes — data, a short fit, `lucid-eval`, predictions drawn over the ground truth — runs end to end in [the segmentation demo notebook](../notebooks/demo_segment.ipynb), short enough for a Colab session and not a reproduction of the numbers here.
+
 **Not intended.** Production segmentation, safety-critical or rights-affecting decisions, medical or scientific measurement from mask areas, surveillance, biometric identification, or any deployment where 19 segm mAP on 80 common object categories would be mistaken for a reliable perception system. This is a smoke-tier reproduction at the smallest scale, evaluated on exactly one benchmark. Mask boundaries are quantized by a 160×160 prototype grid — 4 input pixels per prototype cell — so any use that depends on precise object extent, and especially on small objects, is outside what this model supports.
 
 ## 🗂️ Training data
