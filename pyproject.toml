@@ -56,6 +56,14 @@ dependencies = [
   # training progress bar, and `lucid-data build-tiles` draws its own (WP-100).
   "tqdm>=4.66",
   "numpy>=1.26",
+  # Promoted from the `dev` group at WP-189, because `lucid_yolo._viz` imports it at
+  # module level and WP-168's release guard reads declarations, not the transitive
+  # graph. Declared directly for the same reason as jsonargparse: `pytorch-lightning
+  # [extra]` above already requires `matplotlib>3.1`, so nothing a consumer installs
+  # changes, but a direct import is not a transitive dependency. Matplotlib's own
+  # PSF-style licence (`License :: OSI Approved :: Python Software Foundation License`
+  # at the installed distribution), permissive; already in the audited environment.
+  "matplotlib>=3.8",
   # Promoted from the `dev` group at WP-159, because Phase 14 made it one: five modules
   # under `data/` import it at module level, so `lucid_yolo.data` -- and `predict`, through
   # `letterbox` -- cannot import without it, and leaving it in a group meant an install
@@ -94,9 +102,8 @@ dev = [
   # BSD-2-Clause, read from the installed distribution's own `License-Expression`.
   "packaging>=24.0",
   # `fuse-augmentations` was declared here until WP-159 promoted it to a runtime
-  # dependency; the reasoning for the commit pin, and for the PyPI condition it fails,
+  # dependency, and `matplotlib` until WP-189 did the same; the reasoning for each
   # moved with it to `[project].dependencies`.
-  "matplotlib>=3.8",
   # WP-066's export gate only. The export itself is `torch.onnx.export`, already a
   # runtime dep, so nothing a consumer installs changes: `onnx` reads the emitted
   # graph back to assert what is in it, and `onnxruntime` executes it to assert the

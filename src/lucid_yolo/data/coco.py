@@ -340,6 +340,73 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         """
         return tuple(record.image_id for record in self._images)
 
+    @property
+    def file_names(self) -> tuple[str, ...]:
+        """The image file name of each loader position, in ``__getitem__`` order.
+
+        The companion of :attr:`image_ids` for a consumer that arrives with a file
+        rather than an id — a figure drawn over ``000007.jpg`` needs that image's
+        labels, and the file name is the one key both the picture on disk and the
+        annotation record share (WP-189).
+
+        Returns:
+            One name per position, as the JSON spells it, aligned with :attr:`image_ids`.
+
+        Examples:
+            ```pycon
+            >>> import json, tempfile
+            >>> from pathlib import Path
+            >>> payload = {
+            ...     "categories": [{"id": 1}],
+            ...     "images": [
+            ...         {"id": 7, "file_name": "b.png", "height": 4, "width": 4},
+            ...         {"id": 3, "file_name": "a.png", "height": 4, "width": 4},
+            ...     ],
+            ...     "annotations": [],
+            ... }
+            >>> with tempfile.TemporaryDirectory() as tmp:
+            ...     path = Path(tmp) / "instances.json"
+            ...     _ = path.write_text(json.dumps(payload), encoding="utf-8")
+            ...     CocoDetectionDataset(Path(tmp), path).file_names
+            ('a.png', 'b.png')
+
+            ```
+        """
+        return tuple(record.file_name for record in self._images)
+
+    def targets_at(self, index: int) -> Targets:
+        """Return position ``index``'s targets without decoding its image.
+
+        :meth:`__getitem__` decodes the picture and applies ``transforms``; a consumer
+        that wants the labels alone — to draw them over an image it reads itself, or to
+        count instances — gets the precomputed, untransformed
+        :class:`~lucid_yolo.data.targets.Targets` here at no decode (WP-189).
+
+        Args:
+            index: Zero-based image index, as :meth:`__getitem__` takes it.
+
+        Returns:
+            The targets built at construction, in original-image pixels.
+
+        Examples:
+            ```pycon
+            >>> import json, tempfile
+            >>> from pathlib import Path
+            >>> payload = {
+            ...     "categories": [{"id": 1}],
+            ...     "images": [{"id": 3, "file_name": "a.png", "height": 8, "width": 8}],
+            ...     "annotations": [{"id": 1, "image_id": 3, "category_id": 1, "bbox": [1, 2, 3, 4], "iscrowd": 0}],
+            ... }
+            >>> with tempfile.TemporaryDirectory() as tmp:
+            ...     path = Path(tmp) / "instances.json"
+            ...     _ = path.write_text(json.dumps(payload), encoding="utf-8")
+            ...     CocoDetectionDataset(Path(tmp), path).targets_at(0).boxes.tolist()
+            [[1.0, 2.0, 4.0, 6.0]]
+
+            ```
+        """
+        return self._targets[index]
+
     def __getitem__(self, index: int) -> tuple[Tensor, Targets]:
         """Return the ``(image, Targets)`` pair for image ``index``.
 

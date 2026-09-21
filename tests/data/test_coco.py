@@ -653,6 +653,30 @@ def test_image_ids_name_each_loader_position(tmp_path: Path) -> None:
     assert len(dataset.image_ids) == len(dataset)
 
 
+def test_file_names_and_targets_at_read_a_position_without_decoding_its_image(tmp_path: Path) -> None:
+    """``file_names`` aligns with ``image_ids``, and ``targets_at`` returns that position's targets alone (WP-189).
+
+    The figure overlay arrives with an image file and wants its labels without the decode
+    ``__getitem__`` performs: the file name is the key it matches on, and ``targets_at``
+    answers from the targets precomputed at construction.
+    """
+    payload = {
+        "images": [
+            {"id": 7, "file_name": "second.png", "height": 8, "width": 8},
+            {"id": 3, "file_name": "first.png", "height": 8, "width": 8},
+        ],
+        "annotations": [{"id": 1, "image_id": 7, "category_id": 1, "bbox": [1, 2, 3, 4], "iscrowd": 0}],
+        "categories": [{"id": 1, "name": "square"}],
+    }
+    split = _write_split(tmp_path / "val", payload)
+
+    dataset = CocoDetectionDataset(split, split / "instances.json")
+
+    assert dataset.file_names == ("first.png", "second.png")
+    assert dataset.targets_at(0).boxes.shape == (0, 4)
+    assert dataset.targets_at(1).boxes.tolist() == [[1.0, 2.0, 4.0, 6.0]]
+
+
 @pytest.mark.parametrize(
     ("variant", "expected"),
     [
