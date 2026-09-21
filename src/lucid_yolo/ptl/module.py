@@ -1295,7 +1295,10 @@ class DetectionLitModule(LightningModule):
             device: Where the images, and so the branch totals, live.
 
         Returns:
-            A ``()``-shaped ``float64`` tensor equal to :attr:`alpha`.
+            A ``()``-shaped ``float64`` tensor equal to :attr:`alpha`, on ``device`` --
+            except for MPS, which has no ``float64``: there it stays on the host, where
+            torch's scalar promotion lets a 0-d CPU tensor weight a device tensor, and
+            no compiled region is involved (the compiled step is CUDA-only).
 
         Examples:
             >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4)
@@ -1303,7 +1306,8 @@ class DetectionLitModule(LightningModule):
             >>> module._alpha_tensor(torch.device("cpu"))
             tensor(0.8000, dtype=torch.float64)
         """
-        return torch.tensor(self.loss.alpha, dtype=torch.float64, device=device)
+        host = torch.device("cpu") if device.type == "mps" else device
+        return torch.tensor(self.loss.alpha, dtype=torch.float64, device=host)
 
     def _mark_dynamic(self, images: Tensor, gt_boxes: Tensor, gt_labels: Tensor, gt_mask: Tensor) -> None:
         """Mark the batch and ground-truth counts dynamic before a compiled objective sees them.

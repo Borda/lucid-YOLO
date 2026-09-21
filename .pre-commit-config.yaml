@@ -15,6 +15,9 @@ default_install_hook_types: [pre-commit, commit-msg]
 # `commit-trailers-history` would fail there even with an interpreter: its range is
 # `origin/main..HEAD`, and the service's checkout carries no `refs/remotes/origin/main`.
 ci:
+  autofix_prs: true
+  autoupdate_commit_msg: "[pre-commit.ci] bump ⬆ suggestions"
+  autoupdate_schedule: monthly
   skip:
     - mypy
     - license-audit

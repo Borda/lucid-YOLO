@@ -397,6 +397,42 @@ def test_compile_step_leaves_state_dict_keys_unchanged() -> None:
     assert len(keys) == 714
 
 
+@pytest.mark.parametrize(
+    ("device", "expected"),
+    [
+        pytest.param("cpu", "cpu", id="cpu-stays-on-cpu"),
+        pytest.param(
+            "mps",
+            "cpu",
+            id="mps-has-no-float64-so-host",
+            marks=pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS backend not available"),
+        ),
+        pytest.param(
+            "cuda",
+            "cuda",
+            id="cuda-goes-to-cuda",
+            marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available"),
+        ),
+    ],
+)
+def test_alpha_tensor_device_follows_what_can_hold_a_float64(device: str, expected: str) -> None:
+    """The 0-d ``float64`` branch weight lands on ``device``, except MPS, where it stays on the host.
+
+    ``torch.tensor(..., dtype=float64, device="mps")`` raises ``TypeError`` -- the MPS
+    framework has no double -- which made every MPS training step fail at the first
+    loss after WP-184 moved the weight from a Python float to a tensor input. A 0-d CPU
+    tensor multiplies a device tensor through scalar promotion, so the host is the
+    answer for MPS.
+    """
+    module = _tiny_module()
+
+    alpha = module._alpha_tensor(torch.device(device))
+
+    assert alpha.device.type == expected
+    assert alpha.dtype == torch.float64
+    assert alpha.item() == module.alpha
+
+
 def test_compile_step_on_a_cpu_trainer_warns_once_and_stays_eager(monkeypatch: pytest.MonkeyPatch) -> None:
     """Off CUDA the flag warns at the first ``setup`` only, keeps the bare method and the same loss."""
     reference = _tiny_module()
