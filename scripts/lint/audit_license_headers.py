@@ -33,8 +33,11 @@ COPYRIGHT_PLACEHOLDER = "Copyright [yyyy] [name of copyright owner]"
 #: Trees whose ``*.py`` files must open with the SPDX line. ``src/`` alone was never a
 #: stated scope, only the one the glob happened to name; ``scripts/`` and ``tests/``
 #: already carry the header on every file, so widening the glob pins what is already
-#: true rather than asking for new work.
-HEADER_DIRS = ("src", "scripts", "tests")
+#: true rather than asking for new work. ``notebooks/`` joined at WP-188: a jupytext
+#: source is a ``.py`` file that travels further than most -- it is the one the Colab
+#: badge hands to a reader -- so it carries the marker like the rest. The walk is
+#: ``rglob`` over a tree that may not exist yet, which yields nothing rather than failing.
+HEADER_DIRS = ("src", "scripts", "tests", "notebooks")
 
 #: The only form ``docs/PROVENANCE.md`` sec. 3.5 admits for naming the method's source: a
 #: nominative reference to the paper. WP-161 corrected the README's ``the Ultralytics YOLO26
@@ -159,10 +162,10 @@ def _carries_spdx_header(text: str) -> bool:
 def check_source_files_carry_spdx_header(repo_root: Path) -> list[str]:
     """Violations for every ``*.py`` file under :data:`HEADER_DIRS` missing the SPDX line.
 
-    Scope is the three trees this repository actually writes Python into, not ``src/``
+    Scope is every tree this repository actually writes Python into, not ``src/``
     alone: the header is a per-file legal marker and a file that travels -- a script
-    pasted into a notebook, a test vendored into a bug report -- carries it or does
-    not, whether or not it ships in the wheel.
+    pasted into a notebook, a test vendored into a bug report, a notebook source opened
+    in Colab -- carries it or does not, whether or not it ships in the wheel.
 
     Examples:
         >>> import tempfile

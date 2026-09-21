@@ -7,6 +7,11 @@ gate. This reads ``mkdocs.yml`` as data instead, so a register that drops out of
 or an identity field that drifts from ``pyproject.toml``, fails in the suite every
 contributor runs rather than in a workflow most of them never trigger.
 
+Notebook pages (WP-188) are the one nav target that is not a file under ``docs/``: a
+``notebooks/<name>.ipynb`` entry is valid when ``notebooks/<name>.py`` exists, and every
+such source owes the nav an entry -- the same rule as for pages, resolved against the
+committed source rather than the build product.
+
 Examples:
     Command-line usage (exit status is the process return code)::
 
@@ -28,6 +33,12 @@ DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 DEFAULT_MKDOCS_YML = REPO_ROOT / "mkdocs.yml"
 DEFAULT_PYPROJECT = REPO_ROOT / "pyproject.toml"
 DEFAULT_DOCS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docs.yml"
+DEFAULT_NOTEBOOKS_DIR = REPO_ROOT / "notebooks"
+
+#: Where `make notebooks` writes the rendered page for each source, relative to
+#: `docs/`. A nav entry under this prefix names a build product, so the audit resolves
+#: it against the source that produces it rather than against the docs tree.
+NOTEBOOK_PAGES_PREFIX = "notebooks/"
 
 
 class _NavLoader(yaml.SafeLoader):
@@ -104,12 +115,65 @@ def check_every_docs_page_is_listed_in_the_nav(docs_dir: Path, mkdocs_yml: Path)
     return []
 
 
-def check_every_nav_entry_points_at_a_file_that_exists(docs_dir: Path, mkdocs_yml: Path) -> list[str]:
+def _notebook_source_for(target: str) -> str | None:
+    """The ``notebooks/<name>.py`` source a nav target of the form ``notebooks/<name>.ipynb`` derives from.
+
+    ``None`` for every other target: a markdown page is its own file, and a ``.ipynb``
+    outside the notebooks prefix would be a committed notebook, which the
+    ``no-ipynb-tracked`` hook refuses on its own grounds.
+
+    Examples:
+        >>> _notebook_source_for("notebooks/wiring_gate.ipynb")
+        'wiring_gate.py'
+        >>> _notebook_source_for("TRAINING.md") is None
+        True
+        >>> _notebook_source_for("elsewhere/x.ipynb") is None
+        True
+    """
+    if not target.startswith(NOTEBOOK_PAGES_PREFIX) or not target.endswith(".ipynb"):
+        return None
+    return target[len(NOTEBOOK_PAGES_PREFIX) : -len(".ipynb")] + ".py"
+
+
+def _nav_target_exists(target: str, docs_dir: Path, notebooks_dir: Path) -> bool:
+    """True if a nav target names a page on disk, or a notebook page whose source is on disk.
+
+    A notebook page is a build product: what has to exist is the ``notebooks/<name>.py``
+    that ``make notebooks`` converts, whether or not the ``.ipynb`` has been written yet.
+    Resolving against the source rather than the product is what makes the answer the
+    same on a warm checkout and a cold one -- a stale ``.ipynb`` with no source would
+    otherwise pass here and fail in CI.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     (root / "docs").mkdir()
+        ...     (root / "notebooks").mkdir()
+        ...     _ = (root / "notebooks" / "a.py").write_text("# %%\\n", encoding="utf-8")
+        ...     _nav_target_exists("notebooks/a.ipynb", root / "docs", root / "notebooks")
+        ...     _nav_target_exists("notebooks/b.ipynb", root / "docs", root / "notebooks")
+        True
+        False
+    """
+    source = _notebook_source_for(target)
+    if source is not None:
+        return (notebooks_dir / source).is_file()
+    return (docs_dir / target).is_file()
+
+
+def check_every_nav_entry_points_at_a_file_that_exists(
+    docs_dir: Path, mkdocs_yml: Path, notebooks_dir: Path = DEFAULT_NOTEBOOKS_DIR
+) -> list[str]:
     """Violation for every nav entry naming a file that does not exist under ``docs_dir``.
 
     Checked separately from the coverage above because the two fail for opposite reasons
     and a single set comparison would report either as "the nav and the tree disagree",
     which does not say which file to go look at.
+
+    A ``notebooks/<name>.ipynb`` entry is the one derived page (WP-188): it exists when
+    ``notebooks_dir/<name>.py`` does, since the ``.ipynb`` is gitignored and written by
+    ``make notebooks`` at build time.
 
     Examples:
         >>> import tempfile
@@ -119,12 +183,61 @@ def check_every_nav_entry_points_at_a_file_that_exists(docs_dir: Path, mkdocs_ym
         ...     docs.mkdir()
         ...     mkdocs_yml = root / "mkdocs.yml"
         ...     _ = mkdocs_yml.write_text("nav:\\n  - ghost.md\\n", encoding="utf-8")
-        ...     check_every_nav_entry_points_at_a_file_that_exists(docs, mkdocs_yml)
+        ...     check_every_nav_entry_points_at_a_file_that_exists(docs, mkdocs_yml, root / "notebooks")
         ["nav entries with no file on disk: ['ghost.md']"]
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     (root / "docs").mkdir()
+        ...     (root / "notebooks").mkdir()
+        ...     _ = (root / "notebooks" / "a.py").write_text("# %%\\n", encoding="utf-8")
+        ...     mkdocs_yml = root / "mkdocs.yml"
+        ...     _ = mkdocs_yml.write_text("nav:\\n  - notebooks/a.ipynb\\n", encoding="utf-8")
+        ...     check_every_nav_entry_points_at_a_file_that_exists(root / "docs", mkdocs_yml, root / "notebooks")
+        []
     """
-    missing = [target for target in _nav_targets(_config(mkdocs_yml)["nav"]) if not (docs_dir / target).is_file()]
+    missing = [
+        target
+        for target in _nav_targets(_config(mkdocs_yml)["nav"])
+        if not _nav_target_exists(target, docs_dir, notebooks_dir)
+    ]
     if missing:
         return [f"nav entries with no file on disk: {missing}"]
+    return []
+
+
+def check_every_notebook_source_has_a_nav_entry(mkdocs_yml: Path, notebooks_dir: Path) -> list[str]:
+    """Violation for every ``notebooks/*.py`` source with no ``notebooks/<name>.ipynb`` nav entry.
+
+    The same rule as :func:`check_every_docs_page_is_listed_in_the_nav`, for the one kind
+    of page that is not a markdown file on disk: a notebook nobody can navigate to is one
+    nobody reads. Checked from the source side rather than by globbing ``docs/notebooks/``
+    because that directory is a build product and may not exist on the checkout running
+    the hook. A ``notebooks/`` directory with no sources -- WP-188's own state -- is
+    clean, and so is a ``mkdocs.yml`` with no ``Notebooks`` section then: an empty nav
+    section is invalid YAML for MkDocs, so the section arrives with the first notebook.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     (root / "notebooks").mkdir()
+        ...     _ = (root / "notebooks" / "a.py").write_text("# %%\\n", encoding="utf-8")
+        ...     mkdocs_yml = root / "mkdocs.yml"
+        ...     _ = mkdocs_yml.write_text("nav:\\n  - index.md\\n", encoding="utf-8")
+        ...     check_every_notebook_source_has_a_nav_entry(mkdocs_yml, root / "notebooks")
+        ...     check_every_notebook_source_has_a_nav_entry(mkdocs_yml, root / "absent")
+        ["notebook sources absent from the nav: ['a.py']"]
+        []
+    """
+    if not notebooks_dir.is_dir():
+        return []
+    sources = {path.name for path in notebooks_dir.glob("*.py")}
+    in_nav = {
+        source for source in map(_notebook_source_for, _nav_targets(_config(mkdocs_yml)["nav"])) if source is not None
+    }
+    missing = sources - in_nav
+    if missing:
+        return [f"notebook sources absent from the nav: {sorted(missing)}"]
     return []
 
 
@@ -290,8 +403,9 @@ def find_violations(
     mkdocs_yml: Path = DEFAULT_MKDOCS_YML,
     pyproject: Path = DEFAULT_PYPROJECT,
     docs_workflow: Path = DEFAULT_DOCS_WORKFLOW,
+    notebooks_dir: Path = DEFAULT_NOTEBOOKS_DIR,
 ) -> list[str]:
-    """Every docs-site violation across the nav, identity fields, and CI wiring.
+    """Every docs-site violation across the nav, notebook sources, identity fields, and CI wiring.
 
     Examples:
         >>> find_violations(DEFAULT_DOCS_DIR, DEFAULT_MKDOCS_YML, DEFAULT_PYPROJECT, DEFAULT_DOCS_WORKFLOW)
@@ -299,7 +413,8 @@ def find_violations(
     """
     violations: list[str] = []
     violations += check_every_docs_page_is_listed_in_the_nav(docs_dir, mkdocs_yml)
-    violations += check_every_nav_entry_points_at_a_file_that_exists(docs_dir, mkdocs_yml)
+    violations += check_every_nav_entry_points_at_a_file_that_exists(docs_dir, mkdocs_yml, notebooks_dir)
+    violations += check_every_notebook_source_has_a_nav_entry(mkdocs_yml, notebooks_dir)
     violations += check_the_gfm_table_extension_is_declared(mkdocs_yml)
     violations += check_the_repo_url_matches_the_declared_homepage(mkdocs_yml, pyproject)
     violations += check_the_site_description_is_the_distribution_description(mkdocs_yml, pyproject)
@@ -333,15 +448,21 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_DOCS_WORKFLOW,
         help=f"docs CI workflow (default: {DEFAULT_DOCS_WORKFLOW})",
     )
+    parser.add_argument(
+        "--notebooks-dir",
+        type=Path,
+        default=DEFAULT_NOTEBOOKS_DIR,
+        help=f"jupytext notebook sources (default: {DEFAULT_NOTEBOOKS_DIR})",
+    )
     args = parser.parse_args(argv)
 
-    violations = find_violations(args.docs_dir, args.mkdocs_yml, args.pyproject, args.docs_workflow)
+    violations = find_violations(args.docs_dir, args.mkdocs_yml, args.pyproject, args.docs_workflow, args.notebooks_dir)
     if violations:
         print(f"docs-site-audit FAILED: {len(violations)} violation(s)")
         for item in violations:
             print(f"  - {item}")
         return 1
-    print("docs-site-audit clean: nav, identity fields, and CI wiring all match")
+    print("docs-site-audit clean: nav, notebook sources, identity fields, and CI wiring all match")
     return 0
 
 

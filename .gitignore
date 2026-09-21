@@ -114,6 +114,10 @@ results/
 # mkdocs writes site/; Sphinx writes docs/_build/
 /site
 docs/_build/
+# `make notebooks` writes the .ipynb mkdocs-jupyter renders, converted from the
+# committed notebooks/*.py sources (WP-188). Never committed: the `no-ipynb-tracked`
+# hook is the gate, since `git add -f` walks straight past this file.
+docs/notebooks/
 
 # --- Editors, IDEs and OS ---------------------------------------------------
 # JetBrains: the maintained template is Global/JetBrains.gitignore; the nuclear

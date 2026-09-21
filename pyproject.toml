@@ -103,6 +103,24 @@ dev = [
   # exported model still answers what the checkpoint answers. Both Apache-2.0/MIT.
   "onnx>=1.17",
   "onnxruntime>=1.19",
+  # The notebook smoke test (`tests/notebooks/test_notebooks_run.py`) executes each
+  # `notebooks/*.py` source through a Jupyter kernel rather than as a script: the Colab
+  # bootstrap cell is `!`/`%pip` lines, which are comments to a script and only run in a
+  # kernel, and a cell's last expression renders only there. `jupytext` reads the
+  # percent-format source and drives the execution
+  # (`--execute`); that path imports `nbconvert.preprocessors.ExecutePreprocessor`, which
+  # is why the declaration is `nbconvert` (it requires `nbclient`) and not `nbclient` --
+  # `importlib.metadata.requires("jupytext")` lists neither as a hard requirement;
+  # `ipykernel` is the kernel, and its wheel drops the `python3` kernelspec into
+  # `.venv/share/jupyter/kernels/`, so no `ipykernel install` step exists anywhere.
+  # `jupytext` stays in `docs` as well: the site's conversion is the same tool, and that
+  # group is installed alone by `docs.yml`. All permissive -- jupytext MIT, nbconvert and
+  # ipykernel BSD-3 -- and the tree they pull is the one the WP-188 scratch-venv audit
+  # already walked for the docs group (`pyzmq`, BSD-3, is the native binary in it); the
+  # licence audit re-run on the dev environment with these three added stayed clean.
+  "jupytext>=1.16",
+  "nbconvert>=7.16",
+  "ipykernel>=6.29",
 ]
 # The type checker and its stub packages, separate from `dev` because only one job
 # needs them: `pre-commit` runs mypy as a `language: system` hook whose entry is
@@ -146,9 +164,21 @@ typing = [
 # declares, so a distribution declaring nothing matches nothing and passes silently. The
 # cap is what keeps that resolution from happening in the first place. Lift it when
 # 2.x ships a permissive LICENSE, verified from the repository rather than from the notice.
+#
+# The two notebook packages (WP-188) are the one place the site renders a file that is
+# not in the repository: `jupytext` converts each `notebooks/*.py` percent-format source
+# into `docs/notebooks/<name>.ipynb`, and `mkdocs-jupyter` renders that file, unexecuted
+# (`execute: false`), as a page. Measured in a scratch venv holding the docs group alone:
+# 43 distributions with jupytext, 77 with mkdocs-jupyter -- the 34 it adds are the
+# `nbconvert` / `nbclient` / `ipykernel` tree and what they pull, of which `pyzmq`
+# (BSD-3-Clause) is the one shipping a native binary the audit's binary scan walked.
+# Licence audit clean at both counts; nothing copyleft entered. The `docs.yml` build job
+# is where CI sees this tree, and its audit step runs before the build for that reason.
 docs = [
   "mkdocs>=1.6,<2",
   "mkdocs-material>=9.5",
+  "jupytext>=1.16",
+  "mkdocs-jupyter>=0.25",
 ]
 
 [project.scripts]
@@ -206,6 +236,13 @@ max-returns = 6
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["PLR0913"]
+# Notebook sources are jupytext percent-format scripts: a `# %% [markdown]` prose cell
+# sits between the title and the first import, and each later cell imports what it
+# needs where the reader meets it, so module-level imports are not at the top by
+# design (E402). Everything else applies -- a notebook is a `.py` file this project
+# lints, tests and publishes. Widen this list only from a real ruff finding on a real
+# notebook, one code at a time, each with its reason here.
+"notebooks/**" = ["E402"]
 
 [tool.mypy]
 python_version = "3.11"

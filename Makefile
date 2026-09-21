@@ -11,7 +11,7 @@ DATASET   ?=
 
 TAG       ?=
 
-.PHONY: setup lint test test-gpu precommit gate gate-gpu golden golden-gpu freeze-goldens overfit shapes check-data build dist-pypi docs docs-serve clean
+.PHONY: setup lint test test-gpu precommit gate gate-gpu golden golden-gpu freeze-goldens overfit shapes check-data build dist-pypi notebooks docs docs-serve clean
 
 setup:
 	$(UV) venv --python 3.11 $(VENV)
@@ -117,6 +117,26 @@ dist-pypi:
 	status=0; $(PY) -m build || status=$$?; \
 	$(PY) scripts/absolutize_readme.py --revert || exit 1; \
 	exit $$status
+# Notebook pages are built, not committed (WP-188, D25): every `notebooks/<name>.py`
+# jupytext percent-format source becomes `docs/notebooks/<name>.ipynb`, unexecuted, and
+# mkdocs-jupyter renders that file. The `.ipynb` is a build product -- gitignored here,
+# and `no-ipynb-tracked` refuses one that reaches the index anyway. The loop is a shell
+# glob with an existence test rather than `$(wildcard)`: with no sources yet, `for f in ;`
+# is a syntax error under /bin/sh, while an unmatched glob is one literal the test skips,
+# so an empty `notebooks/` is a no-op rather than a failure. `docs.yml` runs the same
+# command line rather than this target, so a change here is a change there.
+# `--from py:percent` is required, not a restatement of the default: a source's commands
+# are `!` shell lines, escaped as `# !cmd` in the `.py`, and jupytext's format guesser
+# reads an indented one (the Colab `if` block's `# !git clone`) as an unescaped magic and
+# guesses `hydrogen`, a format that leaves every `# !` line a comment in the `.ipynb`.
+notebooks:
+	mkdir -p docs/notebooks
+	rm -f docs/notebooks/*.ipynb
+	@for src in notebooks/*.py; do \
+		[ -e "$$src" ] || continue; \
+		$(PY) -m jupytext --from py:percent --to ipynb --output "docs/notebooks/$$(basename "$$src" .py).ipynb" "$$src"; \
+	done
+
 # MkDocs Material site over docs/ into site/. The docs group is deliberately outside
 # `make setup`: it is a publishing toolchain, no gate imports it, and a contributor who
 # never builds the site never installs the tree. Install it on demand with
@@ -124,18 +144,22 @@ dist-pypi:
 # pre-commit licence audit — the audit scans the environment, not the diff.
 # --strict is the whole value of building locally: it fails on a link to a page that
 # does not exist and on a page the nav never lists, and a register nobody can navigate
-# to is one nobody reads.
-docs:
+# to is one nobody reads. Depends on `notebooks` because a nav entry naming a page the
+# converter has not written yet is exactly the dead link --strict exists to catch.
+docs: notebooks
 	$(PY) -m mkdocs build --strict
 
-# Live-reload preview on http://127.0.0.1:8000 for editing prose; not a gate.
-docs-serve:
+# Live-reload preview on http://127.0.0.1:8000 for editing prose; not a gate. The
+# notebooks are converted once at start; a source edited mid-session is re-rendered by
+# running `make notebooks` again, since the server watches docs/, not notebooks/.
+docs-serve: notebooks
 	$(PY) -m mkdocs serve
 
 # `tests/fixtures/_generated` is the synthetic micro-dataset cache. It is gitignored, so
 # CI is always cold and a contributor's machine is always warm; leaving it out of `clean`
 # left "start from nothing" meaning two different things on the two (M-45). The cache is
 # self-invalidating on a fingerprint mismatch, so removing it here is a belt to that
-# brace, not the mechanism.
+# brace, not the mechanism. `docs/notebooks` is the converter's output and is removed
+# on the same reasoning: what `make notebooks` writes, `make clean` takes back.
 clean:
-	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache .coverage build dist site src/*.egg-info tests/fixtures/_generated
+	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache .coverage build dist site src/*.egg-info tests/fixtures/_generated docs/notebooks

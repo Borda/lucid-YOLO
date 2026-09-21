@@ -4,7 +4,7 @@
 Covers ``scripts/lint/audit_docs_site.py``'s public contract in isolation, on synthetic
 files under ``tmp_path`` rather than against the live docs tree -- the live tree is
 exercised instead by the pre-commit hook itself each time ``mkdocs.yml``, ``docs/**``,
-``pyproject.toml``, or ``.github/workflows/docs.yml`` changes. This file is the
+``pyproject.toml``, ``notebooks/*.py``, or ``.github/workflows/docs.yml`` changes. This file is the
 functional-core check pytest owns; the hook is the lint gate that runs it.
 """
 
@@ -83,6 +83,114 @@ def test_every_nav_entry_points_at_a_file_that_exists_passes_when_covered(tmp_pa
     mkdocs_yml.write_text("nav:\n  - index.md\n", encoding="utf-8")
 
     assert audit.check_every_nav_entry_points_at_a_file_that_exists(docs, mkdocs_yml) == []
+
+
+class TestNotebookPagesInTheNav:
+    """A `notebooks/<name>.ipynb` nav entry is a build product resolved against its `.py` source (WP-188)."""
+
+    def test_an_entry_whose_source_exists_passes_without_the_ipynb(self, tmp_path: Path) -> None:
+        """The `.ipynb` is gitignored and may not have been written yet; the source is what has to exist.
+
+        A cold checkout -- CI, or a contributor who has not run `make notebooks` -- has the
+        `.py` and not the `.ipynb`, and the audit has to answer the same there as on a warm one.
+        """
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "notebooks").mkdir()
+        (tmp_path / "notebooks" / "wiring_gate.py").write_text("# %%\n", encoding="utf-8")
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text(
+            "nav:\n  - Notebooks:\n      - Wiring gate: notebooks/wiring_gate.ipynb\n", encoding="utf-8"
+        )
+
+        violations = audit.check_every_nav_entry_points_at_a_file_that_exists(
+            tmp_path / "docs", mkdocs_yml, tmp_path / "notebooks"
+        )
+
+        assert violations == []
+
+    def test_an_entry_with_no_source_is_flagged_even_if_a_stale_ipynb_exists(self, tmp_path: Path) -> None:
+        """A generated `.ipynb` left behind by a deleted source does not make the nav entry valid.
+
+        Resolving against the product would pass on the warm checkout that deleted the
+        source and fail on every cold one; the source is the only file the repository holds.
+        """
+        (tmp_path / "docs" / "notebooks").mkdir(parents=True)
+        (tmp_path / "docs" / "notebooks" / "gone.ipynb").write_text("{}", encoding="utf-8")
+        (tmp_path / "notebooks").mkdir()
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text("nav:\n  - notebooks/gone.ipynb\n", encoding="utf-8")
+
+        violations = audit.check_every_nav_entry_points_at_a_file_that_exists(
+            tmp_path / "docs", mkdocs_yml, tmp_path / "notebooks"
+        )
+
+        assert violations == ["nav entries with no file on disk: ['notebooks/gone.ipynb']"]
+
+    def test_an_ipynb_outside_the_notebooks_prefix_is_an_ordinary_page(self, tmp_path: Path) -> None:
+        """Only the `notebooks/` prefix is derived; any other `.ipynb` must exist under `docs/` itself."""
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "notebooks").mkdir()
+        (tmp_path / "notebooks" / "x.py").write_text("# %%\n", encoding="utf-8")
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text("nav:\n  - elsewhere/x.ipynb\n", encoding="utf-8")
+
+        violations = audit.check_every_nav_entry_points_at_a_file_that_exists(
+            tmp_path / "docs", mkdocs_yml, tmp_path / "notebooks"
+        )
+
+        assert violations == ["nav entries with no file on disk: ['elsewhere/x.ipynb']"]
+
+
+class TestEveryNotebookSourceHasANavEntry:
+    """Every `notebooks/*.py` owes the nav a `notebooks/<name>.ipynb` entry (WP-188)."""
+
+    def test_a_source_absent_from_the_nav_is_named(self, tmp_path: Path) -> None:
+        """A notebook nobody can navigate to is one nobody reads -- the page rule, applied to sources."""
+        (tmp_path / "notebooks").mkdir()
+        (tmp_path / "notebooks" / "orphan.py").write_text("# %%\n", encoding="utf-8")
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text("nav:\n  - index.md\n", encoding="utf-8")
+
+        violations = audit.check_every_notebook_source_has_a_nav_entry(mkdocs_yml, tmp_path / "notebooks")
+
+        assert violations == ["notebook sources absent from the nav: ['orphan.py']"]
+
+    def test_a_source_named_in_the_nav_passes(self, tmp_path: Path) -> None:
+        """A source whose `.ipynb` the nav lists produces no violation."""
+        (tmp_path / "notebooks").mkdir()
+        (tmp_path / "notebooks" / "a.py").write_text("# %%\n", encoding="utf-8")
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text("nav:\n  - Notebooks:\n      - A: notebooks/a.ipynb\n", encoding="utf-8")
+
+        assert audit.check_every_notebook_source_has_a_nav_entry(mkdocs_yml, tmp_path / "notebooks") == []
+
+    def test_no_sources_and_no_section_is_clean(self, tmp_path: Path) -> None:
+        """An empty `notebooks/` with no `Notebooks` nav section is the state WP-188 ships in.
+
+        MkDocs rejects a nav section with no children, so the section cannot exist
+        before the first notebook does; the check must not demand it.
+        """
+        (tmp_path / "notebooks").mkdir()
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text("nav:\n  - index.md\n", encoding="utf-8")
+
+        assert audit.check_every_notebook_source_has_a_nav_entry(mkdocs_yml, tmp_path / "notebooks") == []
+
+    def test_a_missing_notebooks_directory_is_clean(self, tmp_path: Path) -> None:
+        """No directory at all is the same as an empty one, not a failure to read."""
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text("nav:\n  - index.md\n", encoding="utf-8")
+
+        assert audit.check_every_notebook_source_has_a_nav_entry(mkdocs_yml, tmp_path / "absent") == []
+
+    def test_a_non_python_file_in_the_directory_is_not_a_source(self, tmp_path: Path) -> None:
+        """`notebooks/README.md` lives beside the sources and owes the nav nothing."""
+        (tmp_path / "notebooks").mkdir()
+        (tmp_path / "notebooks" / "README.md").write_text("# how to\n", encoding="utf-8")
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text("nav:\n  - index.md\n", encoding="utf-8")
+
+        assert audit.check_every_notebook_source_has_a_nav_entry(mkdocs_yml, tmp_path / "notebooks") == []
 
 
 def test_the_gfm_table_extension_is_declared_flags_a_missing_extension(tmp_path: Path) -> None:

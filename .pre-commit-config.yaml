@@ -24,6 +24,7 @@ ci:
     - docs-site
     - figure-captions
     - license-headers
+    - no-ipynb-tracked
     - frozen-manifest
     - version-single-source
     - commit-trailers-history
@@ -175,7 +176,9 @@ repos:
         entry: .venv/bin/python scripts/lint/audit_docs_site.py
         language: system
         pass_filenames: false
-        files: ^(mkdocs\.yml|docs/.*|pyproject\.toml|\.github/workflows/docs\.yml)$
+        # `notebooks/*.py` is in the pattern because each source owes the nav an entry
+        # (WP-188): a notebook added without one is the change this hook has to see.
+        files: ^(mkdocs\.yml|docs/.*|pyproject\.toml|\.github/workflows/docs\.yml|notebooks/.*\.py)$
       # A figure's rendered caption text must match the source string that drew it.
       - id: figure-captions
         name: "🖼️ figure caption text matches source"
@@ -193,7 +196,21 @@ repos:
         entry: .venv/bin/python scripts/lint/audit_license_headers.py
         language: system
         pass_filenames: false
-        files: ^(LICENSE|NOTICE|README\.md|(src|scripts|tests)/.*\.py)$
+        files: ^(LICENSE|NOTICE|README\.md|(src|scripts|tests|notebooks)/.*\.py)$
+      # A notebook is committed as a jupytext `.py` source; the `.ipynb` the site
+      # renders is written by `make notebooks` into a gitignored directory (WP-188).
+      # `check-added-large-files` does not cover it -- a fresh notebook is small -- and
+      # `.gitignore` is not a gate, since `git add -f` walks past it. This reads the
+      # index, so it runs on every commit like the other tree-state checks rather than
+      # on a `files:` filter: pre-commit's staged-path filter is what a forced add
+      # would have to match, and a filter on `\.ipynb$` fires only on the file it
+      # could just as well have refused. Milliseconds: one `git ls-files`.
+      - id: no-ipynb-tracked
+        name: "📓 no .ipynb tracked (notebooks are .py sources)"
+        entry: .venv/bin/python scripts/lint/audit_no_notebooks_tracked.py
+        language: system
+        pass_filenames: false
+        always_run: true
       # Every frozen golden must still be the file the release wrote. The golden
       # harness compares each frozen file against its own stored values, so an edit
       # moving both the values and the tolerances is green there by construction --

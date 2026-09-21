@@ -233,9 +233,27 @@ class TestSpdxHeaderScope:
 
         assert violations == ["files missing SPDX header: ['tests/test_bare.py']"]
 
+    def test_a_notebook_source_without_the_header_is_named(self, tmp_path: Path) -> None:
+        """`notebooks/` is in scope (WP-188): the jupytext source is the file Colab hands a reader."""
+        notebooks = tmp_path / "notebooks"
+        notebooks.mkdir()
+        (notebooks / "bare.py").write_text("# %%\nimport os\n", encoding="utf-8")
+
+        violations = audit.check_source_files_carry_spdx_header(tmp_path)
+
+        assert violations == ["files missing SPDX header: ['notebooks/bare.py']"]
+
+    def test_an_absent_tree_is_not_a_failure(self, tmp_path: Path) -> None:
+        """A scoped tree that does not exist yet yields no files rather than an error.
+
+        `notebooks/` joined the scope before any source landed in it, so the walk has to
+        tolerate a checkout without the directory -- `rglob` on a missing path is empty.
+        """
+        assert audit.check_source_files_carry_spdx_header(tmp_path) == []
+
     def test_the_scope_is_stated_rather_than_implied_by_a_glob(self) -> None:
         """The trees are a named constant, so widening or narrowing is a visible decision."""
-        assert audit.HEADER_DIRS == ("src", "scripts", "tests")
+        assert audit.HEADER_DIRS == ("src", "scripts", "tests", "notebooks")
 
 
 def test_the_live_repo_tree_is_currently_clean() -> None:

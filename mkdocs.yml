@@ -3,7 +3,11 @@
 # The site publishes what is already in the repository; it owns no prose of its own
 # beyond docs/index.md. Every register stays a plain markdown file a reader can open
 # on GitHub without this toolchain, which is why nothing here rewrites content and
-# why no plugin generates pages from source.
+# why no plugin generates a page from a docstring or a template. The one derived
+# surface is the notebooks (WP-188, D25): `make notebooks` converts each committed
+# `notebooks/<name>.py` jupytext source into `docs/notebooks/<name>.ipynb`, gitignored,
+# and mkdocs-jupyter renders that file unexecuted -- the source cells and the Colab
+# badge, no outputs. The prose is still the repository's; only the file format is not.
 #
 # Identity fields are read off pyproject.toml rather than restated: site_name is the
 # distribution name, site_description its description verbatim, repo_url its Homepage.
@@ -62,6 +66,17 @@ plugins:
   # Naming any plugin replaces the default list, so search is restated rather than
   # inherited — omitting it silently ships a site whose search box finds nothing.
   - search
+  # Renders the `.ipynb` files `make notebooks` writes under docs/notebooks/. Never
+  # executes them: docs CI is torch-free and the site is not where a notebook is
+  # proven to run — `tests/notebooks/test_notebooks_run.py` is (fast, under `make
+  # test`; full, under `make test-gpu`). `include_source` puts a download link to the
+  # `.ipynb` on the page; `ignore_h1_titles` keeps the nav label below as the page
+  # title rather than the notebook's own first heading, matching every other page.
+  - mkdocs-jupyter:
+      include: ["*.ipynb"]
+      execute: false
+      include_source: true
+      ignore_h1_titles: true
 
 markdown_extensions:
   # tables is a default that a user-supplied markdown_extensions list does not
@@ -133,3 +148,11 @@ nav:
       - Escalation log: ESCALATION.md
   - Contributing:
       - Contributor guide: CONTRIBUTING.md
+  # Notebook pages go here as `- <Title>: notebooks/<name>.ipynb`, one per
+  # `notebooks/<name>.py` source (WP-188). The section is a comment rather than an
+  # empty `- Notebooks:` entry because MkDocs rejects a nav section with no children,
+  # and `scripts/lint/audit_docs_site.py` requires the entry for every source that
+  # exists while tolerating the section's absence when none does. WP-189 uncomments
+  # it with the first page.
+  # - Notebooks:
+  #     - <Title>: notebooks/<name>.ipynb

@@ -1,14 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 name: Docs
 
-# Builds the MkDocs Material site on every pull request and deploys it to GitHub
-# Pages on push to the default branch. `mkdocs build --strict` fails on a link to a
-# missing page and on a page the nav never lists -- the two ways this site rots.
+# Builds the MkDocs Material site on every pull request and publishes it to the
+# `gh-pages` branch on push to the default branch. `mkdocs build --strict` fails on a
+# link to a missing page and on a page the nav never lists -- the two ways this site
+# rots.
 #
-# Enabling Pages is a one-time operator step (Settings -> Pages -> Source: GitHub
-# Actions), deliberately not automated: `configure-pages` runs without `enablement`,
-# so it reports a misconfigured repository rather than changing one. Until then the
-# push-to-main run fails at `configure-pages`; pull-request runs never reach it.
+# Publishing is a branch deploy, not the Pages artifact flow it was until WP-188:
+# `ghp-import` commits `site/` onto `gh-pages` on top of that branch's history (a plain
+# push, never forced) and Pages serves the branch. One branch then carries the site and
+# the generated notebooks -- each `notebooks/<name>.py` source is converted to
+# `.ipynb` here and copied to `site/notebooks/<name>.ipynb`, and the Colab badge on
+# every notebook page opens `blob/gh-pages/notebooks/<name>.ipynb`, because Colab's
+# GitHub loader reads a file by branch path and `main` holds no `.ipynb` by design (D25).
+#
+# Serving the branch is a one-time operator step, deliberately not automated:
+# Settings -> Pages -> Source "Deploy from a branch", branch `gh-pages`, folder
+# `/ (root)`. Until then a push run publishes the branch and nothing serves it; the
+# badge still resolves, since it reads the branch and not the site.
 
 on:
   pull_request:
@@ -20,22 +29,36 @@ permissions:
 
 concurrency:
   group: docs-${{ github.workflow }}-${{ github.ref }}
-  # Not cancel-in-progress, as in release.yml: a half-finished deployment is worse
-  # than a queue.
+  # Not cancel-in-progress, as in release.yml: a half-finished publish is worse than
+  # a queue.
   cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Replaces the top-level block. `pages: read` is what `configure-pages` needs;
-    # its `enablement` input defaults to false and would need a token other than
-    # `GITHUB_TOKEN` anyway, so read is the ceiling, not a denied permission.
+    # Replaces the top-level block. `write` is what the push-only `ghp-import` step
+    # needs; a pull-request run never reaches that step, but a job's permissions are
+    # fixed for the job, so its build and audit steps run under the same grant. A
+    # second job holding the write permission alone would need the built site handed
+    # across an artifact for the same result, so the grant sits here, commented.
     permissions:
-      contents: read
-      pages: read
+      contents: write
     steps:
-      - name: "📥 Check out the repository"
+      # Two checkouts, one per event. A pull request builds and never publishes, so
+      # one commit of one branch is all it needs. A push publishes, and `ghp-import`
+      # parents its commit on `refs/remotes/origin/gh-pages` -- absent from a shallow
+      # single-branch checkout, in which case it starts a fresh root, which is the
+      # non-fast-forward the remote rejected on the second publish. `fetch-depth: 0`
+      # fetches every branch, so the parent is there; on the first publish, before the
+      # branch exists, the import still starts a root and the push creates it.
+      - name: "📥 Check out the repository (shallow)"
+        if: github.event_name != 'push'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "📥 Check out the repository with every branch"
+        if: github.event_name == 'push'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: "🐍 Set up Python"
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -52,31 +75,42 @@ jobs:
       # (D15/D16), so it runs where the exposure enters.
       - name: "⚖️ Dependency license audit over the docs environment"
         run: .venv/bin/python scripts/lint/audit_licenses.py
+      # Mirrors the Makefile's `notebooks` target line for line; the existence test
+      # is what makes an empty `notebooks/` a no-op rather than a jupytext error on
+      # the literal `notebooks/*.py`. `--from py:percent` keeps the sources' `# !cmd`
+      # lines shell lines in the published `.ipynb`; the Makefile says why the guesser
+      # cannot be trusted with them.
+      - name: "📓 Convert the notebook sources to .ipynb"
+        run: |
+          mkdir -p docs/notebooks
+          for src in notebooks/*.py; do
+            [ -e "$src" ] || continue
+            .venv/bin/python -m jupytext --from py:percent --to ipynb --output "docs/notebooks/$(basename "$src" .py).ipynb" "$src"
+          done
       - name: "🏗️ Build the site (strict)"
         run: .venv/bin/python -m mkdocs build --strict
-      # Skipped on pull requests: it fails when Pages is not enabled, which no PR can
-      # fix. On push it is the early, legible failure for that state.
-      - name: "⚙️ Configure Pages"
+      # `include_source` already places a copy at `site/notebooks/<name>/<name>.ipynb`
+      # beside the rendered page; this copy is the flat `site/notebooks/<name>.ipynb`
+      # the badge URL names. Skipped on pull requests with the publish step below:
+      # nothing a PR builds is published.
+      - name: "📎 Copy the converted notebooks to the badge path"
         if: github.event_name == 'push'
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-      - name: "📤 Upload the built site as a Pages artifact"
+        run: |
+          mkdir -p site/notebooks
+          for nb in docs/notebooks/*.ipynb; do
+            [ -e "$nb" ] || continue
+            cp "$nb" site/notebooks/
+          done
+      # `ghp-import` arrives with mkdocs (no new dependency). `-n` writes `.nojekyll`
+      # so Pages serves Material's underscore-prefixed assets; `-p` pushes; the commit
+      # lands on top of `gh-pages` history -- `-f` is never passed. The bot identity is
+      # the one `commit-trailers-history` already exempts by address; a build-product
+      # commit has no provenance to name. If a branch ruleset ever blocks pushes from
+      # `GITHUB_TOKEN`, this step fails at the push and says so -- an operator step,
+      # like the Pages source above, and not one this file works around.
+      - name: "🚀 Publish site/ to the gh-pages branch"
         if: github.event_name == 'push'
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: site
-
-  deploy:
-    if: github.event_name == 'push'
-    needs: build
-    runs-on: ubuntu-latest
-    # Job-level permissions replace the top-level block, so both are named here.
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: "🚀 Deploy to GitHub Pages"
-        id: deployment
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          .venv/bin/ghp-import -n -p -m "docs: build ${{ github.sha }}" site
