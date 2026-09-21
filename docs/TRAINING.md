@@ -156,6 +156,6 @@ python scripts/overfit_micro.py --task obb        # train rotated mAP50 >= 0.9
 python scripts/overfit_micro.py --task keypoints  # train OKS AP >= 0.30
 ```
 
-A tier that cannot overfit a handful of images will not converge on the full set, and finding that out after the first epoch of a fifty-epoch run costs the run.
+A tier that cannot overfit a handful of images will not converge on the full set, and finding that out after the first epoch of a fifty-epoch run costs the run. The four commands, and the shapes regression beside them, run as they are in the [development gates notebook](notebooks/development_gates.ipynb).
 
 The keypoint floor looks low beside the other three and is not measuring less. Its slice is the only one not drawn from the geometric shapes — `task: keypoints` needs a keypoint-bearing family, so it draws a 7-point synthetic symbol schema, and OKS at that schema's uniform sigma is a cliff on objects a few dozen pixels across: feeding the ground truth back as the prediction scores exactly 1.0, and displacing every point by 3 px scores 0.269. The floor was set from that measured slope rather than guessed.

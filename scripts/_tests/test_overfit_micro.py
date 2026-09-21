@@ -44,6 +44,25 @@ def test_overfit_golden_excluded_from_offline_harness() -> None:
     assert overfit_micro._GOLDEN_PATH not in check_goldens.discover_goldens(goldens_dir)
 
 
+@pytest.mark.parametrize(
+    ("documented", "key"),
+    [
+        pytest.param("detect", "det", id="detect"),
+        pytest.param("segment", "seg", id="segment"),
+        pytest.param("obb", "obb", id="obb"),
+        pytest.param("keypoints", "kp", id="keypoints"),
+    ],
+)
+def test_the_documented_task_names_resolve_to_a_wired_gate(documented: str, key: str) -> None:
+    """Every ``--task`` spelling TRAINING.md writes names a gate in ``TASK_SPECS``.
+
+    Three of the four documented commands exited 1 with "unsupported task" before WP-190,
+    because the lookup knew only the short keys; the alias table is what closed that.
+    """
+    assert overfit_micro.resolve_task(documented) == key
+    assert key in overfit_micro.TASK_SPECS
+
+
 @pytest.fixture(scope="module")
 def overfit_metrics() -> dict[str, float]:
     """Run the full overfit pipeline once and share its metrics across the gpu tests."""
@@ -106,39 +125,6 @@ def test_non_detection_score_clears_floor(non_detection_metrics: tuple[str, dict
     assert metrics[spec.metric] >= spec.floor
 
 
-def test_run_overfit_returns_metrics_when_score_clears_floor(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A run scoring above its floor returns the metric mapping with the score rounded.
-
-    Stands in for the accelerator: training is stubbed so the producer's own
-    floor branch — not the trainer — is what the case exercises.
-    """
-    spec = overfit_micro.TASK_SPECS["kp"]
-    monkeypatch.setattr(overfit_micro, "generate_slice", lambda *_args: Path("unused"))
-    monkeypatch.setattr(overfit_micro, "_train_and_score", lambda *_args: (0.3456789, 548, 1))
-
-    metrics = overfit_micro.run_overfit("kp")
-
-    assert metrics[spec.metric] == 0.345679
-    assert metrics["num_instances"] == 548.0
-
-
-def test_run_overfit_raises_when_score_below_floor(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The producer itself rejects a below-floor run, so no caller can accept one.
-
-    The keypoint gate is the narrowest of the four floors and the one whose frozen
-    band was widest relative to it, so it is the case that would have gone unnoticed.
-    """
-    spec = overfit_micro.TASK_SPECS["kp"]
-    monkeypatch.setattr(overfit_micro, "generate_slice", lambda *_args: Path("unused"))
-    monkeypatch.setattr(overfit_micro, "_train_and_score", lambda *_args: (spec.floor - 0.01, 548, 1))
-
-    with pytest.raises(overfit_micro.FloorNotMet) as excinfo:
-        overfit_micro.run_overfit("kp")
-
-    assert excinfo.value.floor == spec.floor
-    assert excinfo.value.score == pytest.approx(spec.floor - 0.01)
-
-
 @pytest.mark.parametrize(
     ("task", "score", "expected_tolerance"),
     [
@@ -168,3 +154,90 @@ def test_written_band_never_dips_below_the_floor(
     # Six decimals is the precision the goldens themselves store; binary float dust
     # otherwise puts the exactly-clamped obb edge one ulp under its floor.
     assert round(score - written["tolerances"][spec.metric], 6) >= spec.floor
+
+
+def test_main_prints_probe_for_a_capped_run(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--epochs`` below the tuned budget exits 0 with a PROBE line and no PASS line.
+
+    The CLI must not print PASS for a run the floor was never compared against.
+    """
+    monkeypatch.setattr(
+        overfit_micro, "run_overfit", lambda task, epochs, batches: {"num_instances": 5.0, "train_oks_ap": 0.02}
+    )
+
+    status = overfit_micro.main(["--task", "keypoints", "--epochs", "1", "--batches", "4"])
+
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "PROBE: 1 of" in out
+    assert "PASS" not in out
+
+
+class TestRunOverfit:
+    """The producer: floor enforcement, its probe override, and the budget it refuses."""
+
+    def test_returns_metrics_when_score_clears_floor(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A run scoring above its floor returns the metric mapping with the score rounded.
+
+        Stands in for the accelerator: training is stubbed so the producer's own
+        floor branch — not the trainer — is what the case exercises.
+        """
+        spec = overfit_micro.TASK_SPECS["kp"]
+        monkeypatch.setattr(overfit_micro, "generate_slice", lambda *_args: Path("unused"))
+        monkeypatch.setattr(overfit_micro, "_train_and_score", lambda *_args: (0.3456789, 548, 1))
+
+        metrics = overfit_micro.run_overfit("kp")
+
+        assert metrics[spec.metric] == 0.345679
+        assert metrics["num_instances"] == 548.0
+
+    def test_raises_when_score_below_floor(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The producer itself rejects a below-floor run, so no caller can accept one.
+
+        The keypoint gate is the narrowest of the four floors and the one whose frozen
+        band was widest relative to it, so it is the case that would have gone unnoticed.
+        """
+        spec = overfit_micro.TASK_SPECS["kp"]
+        monkeypatch.setattr(overfit_micro, "generate_slice", lambda *_args: Path("unused"))
+        monkeypatch.setattr(overfit_micro, "_train_and_score", lambda *_args: (spec.floor - 0.01, 548, 1))
+
+        with pytest.raises(overfit_micro.FloorNotMet) as excinfo:
+            overfit_micro.run_overfit("kp")
+
+        assert excinfo.value.floor == spec.floor
+        assert excinfo.value.score == pytest.approx(spec.floor - 0.01)
+
+    def test_reports_a_capped_run_without_the_floor(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A probe budget below the tuned one returns its score instead of raising ``FloorNotMet``.
+
+        The development-gates notebook walks every task at one epoch on a CPU; that run is
+        a wiring check and its score is nowhere near the floor by design, so the floor
+        applies only at the budget it was tuned against.
+        """
+        spec = overfit_micro.TASK_SPECS["kp"]
+        seen: dict[str, int] = {}
+        monkeypatch.setattr(overfit_micro, "generate_slice", lambda *_args: Path("unused"))
+        monkeypatch.setattr(
+            overfit_micro,
+            "_train_and_score",
+            lambda recipe, *args: (
+                seen.update(epochs=recipe.max_epochs, mosaic=recipe.close_mosaic, batches=args[-1]) or (0.01, 548, 1)
+            ),
+        )
+
+        metrics = overfit_micro.run_overfit("kp", epochs=1, batches=4)
+
+        assert metrics[spec.metric] == 0.01
+        assert metrics["epochs"] == 1.0
+        assert seen == {"epochs": 1, "mosaic": 1, "batches": 4}
+
+    @pytest.mark.parametrize("epochs", [0, overfit_micro._EPOCHS + 1])
+    def test_rejects_a_budget_outside_the_tuned_range(self, epochs: int) -> None:
+        """Zero epochs and more than the tuned budget are refused before any training starts.
+
+        Above the budget would silently gate a stronger run against the same floor.
+        """
+        with pytest.raises(ValueError, match="epochs must be in"):
+            overfit_micro.run_overfit("kp", epochs=epochs)

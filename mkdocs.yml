@@ -148,11 +148,9 @@ nav:
       - Escalation log: ESCALATION.md
   - Contributing:
       - Contributor guide: CONTRIBUTING.md
-  # Notebook pages go here as `- <Title>: notebooks/<name>.ipynb`, one per
-  # `notebooks/<name>.py` source (WP-188). The section is a comment rather than an
-  # empty `- Notebooks:` entry because MkDocs rejects a nav section with no children,
-  # and `scripts/lint/audit_docs_site.py` requires the entry for every source that
-  # exists while tolerating the section's absence when none does. WP-189 uncomments
-  # it with the first page.
-  # - Notebooks:
-  #     - <Title>: notebooks/<name>.ipynb
+  # One entry per `notebooks/<name>.py` source, as `- <Title>: notebooks/<name>.ipynb`
+  # (WP-188): the `.ipynb` is what `make notebooks` writes, and
+  # `scripts/lint/audit_docs_site.py` resolves the entry against the `.py` source, so
+  # the nav is valid on a checkout that has never run the converter.
+  - Notebooks:
+      - Development gates: notebooks/development_gates.ipynb

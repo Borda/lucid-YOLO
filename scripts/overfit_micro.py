@@ -78,7 +78,7 @@ import argparse
 import json
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import torch
@@ -495,10 +495,11 @@ def build_module(
     )
 
 
-def _make_trainer(recipe: Recipe, deterministic: bool) -> Trainer:
-    """Build the overfit trainer: mosaic off from epoch 0, gradients norm-clipped."""
+def _make_trainer(recipe: Recipe, deterministic: bool, batches: int | None = None) -> Trainer:
+    """Build the overfit trainer: mosaic off from epoch 0, gradients norm-clipped, ``batches`` per epoch at most."""
     return Trainer(
         max_epochs=recipe.max_epochs,
+        limit_train_batches=1.0 if batches is None else batches,
         accelerator="auto",
         deterministic=deterministic,
         gradient_clip_val=_GRAD_CLIP,
@@ -963,7 +964,27 @@ class TaskSpec:
     shapes: tuple[object, ...] | None = None
 
 
-#: The two wired gates, keyed by the ``--task`` value.
+#: ``--task`` spellings that name a gate without being its key. The module's own task
+#: names (``detect``, ``segment``, ``keypoints``) are what TRAINING.md, the model cards
+#: and the reproduction report have always written, and until WP-190 three of those four
+#: documented commands printed "unsupported task" and exited 1 — the keys below were the
+#: only spelling the lookup knew. ``obb`` is both key and task name, so it needs no row.
+TASK_ALIASES: dict[str, str] = {"detect": "det", "segment": "seg", "keypoints": "kp"}
+
+
+def resolve_task(name: str) -> str:
+    """Return the :data:`TASK_SPECS` key for a ``--task`` value, accepting either spelling.
+
+    Examples:
+        >>> resolve_task("detect"), resolve_task("det"), resolve_task("obb"), resolve_task("keypoints")
+        ('det', 'det', 'obb', 'kp')
+        >>> resolve_task("pose")
+        'pose'
+    """
+    return TASK_ALIASES.get(name, name)
+
+
+#: The four wired gates, keyed by the ``--task`` value.
 TASK_SPECS: dict[str, TaskSpec] = {
     "det": TaskSpec(
         module_task="detect",
@@ -1013,7 +1034,9 @@ TASK_SPECS: dict[str, TaskSpec] = {
 }
 
 
-def _train_and_score(recipe: Recipe, split: Path, deterministic: bool, spec: TaskSpec) -> tuple[float, int, int]:
+def _train_and_score(
+    recipe: Recipe, split: Path, deterministic: bool, spec: TaskSpec, batches: int | None = None
+) -> tuple[float, int, int]:
     """Build, train, and score one overfit run; return ``(score, instances, classes)``."""
     seed_everything(recipe.seed, workers=True)
     num_classes = _num_classes(split)
@@ -1030,12 +1053,12 @@ def _train_and_score(recipe: Recipe, split: Path, deterministic: bool, spec: Tas
         rotated_targets=spec.module_task == "obb",
         keypoint_targets=spec.module_task == "keypoints",
     )
-    _make_trainer(recipe, deterministic).fit(module, datamodule=datamodule)
+    _make_trainer(recipe, deterministic, batches).fit(module, datamodule=datamodule)
     score, instances = spec.scorer(module, datamodule)
     return score, instances, num_classes
 
 
-def run_overfit(task: str = "det") -> dict[str, float]:
+def run_overfit(task: str = "det", epochs: int = _EPOCHS, batches: int | None = None) -> dict[str, float]:
     """Run the full overfit pipeline for one task and return the golden metric mapping.
 
     Generates the slice, trains the ``n``-scale module end to end (attempting
@@ -1048,12 +1071,21 @@ def run_overfit(task: str = "det") -> dict[str, float]:
     comparison used to live in the CLI alone, so the three non-detection floors
     were enforced only when a human ran the CLI — the golden producers and the
     marked tests could accept a below-floor run. Checking it in the producer makes
-    the producer and the floor impossible to disagree (WP-167 H-01).
+    the producer and the floor impossible to disagree (WP-167 H-01). A run capped
+    below the tuned budget by ``epochs`` or ``batches`` is a probe of the wiring, not
+    the gate: it returns its score without the floor comparison, the way
+    ``scripts/shapes_regression.py --epochs`` overrides its own budget, so the
+    development-gates notebook can walk every task in seconds on a CPU.
 
     Args:
         task: One of the wired gates — ``"det"`` (train recall at IoU 0.5),
             ``"seg"`` (mean train mask IoU), ``"obb"`` (rotated mAP50) or ``"kp"``
             (OKS AP). Defaults to ``"det"``.
+        epochs: Training budget. The default is the tuned budget the floors were set
+            against and the only one the floor is enforced at; anything smaller is a
+            probe override. ``close_mosaic`` follows it, so mosaic stays off.
+        batches: Train batches per epoch, or ``None`` for the whole slice. Any cap is
+            a probe override too.
 
     Returns:
         A mapping of the frozen metrics: ``num_images``, ``num_instances``,
@@ -1062,7 +1094,10 @@ def run_overfit(task: str = "det") -> dict[str, float]:
 
     Raises:
         KeyError: If ``task`` is not one of the wired gates.
-        FloorNotMet: If the achieved score is below the task's acceptance floor.
+        ValueError: If ``epochs`` is not positive or exceeds the tuned budget, or if
+            ``batches`` is not positive.
+        FloorNotMet: If the achieved score is below the task's acceptance floor at
+            the full budget.
 
     Examples:
         >>> metrics = run_overfit()  # doctest: +SKIP
@@ -1070,13 +1105,17 @@ def run_overfit(task: str = "det") -> dict[str, float]:
         True
     """
     spec = TASK_SPECS[task]
-    recipe = load_recipe()
+    if not 0 < epochs <= _EPOCHS:
+        raise ValueError(f"epochs must be in 1..{_EPOCHS}, got {epochs}")
+    if batches is not None and batches <= 0:
+        raise ValueError(f"batches must be positive, got {batches}")
+    recipe = replace(load_recipe(), max_epochs=epochs, close_mosaic=epochs)
     split = generate_slice(spec.slice_dir, spec.generator_task, spec.shapes)
     try:
-        score, instances, num_classes = _train_and_score(recipe, split, True, spec)
+        score, instances, num_classes = _train_and_score(recipe, split, True, spec, batches)
     except RuntimeError:
-        score, instances, num_classes = _train_and_score(recipe, split, False, spec)
-    if score < spec.floor:
+        score, instances, num_classes = _train_and_score(recipe, split, False, spec, batches)
+    if epochs == _EPOCHS and batches is None and score < spec.floor:
         raise FloorNotMet(spec.label, score, spec.floor)
     return {
         "num_images": float(_NUM_IMAGES),
@@ -1232,23 +1271,46 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--task",
         default="det",
-        help="gate to run: 'det' (recall), 'seg' (mask IoU), 'obb' (rotated mAP50) or 'kp' (OKS AP)",
+        help=(
+            "gate to run: 'det' (recall), 'seg' (mask IoU), 'obb' (rotated mAP50) or 'kp' (OKS AP); "
+            "the module's task names 'detect', 'segment' and 'keypoints' are accepted for the same gates"
+        ),
     )
     parser.add_argument("--freeze", action="store_true", help="write the task's goldens/gpu/ file on success")
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=_EPOCHS,
+        help=f"training epochs (probe override; the floor is enforced only at the tuned {_EPOCHS})",
+    )
+    parser.add_argument(
+        "--batches",
+        type=int,
+        default=None,
+        help="train batches per epoch (probe override; the floor is enforced only over the whole slice)",
+    )
     args = parser.parse_args(argv)
 
-    spec = TASK_SPECS.get(args.task)
+    task = resolve_task(args.task)
+    spec = TASK_SPECS.get(task)
     if spec is None:
-        print(f"unsupported task {args.task!r}; wired tasks are {sorted(TASK_SPECS)}")
+        print(f"unsupported task {args.task!r}; wired tasks are {sorted(TASK_SPECS)} (or {sorted(TASK_ALIASES)})")
         return 1
 
     try:
-        metrics = run_overfit(args.task)
+        metrics = run_overfit(task, epochs=args.epochs, batches=args.batches)
     except FloorNotMet as exc:
         print(f"FAIL: {exc}")
         return 1
+    except ValueError as exc:
+        print(f"invalid overfit budget: {exc}")
+        return 1
     score = metrics[spec.metric]
-    print(f"overfit-{args.task}: {spec.label} = {score:.4f} over {int(metrics['num_instances'])} instances")
+    print(f"overfit-{task}: {spec.label} = {score:.4f} over {int(metrics['num_instances'])} instances")
+    if args.epochs < _EPOCHS or args.batches is not None:
+        batches = "the whole slice" if args.batches is None else f"{args.batches} batches"
+        print(f"PROBE: {args.epochs} of {_EPOCHS} epochs over {batches}; floor {spec.floor} not enforced")
+        return 0
     if args.freeze:
         write_golden(metrics, spec)
         print(f"froze golden -> {spec.golden_path.relative_to(REPO_ROOT)}")
