@@ -20,6 +20,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -30,10 +31,13 @@ from lucid_yolo.data.layout import resolve_split
 from lucid_yolo.eval import rotated_eval as evaluate
 from lucid_yolo.eval.dota_eval import evaluate_rotated_map
 from lucid_yolo.eval.tile_merge import TileIndex, load_tile_index
+from lucid_yolo.ptl import datamodule as datamodule_module
 from lucid_yolo.ptl.module import DetectionLitModule
 
 #: Letterbox side and tile side used throughout: divisible by the level-32 stride.
 IMG_SIZE = 64
+#: First stride-32 side where the public val policy selects two workers at batch two.
+PARALLEL_IMG_SIZE = 416
 #: Source image side, tiled into four windows at the patch/overlap below.
 SIDE = 96
 PATCH = 64
@@ -55,6 +59,22 @@ def tiled_root(tmp_path: Path) -> Path:
     image = (torch.arange(3 * SIDE * SIDE, dtype=torch.uint8) % 251).reshape(3, SIDE, SIDE)
     build.write_png(image, str(split_dir / "images" / "P0001.png"))
     (split_dir / "labelTxt" / "P0001.txt").write_text("10 10 30 10 30 20 10 20 plane 0\n")
+
+    build.convert_split(split_dir, tmp_path / "tiles", "val", patch=PATCH, overlap=OVERLAP)
+    return tmp_path / "tiles"
+
+
+@pytest.fixture
+def parallel_tiled_root(tmp_path: Path) -> Path:
+    """Build three source images so the worker pool receives more than one batch per worker."""
+    split_dir = tmp_path / "dota" / "val"
+    (split_dir / "images").mkdir(parents=True)
+    (split_dir / "labelTxt").mkdir(parents=True)
+    image = (torch.arange(3 * SIDE * SIDE, dtype=torch.uint8) % 251).reshape(3, SIDE, SIDE)
+    for index in range(3):
+        stem = f"P{index + 1:04d}"
+        build.write_png(image, str(split_dir / "images" / f"{stem}.png"))
+        (split_dir / "labelTxt" / f"{stem}.txt").write_text("10 10 30 10 30 20 10 20 plane 0\n")
 
     build.convert_split(split_dir, tmp_path / "tiles", "val", patch=PATCH, overlap=OVERLAP)
     return tmp_path / "tiles"
@@ -114,6 +134,176 @@ def test_the_limit_stops_early_without_changing_the_frame(tiled_root: Path) -> N
     scoring = evaluate.score_split(module, _datamodule(tiled_root), torch.device("cpu"), img_size=IMG_SIZE, limit=2)
 
     assert scoring.tiles == 2
+
+
+def test_complete_and_limited_runs_choose_their_measured_worker_routes(
+    tiled_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Full scoring uses the shared auto policy while a short diagnostic avoids its startup cost."""
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+    requested_workers: list[int | None] = []
+    original = evaluate.build_datamodule
+
+    def record_worker_route(
+        data_root: Path,
+        split: str,
+        *,
+        img_size: int,
+        batch_size: int,
+        variant: str,
+        num_workers: int | None = 0,
+    ) -> datamodule_module.DetectionDataModule:
+        requested_workers.append(num_workers)
+        # Keep the integration test serial and deterministic after observing the public
+        # dispatch. The separate parity test below exercises real worker processes.
+        return original(
+            data_root,
+            split,
+            img_size=img_size,
+            batch_size=batch_size,
+            variant=variant,
+            num_workers=0,
+        )
+
+    monkeypatch.setattr(evaluate, "build_datamodule", record_worker_route)
+    common = {
+        "module": module,
+        "info": {"ema": False},
+        "data_root": tiled_root,
+        "split": "val",
+        "variant": "n",
+        "img_size": IMG_SIZE,
+        "batch_size": 2,
+        "device_name": "cpu",
+    }
+
+    assert evaluate.run(**common, limit=0, output=tmp_path / "full.json") == 0  # type: ignore[arg-type]
+    assert evaluate.run(**common, limit=1, output=tmp_path / "limited.json") == 0  # type: ignore[arg-type]
+
+    assert requested_workers == [None, 0]
+
+
+def test_parallel_validation_preserves_images_targets_and_order(
+    tiled_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The auto-worker route emits exactly the low-startup route's OBB inputs in the same order."""
+    monkeypatch.setattr(datamodule_module.os, "cpu_count", lambda: 2)
+    monkeypatch.setattr(
+        datamodule_module.os,
+        "statvfs",
+        lambda _path: SimpleNamespace(f_bavail=64 * 1024 * 1024, f_frsize=1),
+    )
+
+    def snapshot(workers: int | None) -> tuple[int, list[tuple[torch.Tensor, list[tuple[torch.Tensor, ...]]]]]:
+        datamodule = evaluate.build_datamodule(
+            tiled_root,
+            "val",
+            img_size=PARALLEL_IMG_SIZE,
+            batch_size=2,
+            variant="n",
+            num_workers=workers,
+        )
+        datamodule.setup("validate")
+        loader = datamodule.val_dataloader()
+        batches = []
+        for batch in loader:
+            images, targets, _ = datamodule.on_after_batch_transfer(batch, 0)
+            batches.append(
+                (
+                    images,
+                    [(target.boxes, target.labels, target.rboxes, target.difficult) for target in targets],
+                )
+            )
+        return loader.num_workers, batches
+
+    low_startup_workers, low_startup = snapshot(0)
+    parallel_workers, parallel = snapshot(None)
+
+    assert low_startup_workers in {0, 1}
+    assert parallel_workers == 2
+    assert len(low_startup) == len(parallel)
+    for (low_startup_images, low_startup_targets), (parallel_images, parallel_targets) in zip(
+        low_startup, parallel, strict=True
+    ):
+        assert torch.equal(low_startup_images, parallel_images)
+        assert len(low_startup_targets) == len(parallel_targets)
+        for low_startup_target, parallel_target in zip(low_startup_targets, parallel_targets, strict=True):
+            assert all(
+                torch.equal(left, right) for left, right in zip(low_startup_target, parallel_target, strict=True)
+            )
+
+
+def test_a_tiny_complete_run_keeps_the_low_startup_route(
+    tiled_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A complete custom split does not start a pool with at most one batch per worker."""
+    monkeypatch.setattr(datamodule_module.os, "cpu_count", lambda: 2)
+    monkeypatch.setattr(
+        datamodule_module.os,
+        "statvfs",
+        lambda _path: SimpleNamespace(f_bavail=64 * 1024 * 1024, f_frsize=1),
+    )
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+    output = tmp_path / "tiny-complete.json"
+
+    assert (
+        evaluate.run(
+            module,
+            {"ema": False},
+            data_root=tiled_root,
+            split="val",
+            variant="n",
+            img_size=PARALLEL_IMG_SIZE,
+            batch_size=2,
+            device_name="cpu",
+            limit=0,
+            output=output,
+        )
+        == 0
+    )
+    assert json.loads(output.read_text())["info"]["workers"] in {0, 1}
+
+
+def test_run_through_real_workers_matches_run_through_the_low_startup_route(
+    parallel_tiled_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The public complete run keeps its report under a reused real worker pool.
+
+    A 416 px side is the first stride-32 size where the public image-size policy
+    selects two workers at batch two. Twelve tiles give each worker three batches;
+    a positive limit covers the same complete input through the low-startup route.
+    """
+    monkeypatch.setattr(datamodule_module.os, "cpu_count", lambda: 2)
+    monkeypatch.setattr(
+        datamodule_module.os,
+        "statvfs",
+        lambda _path: SimpleNamespace(f_bavail=64 * 1024 * 1024, f_frsize=1),
+    )
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+    common = {
+        "module": module,
+        "info": {"ema": False},
+        "data_root": parallel_tiled_root,
+        "split": "val",
+        "variant": "n",
+        "img_size": PARALLEL_IMG_SIZE,
+        "batch_size": 2,
+        "device_name": "cpu",
+    }
+    parallel_output = tmp_path / "parallel.json"
+    low_startup_output = tmp_path / "low-startup.json"
+
+    assert evaluate.run(**common, limit=0, output=parallel_output) == 0  # type: ignore[arg-type]
+    assert evaluate.run(**common, limit=12, output=low_startup_output) == 0  # type: ignore[arg-type]
+    parallel_report = json.loads(parallel_output.read_text())
+    low_startup_report = json.loads(low_startup_output.read_text())
+
+    assert parallel_report["info"]["workers"] == 2
+    assert low_startup_report["info"]["workers"] in {0, 1}
+    for report in (parallel_report, low_startup_report):
+        report.pop("seconds")
+        report["info"].pop("workers")
+    assert parallel_report == low_startup_report
 
 
 def test_the_report_is_written_into_a_directory_that_does_not_exist_yet(tiled_root: Path, tmp_path: Path) -> None:
@@ -190,6 +380,7 @@ def test_the_report_names_both_figures_rather_than_quoting_one(tiled_root: Path,
     payload = _run_report(module, tiled_root, tmp_path / "obb.json")
 
     assert payload["info"]["per_tile"] is True  # type: ignore[call-overload,index]
+    assert payload["info"]["workers"] == 1  # type: ignore[call-overload,index]
     assert payload["tiles"] == 4
     assert payload["whole_image"]["source_images"] == 1  # type: ignore[call-overload,index]
     assert payload["whole_image"]["max_detections"] is None  # type: ignore[call-overload,index]
