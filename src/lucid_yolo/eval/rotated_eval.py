@@ -85,7 +85,13 @@ if TYPE_CHECKING:
 
 
 def build_datamodule(
-    data_root: Path, split: str, *, img_size: int, batch_size: int, variant: str
+    data_root: Path,
+    split: str,
+    *,
+    img_size: int,
+    batch_size: int,
+    variant: str,
+    num_workers: int | None = 0,
 ) -> DetectionDataModule:
     """Point a datamodule's **val** loader at one split of the tiled layout.
 
@@ -100,6 +106,10 @@ def build_datamodule(
         batch_size: Images per forward pass.
         variant: Scale letter, which selects the augmentation policy the val loader
             does not use.
+        num_workers: Loader worker count. ``None`` uses the datamodule's automatic,
+            image-size-aware policy. The default ``0`` preserves this helper's
+            low-startup validation route. Linux's inherited-validation shared-memory
+            guard resolves that route to one worker; hosts without ``/dev/shm`` keep zero.
 
     Returns:
         A datamodule set up for the oriented val split.
@@ -113,7 +123,7 @@ def build_datamodule(
     return DetectionDataModule(
         data_root=data_root,
         batch_size=batch_size,
-        num_workers=0,
+        num_workers=num_workers,
         variant=variant,
         img_size=img_size,
         train_images_dir=images_dir,
@@ -136,6 +146,9 @@ class SplitScoring:
         source_predictions: Per-tile predictions in **source-image** pixels, ready for
             :func:`~lucid_yolo.eval.tile_merge.merge_whole_images`. Empty when the split
             carries no window provenance and no whole-image figure is available.
+        workers: The val loader's resolved ``num_workers``. Recorded because the
+            caller may hand ``None`` (WP-192) and the datamodule's shared-memory-
+            and image-size-aware policy then picks a host-dependent count.
 
     Examples:
         >>> SplitScoring({"map": 0.5}, tiles=4, instances=9).tiles
@@ -146,6 +159,7 @@ class SplitScoring:
     tiles: int
     instances: int
     source_predictions: list[dict[str, Tensor]] = field(default_factory=list)
+    workers: int = 0
 
 
 def score_split(
@@ -255,6 +269,7 @@ def score_split(
         tiles=len(ground_truth),
         instances=instances,
         source_predictions=source_predictions,
+        workers=loader.num_workers,
     )
 
 
@@ -503,7 +518,8 @@ def run(
         img_size: Letterbox side; the tier's tiles are 1024 px.
         batch_size: Tiles per forward pass.
         device_name: Device string, or ``auto``.
-        limit: Score only the first N tiles; ``0`` scores all.
+        limit: Score only the first N tiles. ``0`` scores all and permits the automatic
+            worker policy once the loader has more batches than workers.
         output: Optional path for the JSON report.
 
     Returns:
@@ -516,8 +532,32 @@ def run(
     device = pick_device(device_name)
     _, ann_file = resolve_split(data_root, split)
     index = load_tile_index(ann_file)
-    datamodule = build_datamodule(data_root, split, img_size=img_size, batch_size=batch_size, variant=variant)
+    # A complete acceptance run may be long enough to repay worker startup; a limited
+    # diagnostic prefix is not (and keeps the previous low-startup-cost path).
+    num_workers = None if limit == 0 else 0
+    datamodule = build_datamodule(
+        data_root,
+        split,
+        img_size=img_size,
+        batch_size=batch_size,
+        variant=variant,
+        num_workers=num_workers,
+    )
     datamodule.setup("validate")
+    if limit == 0:
+        loader = datamodule.val_dataloader()
+        if loader.num_workers > 1 and len(loader) <= loader.num_workers:
+            # A pool with at most one batch per worker never reuses a process after its
+            # startup. Keep the previous route for a complete but tiny custom split.
+            datamodule = build_datamodule(
+                data_root,
+                split,
+                img_size=img_size,
+                batch_size=batch_size,
+                variant=variant,
+                num_workers=0,
+            )
+            datamodule.setup("validate")
 
     print(f"eval-obb: split={split}, device={device.type}, ema={info.get('ema')}, img_size={img_size}")
     start = time.perf_counter()
@@ -591,6 +631,9 @@ def _report(
     ``metrics`` stays where every previous report put it — the per-tile number, which the
     tier acceptance gate reads — and the whole-image number is its own block carrying the
     detection cap it was scored at, because ``mar_300`` keeps A47's name whatever the cap.
+    ``info["workers"]`` records the val loader's resolved worker count: a complete run
+    (WP-192) hands the datamodule ``None`` and lets its shared-memory- and image-size-aware
+    policy choose, so the same command can pick a different count on a different host.
 
     Args:
         info: The checkpoint loader's provenance dict.
@@ -608,7 +651,7 @@ def _report(
         True
     """
     return {
-        "info": {**info, "split": split, "img_size": img_size, "per_tile": True},
+        "info": {**info, "split": split, "img_size": img_size, "per_tile": True, "workers": scoring.workers},
         "tiles": scoring.tiles,
         "instances": scoring.instances,
         "seconds": round(elapsed, 1),
