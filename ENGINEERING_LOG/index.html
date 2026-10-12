@@ -2313,6 +2313,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#wp-192-the-complete-oriented-evaluator-uses-the-worker-policy-it-already-had" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-192 — the complete oriented evaluator uses the worker policy it already had
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4070,6 +4081,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#wp-192-the-complete-oriented-evaluator-uses-the-worker-policy-it-already-had" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-192 — the complete oriented evaluator uses the worker policy it already had
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5088,6 +5110,16 @@
 <p><a id="wp-158-scope"></a></p>
 <p><strong>WP-158 — the closing sweep.</strong> The last of the four rows that re-freeze; like the other three, it holds no swap. <code>data/__init__.py</code> re-exports 54 symbols — 55 when this paragraph was written, less the <code>FusedAffineLetterbox</code> WP-156 deleted — a count set when the package owned the whole augmentation stack and raised by WP-147's five parameter dataclasses; it is reduced to what survives, so the public surface states what this project still implements. <code>docs/ROADMAP.md</code>, <code>docs/ASSUMPTIONS.md</code> (A10, A11, A21, A26), <code>docs/PROVENANCE.md</code>, the model cards and <code>README.md</code> are rewritten to describe the boundary rather than a stack this project no longer implements, with A11's half-open rasterisation rule kept — that one stays local and still governs mask supervision.</p>
 <p>Any structural fixture metric the swaps moved is re-frozen with the move recorded. Tier D is <em>not</em> re-frozen, because there is nothing there to re-freeze: it holds no literal and no golden, only same-seed-equal and different-seed-differ against whichever implementation is live, so it either still holds after the swaps or names a real loss of reproducibility. Tiers A, B and C are not re-frozen either: if any moved, the swap was wrong and the row that moved it is the defect.</p>
+<h3 id="wp-192-the-complete-oriented-evaluator-uses-the-worker-policy-it-already-had">WP-192 — the complete oriented evaluator uses the worker policy it already had<a class="headerlink" href="#wp-192-the-complete-oriented-evaluator-uses-the-worker-policy-it-already-had" title="Permanent link">&para;</a></h3>
+<p><a id="wp-192"></a></p>
+<p><strong>Timing evidence is host-specific and non-gated.</strong> The off-repository procedures were profiling the public scoring loop, comparing five-run medians with <code>channels_last</code>, traversing the loader, and calling public <code>run</code>; the warm-up and repetition procedure is recorded below where available. The benchmark harness and raw output are not committed.</p>
+<p><strong>The standalone path predates the image-size target and inherited-validation guard.</strong> The evaluator's explicit <code>num_workers=0</code> arrived in <code>0fe08f4</code> on 12 August. The free-<code>/dev/shm</code> cap on automatic workers was already present from <code>9f1fa80</code> on 2 August; the image-size validation worker target (<code>9d0fa88</code>) and inherited-validation guard (<code>d09ded9</code>) arrived on 13 August, one day after the call site. <code>00af9e4</code> on 6 September renamed <code>_val_worker_cap</code> to <code>_val_worker_target</code> and clarified its documentation without changing the policy. Nothing revisited the call site, so automatic worker selection could only govern datamodules whose callers left worker selection open. Through the inherited-validation guard, the evaluator's explicit zero was raised to one validation worker wherever <code>/dev/shm</code> exists. All measured "existing route" baselines below, including 0.850 s, 9.757 s and 13.104 s, therefore used one validation worker; the current low-startup route runs zero workers and is unmeasured. A profile of the public scoring loop over 117 real DOTA tiles spent 3.60 of 5.10 s waiting for the loader. The rotated accumulator took 0.051 s, so even removing it entirely could save only 1.0% of that run. Converting the standalone module to <code>channels_last</code>, the other live candidate, moved the five-run median from 2.679 to 2.645 s and overlapped both ranges; it was rejected.</p>
+<p><strong>Completeness is not itself the crossover.</strong> Starting eight workers to score only eight tiles took a 1.784 s median against 0.850 s on the existing route. A positive <code>--limit</code> therefore keeps that route unconditionally — the measurement is the smallest size the diagnostic path runs at, not a sweep, so a large positive <code>--limit</code> keeps the same route by scope rather than by a remeasured crossover. With no limit, the evaluator asks the datamodule for its existing policy, then keeps it only when the loader has more batches than workers: otherwise no process can be reused after its first batch. That structural guard covers the measured one-batch regression and a complete but tiny custom split without introducing a dataset-size constant. No crossover measurement was taken on macOS / MPS, where workers spawn rather than fork, and the band of batch counts just above the worker count is also unmeasured. Nothing in the reader, letterbox, model, decoder, merge or metric changes. Tests walk <code>run</code> through both public branches and the tiny-complete fallback, while a separate real-pool case reads the same twelve tiles through one and two workers and compares images, boxes, labels, rotated boxes, difficult flags, order and the complete report.</p>
+<p><strong>The loader result was repeated on an isolated CPU.</strong> Five measured traversals after one warm-up on an <code>n2-standard-8</code> Ice Lake VM (Python 3.12.3, torch 2.14.1) moved from a 9.757 s median (9.651–9.987 s) with one validation worker to 2.658 s (2.609–2.781 s) with the policy's eight, a 72.96% median reduction. Every traversal yielded the same 117 tiles, 2,691 instances and tensor checksum. That figure is the loader alone: CPU-device inference was not measured. The policy's worker count derives from <code>os.cpu_count()</code>, which is blind to container CPU quotas and process affinity, so a host that limits either may start more workers than it can run. A quota- or affinity-aware count would change the datamodule policy that training shares and belongs in its own work package, not in WP-192.</p>
+<p><strong>The complete pipeline keeps the gain.</strong> Five measured public <code>run</code> calls after one warm-up on an NVIDIA L4 (driver 580.178.04, torch 2.14.1+cu130, batch 8) included loading, model inference, rotated decoding and scoring, whole-image merge and scoring, and report construction. The existing route took a 13.104 s median (12.909–13.253 s); the policy route took 7.830 s (7.336–8.090 s), a 39.66% median paired reduction. Each pair used the same freshly initialised oriented nano model over the same official-DOTA-derived 117-tile slice; metrics and report payloads were equal in these runs after removing the recorded seconds and the intentionally different worker-count diagnostic. The in-repository, gated CPU evidence of report equivalence is <code>tests/eval/test_eval_obb.py::test_run_through_real_workers_matches_run_through_the_low_startup_route</code>, which compares a real worker pool with the zero-worker route after removing those same fields; it does not establish CUDA determinism.</p>
+<p><strong>The report now says which count ran.</strong> A complete run's worker count is no longer the fixed <code>0</code> the report used to imply; it is whatever the datamodule's shared-memory- and image-size-aware policy picked on the host that ran it. <code>SplitScoring</code> and the JSON report's <code>info.workers</code> field now carry that count, read off the same loader <code>score_split</code> already builds, so a report is self-describing about which route scored it without reaching into the datamodule's private state. A failure of the policy route's worker pool itself, such as a worker that dies mid-pass and surfaces as the loader's <code>RuntimeError</code>, is not one of the pairing <code>ValueError</code>s <code>run</code> turns into a <code>FAIL:</code> line: it reaches the terminal as a traceback, <code>lucid-eval</code> exits with status 1, and no report is written.</p>
+<p><strong>That field is an additive schema change, and its consumers were checked.</strong> A repository-wide search over <code>tests/</code>, <code>notebooks/</code>, <code>docs/</code> and <code>src/</code> found no oriented-report golden and no consumer comparing the whole payload or the exact <code>info</code> key set. The tests and the other task reports read named keys, while <code>demo_obb.py</code> and the documentation only produce or name <code>obb_report.json</code>. The regression therefore pins the new field directly; downstream code that selects existing keys is unchanged, while a consumer enforcing an undocumented closed schema would need to accept the additive key.</p>
+<p><strong>The floor moved to its exact live count, not a one-row nudge.</strong> <code>_WP_FLOOR</code> only tracks additions correctly when it is raised to the roadmap's exact live count — the same ratchet rule WP-152b and WP-165b record, and the one <code>_ASSUMPTION_FLOOR</code> was caught violating at 47 rows of slack. This row found <code>_WP_FLOOR</code> at 177 against a live count already at 191 before it, 14 rows of slack that would have let most of Phase 17 be deleted without the ratchet firing; it is now 192, the exact count after this row, leaving zero slack for the next one to inherit.</p>
 
 
 
