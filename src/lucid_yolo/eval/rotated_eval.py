@@ -498,11 +498,14 @@ def _keeps_low_startup_route(*, batches: int, workers: int) -> bool:
     """Decide whether a complete run sets the policy's worker pool aside for the low-startup route.
 
     A complete run (``limit == 0``) asks the datamodule's automatic policy for a worker
-    count, then keeps it only when the loader has more batches than workers. A pool with
-    at most one batch per worker never reuses a process after its startup, so a complete
-    but tiny custom split keeps the previous route. That holds for any nonzero count, a
-    single worker included; a count of zero is already in-process and has no pool to set
-    aside.
+    count, then keeps it only when the loader has more batches than workers. With no more
+    batches than workers, no worker would receive a second batch and every worker beyond
+    the batch count would receive none, so a complete but tiny custom split keeps the
+    previous route rather than start such a pool. That is a deliberately conservative structural
+    bound, not a measured crossover: parallel decode can repay a pool's startup with
+    fewer batches than workers, and only the one-batch case was measured to lose. It
+    holds for any nonzero count, a single worker included; a count of zero is already
+    in-process and has no pool to set aside.
 
     Kept apart from :func:`run` so the decision is pinned on the two counts the probe
     loader already holds, without a model or tiles on disk.
@@ -550,7 +553,11 @@ def run(
         batch_size: Tiles per forward pass.
         device_name: Device string, or ``auto``.
         limit: Score only the first N tiles. ``0`` scores all and permits the automatic
-            worker policy once the loader has more batches than workers.
+            worker policy once the loader has more batches than workers. With no more
+            batches than workers it keeps the low-startup route rather than start
+            workers that would receive one batch at most, some none — a deliberately
+            conservative structural bound (:func:`_keeps_low_startup_route`), not a
+            measured crossover.
         output: Optional path for the JSON report.
 
     Returns:
