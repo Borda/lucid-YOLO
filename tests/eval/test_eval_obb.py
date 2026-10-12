@@ -16,6 +16,7 @@ the label space it expects. A wrong frame or a shifted label space fails that te
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import json
 import os
@@ -190,13 +191,21 @@ def test_the_split_is_scored_tile_by_tile(tiled_root: Path) -> None:
     assert 0.0 <= scoring.per_tile["map_50"] <= 1.0
 
 
-def test_the_limit_stops_early_without_changing_the_frame(tiled_root: Path) -> None:
-    """``--limit`` scores a prefix of the split rather than a resampled subset."""
+@pytest.mark.parametrize(
+    ("limit", "tiles"),
+    [pytest.param(2, 2, id="a-prefix"), pytest.param(9, 4, id="past-the-end-of-the-split")],
+)
+def test_the_limit_stops_early_without_changing_the_frame(tiled_root: Path, limit: int, tiles: int) -> None:
+    """``--limit`` scores a prefix of the split rather than a resampled subset.
+
+    A limit past the end of the four-tile split is not an error: the pass runs out of tiles
+    before it reaches the limit and scores every one of them.
+    """
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
 
-    scoring = evaluate.score_split(module, _datamodule(tiled_root), torch.device("cpu"), img_size=IMG_SIZE, limit=2)
+    scoring = evaluate.score_split(module, _datamodule(tiled_root), torch.device("cpu"), img_size=IMG_SIZE, limit=limit)
 
-    assert scoring.tiles == 2
+    assert scoring.tiles == tiles
 
 
 @pytest.mark.usefixtures("worker_host")
@@ -423,6 +432,50 @@ def test_run_through_real_workers_matches_run_through_the_low_startup_route(
         report.pop("seconds")
         report["info"].pop("workers")
     assert parallel_report == low_startup_report
+
+
+@pytest.mark.usefixtures("worker_host")
+def test_a_mispaired_index_fails_the_run_under_a_real_worker_pool(
+    parallel_tiled_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    requested_worker_counts: list[int | None],
+) -> None:
+    """A pairing refusal raised while two workers feed the pass still ends the run in ``FAIL:`` and status 1.
+
+    The pairing tests walk the refusal through an in-process loader; this walks it through
+    the policy's pool. Twelve tiles at batch two give the pinned host's two workers six
+    batches, so the pool is kept, and swapping two of the index's windows makes the first
+    batch raise in the main process mid-iteration. When the pool shuts down afterwards is
+    the loader's timing rather than this command's contract, so it is not asserted.
+    """
+    index = load_tile_index(resolve_split(parallel_tiled_root, "val")[1])
+    assert index is not None
+    windows = list(index.windows)
+    windows[1], windows[2] = windows[2], windows[1]
+    mispaired = dataclasses.replace(index, windows=tuple(windows))
+    monkeypatch.setattr(evaluate, "load_tile_index", lambda _ann_file: mispaired)
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+    output = tmp_path / "mispaired.json"
+
+    code = evaluate.run(
+        module,
+        {"ema": False},
+        data_root=parallel_tiled_root,
+        split="val",
+        variant="n",
+        img_size=PARALLEL_IMG_SIZE,
+        batch_size=2,
+        device_name="cpu",
+        limit=0,
+        output=output,
+    )
+
+    assert code == 1
+    assert "FAIL: the val dataset's tile 1 has COCO image id" in capsys.readouterr().out
+    assert requested_worker_counts == [None]
+    assert not output.exists()
 
 
 def test_the_report_is_written_into_a_directory_that_does_not_exist_yet(tiled_root: Path, tmp_path: Path) -> None:
