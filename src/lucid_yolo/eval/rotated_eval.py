@@ -85,7 +85,13 @@ if TYPE_CHECKING:
 
 
 def build_datamodule(
-    data_root: Path, split: str, *, img_size: int, batch_size: int, variant: str
+    data_root: Path,
+    split: str,
+    *,
+    img_size: int,
+    batch_size: int,
+    variant: str,
+    num_workers: int | None = 0,
 ) -> DetectionDataModule:
     """Point a datamodule's **val** loader at one split of the tiled layout.
 
@@ -100,6 +106,12 @@ def build_datamodule(
         batch_size: Images per forward pass.
         variant: Scale letter, which selects the augmentation policy the val loader
             does not use.
+        num_workers: Loader worker count, forwarded to the val loader as its own
+            ``val_num_workers`` so the count named here is the count it runs: ``0``
+            reads in-process on every host, and a positive count is used as stated.
+            ``None`` hands the choice to the datamodule's automatic, image-size- and
+            shared-memory-aware policy. The default ``0`` is this helper's low-startup
+            route.
 
     Returns:
         A datamodule set up for the oriented val split.
@@ -113,13 +125,17 @@ def build_datamodule(
     return DetectionDataModule(
         data_root=data_root,
         batch_size=batch_size,
-        num_workers=0,
+        num_workers=num_workers,
         variant=variant,
         img_size=img_size,
         train_images_dir=images_dir,
         train_ann_file=ann_file,
         val_images_dir=images_dir,
         val_ann_file=ann_file,
+        # Named for the val loader too: left unset, an explicit 0 counts as inherited
+        # from num_workers and the datamodule's shared-memory floor raises it to one
+        # worker wherever /dev/shm exists.
+        val_num_workers=num_workers,
         rotated_targets=True,
     )
 
@@ -136,6 +152,12 @@ class SplitScoring:
         source_predictions: Per-tile predictions in **source-image** pixels, ready for
             :func:`~lucid_yolo.eval.tile_merge.merge_whole_images`. Empty when the split
             carries no window provenance and no whole-image figure is available.
+        workers: The val loader's resolved ``num_workers``, or ``None`` when nothing
+            recorded one — an instance built directly rather than by
+            :func:`score_split`. ``None`` rather than ``0``, which would read as an
+            in-process run. Recorded because a complete run (WP-192) leaves the count
+            to the datamodule's shared-memory- and image-size-aware policy, which picks
+            a host-dependent one.
 
     Examples:
         >>> SplitScoring({"map": 0.5}, tiles=4, instances=9).tiles
@@ -146,6 +168,7 @@ class SplitScoring:
     tiles: int
     instances: int
     source_predictions: list[dict[str, Tensor]] = field(default_factory=list)
+    workers: int | None = None
 
 
 def score_split(
@@ -255,6 +278,7 @@ def score_split(
         tiles=len(ground_truth),
         instances=instances,
         source_predictions=source_predictions,
+        workers=loader.num_workers,
     )
 
 
@@ -479,6 +503,40 @@ def _to_source(
     ]
 
 
+def _keeps_low_startup_route(*, batches: int, workers: int) -> bool:
+    """Decide whether a complete run sets the policy's worker pool aside for the low-startup route.
+
+    A complete run (``limit == 0``) asks the datamodule's automatic policy for a worker
+    count, then keeps it only when the loader has more batches than workers. With no more
+    batches than workers, no worker would receive a second batch and every worker beyond
+    the batch count would receive none, so a complete but tiny custom split keeps the
+    previous route rather than start such a pool. That is a deliberately conservative structural
+    bound, not a measured crossover: parallel decode can repay a pool's startup with
+    fewer batches than workers, and only the one-batch case was measured to lose. It
+    holds for any nonzero count, a single worker included; a count of zero is already
+    in-process and has no pool to set aside.
+
+    Kept apart from :func:`run` so the decision is pinned on the two counts the probe
+    loader already holds, without a model or tiles on disk.
+
+    Args:
+        batches: Batches the policy's val loader yields over the split.
+        workers: Worker count the policy resolved for that loader.
+
+    Returns:
+        ``True`` when :func:`run` should rebuild the datamodule on the low-startup route.
+
+    Examples:
+        >>> _keeps_low_startup_route(batches=1, workers=8)
+        True
+        >>> _keeps_low_startup_route(batches=1, workers=1)  # one worker is still a pool
+        True
+        >>> _keeps_low_startup_route(batches=9, workers=8)
+        False
+    """
+    return workers > 0 and batches <= workers
+
+
 def run(
     module: DetectionLitModule,
     info: dict[str, object],
@@ -503,7 +561,12 @@ def run(
         img_size: Letterbox side; the tier's tiles are 1024 px.
         batch_size: Tiles per forward pass.
         device_name: Device string, or ``auto``.
-        limit: Score only the first N tiles; ``0`` scores all.
+        limit: Score only the first N tiles. ``0`` scores all and permits the automatic
+            worker policy once the loader has more batches than workers. With no more
+            batches than workers it keeps the low-startup route rather than start
+            workers that would receive one batch at most, some none — a deliberately
+            conservative structural bound (:func:`_keeps_low_startup_route`), not a
+            measured crossover.
         output: Optional path for the JSON report.
 
     Returns:
@@ -516,8 +579,30 @@ def run(
     device = pick_device(device_name)
     _, ann_file = resolve_split(data_root, split)
     index = load_tile_index(ann_file)
-    datamodule = build_datamodule(data_root, split, img_size=img_size, batch_size=batch_size, variant=variant)
+    # A complete acceptance run may be long enough to repay worker startup; a limited
+    # diagnostic prefix is not (and keeps the previous low-startup-cost path).
+    num_workers = None if limit == 0 else 0
+    datamodule = build_datamodule(
+        data_root,
+        split,
+        img_size=img_size,
+        batch_size=batch_size,
+        variant=variant,
+        num_workers=num_workers,
+    )
     datamodule.setup("validate")
+    if limit == 0:
+        loader = datamodule.val_dataloader()
+        if _keeps_low_startup_route(batches=len(loader), workers=loader.num_workers):
+            datamodule = build_datamodule(
+                data_root,
+                split,
+                img_size=img_size,
+                batch_size=batch_size,
+                variant=variant,
+                num_workers=0,
+            )
+            datamodule.setup("validate")
 
     print(f"eval-obb: split={split}, device={device.type}, ema={info.get('ema')}, img_size={img_size}")
     start = time.perf_counter()
@@ -591,6 +676,10 @@ def _report(
     ``metrics`` stays where every previous report put it — the per-tile number, which the
     tier acceptance gate reads — and the whole-image number is its own block carrying the
     detection cap it was scored at, because ``mar_300`` keeps A47's name whatever the cap.
+    ``info["workers"]`` records the val loader's resolved worker count: a complete run
+    (WP-192) hands the datamodule ``None`` and lets its shared-memory- and image-size-aware
+    policy choose, so the same command can pick a different count on a different host.
+    It is ``null`` when the scoring recorded no count, never a ``0`` standing in for one.
 
     Args:
         info: The checkpoint loader's provenance dict.
@@ -606,9 +695,11 @@ def _report(
     Examples:
         >>> _report({}, "val", 64, 1.0, SplitScoring({"map": 0.5}, 2, 3), None)["whole_image"] is None
         True
+        >>> _report({}, "val", 64, 1.0, SplitScoring({"map": 0.5}, 2, 3), None)["info"]["workers"] is None
+        True
     """
     return {
-        "info": {**info, "split": split, "img_size": img_size, "per_tile": True},
+        "info": {**info, "split": split, "img_size": img_size, "per_tile": True, "workers": scoring.workers},
         "tiles": scoring.tiles,
         "instances": scoring.instances,
         "seconds": round(elapsed, 1),

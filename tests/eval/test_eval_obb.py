@@ -16,10 +16,15 @@ the label space it expects. A wrong frame or a shifted label space fails that te
 
 from __future__ import annotations
 
+import dataclasses
+import inspect
 import json
+import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 import torch
@@ -30,14 +35,24 @@ from lucid_yolo.data.layout import resolve_split
 from lucid_yolo.eval import rotated_eval as evaluate
 from lucid_yolo.eval.dota_eval import evaluate_rotated_map
 from lucid_yolo.eval.tile_merge import TileIndex, load_tile_index
+from lucid_yolo.ptl import datamodule as datamodule_module
 from lucid_yolo.ptl.module import DetectionLitModule
 
 #: Letterbox side and tile side used throughout: divisible by the level-32 stride.
 IMG_SIZE = 64
+#: First stride-32 side where the public val policy selects two workers at batch two.
+PARALLEL_IMG_SIZE = 416
 #: Source image side, tiled into four windows at the patch/overlap below.
 SIDE = 96
 PATCH = 64
 OVERLAP = 32
+#: The shared-memory mount whose presence decides which branch the worker policy takes.
+DEV_SHM = Path("/dev/shm")
+#: A roomy ``/dev/shm``: 1 GiB free, 262144 blocks of 4096 bytes. The cap is read but never
+#: binds here, since the largest queue these tests build (two workers, two prefetched batches
+#: of six 416 px images) is about 50 MB against a 512 MiB budget. The cap itself is pinned
+#: in ``tests/data/test_coco.py``.
+ROOMY_DEV_SHM = os.statvfs_result((4096, 4096, 0, 262144, 262144, 0, 0, 0, 0, 255))
 
 
 @pytest.fixture(autouse=True)
@@ -47,17 +62,86 @@ def reset_random_seeds() -> None:
 
 
 @pytest.fixture
-def tiled_root(tmp_path: Path) -> Path:
-    """Build a one-image, one-class tiled layout with a single oriented object."""
-    split_dir = tmp_path / "dota" / "val"
-    (split_dir / "images").mkdir(parents=True)
-    (split_dir / "labelTxt").mkdir(parents=True)
-    image = (torch.arange(3 * SIDE * SIDE, dtype=torch.uint8) % 251).reshape(3, SIDE, SIDE)
-    build.write_png(image, str(split_dir / "images" / "P0001.png"))
-    (split_dir / "labelTxt" / "P0001.txt").write_text("10 10 30 10 30 20 10 20 plane 0\n")
+def worker_host(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin what the worker policy reads off the host: two cores and, by default, ``/dev/shm``.
 
-    build.convert_split(split_dir, tmp_path / "tiles", "val", patch=PATCH, overlap=OVERLAP)
-    return tmp_path / "tiles"
+    The policy branches on whether ``/dev/shm`` exists, so left to the runner a Linux cell
+    and a macOS cell walk different code under one assertion. Parametrized indirectly with
+    ``False``, the host has no ``/dev/shm``. Both patches are path-selective: every other path
+    keeps its real ``exists`` and ``statvfs``, because these tests also resolve the tiled
+    layout through ``exists``, and a blanket answer would leak into it.
+    """
+    has_dev_shm: bool = getattr(request, "param", True)
+    real_exists = datamodule_module.Path.exists
+    real_statvfs = datamodule_module.os.statvfs
+
+    def exists(path: Path, *args: Any, **kwargs: Any) -> bool:
+        return has_dev_shm if path == DEV_SHM else real_exists(path, *args, **kwargs)
+
+    def statvfs(path: Any) -> os.statvfs_result:
+        return ROOMY_DEV_SHM if path == DEV_SHM else real_statvfs(path)
+
+    monkeypatch.setattr(datamodule_module.os, "cpu_count", lambda: 2)
+    monkeypatch.setattr(datamodule_module.Path, "exists", exists)
+    monkeypatch.setattr(datamodule_module.os, "statvfs", statvfs)
+
+
+@pytest.fixture
+def requested_worker_counts(monkeypatch: pytest.MonkeyPatch) -> list[int | None]:
+    """Record the ``num_workers`` every ``build_datamodule`` call asks for, then build it for real.
+
+    The call is bound against the real signature rather than a copy of it, so the spy keeps
+    up with the helper's parameters and a call leaving the count to its default records it.
+    """
+    real = evaluate.build_datamodule
+    signature = inspect.signature(real)
+    requested: list[int | None] = []
+
+    def spy(*args: Any, **kwargs: Any) -> datamodule_module.DetectionDataModule:
+        call = signature.bind(*args, **kwargs)
+        call.apply_defaults()
+        requested.append(call.arguments["num_workers"])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(evaluate, "build_datamodule", spy)
+    return requested
+
+
+@pytest.fixture
+def build_tiled_root(tmp_path: Path) -> Callable[[int], Path]:
+    """Return a builder tiling a synthetic DOTA split of N source images into a layout.
+
+    Every source image is the same one, carrying one oriented object, and tiles into four
+    windows at the patch and overlap above, so the layout holds four tiles per image. One
+    layout per test: the builder writes into the test's own ``tmp_path``.
+    """
+
+    def build_layout(images: int) -> Path:
+        split_dir = tmp_path / "dota" / "val"
+        (split_dir / "images").mkdir(parents=True)
+        (split_dir / "labelTxt").mkdir(parents=True)
+        image = (torch.arange(3 * SIDE * SIDE, dtype=torch.uint8) % 251).reshape(3, SIDE, SIDE)
+        for index in range(images):
+            stem = f"P{index + 1:04d}"
+            build.write_png(image, str(split_dir / "images" / f"{stem}.png"))
+            (split_dir / "labelTxt" / f"{stem}.txt").write_text("10 10 30 10 30 20 10 20 plane 0\n")
+
+        build.convert_split(split_dir, tmp_path / "tiles", "val", patch=PATCH, overlap=OVERLAP)
+        return tmp_path / "tiles"
+
+    return build_layout
+
+
+@pytest.fixture
+def tiled_root(build_tiled_root: Callable[[int], Path]) -> Path:
+    """Build a one-image, one-class tiled layout with a single oriented object."""
+    return build_tiled_root(1)
+
+
+@pytest.fixture
+def parallel_tiled_root(build_tiled_root: Callable[[int], Path]) -> Path:
+    """Build three source images so the worker pool receives more than one batch per worker."""
+    return build_tiled_root(3)
 
 
 def _datamodule(root: Path) -> object:
@@ -107,13 +191,291 @@ def test_the_split_is_scored_tile_by_tile(tiled_root: Path) -> None:
     assert 0.0 <= scoring.per_tile["map_50"] <= 1.0
 
 
-def test_the_limit_stops_early_without_changing_the_frame(tiled_root: Path) -> None:
-    """``--limit`` scores a prefix of the split rather than a resampled subset."""
+@pytest.mark.parametrize(
+    ("limit", "tiles"),
+    [pytest.param(2, 2, id="a-prefix"), pytest.param(9, 4, id="past-the-end-of-the-split")],
+)
+def test_the_limit_stops_early_without_changing_the_frame(tiled_root: Path, limit: int, tiles: int) -> None:
+    """``--limit`` scores a prefix of the split rather than a resampled subset.
+
+    A limit past the end of the four-tile split is not an error: the pass runs out of tiles
+    before it reaches the limit and scores every one of them.
+    """
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
 
-    scoring = evaluate.score_split(module, _datamodule(tiled_root), torch.device("cpu"), img_size=IMG_SIZE, limit=2)
+    scoring = evaluate.score_split(module, _datamodule(tiled_root), torch.device("cpu"), img_size=IMG_SIZE, limit=limit)
 
-    assert scoring.tiles == 2
+    assert scoring.tiles == tiles
+
+
+@pytest.mark.usefixtures("worker_host")
+def test_complete_and_limited_runs_request_their_chosen_worker_routes(
+    tiled_root: Path, tmp_path: Path, requested_worker_counts: list[int | None]
+) -> None:
+    """Full scoring uses the shared auto policy while a short diagnostic avoids its startup cost.
+
+    At 64 px the policy resolves one worker, which the split's two batches outnumber, so the
+    complete run keeps the datamodule it asked the policy for and nothing is rebuilt.
+    """
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+    common = {
+        "module": module,
+        "info": {"ema": False},
+        "data_root": tiled_root,
+        "split": "val",
+        "variant": "n",
+        "img_size": IMG_SIZE,
+        "batch_size": 2,
+        "device_name": "cpu",
+    }
+
+    assert evaluate.run(**common, limit=0, output=tmp_path / "full.json") == 0  # type: ignore[arg-type]
+    assert evaluate.run(**common, limit=1, output=tmp_path / "limited.json") == 0  # type: ignore[arg-type]
+
+    assert requested_worker_counts == [None, 0]
+
+
+@pytest.mark.parametrize("worker_host", [True, False], indirect=True)
+@pytest.mark.parametrize(
+    ("num_workers", "expected"),
+    [pytest.param(0, 0, id="low-startup"), pytest.param(None, 2, id="policy")],
+)
+def test_each_route_resolves_one_val_worker_count_with_or_without_dev_shm(
+    tiled_root: Path, worker_host: None, num_workers: int | None, expected: int
+) -> None:
+    """Either host gives zero workers on the low-startup route and the policy's two on the other.
+
+    The shared fixture pins ``/dev/shm`` present everywhere else; this is the direct check
+    of a host without it as well. The zero matters on both: before it was forwarded as the
+    val loader's own count, the shared-memory floor raised it to one worker wherever
+    ``/dev/shm`` exists, so the low-startup route was in-process on macOS alone.
+    """
+    datamodule = evaluate.build_datamodule(
+        tiled_root, "val", img_size=PARALLEL_IMG_SIZE, batch_size=2, variant="n", num_workers=num_workers
+    )
+    datamodule.setup("validate")
+
+    assert datamodule.val_dataloader().num_workers == expected
+
+
+@pytest.mark.usefixtures("worker_host")
+def test_parallel_validation_preserves_images_targets_and_order(tiled_root: Path) -> None:
+    """The auto-worker route emits exactly the low-startup route's OBB inputs in the same order."""
+
+    def snapshot(workers: int | None) -> tuple[int, list[tuple[torch.Tensor, list[tuple[torch.Tensor, ...]]]]]:
+        datamodule = evaluate.build_datamodule(
+            tiled_root,
+            "val",
+            img_size=PARALLEL_IMG_SIZE,
+            batch_size=2,
+            variant="n",
+            num_workers=workers,
+        )
+        datamodule.setup("validate")
+        loader = datamodule.val_dataloader()
+        batches = []
+        for batch in loader:
+            images, targets, _ = datamodule.on_after_batch_transfer(batch, 0)
+            batches.append(
+                (
+                    images,
+                    [(target.boxes, target.labels, target.rboxes, target.difficult) for target in targets],
+                )
+            )
+        return loader.num_workers, batches
+
+    low_startup_workers, low_startup = snapshot(0)
+    parallel_workers, parallel = snapshot(None)
+
+    assert low_startup_workers == 0
+    assert parallel_workers == 2
+    assert len(low_startup) == len(parallel)
+    for (low_startup_images, low_startup_targets), (parallel_images, parallel_targets) in zip(
+        low_startup, parallel, strict=True
+    ):
+        assert torch.equal(low_startup_images, parallel_images)
+        assert len(low_startup_targets) == len(parallel_targets)
+        for low_startup_target, parallel_target in zip(low_startup_targets, parallel_targets, strict=True):
+            assert all(
+                torch.equal(left, right) for left, right in zip(low_startup_target, parallel_target, strict=True)
+            )
+
+
+@pytest.mark.usefixtures("worker_host")
+def test_a_tiny_complete_run_keeps_the_low_startup_route(tiled_root: Path, tmp_path: Path) -> None:
+    """A complete custom split does not start a pool with at most one batch per worker."""
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+    output = tmp_path / "tiny-complete.json"
+
+    assert (
+        evaluate.run(
+            module,
+            {"ema": False},
+            data_root=tiled_root,
+            split="val",
+            variant="n",
+            img_size=PARALLEL_IMG_SIZE,
+            batch_size=2,
+            device_name="cpu",
+            limit=0,
+            output=output,
+        )
+        == 0
+    )
+    assert json.loads(output.read_text())["info"]["workers"] == 0
+
+
+@pytest.mark.usefixtures("worker_host")
+@pytest.mark.parametrize(
+    ("batch_size", "requested", "workers"),
+    [
+        pytest.param(6, [None, 0], 0, id="one-batch-per-worker-rebuilds-in-process"),
+        pytest.param(4, [None], 2, id="a-second-batch-for-a-worker-keeps-the-pool"),
+    ],
+)
+def test_a_complete_run_rebuilds_in_process_only_when_no_worker_gets_a_second_batch(
+    parallel_tiled_root: Path,
+    tmp_path: Path,
+    requested_worker_counts: list[int | None],
+    batch_size: int,
+    requested: list[int | None],
+    workers: int,
+) -> None:
+    """A complete run swaps the policy's datamodule for an in-process one only when no worker gets two batches.
+
+    Twelve tiles at 416 px, where the pinned host's policy resolves two workers. Batch six
+    makes two batches, one per worker, so the probe datamodule is set aside and a second is
+    built with zero workers; batch four makes three, so the probe's pool is kept and nothing
+    is rebuilt. The scored tile count is what shows the rebuilt datamodule was set up and
+    read the whole split rather than some prefix of it.
+    """
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+    output = tmp_path / "complete.json"
+
+    code = evaluate.run(
+        module,
+        {"ema": False},
+        data_root=parallel_tiled_root,
+        split="val",
+        variant="n",
+        img_size=PARALLEL_IMG_SIZE,
+        batch_size=batch_size,
+        device_name="cpu",
+        limit=0,
+        output=output,
+    )
+
+    report = json.loads(output.read_text())
+    assert code == 0
+    assert requested_worker_counts == requested
+    assert report["info"]["workers"] == workers
+    assert report["tiles"] == 12
+
+
+@pytest.mark.parametrize(
+    ("batches", "workers", "expected"),
+    [
+        pytest.param(1, 1, True, id="one-batch-one-worker"),
+        pytest.param(2, 1, False, id="one-worker-gets-a-second-batch"),
+        pytest.param(2, 2, True, id="one-batch-per-worker"),
+        pytest.param(3, 2, False, id="more-batches-than-workers"),
+        pytest.param(0, 2, True, id="empty-split"),
+        pytest.param(5, 0, False, id="already-in-process"),
+    ],
+)
+def test_a_complete_run_sets_the_pool_aside_until_batches_outnumber_workers(
+    batches: int, workers: int, expected: bool
+) -> None:
+    """The tiny-split fallback fires for any nonzero pool with no more batches than workers.
+
+    Pinned on the pure decision rather than through ``run``, so it needs no model, no
+    tiles and no host-dependent worker policy. The one-worker rows are the boundary the
+    guard once missed: a policy resolving to a single worker for a one-batch split started
+    that worker on hosts where the low-startup route starts none. Zero workers is already the
+    in-process route, so there is nothing to set aside however many batches there are.
+    """
+    assert evaluate._keeps_low_startup_route(batches=batches, workers=workers) is expected
+
+
+@pytest.mark.usefixtures("worker_host")
+def test_run_through_real_workers_matches_run_through_the_low_startup_route(
+    parallel_tiled_root: Path, tmp_path: Path
+) -> None:
+    """The public complete run keeps its report under a reused real worker pool.
+
+    A 416 px side is the first stride-32 size where the public image-size policy
+    selects two workers at batch two. Twelve tiles give each worker three batches;
+    a positive limit covers the same complete input through the low-startup route.
+    """
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+    common = {
+        "module": module,
+        "info": {"ema": False},
+        "data_root": parallel_tiled_root,
+        "split": "val",
+        "variant": "n",
+        "img_size": PARALLEL_IMG_SIZE,
+        "batch_size": 2,
+        "device_name": "cpu",
+    }
+    parallel_output = tmp_path / "parallel.json"
+    low_startup_output = tmp_path / "low-startup.json"
+
+    assert evaluate.run(**common, limit=0, output=parallel_output) == 0  # type: ignore[arg-type]
+    assert evaluate.run(**common, limit=12, output=low_startup_output) == 0  # type: ignore[arg-type]
+    parallel_report = json.loads(parallel_output.read_text())
+    low_startup_report = json.loads(low_startup_output.read_text())
+
+    assert parallel_report["info"]["workers"] == 2
+    assert low_startup_report["info"]["workers"] == 0
+    for report in (parallel_report, low_startup_report):
+        report.pop("seconds")
+        report["info"].pop("workers")
+    assert parallel_report == low_startup_report
+
+
+@pytest.mark.usefixtures("worker_host")
+def test_a_mispaired_index_fails_the_run_under_a_real_worker_pool(
+    parallel_tiled_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    requested_worker_counts: list[int | None],
+) -> None:
+    """A pairing refusal raised while two workers feed the pass still ends the run in ``FAIL:`` and status 1.
+
+    The pairing tests walk the refusal through an in-process loader; this walks it through
+    the policy's pool. Twelve tiles at batch two give the pinned host's two workers six
+    batches, so the pool is kept, and swapping two of the index's windows makes the first
+    batch raise in the main process mid-iteration. When the pool shuts down afterwards is
+    the loader's timing rather than this command's contract, so it is not asserted.
+    """
+    index = load_tile_index(resolve_split(parallel_tiled_root, "val")[1])
+    assert index is not None
+    windows = list(index.windows)
+    windows[1], windows[2] = windows[2], windows[1]
+    mispaired = dataclasses.replace(index, windows=tuple(windows))
+    monkeypatch.setattr(evaluate, "load_tile_index", lambda _ann_file: mispaired)
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+    output = tmp_path / "mispaired.json"
+
+    code = evaluate.run(
+        module,
+        {"ema": False},
+        data_root=parallel_tiled_root,
+        split="val",
+        variant="n",
+        img_size=PARALLEL_IMG_SIZE,
+        batch_size=2,
+        device_name="cpu",
+        limit=0,
+        output=output,
+    )
+
+    assert code == 1
+    assert "FAIL: the val dataset's tile 1 has COCO image id" in capsys.readouterr().out
+    assert requested_worker_counts == [None]
+    assert not output.exists()
 
 
 def test_the_report_is_written_into_a_directory_that_does_not_exist_yet(tiled_root: Path, tmp_path: Path) -> None:
