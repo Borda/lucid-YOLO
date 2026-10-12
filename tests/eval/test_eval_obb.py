@@ -264,6 +264,31 @@ def test_a_tiny_complete_run_keeps_the_low_startup_route(
     assert json.loads(output.read_text())["info"]["workers"] in {0, 1}
 
 
+@pytest.mark.parametrize(
+    ("batches", "workers", "expected"),
+    [
+        pytest.param(1, 1, True, id="one-batch-one-worker"),
+        pytest.param(2, 1, False, id="one-worker-gets-a-second-batch"),
+        pytest.param(2, 2, True, id="one-batch-per-worker"),
+        pytest.param(3, 2, False, id="more-batches-than-workers"),
+        pytest.param(0, 2, True, id="empty-split"),
+        pytest.param(5, 0, False, id="already-in-process"),
+    ],
+)
+def test_a_complete_run_sets_the_pool_aside_until_batches_outnumber_workers(
+    batches: int, workers: int, expected: bool
+) -> None:
+    """The tiny-split fallback fires for any nonzero pool with no more batches than workers.
+
+    Pinned on the pure decision rather than through ``run``, so it needs no model, no
+    tiles and no host-dependent worker policy. The one-worker rows are the boundary the
+    guard once missed: a policy resolving to a single worker for a one-batch split started
+    that worker on hosts where the low-startup route starts none. Zero workers is already the
+    in-process route, so there is nothing to set aside however many batches there are.
+    """
+    assert evaluate._keeps_low_startup_route(batches=batches, workers=workers) is expected
+
+
 def test_run_through_real_workers_matches_run_through_the_low_startup_route(
     parallel_tiled_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

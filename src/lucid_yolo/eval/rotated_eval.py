@@ -500,7 +500,9 @@ def _keeps_low_startup_route(*, batches: int, workers: int) -> bool:
     A complete run (``limit == 0``) asks the datamodule's automatic policy for a worker
     count, then keeps it only when the loader has more batches than workers. A pool with
     at most one batch per worker never reuses a process after its startup, so a complete
-    but tiny custom split keeps the previous route.
+    but tiny custom split keeps the previous route. That holds for any nonzero count, a
+    single worker included; a count of zero is already in-process and has no pool to set
+    aside.
 
     Kept apart from :func:`run` so the decision is pinned on the two counts the probe
     loader already holds, without a model or tiles on disk.
@@ -515,10 +517,12 @@ def _keeps_low_startup_route(*, batches: int, workers: int) -> bool:
     Examples:
         >>> _keeps_low_startup_route(batches=1, workers=8)
         True
+        >>> _keeps_low_startup_route(batches=1, workers=1)  # one worker is still a pool
+        True
         >>> _keeps_low_startup_route(batches=9, workers=8)
         False
     """
-    return workers > 1 and batches <= workers
+    return workers > 0 and batches <= workers
 
 
 def run(
