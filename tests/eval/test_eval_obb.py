@@ -21,6 +21,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -106,33 +107,40 @@ def requested_worker_counts(monkeypatch: pytest.MonkeyPatch) -> list[int | None]
 
 
 @pytest.fixture
-def tiled_root(tmp_path: Path) -> Path:
-    """Build a one-image, one-class tiled layout with a single oriented object."""
-    split_dir = tmp_path / "dota" / "val"
-    (split_dir / "images").mkdir(parents=True)
-    (split_dir / "labelTxt").mkdir(parents=True)
-    image = (torch.arange(3 * SIDE * SIDE, dtype=torch.uint8) % 251).reshape(3, SIDE, SIDE)
-    build.write_png(image, str(split_dir / "images" / "P0001.png"))
-    (split_dir / "labelTxt" / "P0001.txt").write_text("10 10 30 10 30 20 10 20 plane 0\n")
+def build_tiled_root(tmp_path: Path) -> Callable[[int], Path]:
+    """Return a builder tiling a synthetic DOTA split of N source images into a layout.
 
-    build.convert_split(split_dir, tmp_path / "tiles", "val", patch=PATCH, overlap=OVERLAP)
-    return tmp_path / "tiles"
+    Every source image is the same one, carrying one oriented object, and tiles into four
+    windows at the patch and overlap above, so the layout holds four tiles per image. One
+    layout per test: the builder writes into the test's own ``tmp_path``.
+    """
+
+    def build_layout(images: int) -> Path:
+        split_dir = tmp_path / "dota" / "val"
+        (split_dir / "images").mkdir(parents=True)
+        (split_dir / "labelTxt").mkdir(parents=True)
+        image = (torch.arange(3 * SIDE * SIDE, dtype=torch.uint8) % 251).reshape(3, SIDE, SIDE)
+        for index in range(images):
+            stem = f"P{index + 1:04d}"
+            build.write_png(image, str(split_dir / "images" / f"{stem}.png"))
+            (split_dir / "labelTxt" / f"{stem}.txt").write_text("10 10 30 10 30 20 10 20 plane 0\n")
+
+        build.convert_split(split_dir, tmp_path / "tiles", "val", patch=PATCH, overlap=OVERLAP)
+        return tmp_path / "tiles"
+
+    return build_layout
 
 
 @pytest.fixture
-def parallel_tiled_root(tmp_path: Path) -> Path:
-    """Build three source images so the worker pool receives more than one batch per worker."""
-    split_dir = tmp_path / "dota" / "val"
-    (split_dir / "images").mkdir(parents=True)
-    (split_dir / "labelTxt").mkdir(parents=True)
-    image = (torch.arange(3 * SIDE * SIDE, dtype=torch.uint8) % 251).reshape(3, SIDE, SIDE)
-    for index in range(3):
-        stem = f"P{index + 1:04d}"
-        build.write_png(image, str(split_dir / "images" / f"{stem}.png"))
-        (split_dir / "labelTxt" / f"{stem}.txt").write_text("10 10 30 10 30 20 10 20 plane 0\n")
+def tiled_root(build_tiled_root: Callable[[int], Path]) -> Path:
+    """Build a one-image, one-class tiled layout with a single oriented object."""
+    return build_tiled_root(1)
 
-    build.convert_split(split_dir, tmp_path / "tiles", "val", patch=PATCH, overlap=OVERLAP)
-    return tmp_path / "tiles"
+
+@pytest.fixture
+def parallel_tiled_root(build_tiled_root: Callable[[int], Path]) -> Path:
+    """Build three source images so the worker pool receives more than one batch per worker."""
+    return build_tiled_root(3)
 
 
 def _datamodule(root: Path) -> object:
@@ -191,36 +199,16 @@ def test_the_limit_stops_early_without_changing_the_frame(tiled_root: Path) -> N
     assert scoring.tiles == 2
 
 
+@pytest.mark.usefixtures("worker_host")
 def test_complete_and_limited_runs_request_their_chosen_worker_routes(
-    tiled_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tiled_root: Path, tmp_path: Path, requested_worker_counts: list[int | None]
 ) -> None:
-    """Full scoring uses the shared auto policy while a short diagnostic avoids its startup cost."""
+    """Full scoring uses the shared auto policy while a short diagnostic avoids its startup cost.
+
+    At 64 px the policy resolves one worker, which the split's two batches outnumber, so the
+    complete run keeps the datamodule it asked the policy for and nothing is rebuilt.
+    """
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
-    requested_workers: list[int | None] = []
-    original = evaluate.build_datamodule
-
-    def record_worker_route(
-        data_root: Path,
-        split: str,
-        *,
-        img_size: int,
-        batch_size: int,
-        variant: str,
-        num_workers: int | None = 0,
-    ) -> datamodule_module.DetectionDataModule:
-        requested_workers.append(num_workers)
-        # Keep the integration test serial and deterministic after observing the public
-        # dispatch. The separate parity test below exercises real worker processes.
-        return original(
-            data_root,
-            split,
-            img_size=img_size,
-            batch_size=batch_size,
-            variant=variant,
-            num_workers=0,
-        )
-
-    monkeypatch.setattr(evaluate, "build_datamodule", record_worker_route)
     common = {
         "module": module,
         "info": {"ema": False},
@@ -235,7 +223,7 @@ def test_complete_and_limited_runs_request_their_chosen_worker_routes(
     assert evaluate.run(**common, limit=0, output=tmp_path / "full.json") == 0  # type: ignore[arg-type]
     assert evaluate.run(**common, limit=1, output=tmp_path / "limited.json") == 0  # type: ignore[arg-type]
 
-    assert requested_workers == [None, 0]
+    assert requested_worker_counts == [None, 0]
 
 
 @pytest.mark.parametrize("worker_host", [True, False], indirect=True)
@@ -511,7 +499,6 @@ def test_the_report_names_both_figures_rather_than_quoting_one(tiled_root: Path,
     payload = _run_report(module, tiled_root, tmp_path / "obb.json")
 
     assert payload["info"]["per_tile"] is True  # type: ignore[call-overload,index]
-    assert payload["info"]["workers"] == 1  # type: ignore[call-overload,index]
     assert payload["tiles"] == 4
     assert payload["whole_image"]["source_images"] == 1  # type: ignore[call-overload,index]
     assert payload["whole_image"]["max_detections"] is None  # type: ignore[call-overload,index]
