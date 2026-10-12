@@ -152,9 +152,12 @@ class SplitScoring:
         source_predictions: Per-tile predictions in **source-image** pixels, ready for
             :func:`~lucid_yolo.eval.tile_merge.merge_whole_images`. Empty when the split
             carries no window provenance and no whole-image figure is available.
-        workers: The val loader's resolved ``num_workers``. Recorded because the
-            caller may hand ``None`` (WP-192) and the datamodule's shared-memory-
-            and image-size-aware policy then picks a host-dependent count.
+        workers: The val loader's resolved ``num_workers``, or ``None`` when nothing
+            recorded one — an instance built directly rather than by
+            :func:`score_split`. ``None`` rather than ``0``, which would read as an
+            in-process run. Recorded because a complete run (WP-192) leaves the count
+            to the datamodule's shared-memory- and image-size-aware policy, which picks
+            a host-dependent one.
 
     Examples:
         >>> SplitScoring({"map": 0.5}, tiles=4, instances=9).tiles
@@ -165,7 +168,7 @@ class SplitScoring:
     tiles: int
     instances: int
     source_predictions: list[dict[str, Tensor]] = field(default_factory=list)
-    workers: int = 0
+    workers: int | None = None
 
 
 def score_split(
@@ -676,6 +679,7 @@ def _report(
     ``info["workers"]`` records the val loader's resolved worker count: a complete run
     (WP-192) hands the datamodule ``None`` and lets its shared-memory- and image-size-aware
     policy choose, so the same command can pick a different count on a different host.
+    It is ``null`` when the scoring recorded no count, never a ``0`` standing in for one.
 
     Args:
         info: The checkpoint loader's provenance dict.
@@ -690,6 +694,8 @@ def _report(
 
     Examples:
         >>> _report({}, "val", 64, 1.0, SplitScoring({"map": 0.5}, 2, 3), None)["whole_image"] is None
+        True
+        >>> _report({}, "val", 64, 1.0, SplitScoring({"map": 0.5}, 2, 3), None)["info"]["workers"] is None
         True
     """
     return {
