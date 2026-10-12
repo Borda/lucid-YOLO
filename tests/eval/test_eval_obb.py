@@ -16,6 +16,7 @@ the label space it expects. A wrong frame or a shifted label space fails that te
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import subprocess
@@ -81,6 +82,27 @@ def worker_host(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(datamodule_module.os, "cpu_count", lambda: 2)
     monkeypatch.setattr(datamodule_module.Path, "exists", exists)
     monkeypatch.setattr(datamodule_module.os, "statvfs", statvfs)
+
+
+@pytest.fixture
+def requested_worker_counts(monkeypatch: pytest.MonkeyPatch) -> list[int | None]:
+    """Record the ``num_workers`` every ``build_datamodule`` call asks for, then build it for real.
+
+    The call is bound against the real signature rather than a copy of it, so the spy keeps
+    up with the helper's parameters and a call leaving the count to its default records it.
+    """
+    real = evaluate.build_datamodule
+    signature = inspect.signature(real)
+    requested: list[int | None] = []
+
+    def spy(*args: Any, **kwargs: Any) -> datamodule_module.DetectionDataModule:
+        call = signature.bind(*args, **kwargs)
+        call.apply_defaults()
+        requested.append(call.arguments["num_workers"])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(evaluate, "build_datamodule", spy)
+    return requested
 
 
 @pytest.fixture
@@ -169,7 +191,7 @@ def test_the_limit_stops_early_without_changing_the_frame(tiled_root: Path) -> N
     assert scoring.tiles == 2
 
 
-def test_complete_and_limited_runs_choose_their_measured_worker_routes(
+def test_complete_and_limited_runs_request_their_chosen_worker_routes(
     tiled_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Full scoring uses the shared auto policy while a short diagnostic avoids its startup cost."""
@@ -304,6 +326,53 @@ def test_a_tiny_complete_run_keeps_the_low_startup_route(tiled_root: Path, tmp_p
         == 0
     )
     assert json.loads(output.read_text())["info"]["workers"] == 0
+
+
+@pytest.mark.usefixtures("worker_host")
+@pytest.mark.parametrize(
+    ("batch_size", "requested", "workers"),
+    [
+        pytest.param(6, [None, 0], 0, id="one-batch-per-worker-rebuilds-in-process"),
+        pytest.param(4, [None], 2, id="a-second-batch-for-a-worker-keeps-the-pool"),
+    ],
+)
+def test_a_complete_run_rebuilds_in_process_only_when_no_worker_gets_a_second_batch(
+    parallel_tiled_root: Path,
+    tmp_path: Path,
+    requested_worker_counts: list[int | None],
+    batch_size: int,
+    requested: list[int | None],
+    workers: int,
+) -> None:
+    """A complete run swaps the policy's datamodule for an in-process one only when no worker gets two batches.
+
+    Twelve tiles at 416 px, where the pinned host's policy resolves two workers. Batch six
+    makes two batches, one per worker, so the probe datamodule is set aside and a second is
+    built with zero workers; batch four makes three, so the probe's pool is kept and nothing
+    is rebuilt. The scored tile count is what shows the rebuilt datamodule was set up and
+    read the whole split rather than some prefix of it.
+    """
+    module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
+    output = tmp_path / "complete.json"
+
+    code = evaluate.run(
+        module,
+        {"ema": False},
+        data_root=parallel_tiled_root,
+        split="val",
+        variant="n",
+        img_size=PARALLEL_IMG_SIZE,
+        batch_size=batch_size,
+        device_name="cpu",
+        limit=0,
+        output=output,
+    )
+
+    report = json.loads(output.read_text())
+    assert code == 0
+    assert requested_worker_counts == requested
+    assert report["info"]["workers"] == workers
+    assert report["tiles"] == 12
 
 
 @pytest.mark.parametrize(
