@@ -494,6 +494,33 @@ def _to_source(
     ]
 
 
+def _keeps_low_startup_route(*, batches: int, workers: int) -> bool:
+    """Decide whether a complete run sets the policy's worker pool aside for the low-startup route.
+
+    A complete run (``limit == 0``) asks the datamodule's automatic policy for a worker
+    count, then keeps it only when the loader has more batches than workers. A pool with
+    at most one batch per worker never reuses a process after its startup, so a complete
+    but tiny custom split keeps the previous route.
+
+    Kept apart from :func:`run` so the decision is pinned on the two counts the probe
+    loader already holds, without a model or tiles on disk.
+
+    Args:
+        batches: Batches the policy's val loader yields over the split.
+        workers: Worker count the policy resolved for that loader.
+
+    Returns:
+        ``True`` when :func:`run` should rebuild the datamodule on the low-startup route.
+
+    Examples:
+        >>> _keeps_low_startup_route(batches=1, workers=8)
+        True
+        >>> _keeps_low_startup_route(batches=9, workers=8)
+        False
+    """
+    return workers > 1 and batches <= workers
+
+
 def run(
     module: DetectionLitModule,
     info: dict[str, object],
@@ -546,9 +573,7 @@ def run(
     datamodule.setup("validate")
     if limit == 0:
         loader = datamodule.val_dataloader()
-        if loader.num_workers > 1 and len(loader) <= loader.num_workers:
-            # A pool with at most one batch per worker never reuses a process after its
-            # startup. Keep the previous route for a complete but tiny custom split.
+        if _keeps_low_startup_route(batches=len(loader), workers=loader.num_workers):
             datamodule = build_datamodule(
                 data_root,
                 split,
