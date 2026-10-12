@@ -17,10 +17,11 @@ the label space it expects. A wrong frame or a shifted label space fails that te
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from typing import Any
 
 import pytest
 import torch
@@ -42,12 +43,44 @@ PARALLEL_IMG_SIZE = 416
 SIDE = 96
 PATCH = 64
 OVERLAP = 32
+#: The shared-memory mount whose presence decides which branch the worker policy takes.
+DEV_SHM = Path("/dev/shm")
+#: A roomy ``/dev/shm``: 1 GiB free, 262144 blocks of 4096 bytes. The cap is read but never
+#: binds here, since the largest queue these tests build (two workers, two prefetched batches
+#: of six 416 px images) is about 50 MB against a 512 MiB budget. The cap itself is pinned
+#: in ``tests/data/test_coco.py``.
+ROOMY_DEV_SHM = os.statvfs_result((4096, 4096, 0, 262144, 262144, 0, 0, 0, 0, 255))
 
 
 @pytest.fixture(autouse=True)
 def reset_random_seeds() -> None:
     """Seed the global RNG before each test (the module is randomly initialized)."""
     torch.manual_seed(0)
+
+
+@pytest.fixture
+def worker_host(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin what the worker policy reads off the host: two cores and, by default, ``/dev/shm``.
+
+    The policy branches on whether ``/dev/shm`` exists, so left to the runner a Linux cell
+    and a macOS cell walk different code under one assertion. Parametrized indirectly with
+    ``False``, the host has no ``/dev/shm``. Both patches are path-selective: every other path
+    keeps its real ``exists`` and ``statvfs``, because these tests also resolve the tiled
+    layout through ``exists``, and a blanket answer would leak into it.
+    """
+    has_dev_shm: bool = getattr(request, "param", True)
+    real_exists = datamodule_module.Path.exists
+    real_statvfs = datamodule_module.os.statvfs
+
+    def exists(path: Path, *args: Any, **kwargs: Any) -> bool:
+        return has_dev_shm if path == DEV_SHM else real_exists(path, *args, **kwargs)
+
+    def statvfs(path: Any) -> os.statvfs_result:
+        return ROOMY_DEV_SHM if path == DEV_SHM else real_statvfs(path)
+
+    monkeypatch.setattr(datamodule_module.os, "cpu_count", lambda: 2)
+    monkeypatch.setattr(datamodule_module.Path, "exists", exists)
+    monkeypatch.setattr(datamodule_module.os, "statvfs", statvfs)
 
 
 @pytest.fixture
@@ -183,16 +216,32 @@ def test_complete_and_limited_runs_choose_their_measured_worker_routes(
     assert requested_workers == [None, 0]
 
 
-def test_parallel_validation_preserves_images_targets_and_order(
-    tiled_root: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("worker_host", [True, False], indirect=True)
+@pytest.mark.parametrize(
+    ("num_workers", "expected"),
+    [pytest.param(0, 0, id="low-startup"), pytest.param(None, 2, id="policy")],
+)
+def test_each_route_resolves_one_val_worker_count_with_or_without_dev_shm(
+    tiled_root: Path, worker_host: None, num_workers: int | None, expected: int
 ) -> None:
-    """The auto-worker route emits exactly the low-startup route's OBB inputs in the same order."""
-    monkeypatch.setattr(datamodule_module.os, "cpu_count", lambda: 2)
-    monkeypatch.setattr(
-        datamodule_module.os,
-        "statvfs",
-        lambda _path: SimpleNamespace(f_bavail=64 * 1024 * 1024, f_frsize=1),
+    """Either host gives zero workers on the low-startup route and the policy's two on the other.
+
+    The shared fixture pins ``/dev/shm`` present everywhere else; this is the direct check
+    of a host without it as well. The zero matters on both: before it was forwarded as the
+    val loader's own count, the shared-memory floor raised it to one worker wherever
+    ``/dev/shm`` exists, so the low-startup route was in-process on macOS alone.
+    """
+    datamodule = evaluate.build_datamodule(
+        tiled_root, "val", img_size=PARALLEL_IMG_SIZE, batch_size=2, variant="n", num_workers=num_workers
     )
+    datamodule.setup("validate")
+
+    assert datamodule.val_dataloader().num_workers == expected
+
+
+@pytest.mark.usefixtures("worker_host")
+def test_parallel_validation_preserves_images_targets_and_order(tiled_root: Path) -> None:
+    """The auto-worker route emits exactly the low-startup route's OBB inputs in the same order."""
 
     def snapshot(workers: int | None) -> tuple[int, list[tuple[torch.Tensor, list[tuple[torch.Tensor, ...]]]]]:
         datamodule = evaluate.build_datamodule(
@@ -219,7 +268,7 @@ def test_parallel_validation_preserves_images_targets_and_order(
     low_startup_workers, low_startup = snapshot(0)
     parallel_workers, parallel = snapshot(None)
 
-    assert low_startup_workers in {0, 1}
+    assert low_startup_workers == 0
     assert parallel_workers == 2
     assert len(low_startup) == len(parallel)
     for (low_startup_images, low_startup_targets), (parallel_images, parallel_targets) in zip(
@@ -233,16 +282,9 @@ def test_parallel_validation_preserves_images_targets_and_order(
             )
 
 
-def test_a_tiny_complete_run_keeps_the_low_startup_route(
-    tiled_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.usefixtures("worker_host")
+def test_a_tiny_complete_run_keeps_the_low_startup_route(tiled_root: Path, tmp_path: Path) -> None:
     """A complete custom split does not start a pool with at most one batch per worker."""
-    monkeypatch.setattr(datamodule_module.os, "cpu_count", lambda: 2)
-    monkeypatch.setattr(
-        datamodule_module.os,
-        "statvfs",
-        lambda _path: SimpleNamespace(f_bavail=64 * 1024 * 1024, f_frsize=1),
-    )
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
     output = tmp_path / "tiny-complete.json"
 
@@ -261,7 +303,7 @@ def test_a_tiny_complete_run_keeps_the_low_startup_route(
         )
         == 0
     )
-    assert json.loads(output.read_text())["info"]["workers"] in {0, 1}
+    assert json.loads(output.read_text())["info"]["workers"] == 0
 
 
 @pytest.mark.parametrize(
@@ -289,8 +331,9 @@ def test_a_complete_run_sets_the_pool_aside_until_batches_outnumber_workers(
     assert evaluate._keeps_low_startup_route(batches=batches, workers=workers) is expected
 
 
+@pytest.mark.usefixtures("worker_host")
 def test_run_through_real_workers_matches_run_through_the_low_startup_route(
-    parallel_tiled_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    parallel_tiled_root: Path, tmp_path: Path
 ) -> None:
     """The public complete run keeps its report under a reused real worker pool.
 
@@ -298,12 +341,6 @@ def test_run_through_real_workers_matches_run_through_the_low_startup_route(
     selects two workers at batch two. Twelve tiles give each worker three batches;
     a positive limit covers the same complete input through the low-startup route.
     """
-    monkeypatch.setattr(datamodule_module.os, "cpu_count", lambda: 2)
-    monkeypatch.setattr(
-        datamodule_module.os,
-        "statvfs",
-        lambda _path: SimpleNamespace(f_bavail=64 * 1024 * 1024, f_frsize=1),
-    )
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
     common = {
         "module": module,
@@ -324,7 +361,7 @@ def test_run_through_real_workers_matches_run_through_the_low_startup_route(
     low_startup_report = json.loads(low_startup_output.read_text())
 
     assert parallel_report["info"]["workers"] == 2
-    assert low_startup_report["info"]["workers"] in {0, 1}
+    assert low_startup_report["info"]["workers"] == 0
     for report in (parallel_report, low_startup_report):
         report.pop("seconds")
         report["info"].pop("workers")
