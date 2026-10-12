@@ -106,10 +106,12 @@ def build_datamodule(
         batch_size: Images per forward pass.
         variant: Scale letter, which selects the augmentation policy the val loader
             does not use.
-        num_workers: Loader worker count. ``None`` uses the datamodule's automatic,
-            image-size-aware policy. The default ``0`` preserves this helper's
-            low-startup validation route. Linux's inherited-validation shared-memory
-            guard resolves that route to one worker; hosts without ``/dev/shm`` keep zero.
+        num_workers: Loader worker count, forwarded to the val loader as its own
+            ``val_num_workers`` so the count named here is the count it runs: ``0``
+            reads in-process on every host, and a positive count is used as stated.
+            ``None`` hands the choice to the datamodule's automatic, image-size- and
+            shared-memory-aware policy. The default ``0`` is this helper's low-startup
+            route.
 
     Returns:
         A datamodule set up for the oriented val split.
@@ -130,6 +132,10 @@ def build_datamodule(
         train_ann_file=ann_file,
         val_images_dir=images_dir,
         val_ann_file=ann_file,
+        # Named for the val loader too: left unset, an explicit 0 counts as inherited
+        # from num_workers and the datamodule's shared-memory floor raises it to one
+        # worker wherever /dev/shm exists.
+        val_num_workers=num_workers,
         rotated_targets=True,
     )
 
