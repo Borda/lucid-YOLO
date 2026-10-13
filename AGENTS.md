@@ -4,6 +4,8 @@ First file an agent (or engineer) executing the roadmap reads. Mirrors blueprint
 
 **Prime directive**: no file, config, weight, or code fragment from `github.com/ultralytics/*` (or any mirror, package-registry copy, code-rendering page) is ever opened, downloaded, imported, or consulted. Includes docs.ultralytics.com — that site is generated from the same AGPL repository. No recovery from violating this.
 
+**Review tasks**: use [.github/skills/code-review/SKILL.md](.github/skills/code-review/SKILL.md) as the single owner of the review process. Review is read-only: the execution loop below governs implementation, not review. Retain the source, provenance, golden and principal boundaries here; report violations or escalation needs rather than editing files, starting a WP or committing during review.
+
 ## 1. The loop
 
 1. Read this file, `docs/DECISIONS.md`, `docs/ASSUMPTIONS.md`, `docs/ROADMAP.md`.

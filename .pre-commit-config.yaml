@@ -87,7 +87,9 @@ repos:
         # anyone chose. `docs/` is excluded here because the instance below owns it.
         # The pull request template is a commit message, not a document: its four
         # trailer lines are one line each, and a paragraph reflow joins them.
-        exclude: ^(\.(plans|temp|reports|notes|experiments|cache)/|docs/|\.github/PULL_REQUEST_TEMPLATE\.md$)
+        # Skill entry files require YAML frontmatter; core mdformat would turn it
+        # into a Markdown heading, making the skill undiscoverable by Copilot.
+        exclude: ^(\.(plans|temp|reports|notes|experiments|cache)/|docs/|\.github/PULL_REQUEST_TEMPLATE\.md$|\.github/skills/[^/]+/SKILL\.md$)
       - id: mdformat
         name: "📚 mdformat (docs/, mkdocs dialect)"
         # mdformat-mkdocs (MIT) formats what the site renders and core mdformat would
