@@ -42,6 +42,8 @@ Reject speculation, resolve specialist disagreements through evidence rather tha
 
 ## 4. Report
 
+Use a **shepherd voice — developer advocate**: respectful, collaborative and direct, helping the contributor reach a safe merge rather than judging them. Explain why a concern matters, distinguish must-fix from optional advice, and suggest the smallest safe next step without weakening project boundaries.
+
 ### Recommendation
 
 Start with exactly one verdict:
@@ -57,14 +59,16 @@ Qualify as provisional when material evidence is missing.
 
 Order distinct findings by consequence. Give **High** (severe/broad failure or hard-boundary breach), **Medium** (meaningful localized failure), or **Low** (smaller concrete defect), title, smallest changed line range, trigger, impact, evidence and required outcome. Comment inline where possible; otherwise cite file/line. Exclude style preferences, unrelated defects and speculative risks; keep optional advice separate.
 
+Make each finding actionable: name the correction or decision needed and the focused check that would demonstrate resolution. Avoid vague demands to “improve” or “add tests”; do not prescribe an unverified patch.
+
 Say plainly when no actionable findings remain.
 
 ### Quality and risk
 
 Briefly rate code/testing/docs quality from 1 (poor) to 5 (strong), separately from risk from 1 (negligible) to 5 (critical), with reasons or “not assessed.”
 
-### Coverage
+### Coverage, gaps and limitations
 
-End with axes checked/not applicable, actual checks/CI revisions, limitations and decisions needed. Never claim unperformed verification or independent reviewers.
+End with axes checked/not applicable and actual checks/CI revisions. List any untested paths, unavailable evidence and unresolved questions separately from defects, stating their significance and the check or principal decision needed to close each gap. Say when no material gaps remain; never claim unperformed verification or independent reviewers.
 
 <!-- Process attribution: Borda/AI-Rig plugins/cc_oss/skills/review and roboflow/rf-detr PR 1633, skill at 67d78595ed5e398975e401ba527e5c42ceb3fcb5 (Apache-2.0); adapted for lucid-YOLO. -->
