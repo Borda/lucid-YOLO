@@ -23,6 +23,70 @@ from torch import Tensor
 _COEFFS: tuple[float, float, float] = (3.4445, -4.7750, 2.0315)
 
 
+def _orthogonalize_batched(matrices: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
+    """Orthogonalize an exact-shape leading batch with native batched products.
+
+    This is the three-dimensional counterpart of :func:`orthogonalize` for the
+    optimizer's exact-shape buckets. Each ``matrices[index]`` keeps an independent
+    Frobenius normalization and follows the same quintic iteration, but
+    :func:`torch.baddbmm` submits each polynomial and update as one batched operation
+    instead of asking :func:`torch.vmap` to dispatch the scalar expression once per
+    slice. The different reduction schedule can move the last few floating-point
+    bits; it does not change the formula, coefficients, step count or scale.
+
+    Args:
+        matrices: A 3D ``(batch, rows, columns)`` tensor whose slices have one shape.
+        steps: Number of Newton--Schulz iterations to run.
+        eps: Constant added to each slice's Frobenius norm before normalization.
+
+    Returns:
+        A tensor with the same shape and dtype as ``matrices``.
+
+    Raises:
+        ValueError: If ``matrices`` is not 3D, or if ``steps`` is below 1.
+
+    Examples:
+        Each slice orthogonalizes independently, matching :func:`orthogonalize`'s
+        own guarantee that no singular value is left blown up:
+
+        >>> import torch
+        >>> _ = torch.manual_seed(0)
+        >>> q = _orthogonalize_batched(torch.randn(3, 64, 64))
+        >>> q.shape
+        torch.Size([3, 64, 64])
+        >>> bool(torch.linalg.svdvals(q).max() < 1.5)  # never blown up, any slice
+        True
+
+        A 2D input is refused -- the leading batch axis is mandatory:
+
+        >>> _orthogonalize_batched(torch.randn(4, 4))
+        Traceback (most recent call last):
+            ...
+        ValueError: _orthogonalize_batched expects a 3D tensor, got a 2D tensor
+    """
+    if matrices.ndim != 3:
+        msg = f"_orthogonalize_batched expects a 3D tensor, got a {matrices.ndim}D tensor"
+        raise ValueError(msg)
+    if steps < 1:
+        msg = f"_orthogonalize_batched needs steps >= 1 to iterate, got steps={steps}"
+        raise ValueError(msg)
+
+    in_dtype = matrices.dtype
+    a, b, c = _COEFFS
+    x = matrices.to(torch.promote_types(in_dtype, torch.float32))
+    transposed = x.shape[-2] > x.shape[-1]
+    if transposed:
+        x = x.transpose(-2, -1)
+    x = x / (torch.linalg.matrix_norm(x, dim=(-2, -1), keepdim=True) + eps)
+    for _ in range(steps):
+        gram = x @ x.transpose(-2, -1)
+        polynomial = torch.baddbmm(gram, gram, gram, beta=b, alpha=c)
+        x = torch.baddbmm(x, polynomial, x, beta=a)
+    if transposed:
+        x = x.transpose(-2, -1)
+    return x.to(in_dtype)
+
+
 def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
     """Approximate the orthogonal factor ``U V^T`` of a 2D matrix.
 
@@ -56,19 +120,6 @@ def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
     -- the caller (the optimizer) is expected to wrap the call in
     ``torch.no_grad()``. A zero matrix orthogonalizes to zeros without producing
     NaNs.
-
-    Vmap safety: callers (:mod:`lucid_yolo.optim.musgd`) may map this function
-    with ``torch.vmap`` to batch it over a leading axis, treating each ``matrix``
-    as an independent 2D slice. That is only correct because every operation in
-    this function is either elementwise (``x / scalar``) or scoped to the final
-    two axes (``torch.linalg.matrix_norm``, ``x @ x.T``, ``x.T``). Any future
-    change must preserve that: a reduction that is not scoped to
-    ``dim=(-2, -1)`` -- for example swapping ``torch.linalg.matrix_norm(x)`` for
-    ``x.norm()`` or bare ``torch.norm(x)`` -- would reduce across the batch axis
-    introduced by ``vmap`` too, silently giving the wrong answer for every
-    multi-element vmap batch while still passing a single-instance test.
-    ``tests/optim/test_newton_schulz.py`` carries a direct vmap-vs-loop
-    regression test for this invariant.
 
     Args:
         matrix: A 2D tensor of any floating-point dtype.

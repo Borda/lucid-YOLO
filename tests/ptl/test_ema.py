@@ -240,6 +240,110 @@ def test_shadow_updates(num_steps: int) -> None:
     assert torch.allclose(callback._shadow["weight"], expected)
 
 
+def test_shadow_update_uses_one_foreach_call_per_dtype(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Floating tensors are grouped by dtype and each group reaches one interpolation call."""
+
+    class MixedDtypeModule(LightningModule):
+        """Minimal module carrying two dtype buckets for the EMA update."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.float_weight = torch.nn.Parameter(torch.ones(3, dtype=torch.float32))
+            self.double_weight = torch.nn.Parameter(torch.ones(2, dtype=torch.float64))
+
+    module = MixedDtypeModule()
+    callback = _fitted_callback(module, decay=0.9, tau=1)
+    calls: list[tuple[int, torch.dtype]] = []
+    real = torch._foreach_lerp_
+
+    def recording(shadows: list[Tensor], live_tensors: list[Tensor], weight: float) -> list[Tensor]:
+        calls.append((len(shadows), shadows[0].dtype))
+        return real(shadows, live_tensors, weight)
+
+    monkeypatch.setattr(torch, "_foreach_lerp_", recording)
+    _batch_end(callback, module, _StepTrainer())
+
+    assert sorted(calls, key=lambda call: str(call[1])) == [(1, torch.float32), (1, torch.float64)]
+
+
+def test_shadow_update_tolerates_a_restored_dtype_mismatch() -> None:
+    """A shadow whose dtype differs from the live parameter's still blends, cast to the shadow's dtype.
+
+    :meth:`~lucid_yolo.ptl.callbacks.EMACallback.load_state_dict` keeps whatever dtype the
+    checkpoint carried and only :meth:`~lucid_yolo.ptl.callbacks.EMACallback.on_fit_start`
+    moves the shadow's device, never its dtype — so a module resumed under a different
+    precision than the one its EMA checkpoint was written under reaches
+    :meth:`on_train_batch_end` with a shadow/live dtype pair ``torch._foreach_lerp_`` has never
+    seen matching. The scalar recurrence it replaced, ``shadow.add_(live, alpha=...)``,
+    tolerated the pair via its own implicit cast into ``shadow``'s dtype.
+    """
+    module = _TinyEMAModule()
+    callback = _fitted_callback(module, decay=0.9, tau=1)
+    assert callback._shadow is not None
+    callback._shadow = {name: value.double() for name, value in callback._shadow.items()}
+    expected = {name: value.clone() for name, value in callback._shadow.items()}
+
+    _batch_end(callback, module, _StepTrainer())
+
+    decay = callback._decay_at(1)
+    for name, live in callback._ema_tensors(module):
+        expected[name].mul_(decay).add_(live.detach().double(), alpha=1.0 - decay)
+    for name, shadow in callback._shadow.items():
+        assert shadow.dtype == torch.float64
+        torch.testing.assert_close(shadow, expected[name])
+
+
+def test_foreach_shadow_trajectory_matches_scalar_recurrence() -> None:
+    """The fused interpolation stays close to the original scalar recurrence over 100 updates."""
+    module = _TinyEMAModule()
+    callback = _fitted_callback(module, decay=0.9999, tau=2000)
+    assert callback._shadow is not None
+    expected = {name: value.clone() for name, value in callback._shadow.items()}
+    trainer = _StepTrainer()
+
+    for step in range(1, 101):
+        with torch.no_grad():
+            for index, (_, live) in enumerate(callback._ema_tensors(module), start=1):
+                live.copy_(torch.full_like(live, step / (index + 3)))
+        _batch_end(callback, module, trainer)
+        decay = callback._decay_at(step)
+        for name, live in callback._ema_tensors(module):
+            expected[name].mul_(decay).add_(live.detach(), alpha=1.0 - decay)
+
+    for name, shadow in callback._shadow.items():
+        torch.testing.assert_close(shadow, expected[name], rtol=2e-6, atol=2e-7)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="the production foreach path needs CUDA")
+def test_foreach_shadow_runs_on_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The unwidened CUDA callback reaches one foreach bucket and matches the scalar formula."""
+    module = _TinyEMAModule().cuda()
+    callback = _fitted_callback(module, decay=0.9, tau=1)
+    assert callback._shadow is not None
+    expected = {name: value.clone() for name, value in callback._shadow.items()}
+    with torch.no_grad():
+        for _, live in callback._ema_tensors(module):
+            live.add_(1.0)
+    decay = callback._decay_at(1)
+    for name, live in callback._ema_tensors(module):
+        expected[name].mul_(decay).add_(live.detach(), alpha=1.0 - decay)
+    calls = 0
+    real = torch._foreach_lerp_
+
+    def recording(shadows: list[Tensor], live_tensors: list[Tensor], weight: float) -> list[Tensor]:
+        nonlocal calls
+        calls += 1
+        return real(shadows, live_tensors, weight)
+
+    monkeypatch.setattr(torch, "_foreach_lerp_", recording)
+    _batch_end(callback, module, _StepTrainer())
+
+    assert calls == 1
+    for name, shadow in callback._shadow.items():
+        torch.testing.assert_close(shadow, expected[name], rtol=2e-6, atol=2e-7)
+
+
 def test_warmup_ramp_starts_far_below_nominal_decay() -> None:
     """The first-step effective decay is a small fraction of the nominal decay."""
     callback = EMACallback(decay=0.9999, tau=2000)

@@ -164,7 +164,9 @@ class EMACallback(Callback):
 
     ``d_t = decay * (1 - exp(-t / tau))``     ``shadow <- d_t * shadow + (1 - d_t) * live``
 
-    where ``t`` is the number of updates performed so far. The ramp starts the effective
+    where ``t`` is the number of updates performed so far. Tensors sharing a device and
+    dtype are submitted to one foreach interpolation; this is the same recurrence with
+    fewer accelerator launches. The ramp starts the effective
     decay near zero so the early shadow tracks the fast-moving weights closely, then
     relaxes toward the nominal ``decay`` as training settles (blueprint D4). Around the
     validation loop the callback swaps the shadow in (:meth:`on_validation_start`) and the
@@ -314,8 +316,19 @@ class EMACallback(Callback):
         self._num_updates += 1
         decay = self._decay_at(self._num_updates)
         with torch.no_grad():
+            buckets: dict[tuple[torch.device, torch.dtype], tuple[list[Tensor], list[Tensor]]] = {}
             for name, live in self._ema_tensors(pl_module):
-                self._shadow[name].mul_(decay).add_(live.detach(), alpha=1.0 - decay)
+                shadow = self._shadow[name]
+                shadows, live_tensors = buckets.setdefault((shadow.device, shadow.dtype), ([], []))
+                shadows.append(shadow)
+                # Bucketed by the shadow's own dtype: a shadow restored from a checkpoint saved
+                # under a different precision than the live module's current one (the scalar
+                # ``shadow.add_(live, alpha=...)`` it replaces tolerates that via its own implicit
+                # cast into ``shadow``'s dtype) must cast ``live`` the same way, or
+                # ``torch._foreach_lerp_`` raises on the dtype mismatch instead of casting it.
+                live_tensors.append(live.detach().to(dtype=shadow.dtype))
+            for shadows, live_tensors in buckets.values():
+                torch._foreach_lerp_(shadows, live_tensors, 1.0 - decay)
 
     def on_validation_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Stash the live weights and load the shadow so validation runs on the EMA.

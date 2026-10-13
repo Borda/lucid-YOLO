@@ -18,6 +18,7 @@ import pytest
 import torch
 
 from lucid_yolo.optim import MuSGD, orthogonalize
+from lucid_yolo.optim.newton_schulz import _orthogonalize_batched
 
 #: Whether this torch exposes ``Tensor.grad_dtype``, the supported way to hold a gradient in
 #: a dtype other than its parameter's. Below it, assigning such a gradient is refused
@@ -245,8 +246,8 @@ class TestExactShapeBatching:
     """Equal-shape matrices share one Newton--Schulz call without sharing state.
 
     Shape, both dtypes and device are the complete batching key: every operation
-    inside :meth:`MuSGD._parameter_update` is elementwise or acts on the final two
-    matrix axes, so a leading batch axis cannot mix parameters that agree on them.
+    inside :meth:`MuSGD._batched_parameter_update` is elementwise or acts on the
+    final two matrix axes, so a leading batch axis cannot mix parameters that agree.
     Both dtypes, because the gradients are stacked as well as the parameters and
     the two need not match. These tests compare the result with separate
     per-parameter calls and count the production call boundary, since values alone
@@ -259,15 +260,21 @@ class TestExactShapeBatching:
     """
 
     def _count_orthogonalize_calls(self, monkeypatch: pytest.MonkeyPatch) -> list[tuple[torch.Size, torch.dtype]]:
-        """Install a recording wrapper around the real orthogonalization."""
+        """Record scalar and native-batch orthogonalizations at their logical matrix shape."""
         calls: list[tuple[torch.Size, torch.dtype]] = []
         real = orthogonalize
+        real_batched = _orthogonalize_batched
 
         def recording(matrix: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
             calls.append((matrix.shape, matrix.dtype))
             return real(matrix, steps=steps, eps=eps)
 
+        def recording_batched(matrices: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
+            calls.append((matrices.shape[1:], matrices.dtype))
+            return real_batched(matrices, steps=steps, eps=eps)
+
         monkeypatch.setattr("lucid_yolo.optim.musgd.orthogonalize", recording)
+        monkeypatch.setattr("lucid_yolo.optim.musgd._orthogonalize_batched", recording_batched)
         return calls
 
     @pytest.mark.usefixtures("batching_on_every_device")
@@ -464,53 +471,74 @@ class TestExactShapeBatching:
             expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
 
-    def _count_vmap_calls(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
-        """Install a counting stand-in for ``torch.vmap`` and return its one-element tally."""
+    def _count_native_batch_calls(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+        """Install a counting wrapper around the native batched orthogonalization."""
         tally = [0]
-        real = torch.vmap
+        real = _orthogonalize_batched
 
-        def counting(*args: object, **kwargs: object) -> object:
+        def counting(matrices: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
             tally[0] += 1
-            return real(*args, **kwargs)  # type: ignore[arg-type]
+            return real(matrices, steps=steps, eps=eps)
 
-        monkeypatch.setattr(torch, "vmap", counting)
+        monkeypatch.setattr("lucid_yolo.optim.musgd._orthogonalize_batched", counting)
         return tally
 
     @pytest.mark.usefixtures("batching_on_every_device")
     @pytest.mark.parametrize(
-        ("matrix_count", "expected_maps"),
+        ("matrix_count", "expected_batches"),
         [
             pytest.param(1, 0, id="lone-matrix-calls-directly"),
-            pytest.param(2, 1, id="two-equal-matrices-take-one-map"),
+            pytest.param(2, 1, id="two-equal-matrices-take-one-batch"),
         ],
     )
-    def test_a_bucket_of_one_is_called_rather_than_mapped(
-        self, monkeypatch: pytest.MonkeyPatch, matrix_count: int, expected_maps: int
+    def test_a_bucket_of_one_is_called_rather_than_batched(
+        self, monkeypatch: pytest.MonkeyPatch, matrix_count: int, expected_batches: int
     ) -> None:
-        """A bucket holding one parameter reaches the update directly; two of them take one map.
+        """A bucket holding one parameter reaches the update directly; two take one batch.
 
-        A single-element map has nothing to batch and is not free: it pays a stack,
-        a trace and an unbind to wrap the one call it makes, and it returns a value
+        A single-element batch has nothing to combine and is not free: it pays a stack
+        and an unbind to wrap the one call it makes, and it returns a value
         that is no longer bit-for-bit the direct call's. Ten of the n-scale
         detector's buckets hold one parameter, so this is the common case rather
-        than the corner one, and the map count is what separates the two paths --
+        than the corner one, and the batch count is what separates the two paths --
         the recorded orthogonalization shape is the same either way.
         """
         lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
         matrices = [_param_with_grad(6, 4) for _ in range(matrix_count)]
         starts = [param.detach().clone() for param in matrices]
         grads = [param.grad.clone() for param in matrices]
-        maps = self._count_vmap_calls(monkeypatch)
+        batches = self._count_native_batch_calls(monkeypatch)
         opt = MuSGD(matrices, lr=lr)
 
         opt.step()
 
-        assert maps[0] == expected_maps
+        assert batches[0] == expected_batches
         for param, start, grad in zip(matrices, starts, grads, strict=True):
             nesterov = (1.0 + momentum) * grad
             expected_update = w_muon * _expected_muon_update(nesterov, ns_steps)
             expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
+
+    @pytest.mark.gpu
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="the production batching gate is CUDA-only")
+    def test_native_batch_runs_through_the_production_cuda_gate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Two equal CUDA matrices take one native batch without widening the device gate."""
+        matrices = [torch.nn.Parameter(torch.randn(6, 4, device="cuda")) for _ in range(2)]
+        starts = [matrix.detach().clone() for matrix in matrices]
+        grads = [torch.randn_like(matrix) for matrix in matrices]
+        for matrix, grad in zip(matrices, grads, strict=True):
+            matrix.grad = grad.clone()
+        batches = self._count_native_batch_calls(monkeypatch)
+        opt = MuSGD(matrices, lr=0.05)
+
+        opt.step()
+
+        assert batches == [1]
+        for matrix, start, grad in zip(matrices, starts, grads, strict=True):
+            nesterov = 1.95 * grad
+            expected = _expected_muon_update(nesterov, ns_steps=5)
+            expected.mul_(0.5).add_(nesterov, alpha=0.5).add_(start, alpha=5e-4)
+            torch.testing.assert_close(matrix.detach(), start - 0.05 * expected, rtol=2e-5, atol=2e-6)
 
     def test_a_non_batching_device_keeps_the_per_parameter_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Three equal CPU kernels take three separate orthogonalizations, at the same values.
@@ -662,14 +690,14 @@ class TestExactShapeBatching:
 
         Every other batching test in this class compares a single step. The PR
         introducing exact-shape batching reports that floating-point
-        reassociation inside ``torch.vmap`` grows the gap between batched and
+        reassociation inside the batched products grows the gap between batched and
         unbatched runs with step count -- "max difference from the old loop
         after 60 local CUDA steps is 3.814697e-06; after 35 CPU steps it is
         1.192093e-06" -- so a single-step comparison cannot catch a regression
         that only compounds over a real training run. This test runs the
         production batched path (``opt.step()`` on equal-shape matrices) and an
-        unbatched reference (direct :meth:`MuSGD._parameter_update` calls, no
-        ``vmap``) side by side for 40 steps with the same fixed per-parameter
+        unbatched reference (direct :meth:`MuSGD._parameter_update` calls) side by
+        side for 40 steps with the same fixed per-parameter
         gradients each step, and asserts the worst per-step divergence never
         exceeds ``1e-5`` -- a bound comfortably above the PR's own reported
         1.192093e-06-after-35-CPU-steps figure, tight enough to catch a

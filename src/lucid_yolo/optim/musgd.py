@@ -41,7 +41,7 @@ import torch
 from torch import Tensor
 from torch.optim.optimizer import Optimizer
 
-from lucid_yolo.optim.newton_schulz import orthogonalize
+from lucid_yolo.optim.newton_schulz import _orthogonalize_batched, orthogonalize
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -205,25 +205,25 @@ class MuSGD(Optimizer):
         """Apply one MuSGD update, batching matrix parameters with the same exact shape.
 
         The n-scale detector carries 127 matrix parameters but only 41 exact
-        :class:`_BucketKey` values. Calling :meth:`_parameter_update` through
-        :func:`torch.vmap` once per key turns each Newton--Schulz product into a
-        batched product, while the function inside the map keeps the same
-        normalization, requested iteration count, branch weights and decay.
+        :class:`_BucketKey` values. Native batched matrix products once per key
+        replace the scalar products :func:`torch.vmap` dispatched for every slice,
+        while keeping the same normalization, requested iteration count, branch
+        weights and decay.
         Vector parameters and the ``w_muon == 0`` arm stay on their scalar path;
         :meth:`_is_batchable_matrix` is what says which parameters those are, and
         it says it for :meth:`_parameter_update` too.
 
-        The map is taken only where it pays (:data:`_BATCHED_DEVICE_TYPES`). One
+        The batched path is taken only where it pays (:data:`_BATCHED_DEVICE_TYPES`). One
         large kernel launch in place of many is a win where launch overhead
         dominates the step and a loss where it does not, and the measurement says
-        which is which per backend rather than per shape: MPS ran the mapped path
+        which is which per backend rather than per shape: MPS ran the batched path
         at 108.45 ms per optimizer step against 60.99 ms for the per-parameter
         loop. Every parameter on a device outside that set keeps the loop.
 
-        A bucket holding one parameter is called directly rather than mapped. There
-        is nothing to combine, the stack-map-unbind round trip costs more than the
+        A bucket holding one parameter is called directly rather than batched. There
+        is nothing to combine, the stack-batch-unbind round trip costs more than the
         call it wraps, and the direct call is the one that stays bit-for-bit what an
-        unbatched run produced -- a mapped single ``(4, 21, 1, 1)`` differed from it
+        unbatched run produced -- a single-element batch ``(4, 21, 1, 1)`` differed from it
         by 4.77e-7. Ten of the n-scale detector's buckets hold one parameter.
 
         Each update is applied where it resolves rather than collected for a final
@@ -252,9 +252,27 @@ class MuSGD(Optimizer):
                 continue
             params = torch.stack([pending.param for pending in bucket])
             grads = torch.stack([pending.nesterov_grad for pending in bucket])
-            batched = torch.vmap(lambda param, grad: self._parameter_update(param, grad, group))(params, grads)
+            batched = self._batched_parameter_update(params, grads, group)
             for pending, bucket_update in zip(bucket, batched.unbind(), strict=True):
                 pending.param.add_(bucket_update, alpha=-lr)
+
+    @staticmethod
+    def _batched_parameter_update(params: Tensor, grads: Tensor, group: dict[str, Any]) -> Tensor:
+        """Evaluate the matrix update over an equal-shape leading batch.
+
+        The scalar path stays the reference for singletons and non-CUDA devices.
+        This path only changes how the same Newton--Schulz polynomial is scheduled:
+        each product is a native batched product rather than a scalar product inside
+        ``vmap``.
+        """
+        matrices = grads.reshape(grads.shape[0], grads.shape[1], -1)
+        rows, cols = matrices.shape[-2:]
+        orthogonal = _orthogonalize_batched(matrices, steps=group["ns_steps"])
+        muon = orthogonal.reshape_as(grads).mul(_MUON_RMS_SCALE * math.sqrt(max(rows, cols)))
+        update = muon.mul(group["w_muon"]).add(grads, alpha=group["w_sgd"])
+        if group["weight_decay"] != 0.0:
+            update = update.add(params, alpha=group["weight_decay"])
+        return update
 
     @staticmethod
     def _is_batchable_matrix(param: Tensor, group: dict[str, Any]) -> bool:
@@ -314,7 +332,7 @@ class MuSGD(Optimizer):
         the work rather than merely discarding it. The expression inside this
         function remains untouched. Before exact-shape batching, this paragraph
         also promised that a ``w_muon > 0`` run was bit-for-bit the run it was.
-        :meth:`_step_group` now maps the expression over equal-shape matrices, so
+        :meth:`_step_group` now batches the expression over equal-shape matrices, so
         that scheduling promise no longer holds even though the formula does.
 
         One of the remaining behavioural differences is confined to the arm that

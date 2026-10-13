@@ -14,6 +14,7 @@ import pytest
 import torch
 
 from lucid_yolo.optim import orthogonalize
+from lucid_yolo.optim.newton_schulz import _orthogonalize_batched
 
 
 @pytest.fixture(autouse=True)
@@ -197,29 +198,71 @@ class TestEdgeCases:
         assert torch.isfinite(result).all()
 
 
-class TestVmapSafety:
-    """``orthogonalize`` is mapped under ``torch.vmap`` by the Muon branch of MuSGD.
+class TestNativeBatch:
+    """Native batched products keep every matrix slice independent."""
 
-    That is only correct if every reduction inside stays elementwise or scoped to
-    the final two axes rather than reducing over the batch axis ``vmap``
-    introduces. This exercises the contract directly, independent of
-    ``tests/optim/test_musgd.py``'s ``TestExactShapeBatching``.
-    """
-
-    def test_vmap_matches_per_matrix_loop(self) -> None:
-        """Mapping over a batch of same-shape matrices matches a per-matrix loop.
-
-        A reduction that silently collapsed over the batch axis (e.g.
-        ``x.norm()`` in place of the dim-scoped ``torch.linalg.matrix_norm(x)``)
-        would still pass every single-instance test in this file yet diverge here
-        as soon as the batch holds more than one matrix.
-        """
-        batch = torch.stack([_random_conditioned(4, 4, torch.float32) for _ in range(3)])
+    @pytest.mark.parametrize(
+        "shape",
+        [
+            pytest.param((4, 4), id="square"),
+            pytest.param((4, 7), id="wide"),
+            pytest.param((7, 4), id="tall"),
+        ],
+    )
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+    def test_matches_per_matrix_loop(self, shape: tuple[int, int], dtype: torch.dtype) -> None:
+        """A native batch matches independent scalar iterations across shapes and dtypes."""
+        batch = torch.stack([_random_conditioned(*shape, dtype) for _ in range(3)])
 
         looped = torch.stack([orthogonalize(matrix) for matrix in batch])
-        vmapped = torch.vmap(orthogonalize)(batch)
+        batched = _orthogonalize_batched(batch)
 
-        torch.testing.assert_close(vmapped, looped)
+        torch.testing.assert_close(batched, looped, rtol=2e-6, atol=2e-6)
+
+    def test_normalizes_each_slice_independently(self) -> None:
+        """Scaling one slice cannot change a neighbour's answer."""
+        batch = torch.stack([torch.eye(4), torch.eye(4) * 1e4])
+
+        result = _orthogonalize_batched(batch)
+
+        torch.testing.assert_close(result[0], result[1])
+
+    @pytest.mark.parametrize("shape", [(4, 4), (2, 3, 4, 5)])
+    def test_non_3d_raises(self, shape: tuple[int, ...]) -> None:
+        """Only a leading batch plus two matrix axes is accepted."""
+        with pytest.raises(ValueError, match="3D tensor"):
+            _orthogonalize_batched(torch.randn(*shape))
+
+    @pytest.mark.parametrize("steps", [0, -1])
+    def test_steps_below_one_raises(self, steps: int) -> None:
+        """A batch cannot silently skip the iteration."""
+        with pytest.raises(ValueError, match="steps"):
+            _orthogonalize_batched(torch.randn(2, 4, 4), steps=steps)
+
+    def test_reaches_baddbmm_twice_per_step(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The native batch dispatches through ``torch.baddbmm``, not a per-slice loop.
+
+        :meth:`test_matches_per_matrix_loop` pins the output against the scalar
+        :func:`orthogonalize` loop it replaces, but a silent reversion to ``torch.vmap``
+        dispatching that same scalar expression would still match it value for value.
+        This pins the mechanism directly: each of ``steps`` iterations calls
+        :func:`torch.baddbmm` exactly twice (the polynomial, then the update), so a
+        reversion that keeps the public signature and the numbers right is still caught.
+        """
+        calls = 0
+        real = torch.baddbmm
+
+        def counting(*args: object, **kwargs: object) -> torch.Tensor:
+            nonlocal calls
+            calls += 1
+            return real(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(torch, "baddbmm", counting)
+        batch = torch.stack([_random_conditioned(4, 4, torch.float32) for _ in range(3)])
+
+        _orthogonalize_batched(batch, steps=4)
+
+        assert calls == 8
 
 
 class TestInputValidation:
