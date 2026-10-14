@@ -65,12 +65,21 @@ Not an external source and not admissible as one: this row exists because the re
 | -- | -- | -- |
 | R37 | The governing blueprint, v1.5 (2026-07-10), authored by this project's principal (Jirka Borovec, the copyright holder `NOTICE` names). **Unpublished and non-public**, held outside this repository and never distributed with it; it carries no licence grant, so no part of it is redistributable and nothing in it may be quoted here beyond what a decision record already restates. | The project's own specification, not a method source. It states the layout (sec. 7), the variant table (sec. 5.1, itself sourced from R3 Fig. 1), the block stack (sec. 5.2, 5.3), the loss composition (sec. 5.7), the augmentation recipe (sec. 5.9), the dataset layout (sec. 14.3) and D1–D11, which `docs/DECISIONS.md` transcribes. Cited from code by section: 133 `blueprint` references across 36 files under `src/`, 107 of them in the `blueprint sec. N` form (measured 2026-09-05). **Every method claim it carries is downstream of R1–R36** — where a blueprint section and a paper disagree the paper governs, and where the blueprint is the only source the choice is an assumption and belongs in `ASSUMPTIONS.md`. Registered by WP-175; the amendments made after it are D12. |
 
+### Review-process documentation
+
+These references inform agent workflow only, never model implementation or a reproduced method. D26 records the bounded principal decision; registration does not assert that earlier consultation was registered at the time.
+
+| ID | Reference | Role |
+| -- | -- | -- |
+| R38 | AI-Rig, github.com/Borda/AI-Rig, Apache-2.0; review-process guidance attributed to `plugins/cc_oss/skills/review` | Reviewer axes, candidate refutation and report guidance for the repository review skill only. Apache-2.0 verified 2026-10-14 from the local repository `LICENSE` and the installed Codex Rig 0.35.6 `LICENSE`. No detection-implementation lineage or model-method role; no external detection code copied. The historical adaptation is identified by the skill attribution; its original consultation date and exact source revision are not recorded. Admitted as process documentation by D26. |
+
 ### Placeholders
 
 | ID | Status |
 | -- | -- |
 | R15 | Withdrawn (blueprint v1.4). Formerly the prose pages of docs.ultralytics.com; removed because the site is generated from the AGPL repository. Retained as a numbered placeholder so R16–R21 ids stay stable. No page was ever consulted. |
 | R19 | Legal-evidence citation only, never an implementation source: Ultralytics GitHub org discussion 14008 (public, non-code) stating licensing terms "apply to the specific implementation of the YOLO models, not the conceptual model itself." Collected at planning time by the planning role. |
+| R39 | RF-DETR review skill attributed to roboflow/rf-detr PR 1633, revision `67d78595ed5e398975e401ba527e5c42ceb3fcb5`. **Pending, not admitted.** Historical process adaptation named in `.github/skills/code-review/SKILL.md`; original consultation date unknown. That attribution states Apache-2.0, and R36 retains repository-level Apache-2.0 evidence, but neither establishes the exact-revision licence here. The licence-only GitHub reader request was rejected before access on 2026-10-14, so exact-revision verification remains open. A verified licence and principal-approved process-use scope are required before admission or further consultation. D13's detection-code copying prohibition remains unchanged. |
 
 ## 🏷️ Naming evidence record
 
