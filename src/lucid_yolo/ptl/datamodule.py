@@ -960,6 +960,13 @@ class DetectionDataModule(LightningDataModule):
             to ``False`` (WP-076): respawning costs seconds per epoch while a
             persistent pool accumulates per-worker memory for the whole run —
             the observed slow-creep OOM on long containerized runs.
+        cache_train_images: Decode the training split once during :meth:`setup`
+            and retain read-only RGB ``uint8`` tensors. Defaults to ``False``;
+            enabling it trades the uncompressed split size in host RAM for removing
+            image decode from every augmented draw in every epoch. :meth:`setup`
+            only pays this cost for a ``"fit"``/``None`` stage, so a
+            ``"validate"``/``"test"``/``"predict"`` call never decodes the train
+            split it will not read.
         rotated_targets: Read every annotation's four-point ring as a rotated box
             (:class:`~lucid_yolo.data.coco.CocoDetectionDataset`'s ``oriented`` mode,
             WP-088), so both loaders emit ``Targets`` whose ``rboxes`` pair 1:1 with
@@ -1031,6 +1038,7 @@ class DetectionDataModule(LightningDataModule):
         prefetch_factor: int = _PREFETCH_FACTOR,
         val_num_workers: int | None = None,
         persistent_workers: bool = False,
+        cache_train_images: bool = False,
         mask_targets: bool = False,
         rotated_targets: bool = False,
         keypoint_targets: bool = False,
@@ -1062,6 +1070,7 @@ class DetectionDataModule(LightningDataModule):
         self._val_workers_were_inherited = val_num_workers is None and not workers_were_chosen_here
         self._val_num_workers = self._resolve_val_workers(val_num_workers, workers_were_chosen_here)
         self._persistent_workers = bool(persistent_workers)
+        self._cache_train_images = bool(cache_train_images)
         self._seed = int(seed)
         self._pin_memory = torch.cuda.is_available() if pin_memory is None else bool(pin_memory)
         self._policy = build_scale_policy(variant)
@@ -1253,8 +1262,11 @@ class DetectionDataModule(LightningDataModule):
         path tried.
 
         Args:
-            stage: The Lightning stage (``"fit"``/``"validate"``/…); unused, both
-                splits are always built so repeated calls are idempotent.
+            stage: The Lightning stage (``"fit"``/``"validate"``/…); both splits are
+                always built so repeated calls are idempotent, but ``cache_train_images``
+                only decodes the train split when ``stage`` is ``"fit"`` or ``None`` —
+                a ``"validate"``/``"test"``/``"predict"`` call never pays to cache a
+                split it will not read.
 
         Raises:
             FileNotFoundError: If the root satisfies neither dataset convention.
@@ -1262,7 +1274,10 @@ class DetectionDataModule(LightningDataModule):
                 requested modality.
         """
         yolo = self.layout is DatasetLayout.YOLO
-        base, self._val = self._build_yolo_splits() if yolo else self._build_coco_splits()
+        cache_train_images = self._cache_train_images and stage in {None, "fit"}
+        base, self._val = (
+            self._build_yolo_splits(cache_train_images) if yolo else self._build_coco_splits(cache_train_images)
+        )
         self._train = _TrainPipeline(
             base,
             self._img_size,
@@ -1272,13 +1287,17 @@ class DetectionDataModule(LightningDataModule):
             polygon_free=yolo,
         )
 
-    def _build_coco_splits(self) -> tuple[_DetectionSource, _DetectionSource]:
+    def _build_coco_splits(self, cache_train_images: bool) -> tuple[_DetectionSource, _DetectionSource]:
         """Build both splits from the resolved (or overridden) COCO paths.
 
         Each reader derives its own contiguous label space from its own file, so the two are
         compared here before either is served: two disagreeing ``categories`` lists is a
         wrong-dataset error that otherwise trains to completion and reports a metric
         (:func:`_check_shared_label_space`).
+
+        Args:
+            cache_train_images: Decode and retain the train split's images now. The
+                caller already narrows this to the stages that read the train split.
 
         Returns:
             The raw train reader and the letterbox-only val reader.
@@ -1291,6 +1310,7 @@ class DetectionDataModule(LightningDataModule):
             self._train_ann_file,
             oriented=self._rotated_targets,
             keypoints=self._keypoint_targets,
+            cache_images=cache_train_images,
         )
         val = CocoDetectionDataset(
             self._val_images_dir,
@@ -1302,7 +1322,7 @@ class DetectionDataModule(LightningDataModule):
         _check_shared_label_space(train.category_id_to_label, val.category_id_to_label)
         return train, val
 
-    def _build_yolo_splits(self) -> tuple[_DetectionSource, _DetectionSource]:
+    def _build_yolo_splits(self, cache_train_images: bool) -> tuple[_DetectionSource, _DetectionSource]:
         """Build both splits from the root's own ``data.yaml`` and label trees.
 
         Each split is resolved by the reader
@@ -1312,11 +1332,20 @@ class DetectionDataModule(LightningDataModule):
         selects the nine-field oriented reading on *both* splits, since the variant is a
         property of the dataset and is declared, never sniffed (WP-099).
 
+        Args:
+            cache_train_images: Decode and retain the train split's images now. The
+                caller already narrows this to the stages that read the train split.
+
         Returns:
             The raw train reader and the letterbox-only val reader.
         """
         return (
-            YoloDetectionDataset.from_root(self._data_root, "train", oriented=self._rotated_targets),
+            YoloDetectionDataset.from_root(
+                self._data_root,
+                "train",
+                oriented=self._rotated_targets,
+                cache_images=cache_train_images,
+            ),
             YoloDetectionDataset.from_root(
                 self._data_root,
                 "val",

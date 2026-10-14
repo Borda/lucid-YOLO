@@ -6,6 +6,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Added
 
+- **Opt-in decoded-image caching for training.** `--data.cache_train_images true` decodes each distinct COCO or YOLO training image once during setup and retains the RGB `uint8` tensor. Forked loader workers read those immutable pages and still build a fresh float image for every augmented draw, so repeated mosaic source reads stop paying JPEG/PNG decode while validation remains uncached. The flag defaults off because its host-RAM cost is the uncompressed training split.
+
 - **One demo notebook per task.** `notebooks/demo_detect.py`, `demo_segment.py`, `demo_obb.py` and `demo_keypoints.py` each walk one short run through the library — the dataset, a `DetectionLitModule` and `DetectionDataModule` built from the task's smoke recipe, a two-epoch `Trainer.fit`, `trainer.validate` — then draw the training curves and four images with predictions solid and ground truth dashed through `lucid_yolo._viz`. Every model card links its demo, and every demo carries a Colab badge.
 
 - **The development gates as a notebook.** `notebooks/development_gates.py` runs `scripts/overfit_micro.py` for each of the four tasks and `scripts/shapes_regression.py` as the `!` commands TRAINING.md names, and renders on the site with a Colab badge. The overfit script gains `--epochs`, a probe override like the shapes script's, under which it reports the score without enforcing the floor; and it learned the task names the documentation uses: `--task detect`, `segment` and `keypoints` now resolve to their gates instead of exiting with "unsupported task".

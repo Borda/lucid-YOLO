@@ -33,6 +33,7 @@ from pytorch_lightning import LightningModule, Trainer
 from lucid_yolo.cli import data as data_cli
 from lucid_yolo.data import Targets, boxes_from_polygons
 from lucid_yolo.data import check as check_data
+from lucid_yolo.data import coco as coco_data
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.ptl import datamodule as dm
 from lucid_yolo.ptl.datamodule import (
@@ -97,6 +98,60 @@ def test_sample_dtype_and_range(detseg_fixture_dir: Path) -> None:
     assert image.dtype == torch.float32
     assert image.ndim == 3 and image.shape[0] == 3
     assert float(image.min()) >= 0.0 and float(image.max()) <= 1.0
+
+
+def test_opt_in_cache_decodes_once_and_keeps_returned_images_independent(
+    detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The eager cache pays one decode per file and never exposes mutable cached storage."""
+    split = detseg_fixture_dir / "train"
+    calls: list[str] = []
+    incumbent = coco_data.read_image
+
+    def counted_read_image(path: str, mode: object) -> torch.Tensor:
+        calls.append(path)
+        return incumbent(path, mode)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(coco_data, "read_image", counted_read_image)
+    dataset = CocoDetectionDataset(split, split / "_annotations.coco.json", cache_images=True)
+    assert len(calls) == len(dataset)
+    assert dataset._image_cache is not None
+    assert all(raw.dtype == torch.uint8 and raw.ndim == 3 for raw in dataset._image_cache.values())
+
+    first, _ = dataset[0]
+    expected = first.clone()
+    first.zero_()
+    replay, _ = dataset[0]
+
+    assert len(calls) == len(dataset)
+    assert torch.equal(replay, expected)
+
+
+def test_opt_in_cache_deduplicates_repeated_coco_file_names(
+    detseg_fixture_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two COCO records naming one file retain one decoded tensor, not two copies."""
+    split = detseg_fixture_dir / "train"
+    source = split / "_annotations.coco.json"
+    payload = json.loads(source.read_text())
+    duplicate = dict(payload["images"][0])
+    duplicate["id"] = max(image["id"] for image in payload["images"]) + 1
+    payload["images"].append(duplicate)
+    annotation_file = tmp_path / "instances.json"
+    annotation_file.write_text(json.dumps(payload))
+    calls: list[str] = []
+    incumbent = coco_data.read_image
+
+    def counted_read_image(path: str, mode: object) -> torch.Tensor:
+        calls.append(path)
+        return incumbent(path, mode)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(coco_data, "read_image", counted_read_image)
+    dataset = CocoDetectionDataset(split, annotation_file, cache_images=True)
+
+    assert len(dataset) == _FIXTURE_IMAGE_COUNT + 1
+    assert len(calls) == _FIXTURE_IMAGE_COUNT
+    assert len(set(calls)) == _FIXTURE_IMAGE_COUNT
 
 
 def test_boxes_are_xyxy_within_bounds(detseg_fixture_dir: Path) -> None:

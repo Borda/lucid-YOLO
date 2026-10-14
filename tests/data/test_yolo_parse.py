@@ -23,6 +23,7 @@ import pytest
 import torch
 from torchvision.io import write_png
 
+from lucid_yolo.data import yolo as yolo_data
 from lucid_yolo.data.layout import resolve_yolo_split
 from lucid_yolo.data.rotated_aug import rbox_envelopes
 from lucid_yolo.data.yolo import (
@@ -454,6 +455,32 @@ class TestDatasetRoundTrip:
         assert image.shape == (3, _HEIGHT, _WIDTH)
         assert image.dtype == torch.float32
         assert targets.boxes.tolist() == [_DETECTION_BOX]
+
+    def test_opt_in_cache_decodes_once_and_keeps_returned_images_independent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The YOLO reader pays one eager decode and never exposes cached storage."""
+        root = _build_root(tmp_path, [_DETECTION_ROW])
+        calls: list[str] = []
+        incumbent = yolo_data.read_image
+
+        def counted_read_image(path: str, mode: object) -> torch.Tensor:
+            calls.append(path)
+            return incumbent(path, mode)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(yolo_data, "read_image", counted_read_image)
+        dataset = YoloDetectionDataset.from_root(root, "train", cache_images=True)
+        assert len(calls) == len(dataset)
+        assert dataset._image_cache is not None
+        assert all(raw.dtype == torch.uint8 and raw.ndim == 3 for raw in dataset._image_cache.values())
+
+        first, _ = dataset[0]
+        expected = first.clone()
+        first.zero_()
+        replay, _ = dataset[0]
+
+        assert len(calls) == len(dataset)
+        assert torch.equal(replay, expected)
 
     def test_the_oriented_root_round_trips_with_every_modality_aligned(self, tmp_path: Path) -> None:
         """An oriented root yields boxes, labels and rotated boxes on one instance axis.

@@ -264,6 +264,42 @@ class TestLayoutDispatch:
         assert isinstance(datamodule._train._base, YoloDetectionDataset)
         assert isinstance(datamodule._val, YoloDetectionDataset)
 
+    @pytest.mark.parametrize(
+        ("layout", "write_root"),
+        [("coco", _write_coco_root), ("yolo", _write_yolo_root)],
+    )
+    def test_image_cache_is_train_only_for_both_readers(self, tmp_path: Path, layout: str, write_root: object) -> None:
+        """The public switch caches train images without retaining one-use validation pixels."""
+        root = write_root(tmp_path)  # type: ignore[operator]
+        datamodule = _datamodule(root, layout=layout, cache_train_images=True)
+        datamodule.setup("fit")
+
+        assert datamodule._train is not None
+        assert datamodule._train._base._image_cache is not None
+        assert datamodule._val is not None
+        assert datamodule._val._image_cache is None
+
+    @pytest.mark.parametrize(
+        ("layout", "write_root"),
+        [("coco", _write_coco_root), ("yolo", _write_yolo_root)],
+    )
+    @pytest.mark.parametrize("stage", ["validate", "test", "predict"])
+    def test_image_cache_is_skipped_outside_fit_stage(
+        self, tmp_path: Path, layout: str, write_root: object, stage: str
+    ) -> None:
+        """A validate/test/predict call never decodes the train split it will not read.
+
+        ``setup`` still builds ``_train`` for idempotency, but a stage that cannot reach
+        it must not pay to cache it — the flag a training config sets would otherwise
+        make a validate-only run decode the whole train split for nothing.
+        """
+        root = write_root(tmp_path)  # type: ignore[operator]
+        datamodule = _datamodule(root, layout=layout, cache_train_images=True)
+        datamodule.setup(stage)
+
+        assert datamodule._train is not None
+        assert datamodule._train._base._image_cache is None
+
     def test_the_yolo_val_split_comes_from_the_datasets_own_entry(self, tmp_path: Path) -> None:
         """``val: ../valid/images`` resolves, so the dataset's spelling outranks the convention."""
         datamodule = _datamodule(_write_yolo_root(tmp_path))
@@ -423,7 +459,9 @@ class TestYoloBatches:
         assert all(target.boxes.shape[0] == 1 for target in targets)
 
 
-def _train_epochs(data_root: Path, global_seed: int, epochs: int = 2) -> list[list[tuple[Tensor, PackedTargets]]]:
+def _train_epochs(
+    data_root: Path, global_seed: int, epochs: int = 2, **kwargs: object
+) -> list[list[tuple[Tensor, PackedTargets]]]:
     """Drive a freshly-built datamodule's training loader for ``epochs`` and return the transport batches.
 
     The global RNG is seeded to ``global_seed`` *before* construction on purpose: the claim
@@ -434,6 +472,9 @@ def _train_epochs(data_root: Path, global_seed: int, epochs: int = 2) -> list[li
         data_root: A COCO root to build both splits from.
         global_seed: Ambient ``torch.manual_seed`` value, deliberately varied between runs.
         epochs: How many passes over the loader to collect.
+        **kwargs: Overrides forwarded to the datamodule beyond this helper's own fixed
+            ``batch_size``/``variant``/``seed``/``mask_targets`` — ``cache_train_images``
+            for the cache-parity check below.
 
     Returns:
         One list of ``(uint8 images, PackedTargets)`` batches per epoch, in the transport
@@ -449,7 +490,12 @@ def _train_epochs(data_root: Path, global_seed: int, epochs: int = 2) -> list[li
     """
     torch.manual_seed(global_seed)
     datamodule = _datamodule(
-        data_root, batch_size=1, variant=_COPY_PASTE_VARIANT, seed=_DETERMINISM_SEED, mask_targets=False
+        data_root,
+        batch_size=1,
+        variant=_COPY_PASTE_VARIANT,
+        seed=_DETERMINISM_SEED,
+        mask_targets=False,
+        **kwargs,  # type: ignore[arg-type]
     )
     datamodule.setup("fit")
     loader = datamodule.train_dataloader()
@@ -533,3 +579,23 @@ class TestTrainingDeterminism:
         other_images = next(iter(other.train_dataloader()))[0]
 
         assert not torch.equal(images, other_images)
+
+    @pytest.mark.parametrize("write_root", [_write_coco_root, _write_yolo_root])
+    def test_cache_train_images_does_not_change_the_augmented_epoch(self, tmp_path: Path, write_root: object) -> None:
+        """The cache swaps where a draw's raw bytes come from, never what mosaic/affine/color/flip do with them.
+
+        ``test_opt_in_cache_decodes_once_and_keeps_returned_images_independent`` (in
+        ``test_coco.py``/``test_yolo_parse.py``) proves the reader's own decode count and
+        isolation with no ``transforms`` attached. It never drives the actual training
+        pipeline, so a cache that fed the same raw bytes through a *different* augmented
+        draw would still pass it. Replaying one seeded epoch through the real
+        ``_TrainPipeline`` with the cache on and off is the check that would catch that.
+        """
+        data_root = write_root(tmp_path)  # type: ignore[operator]
+
+        uncached = _train_epochs(data_root, global_seed=0, epochs=1, cache_train_images=False)
+        cached = _train_epochs(data_root, global_seed=0, epochs=1, cache_train_images=True)
+
+        assert [len(epoch) for epoch in uncached] == [len(epoch) for epoch in cached]
+        for left, right in zip(uncached[0], cached[0], strict=True):
+            _assert_batches_identical(left, right)

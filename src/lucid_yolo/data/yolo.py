@@ -299,6 +299,9 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         allow_missing_labels: Read an image with no label file as a background image instead
             of raising. ``False`` (the default) treats the absence as the broken export it
             usually is; an empty label file means "no objects" either way.
+        cache_images: Decode all images once at construction and retain their RGB
+            ``uint8`` tensors. Opt-in because the cache occupies the uncompressed
+            dataset size; forked loader workers share those read-only pages.
 
     Attributes:
         names: The class names, in index order.
@@ -327,6 +330,7 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         *,
         oriented: bool = False,
         allow_missing_labels: bool = False,
+        cache_images: bool = False,
     ) -> None:
         self._images_dir = images_dir
         self._labels_dir = labels_dir
@@ -338,6 +342,9 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         self._images = sorted(
             path for path in images_dir.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
         )
+        self._image_cache: dict[Path, Tensor] | None = None
+        if cache_images:
+            self._image_cache = {path: self._decode_image(path) for path in self._images}
 
     @classmethod
     def from_root(
@@ -348,6 +355,7 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         *,
         oriented: bool = False,
         allow_missing_labels: bool = False,
+        cache_images: bool = False,
     ) -> YoloDetectionDataset:
         """Build a split's dataset from a dataset root alone.
 
@@ -362,6 +370,7 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             transforms: Optional per-image geometric transform.
             oriented: Read the oriented nine-field rows (see the class docstring).
             allow_missing_labels: Read an image with no label file as a background image.
+            cache_images: Decode and retain every split image as an RGB ``uint8`` tensor.
 
         Returns:
             The dataset for that split.
@@ -387,6 +396,7 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             transforms,
             oriented=oriented,
             allow_missing_labels=allow_missing_labels,
+            cache_images=cache_images,
         )
 
     def __len__(self) -> int:
@@ -428,11 +438,17 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         Raises:
             OSError: If the file is missing or cannot be decoded; the path is named.
         """
+        raw = self._image_cache[path] if self._image_cache is not None else self._decode_image(path)
+        return raw.to(torch.float32) / _UINT8_MAX
+
+    @staticmethod
+    def _decode_image(path: Path) -> Tensor:
+        """Decode ``path`` into the RGB ``uint8`` representation the cache retains."""
         try:
             raw = read_image(str(path), ImageReadMode.RGB)
         except (RuntimeError, OSError) as error:
             raise OSError(f"failed to read image {path}: {error}") from error
-        return cast("Tensor", raw.to(torch.float32) / _UINT8_MAX)
+        return cast("Tensor", raw)
 
     def _load_targets(self, image_path: Path, *, height: int, width: int) -> Targets:
         """Parse one image's label file, applying the missing-file policy.

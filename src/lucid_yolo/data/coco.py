@@ -250,6 +250,10 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             the WP-120 ``Targets.keypoints`` / ``keypoint_vis`` channels. ``False``
             (the default) leaves the reader, and every target it has ever produced,
             exactly as it was.
+        cache_images: Decode every image once at construction and retain the RGB
+            ``uint8`` tensors in memory. The cache is opt-in because its size is the
+            uncompressed dataset, but it is shared copy-on-write by forked loader
+            workers and removes repeated JPEG/PNG decoding from multi-epoch training.
 
     Attributes:
         category_id_to_label: Mapping from COCO category id to contiguous label.
@@ -274,6 +278,7 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         transforms: GeometricTransform | None = None,
         oriented: bool = False,
         keypoints: bool = False,
+        cache_images: bool = False,
     ) -> None:
         self._images_dir = images_dir
         self._transforms = transforms
@@ -288,6 +293,7 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         # it. Gated, the strictness lands exactly on the runs that mirror points.
         self.keypoint_flip_pairs = _build_keypoint_flip_pairs(payload["categories"]) if self._keypoints else None
         self._images = _build_image_records(payload["images"])
+        self._image_cache: dict[str, Tensor] | None = None
         # Targets are precomputed ONCE here and the raw annotation dicts dropped
         # (WP-073). Keeping the parsed JSON alive — millions of tiny Python
         # objects for a train-scale split — makes every DataLoader worker's
@@ -296,6 +302,9 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         # buffers a fork never copies.
         anns_by_image = _group_annotations(payload["annotations"])
         self._targets = [self._build_targets(anns_by_image.get(record.image_id, ()), record) for record in self._images]
+        if cache_images:
+            file_names = dict.fromkeys(record.file_name for record in self._images)
+            self._image_cache = {file_name: self._decode_image(file_name) for file_name in file_names}
 
     def __len__(self) -> int:
         """Return the number of images in the dataset."""
@@ -442,12 +451,17 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             OSError: If the file is missing or cannot be decoded; the offending
                 path is named in the message.
         """
+        raw = self._image_cache[file_name] if self._image_cache is not None else self._decode_image(file_name)
+        return raw.to(torch.float32) / _UINT8_MAX
+
+    def _decode_image(self, file_name: str) -> Tensor:
+        """Decode ``file_name`` into the RGB ``uint8`` representation the cache retains."""
         path = self._images_dir / file_name
         try:
             raw = read_image(str(path), ImageReadMode.RGB)
         except (RuntimeError, OSError) as error:
             raise OSError(f"failed to read image {path}: {error}") from error
-        return cast("Tensor", raw.to(torch.float32) / _UINT8_MAX)
+        return cast("Tensor", raw)
 
     def _build_targets(self, annotations: Sequence[dict[str, object]], record: _ImageRecord) -> Targets:
         """Assemble the :class:`~lucid_yolo.data.targets.Targets` for one image.
