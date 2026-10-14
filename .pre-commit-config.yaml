@@ -252,7 +252,9 @@ repos:
       # --all-files-reachable half, re-validating every commit not yet on
       # origin/main.
       #
-      # `origin/main..HEAD` is not a history-wide walk and this hook is not the
+      # `@{upstream}..HEAD` checks only local work not yet on the tracked branch;
+      # comparing a published PR branch with origin/main would recheck commits
+      # whose messages are replaced by the squash merge. This hook is not the
       # enforcing owner of the contract. The range is empty whenever the branch
       # is already pushed, which is the normal state of a clean tree, so a green
       # run here usually means zero commits were examined rather than that all of
@@ -263,7 +265,7 @@ repos:
       # request's title and description -- the message a squash merge lands.
       - id: commit-trailers-history
         name: "📜 provenance commit trailers (unpushed history)"
-        entry: .venv/bin/python scripts/lint/check_commit_trailers.py --range origin/main..HEAD
+        entry: .venv/bin/python scripts/lint/check_commit_trailers.py --range @{upstream}..HEAD
         language: system
         pass_filenames: false
         stages: [pre-commit, manual]
