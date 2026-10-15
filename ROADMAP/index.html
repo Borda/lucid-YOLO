@@ -1739,7 +1739,7 @@
 
 
 <h1 id="work-package-roadmap">🗺️ Work-Package Roadmap<a class="headerlink" href="#work-package-roadmap" title="Permanent link">&para;</a></h1>
-<p>The agent's work queue: 193 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording follow-up work that landed after its package had closed. Transcribed from the governing blueprint (sec. 15) with a live status column.</p>
+<p>The agent's work queue: 194 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording follow-up work that landed after its package had closed. Transcribed from the governing blueprint (sec. 15) with a live status column.</p>
 <p><strong>Scope says what a package does, not what executing it taught.</strong> Measurements, rejected approaches and negative results live in RESEARCH_LOG.md, linked per row as <code>· log</code>; choices the papers left open live in ASSUMPTIONS.md and are cited by id; release results live in REPRODUCTION_REPORT.md. A row that restates any of those is duplicating a record that has an owner.</p>
 <p><strong>Length is guidance, not a limit, and the guide is this table's own median</strong> — Scope about 285 characters, DoD about 80, subject about 50. Nothing enforces it and no test measures it: a row whose claims genuinely need more room takes it, and cutting substance to reach a number is the worse outcome. What the figure is for is the drift it makes visible. A cell running several times its column's median is usually not carrying more scope, it is carrying the reasoning behind the scope — which has an owner elsewhere, per the paragraph above. Compress the prose first, move what survives compression to the linked log, and leave the row stating what the package does.</p>
 <p>Legend: <strong>Dep</strong> = prerequisite WPs · <strong>[DATA]</strong> needs a real dataset (synthetic stand-in per A26 for offline development only) · <strong>[GPU]</strong> needs an accelerator (MPS first, D12c) · <strong>[PRINCIPAL]</strong> belongs to whoever drives the project rather than executes it (AGENTS.md sec. 1) — never started autonomously. DoD = the test id(s) that must pass; every WP additionally requires <code>make gate</code> green. Status icons: ⬜ todo · 🔄 in-progress · ✅ done · ⛔ blocked (see docs/ESCALATION.md) · ⏸ deferred, scope still wanted but the start is waiting on something outside this repository, named in the row · ⊘ closed without its DoD met, the row itself saying why. Only ✅, 🔄 and ⊘ appear below Phase 16: every WP written before Phase 17 has either landed or been closed, so ⛔ and ⏸ are defined for rows this queue has not yet needed rather than describing anything on it; Phase 17 is the first queue of ⬜ rows, each waiting on an accelerator or a principal. ⏸ is distinct from ⛔ on both sides: nothing here is stuck, and nothing outside is being escalated to. The status column is flipped to ✅ in the same commit that completes its WP.</p>
@@ -2449,7 +2449,7 @@
 <td>087b</td>
 <td><code>perf(ptl): batched mask-loss gather, one sync not 64</code></td>
 <td><code>_branch_mask_loss</code> pads to the batch's largest positive count and selects once, replacing a data-dependent boolean index run per image per branch that forced a device-to-host sync each time; positives keep their order, so the summation order and the value are the loop's own · <a href="../RESEARCH_LOG/#wp-087b">log</a></td>
-<td><code>test_seg_training.py::test_batched_mask_loss_equals_the_per_image_loop</code> — <code>torch.equal</code> against the per-image loop over uneven, zero and equal positive counts; the loop stays in the test file as the oracle the frozen goldens were measured against</td>
+<td><code>test_seg_training.py::test_batched_mask_loss_equals_per_image_loop</code> — <code>torch.equal</code> against the per-image loop over uneven, zero and equal positive counts; the loop stays in the test file as the oracle the frozen goldens were measured against</td>
 <td>087</td>
 <td>✅</td>
 </tr>
@@ -2457,7 +2457,7 @@
 <td>087c</td>
 <td><code>perf(data): vectorised, batched polygon rasterisation</code></td>
 <td>Polygon rasterisation vectorised in three steps, each superseding the last: all of a ring's edges at once, then a whole image's rings in one crossing test, then edges flattened with an instance index instead of padded to the image's longest ring. Output is identical at every step, not merely close · <a href="../RESEARCH_LOG/#wp-087c">log</a></td>
-<td><code>test_rasterize.py::test_vectorised_crossing_test_matches_the_per_vertex_loop</code> (irrational radius, so nothing lands on a pixel centre), <code>::test_batched_rings_match_one_call_per_ring</code>, <code>::test_chunking_the_edge_axis_does_not_change_the_masks</code>; data checksum goldens unchanged</td>
+<td><code>test_rasterize.py::test_vectorised_crossing_test_matches_per_vertex_loop</code> (irrational radius, so nothing lands on a pixel centre), <code>::test_batched_rings_match_one_call_per_ring</code>, <code>::test_chunking_edge_axis_not_change_masks</code>; data checksum goldens unchanged</td>
 <td>087</td>
 <td>✅</td>
 </tr>
@@ -2465,7 +2465,7 @@
 <td>087d</td>
 <td><code>perf(data): rasterise mask targets in the loader workers</code></td>
 <td>Rasterisation moves into <code>collate_detection</code>, rasterising batches in DataLoader workers ahead of the step: the grid derives from the input canvas (A15), masks travel as a bool stack split by <code>boxes_per_image</code>, and the step rejects a stack rasterised for another grid. Each ring is tested only inside its own bounding window, replacing 087c's flattened-edge batching · <a href="../RESEARCH_LOG/#wp-087d">log</a></td>
-<td><code>test_seg_training.py::test_loader_rasterises_the_masks_the_step_would_have</code>, <code>::test_loader_rasterised_masks_give_the_identical_loss</code>, <code>::test_masks_rasterised_for_another_grid_are_rejected</code>; <code>test_cli.py::test_mask_targets_follows_the_model_task</code>; <code>test_rasterize.py::test_windowed_rasterisation_matches_the_full_grid_rule</code>; seg overfit and data checksum goldens unchanged</td>
+<td><code>test_seg_training.py::test_loader_rasterises_masks_step_would_have</code>, <code>::test_loader_rasterised_masks_give_identical_loss</code>, <code>::test_masks_rasterised_for_another_grid_rejected</code>; <code>test_cli.py::test_mask_targets_follows_model_task</code>; <code>test_rasterize.py::test_windowed_rasterisation_matches_full_grid_rule</code>; seg overfit and data checksum goldens unchanged</td>
 <td>087c</td>
 <td>✅</td>
 </tr>
@@ -2473,7 +2473,7 @@
 <td>087e</td>
 <td><code>refine(ptl): epoch mask mAP during validation</code></td>
 <td>Validation decodes the kept detections' masks through the deployed decode — not a second implementation of it — and logs <code>val/segm_mAP</code>, so a segmentation run finally moves an epoch metric about its masks. Scored on the prototype grid and capped at COCO's own 100 detections, through a second <code>MeanAveragePrecision</code> rather than one metric holding both IoU types · <a href="../RESEARCH_LOG/#wp-087e">log</a></td>
-<td><code>test_seg_training.py::test_validation_logs_a_mask_map_beside_the_box_map</code>, <code>::test_detection_validation_logs_no_mask_metric</code>, <code>::test_mask_map_is_skipped_when_the_batch_carries_no_ground_truth_masks</code>, <code>::test_scored_masks_are_paired_with_the_boxes_own_anchors</code></td>
+<td><code>test_seg_training.py::test_validation_logs_mask_map_beside_box_map</code>, <code>::test_detection_validation_logs_no_mask_metric</code>, <code>::test_mask_map_skipped_when_batch_carries_no_ground_truth_masks</code>, <code>::test_scored_masks_paired_with_boxes_own_anchors</code></td>
 <td>087</td>
 <td>✅</td>
 </tr>
@@ -2481,7 +2481,7 @@
 <td>087f</td>
 <td><code>refine(configs): name tiers by what they are, not by letters</code></td>
 <td>The <code>&lt;task&gt;_tier_&lt;letter&gt;_&lt;letter&gt;</code> configs are renamed for what they are — <code>det_smoke</code>, <code>det_ablations</code>, <code>seg_smoke</code>, planned <code>obb_smoke</code> — and the tier names follow everywhere they are written, historical mentions included, with git history keeping the old ones. No behaviour changes · <a href="../RESEARCH_LOG/#wp-087f">log</a></td>
-<td><code>test_cli.py::test_configs_dir_is_non_empty</code>, <code>::test_config_dry_parses</code> over every shipped config, <code>::test_smoke_tier_resolves_variant_n_multipliers_and_gains</code> and the ablations counterpart; goldens unchanged</td>
+<td><code>test_cli.py::test_configs_dir_non_empty</code>, <code>::test_config_dry_parses</code> over every shipped config, <code>::test_smoke_tier_resolves_variant_n_multipliers_and_gains</code> and the ablations counterpart; goldens unchanged</td>
 <td>087</td>
 <td>✅</td>
 </tr>
@@ -2544,7 +2544,7 @@
 <td>059</td>
 <td><code>feat(losses): ProbIoU rotated loss</code></td>
 <td>Gaussian-box ProbIoU (R17, A19): both losses R17 proposes exposed side by side, since it suggests starting on one and switching and WP-088 owns that choice. R17's formulas are evaluated through cancellation-free identities, which is what makes float32 sufficient where float64 is unavailable (D12c). New A41 records the degenerate-box side floor · <a href="../RESEARCH_LOG/#wp-059">log</a></td>
-<td><code>test_probiou.py::test_matches_numerical_integration_of_the_definition</code> (2e-14 relative), <code>::test_matches_literal_transcription_of_r17</code> (float64, 1e-12), <code>::test_a_box_against_itself_scores_exactly_one</code>, <code>::test_the_two_losses_are_one_quantity</code>, <code>::test_float32_accuracy_is_aspect_ratio_independent</code>, <code>::test_degenerate_boxes_stay_finite_forwards_and_backwards</code>; 75 tests</td>
+<td><code>test_probiou.py::test_matches_numerical_integration_of_definition</code> (2e-14 relative), <code>::test_matches_literal_transcription_of_r17</code> (float64, 1e-12), <code>::test_box_against_itself_scores_exactly_one</code>, <code>::test_two_losses_one_quantity</code>, <code>::test_float32_accuracy_aspect_ratio_independent</code>, <code>::test_degenerate_boxes_stay_finite_forwards_and_backwards</code>; 75 tests</td>
 <td>055</td>
 <td>✅</td>
 </tr>
@@ -2560,7 +2560,7 @@
 <td>061</td>
 <td><code>feat(assign): rotated containment for TAL and STAL</code></td>
 <td>Oriented GTs reach the assigner through one optional <code>gt_rboxes</code> argument into <code>_candidate_mask</code>, the only stage that changes: candidacy becomes the point-in-rotated-rect test while the IoU, the alignment metric, targets and weights keep running on axis-aligned boxes (A25, revised here). The STAL surrogate gains a rotated form that re-canonicalizes (new A43) · <a href="../RESEARCH_LOG/#wp-061">log</a></td>
-<td><code>test_rotated_assign.py::test_tiny_rotated_gt</code> — a 6x6 GT at 45 deg, invisible to vanilla TAL, gains 4 candidates; <code>::test_rotation_excludes_envelope_corners</code>; <code>::test_axis_aligned_assignment_is_bit_identical</code> over three assigners</td>
+<td><code>test_rotated_assign.py::test_tiny_rotated_gt</code> — a 6x6 GT at 45 deg, invisible to vanilla TAL, gains 4 candidates; <code>::test_rotation_excludes_envelope_corners</code>; <code>::test_axis_aligned_assignment_bit_identical</code> over three assigners</td>
 <td>058,060</td>
 <td>✅</td>
 </tr>
@@ -2576,7 +2576,7 @@
 <td>063</td>
 <td><code>feat(eval): rotated mAP on DOTA val</code></td>
 <td>Exact polygon-intersection rotated IoU — Sutherland-Hodgman clipping + shoelace, each pair re-centred on its midpoint <strong>before</strong> corner expansion (A24, now <code>active</code>), plus the accumulator over it. Four constants R1 never states are registered, not inherited from library defaults: A46, A47, zero-non-difficult-GT classes excluded, A48. Tile merge deferred to WP-107 · <a href="../RESEARCH_LOG/#wp-063">log</a></td>
-<td><code>test_dota_eval.py::TestRotatedIou::test_vs_oracle</code> (600 pairs across the angle range, half near-coincident) plus 15 named edge cases; <code>TestRecallGridBoundary::test_boundary_recall_is_sampled_exactly</code>, reference-independent and hand-derived; <code>TestAccumulator::test_matches_the_axis_aligned_instrument_at_zero_angle</code></td>
+<td><code>test_dota_eval.py::TestRotatedIou::test_vs_oracle</code> (600 pairs across the angle range, half near-coincident) plus 15 named edge cases; <code>TestRecallGridBoundary::test_boundary_recall_sampled_exactly</code>, reference-independent and hand-derived; <code>TestAccumulator::test_matches_axis_aligned_instrument_at_zero_angle</code></td>
 <td>062</td>
 <td>✅</td>
 </tr>
@@ -2592,7 +2592,7 @@
 <td>094</td>
 <td><code>feat(data): DOTA tiles into a trainable layout</code></td>
 <td><code>scripts/build_dota_tiles.py</code> writes the COCO layout the oriented reader reads, carrying R18's class order into the label space — the disk-writing caller WP-057 left unwritten, without which <code>obb_smoke.yaml</code> pointed at a directory no code produced. Two encodings registered rather than invented quietly (A52, A53); the reader forwards <code>difficult</code> onto the A51 channel · <a href="../ENGINEERING_LOG/#wp-094">log</a></td>
-<td><code>tests/data/test_build_dota_tiles.py</code> — a round trip through <code>CocoDetectionDataset</code> rather than a JSON-shape check; <code>tests/data/test_coco.py::test_the_difficult_key_reaches_the_targets_channel</code> on both readings</td>
+<td><code>tests/data/test_build_dota_tiles.py</code> — a round trip through <code>CocoDetectionDataset</code> rather than a JSON-shape check; <code>tests/data/test_coco.py::test_difficult_key_reaches_targets_channel</code> on both readings</td>
 <td>057,088</td>
 <td>✅</td>
 </tr>
@@ -2728,7 +2728,7 @@
 <td>090b</td>
 <td><code>fix(eval): masks for an empty instance axis</code></td>
 <td><code>decode_instance_masks</code> raised from <code>F.interpolate</code>, which treats the instance axis as channels and rejects a zero-length one, for as long as it has existed — unreachable from the evaluator, reachable from predict. Returns the empty stack instead, keeping the shape contract a caller stacking per-image results needs; WP-090's call-site guard becomes an optimisation · <a href="../ENGINEERING_LOG/#wp-090b">log</a></td>
-<td><code>tests/eval/test_segment_decode.py::test_no_kept_detections_returns_the_empty_stack</code> — <code>(B, 0, H, W)</code>, still boolean</td>
+<td><code>tests/eval/test_segment_decode.py::test_no_kept_detections_returns_empty_stack</code> — <code>(B, 0, H, W)</code>, still boolean</td>
 <td>090</td>
 <td>✅</td>
 </tr>
@@ -2895,7 +2895,7 @@
 <td>109</td>
 <td><code>fix(scripts): audit the binaries a wheel ships</code></td>
 <td>A third check in <code>scripts/audit_licenses.py</code> (the path as it stood here; WP-129 moved the script to <code>scripts/lint/audit_licenses.py</code>), over the files each wheel's <code>RECORD</code> declares, matched against a named table of copyleft native libraries. Catches the wheel that declares a permissive license, ships license documents naming no copyleft, and vendors a GPL binary regardless — <code>av</code>'s <code>libx264</code>, met while sourcing WP-067's example (D16) · <a href="../ENGINEERING_LOG/#wp-109">log</a></td>
-<td><code>scripts/_tests/test_audit_licenses.py::test_shipped_x264_is_flagged_though_nothing_declares_it</code> and <code>::test_live_environment_ships_no_unallowed_copyleft_binary</code></td>
+<td><code>scripts/_tests/test_audit_licenses.py::test_shipped_x264_flagged_though_nothing_declares_it</code> and <code>::test_live_environment_ships_no_unallowed_copyleft_binary</code></td>
 <td>004</td>
 <td>✅</td>
 </tr>
@@ -2903,7 +2903,7 @@
 <td>110</td>
 <td><code>refine(cli): drop the deprecated download alias</code></td>
 <td>The removal 0.3.0 put in writing in three places — <code>[project.scripts]</code>, AGENTS.md sec. 2, the 0.3.0 changelog — carried out on schedule: the console script, the argparse parser that served only it, and its <code>__main__</code> twin. <code>lucid-data download</code> is untouched. Every operator-facing string naming the alias names the surviving spelling now, the <code>--verify</code> repair hint included — asserted runnable rather than merely present · <a href="../ENGINEERING_LOG/#wp-110">log</a></td>
-<td><code>tests/cli/test_cli_surface.py::test_the_deprecated_download_alias_is_gone</code> and <code>tests/data/test_download.py::TestCliVerify::test_the_repair_hint_names_a_command_that_still_parses</code> (node id moved under <code>TestCliVerify</code> by WP-128)</td>
+<td><code>tests/cli/test_cli_surface.py::test_deprecated_download_alias_gone</code> and <code>tests/data/test_download.py::TestCliVerify::test_repair_hint_names_command_still_parses</code> (node id moved under <code>TestCliVerify</code> by WP-128)</td>
 <td>089, 096</td>
 <td>✅</td>
 </tr>
@@ -3159,7 +3159,7 @@
 <td>131</td>
 <td><code>feat(data): keypoints fixture, geometric-only det/obb/seg categories</code></td>
 <td>fuse-augmentations' <code>class_names(class_mode)</code> spans the whole <code>Shape</code> union regardless of <code>SyntheticConfig.shapes</code> -- animal shapes landing (WP-121b) would move det/obb/seg's frozen <code>*_num_categories</code> goldens from 4 to 16, though those fixtures only draw the 4 geometric shapes. Reported upstream; fix (<code>class_names(class_mode, shapes=...)</code>) is what <code>shapes=DEFAULT_SHAPES</code> on <code>generate_detseg_fixtures</code>/<code>generate_obb_fixtures</code> narrows -- goldens unchanged. <code>generate_keypoints_fixtures</code> is new: 12 images, <code>animal_shapes(2)</code> (duck, elephant). Pinned by git commit not PyPI version (R21) -- version string doesn't move release to release, PyPI forbids re-uploading <code>0.10.0.dev0</code> · <a href="../ENGINEERING_LOG/#wp-131">log</a></td>
-<td><code>tests/fixtures/test_fixtures_load.py::test_keypoints_set_loads</code>, <code>::test_keypoints_generation_is_deterministic</code>; <code>make gate</code> green, 27/27 goldens unchanged</td>
+<td><code>tests/fixtures/test_fixtures_load.py::test_keypoints_set_loads</code>, <code>::test_keypoints_generation_deterministic</code>; <code>make gate</code> green, 27/27 goldens unchanged</td>
 <td>121b</td>
 <td>✅</td>
 </tr>
@@ -3183,7 +3183,7 @@
 <td>134</td>
 <td><code>feat(eval): keypoints wired into lucid-eval, canonical OKS ground truth</code></td>
 <td>WP-124 built the OKS scorer, WP-132 the training path, unjoined: no caller, <code>cli/eval.py</code> knew three tasks. A keypoints checkpoint through <code>lucid-eval</code> fell to the detection path: <code>map=0.006288</code> vs <code>val/mAP=0.48</code> -- category-count fault: <code>detect_eval</code> hardcodes <code>instances_val2017.json</code> (80 categories, 79 with no prediction; <code>0.006288*80=0.503</code>). <code>pose_eval.run</code> scores person-keypoints. <code>DualPathEvaluator</code> gains <code>o2o_keypoints</code>/<code>o2m_keypoints</code>, gathered by anchor indices (<code>PAD_ANCHOR_INDEX</code> clamped/zeroed). Points invert letterbox via <code>Letterbox.inverse_map</code> (A10). Ground truth canonical: <code>area</code>/<code>iscrowd</code>/<code>num_keypoints</code>/<code>bbox</code> from annotation. K!=17 refused -- A67 reversed · <a href="../ENGINEERING_LOG/#wp-134">log</a></td>
-<td><code>tests/eval/test_keypoint_eval.py::TestDualPathKeypoints</code>, <code>::TestCanonicalGroundTruthMetadata</code>, <code>::TestPoseProtocolRefusesForeignSchemas</code>; <code>tests/eval/test_annotations.py::test_keypoint_load_carries_the_annotations_own_metadata</code>; <code>tests/cli/test_cli_surface.py::test_eval_dispatches_on_the_checkpoints_own_task[keypoints]</code>; <code>make gate</code> green</td>
+<td><code>tests/eval/test_keypoint_eval.py::TestDualPathKeypoints</code>, <code>::TestCanonicalGroundTruthMetadata</code>, <code>::TestPoseProtocolRefusesForeignSchemas</code>; <code>tests/eval/test_annotations.py::test_keypoint_load_carries_annotations_own_metadata</code>; <code>tests/cli/test_cli_surface.py::test_eval_dispatches_on_checkpoints_own_task[keypoints]</code>; <code>make gate</code> green</td>
 <td>124,132</td>
 <td>✅</td>
 </tr>
@@ -3527,7 +3527,7 @@
 <td>163</td>
 <td><code>perf(ptl): validation ground truth crosses to the host once</code></td>
 <td>Every validation accumulator moved its ground truth one image at a time — two tensors per image for detection, three for oriented and keypoints, and a mask stack for segmentation — so a batch of 16 paid the accelerator's fixed per-transfer latency 32 to 48 times for a payload that fits in one transfer. <code>_host_split</code> concatenates along the batch axis, moves once, and slices the result back into the same per-image pieces. Values, dtypes and order are unchanged, so no metric and no golden moves. Ported from a survey of RF-DETR's per-image device-to-host sync fixes; measured here rather than assumed · <a href="../ENGINEERING_LOG/#wp-163">log</a></td>
-<td><code>tests/ptl/test_module.py::TestHostSplit</code>, <code>tests/ptl/test_module.py::test_validation_ground_truth_matches_the_per_target_transfer</code>; <code>make gate</code> green</td>
+<td><code>tests/ptl/test_module.py::TestHostSplit</code>, <code>tests/ptl/test_module.py::test_validation_ground_truth_matches_per_target_transfer</code>; <code>make gate</code> green</td>
 <td>158</td>
 <td>✅</td>
 </tr>
@@ -3535,7 +3535,7 @@
 <td>164</td>
 <td><code>perf(ptl): the mask stack is not copied to drop nothing</code></td>
 <td>Validation decoded all 100 detection rows and then wrote <code>masks[keep]</code>, a second full copy of a 100×160×160 boolean stack per image. In the deployed configuration that copy drops <strong>nothing</strong>: <code>TopKDecoder()</code> takes <code>conf_threshold=0.0</code> and the anchor count exceeds <code>k</code>, so every row carries a live score. Counting the live rows on the host copy already present and slicing to that count leaves the copy out and, where a caller does set a threshold, shrinks the decode too. Values and order are unchanged, so no metric and no golden moves. Corrects WP-163's rejection of this candidate, whose "MPS regresses" reading was three measurement faults compounding · <a href="../ENGINEERING_LOG/#wp-164">log</a></td>
-<td><code>tests/decode/test_topk_e2e.py::test_the_scored_rows_are_a_leading_run</code>, <code>tests/ptl/test_seg_training.py::test_zero_scored_rows_are_dropped_before_the_decode_rather_than_after</code>; measured +11.7% CPU and +15.4% MPS on the deployed all-rows-live shape, every trial positive on both devices; <code>make gate</code> green</td>
+<td><code>tests/decode/test_topk_e2e.py::test_scored_rows_leading_run</code>, <code>tests/ptl/test_seg_training.py::test_zero_scored_rows_dropped_before_decode_rather_than_after</code>; measured +11.7% CPU and +15.4% MPS on the deployed all-rows-live shape, every trial positive on both devices; <code>make gate</code> green</td>
 <td>163</td>
 <td>✅</td>
 </tr>
@@ -3726,7 +3726,7 @@
 <td>183</td>
 <td><code>refine(losses): dense box terms over every anchor</code></td>
 <td><code>DetectionBranchLoss._box_losses</code> and <code>oriented_branch_terms</code> score CIoU / ProbIoU, L1 and the angle term densely over all <code>(B, A)</code> anchors, selected by <code>fg_mask</code> through <code>torch.where</code>, instead of gathering <code>pred[fg_mask]</code> — a data-dependent shape that broke the <code>torch.compile</code> step graph seven times. Loss-identical (absdiff 0.0 on a COCO batch), +2% eager; the gates WP-184 builds on</td>
-<td><code>tests/losses/test_detection_loss.py::TestDenseBoxTermsMatchMaskedReference</code> and <code>tests/losses/test_oriented_loss.py::TestDenseOrientedTermsMatchMaskedReference</code> (value and gradient against the pre-change masked oracle to <code>1e-6</code>, empty image, all-background batch, degenerate background predictions); <code>test_detect_step_reproduces_the_pre_change_snapshot</code> unchanged; <code>make gate</code> green</td>
+<td><code>tests/losses/test_detection_loss.py::TestDenseBoxTermsMatchMaskedReference</code> and <code>tests/losses/test_oriented_loss.py::TestDenseOrientedTermsMatchMaskedReference</code> (value and gradient against the pre-change masked oracle to <code>1e-6</code>, empty image, all-background batch, degenerate background predictions); <code>test_detect_step_reproduces_pre_change_snapshot</code> unchanged; <code>make gate</code> green</td>
 <td>182</td>
 <td>✅</td>
 </tr>
@@ -3734,7 +3734,7 @@
 <td>184</td>
 <td><code>perf(train): opt-in torch.compile of the detect objective</code></td>
 <td><code>DetectionLitModule</code> gains kw-only <code>compile_step</code> (default off): on a CUDA accelerator under <code>task="detect"</code>, <code>setup</code> compiles the extracted <code>_detect_objective</code> — forward, both decodes, assignment, dual loss — as one Inductor region through the bound method, so state-dict keys are untouched; every other backend or task warns once and stays eager (D24). <code>tal.py</code> skips <code>_check_labels</code> under tracing and writes <code>_resolve_conflicts</code>'s one-hot as an <code>arange</code> comparison so <code>N</code> is not pinned; batch and padded-GT dims are marked dynamic (enforcing). Measured x1.23 det step on an RTX PRO 6000, <code>n</code>, COCO b16; mAP parity is A78, validated 2026-09-20 on an A100 (paired 4-epoch run: x1.25, 1 recompile, loss parity <code>3.6e-5</code> with TF32 off)</td>
-<td><code>tests/ptl/test_compile.py</code> (region traces as 1 graph / 0 breaks with and without <code>capture_scalar_outputs</code>, with GTs and with none; the compiled step matches eager over five batch shapes through the enforcing marks; <code>setup</code> installs the wrapper once on a mocked CUDA accelerator, warns and stays eager off CUDA and for other tasks; keys unchanged); <code>test_module.py::test_compile_step_leaves_state_dict_keys_unchanged</code>; <code>test_cli.py::test_compile_step_flag_reaches_the_module</code>; <code>make gate</code> green</td>
+<td><code>tests/ptl/test_compile.py</code> (region traces as 1 graph / 0 breaks with and without <code>capture_scalar_outputs</code>, with GTs and with none; the compiled step matches eager over five batch shapes through the enforcing marks; <code>setup</code> installs the wrapper once on a mocked CUDA accelerator, warns and stays eager off CUDA and for other tasks; keys unchanged); <code>test_module.py::test_compile_step_leaves_state_dict_keys_unchanged</code>; <code>test_cli.py::test_compile_step_flag_reaches_module</code>; <code>make gate</code> green</td>
 <td>183</td>
 <td>✅</td>
 </tr>
@@ -3742,7 +3742,7 @@
 <td>185</td>
 <td><code>fix(cli): lucid-yolo exits zero on success</code></td>
 <td><code>lucid_yolo.cli.train.main</code> returned the constructed <code>DetectionCLI</code>; the console-script wrapper passes that to <code>sys.exit</code>, which prints any non-<code>int</code> and exits <code>1</code>, so every completed <code>lucid-yolo fit</code> reported failure to <code>&amp;&amp;</code>, <code>subprocess.run(check=True)</code> and CI. <code>main</code> returns <code>0</code> like <code>lucid-data</code>, <code>lucid-eval</code> and <code>lucid-predict</code>; <code>__main__</code> raises <code>SystemExit(main())</code> as they do. Surfaced by the WP-184 Colab gate</td>
-<td><code>tests/cli/test_cli_surface.py::test_the_train_command_exits_zero_after_its_subcommand_ran</code>; <code>make gate</code> green</td>
+<td><code>tests/cli/test_cli_surface.py::test_train_command_exits_zero_after_subcommand_ran</code>; <code>make gate</code> green</td>
 <td>184</td>
 <td>✅</td>
 </tr>
@@ -3758,7 +3758,7 @@
 <td>187</td>
 <td><code>fix(train): compiled step survives the alpha schedule</code></td>
 <td>A 2-epoch <code>det_nano_smoke</code> on an A100 with <code>compile_step</code> on recompiled <code>_detect_objective</code> every epoch on the guard <code>self.loss.alpha == 0.8</code>: the WP-035 hook rewrites that Python float per epoch and Dynamo guards on its value, so a 50-epoch run crosses <code>cache_size_limit</code> (8) by epoch 7 and silently trains eager. <code>DualBranchLoss.__call__</code> gains kw-only \a kw-only <code>alpha</code> tensor argument (<code>None</code> by default); <code>\_detect_objective</code>takes a 0-d<code>float64</code>alpha tensor built by<code>\_shared_step</code>on the host, blended with the float form's rounding so eager and compiled totals stay bit-identical;<code>DualLossOutput.alpha\</code> stays the attribute float. Alpha is the one schedule-written scalar the region reads (D24 amended)</td>
-<td><code>tests/ptl/test_compile.py::TestAlphaScheduleDoesNotRecompile</code> (three alpha values, zero added compiled frames, the 0.1 total bit-equal to eager) and <code>::test_tensor_alpha_blends_exactly_as_the_eager_float</code>; <code>tests/losses/test_dual_loss.py::test_tensor_alpha_blends_bit_equal_to_the_attribute_and_records_the_attribute</code>; explain test still 1 graph / 0 breaks; <code>make gate</code> green</td>
+<td><code>tests/ptl/test_compile.py::TestAlphaScheduleDoesNotRecompile</code> (three alpha values, zero added compiled frames, the 0.1 total bit-equal to eager) and <code>::test_tensor_alpha_blends_exactly_as_eager_float</code>; <code>tests/losses/test_dual_loss.py::test_tensor_alpha_blends_bit_equal_to_attribute_and_records_attribute</code>; explain test still 1 graph / 0 breaks; <code>make gate</code> green</td>
 <td>184</td>
 <td>✅</td>
 </tr>
@@ -3782,7 +3782,7 @@
 <td>190</td>
 <td><code>docs(notebooks): development gates, as the commands</code></td>
 <td><code>notebooks/development_gates.py</code>, the first notebook on the WP-188 rails: <code>scripts/overfit_micro.py --task &lt;detect,segment,obb,keypoints&gt;</code> and <code>scripts/shapes_regression.py --task det</code> run as the <code>!</code> commands TRAINING.md and the Makefile name, TRAINING.md's argument quoted beside them; the verdict is the PASS/FAIL line each prints. Under <code>LUCID_NOTEBOOK_FAST=1</code> every command carries a probe override (<code>--epochs 1</code>; <code>--images 40 --epochs 1</code> for shapes) and the overfit script reports PROBE with its score, floor not enforced — <code>--epochs</code> is new, modelled on the shapes script's, and the floor is enforced only at the tuned budget. The script also gains <code>TASK_ALIASES</code> and <code>resolve_task</code>, because the <code>--task detect</code> / <code>segment</code> / <code>keypoints</code> spellings TRAINING.md, the model cards and the reproduction report have always written named no gate — three of the four documented commands exited 1 — and the notebook is what noticed</td>
-<td><code>tests/notebooks/test_notebooks_run.py[development_gates]</code> (fast, ~26 s on Apple silicon); <code>scripts/_tests/test_overfit_micro.py::TestRunOverfit::test_reports_a_capped_run_without_the_floor</code>, <code>::test_the_documented_task_names_resolve_to_a_wired_gate</code>; <code>make docs</code> strict with the page in the nav; Colab badge run [HUMAN] after push</td>
+<td><code>tests/notebooks/test_notebooks_run.py[development_gates]</code> (fast, ~26 s on Apple silicon); <code>scripts/_tests/test_overfit_micro.py::TestRunOverfit::test_reports_capped_run_without_floor</code>, <code>::test_documented_task_names_resolve_to_wired_gate</code>; <code>make docs</code> strict with the page in the nav; Colab badge run [HUMAN] after push</td>
 <td>188</td>
 <td>✅</td>
 </tr>
@@ -3817,6 +3817,14 @@
 <td>Native-batch/scalar and foreach/scalar regression trajectories; public COCO finite training; five paired isolated-L4 complete intervals with a median above 8%; <code>make gate</code> green; <code>make gate-gpu</code> still outstanding — this row reassociates the same CUDA Newton--Schulz path WP-177 left open, so its status does not move to done until that check runs</td>
 <td>192</td>
 <td>🔄</td>
+</tr>
+<tr>
+<td>194</td>
+<td><code>refine(tests): static checks to hooks, plain test names</code></td>
+<td>File-content tests leave pytest: the <code>_viz</code>/matplotlib import boundary becomes ruff <code>TID251</code>, the top-k and packaged-recipe text pins the <code>content-pins</code> hook, and live-tree "hook passes" copies are dropped. Test names lose <code>a an the its their is are does that</code> · <a href="../ENGINEERING_LOG/#wp-194">log</a></td>
+<td><code>scripts/_tests/test_audit_content_pins.py</code>; collection count unchanged; <code>make gate</code> green</td>
+<td>193</td>
+<td>✅</td>
 </tr>
 </tbody>
 </table>
