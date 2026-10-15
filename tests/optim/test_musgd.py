@@ -685,7 +685,8 @@ class TestExactShapeBatching:
             torch.testing.assert_close(param_a.detach(), param_b.detach())
 
     @pytest.mark.usefixtures("batching_on_every_device")
-    def test_batched_trajectory_matches_unbatched_reference_over_many_steps(self) -> None:
+    @pytest.mark.parametrize("weight_decay", [5e-4, 0.0])
+    def test_batched_trajectory_matches_unbatched_reference_over_many_steps(self, weight_decay: float) -> None:
         """Divergence between the batched and unbatched paths stays within a tight bound over 40 steps.
 
         Every other batching test in this class compares a single step. The PR
@@ -702,8 +703,13 @@ class TestExactShapeBatching:
         exceeds ``1e-5`` -- a bound comfortably above the PR's own reported
         1.192093e-06-after-35-CPU-steps figure, tight enough to catch a
         regression that reintroduces or worsens the reassociation gap.
+
+        This is also the drift guard between the batched update and
+        :meth:`MuSGD._parameter_update`, which hold separate copies of the same
+        expression. It runs with and without decoupled decay so that both sides of the
+        ``weight_decay != 0`` branch in each copy are compared.
         """
-        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.9, 0.5, 0.5, 5e-4, 5
+        lr, momentum, w_muon, w_sgd, ns_steps = 0.05, 0.9, 0.5, 0.5, 5
         n_steps = 40
         batched_params = [_param_with_grad(6, 4) for _ in range(3)]
         fixed_grads = [param.grad.clone() for param in batched_params]

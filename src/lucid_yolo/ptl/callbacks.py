@@ -319,19 +319,30 @@ class EMACallback(Callback):
         self._num_updates += 1
         decay = self._decay_at(self._num_updates)
         with torch.no_grad():
-            buckets: dict[tuple[torch.device, torch.dtype], tuple[list[Tensor], list[Tensor]]] = {}
+            buckets: dict[tuple[torch.device, torch.dtype, torch.dtype], tuple[list[Tensor], list[Tensor]]] = {}
             for name, live in self._ema_tensors(pl_module):
                 shadow = self._shadow[name]
-                shadows, live_tensors = buckets.setdefault((shadow.device, shadow.dtype), ([], []))
+                detached = live.detach()
+                shadows, live_tensors = buckets.setdefault((shadow.device, shadow.dtype, detached.dtype), ([], []))
                 shadows.append(shadow)
-                # Bucketed by the shadow's own dtype: a shadow restored from a checkpoint saved
-                # under a different precision than the live module's current one (the scalar
-                # ``shadow.add_(live, alpha=...)`` it replaces tolerates that via its own implicit
-                # cast into ``shadow``'s dtype) must cast ``live`` the same way, or
-                # ``torch._foreach_lerp_`` raises on the dtype mismatch instead of casting it.
-                live_tensors.append(live.detach().to(dtype=shadow.dtype))
-            for shadows, live_tensors in buckets.values():
-                torch._foreach_lerp_(shadows, live_tensors, 1.0 - decay)
+                live_tensors.append(detached)
+            # Tensors whose shadow and live dtypes agree share one fused interpolation per
+            # bucket. A shadow restored from a checkpoint saved under another precision than the
+            # live module's current one cannot take that path: ``torch._foreach_lerp_`` rejects
+            # mixed dtypes, and casting ``live`` into the shadow's dtype first would turn a value
+            # outside its range (an fp32 ``7e4`` into an fp16 shadow) into ``inf`` although the
+            # blend itself fits. Such a bucket keeps the scalar recurrence, which casts only the
+            # finished result into ``shadow``'s dtype.
+            for (_, shadow_dtype, live_dtype), (shadows, live_tensors) in buckets.items():
+                if shadow_dtype == live_dtype:
+                    # ``lerp`` forms ``live - shadow`` internally, so unlike the scalar recurrence it
+                    # overflows to ``inf`` once that difference exceeds the dtype's range: fp32
+                    # values of opposite sign beyond about half its maximum (~1.7e38) do so on CPU.
+                    # Weights that large are already unusable, and this call is the measured speedup.
+                    torch._foreach_lerp_(shadows, live_tensors, 1.0 - decay)
+                else:
+                    for shadow, live in zip(shadows, live_tensors, strict=True):
+                        shadow.mul_(decay).add_(live, alpha=1.0 - decay)
 
     def on_validation_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Stash the live weights and load the shadow so validation runs on the EMA.

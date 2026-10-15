@@ -46,6 +46,18 @@ def _orthogonalize_batched(matrices: Tensor, steps: int = 5, eps: float = 1e-7) 
     Raises:
         ValueError: If ``matrices`` is not 3D, or if ``steps`` is below 1.
 
+    Note:
+        The iteration below is a second copy of :func:`orthogonalize`'s, kept apart so that
+        the scalar function stays the untouched reference. A change to the formula, the
+        coefficients, the normalization or ``eps`` made in one has to be made in the other.
+        Two tests hold the copies together: the first compares this function with the
+        scalar loop over square, wide and tall slices, the second compares the optimizer
+        built on it with the scalar update over 40 steps.
+
+            ``tests/optim/test_newton_schulz.py::TestNativeBatch::test_matches_per_matrix_loop``
+
+            ``tests/optim/test_musgd.py::TestExactShapeBatching::test_batched_trajectory_matches_unbatched_reference_over_many_steps``
+
     Examples:
         Each slice orthogonalizes independently, matching :func:`orthogonalize`'s
         own guarantee that no singular value is left blown up:

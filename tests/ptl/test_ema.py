@@ -273,9 +273,9 @@ def test_shadow_update_tolerates_a_restored_dtype_mismatch() -> None:
     checkpoint carried and only :meth:`~lucid_yolo.ptl.callbacks.EMACallback.on_fit_start`
     moves the shadow's device, never its dtype — so a module resumed under a different
     precision than the one its EMA checkpoint was written under reaches
-    :meth:`on_train_batch_end` with a shadow/live dtype pair ``torch._foreach_lerp_`` has never
-    seen matching. The scalar recurrence it replaced, ``shadow.add_(live, alpha=...)``,
-    tolerated the pair via its own implicit cast into ``shadow``'s dtype.
+    :meth:`on_train_batch_end` with a shadow/live dtype pair ``torch._foreach_lerp_`` rejects.
+    Such a pair is blended with the scalar recurrence the fused update replaced,
+    ``shadow.mul_(decay).add_(live, alpha=...)``, which casts into ``shadow``'s dtype itself.
     """
     module = _TinyEMAModule()
     callback = _fitted_callback(module, decay=0.9, tau=1)
@@ -291,6 +291,37 @@ def test_shadow_update_tolerates_a_restored_dtype_mismatch() -> None:
     for name, shadow in callback._shadow.items():
         assert shadow.dtype == torch.float64
         torch.testing.assert_close(shadow, expected[name])
+
+
+def test_shadow_update_blends_a_live_value_beyond_the_shadow_dtype_range() -> None:
+    """A float32 live value outside the float16 range blends into a float16 shadow as a finite value.
+
+    A shadow restored from a half-precision checkpoint meets a float32 live parameter holding
+    ``7e4``, which float16 cannot represent (its maximum is ``65504``). The blended result,
+    about ``3e4``, does fit. Casting the live value into the shadow's dtype *before* blending
+    turns it into ``inf`` and poisons the shadow; the scalar recurrence the fused update
+    replaced, ``shadow.mul_(decay).add_(live, alpha=...)``, only casts the finished result and
+    stays finite, so a mismatched-dtype pair must keep that behaviour.
+    """
+
+    class WideLiveModule(LightningModule):
+        """Minimal module holding one float32 parameter beyond the float16 range."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = nn.Parameter(torch.full((_FEATURES,), 7.0e4, dtype=torch.float32))
+
+    module = WideLiveModule()
+    callback = _fitted_callback(module, decay=0.9, tau=1)
+    callback._shadow = {"weight": torch.ones(_FEATURES, dtype=torch.float16)}
+    decay = callback._decay_at(1)
+    expected = callback._shadow["weight"].clone().mul_(decay).add_(module.weight.detach(), alpha=1.0 - decay)
+
+    _batch_end(callback, module, _StepTrainer())
+
+    assert callback._shadow["weight"].dtype == torch.float16
+    assert torch.isfinite(callback._shadow["weight"]).all()
+    torch.testing.assert_close(callback._shadow["weight"], expected)
 
 
 def test_foreach_shadow_trajectory_matches_scalar_recurrence() -> None:

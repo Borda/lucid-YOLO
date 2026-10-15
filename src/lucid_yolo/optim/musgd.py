@@ -270,6 +270,20 @@ class MuSGD(Optimizer):
         This path only changes how the same Newton--Schulz polynomial is scheduled:
         each product is a native batched product rather than a scalar product inside
         ``vmap``.
+
+        This is a second copy of the Muon arm of :meth:`_parameter_update`, kept beside
+        it instead of factored out so that the scalar path stays the untouched reference.
+        It mirrors :meth:`_muon_branch` (the 2D view and the ``0.2 * sqrt(max(rows, cols))``
+        rescale) with :func:`~lucid_yolo.optim.newton_schulz._orthogonalize_batched` in place
+        of :func:`~lucid_yolo.optim.newton_schulz.orthogonalize`, then repeats the
+        ``w_muon``/``w_sgd`` weighting and the decoupled decay of :meth:`_parameter_update`.
+        A change to the formula made in one place has to be made in the other. Two tests hold
+        the copies together: the first compares this path with :meth:`_parameter_update` over
+        40 optimizer steps, the second compares the orthogonalization alone with the scalar loop.
+
+            ``tests/optim/test_musgd.py::TestExactShapeBatching::test_batched_trajectory_matches_unbatched_reference_over_many_steps``
+
+            ``tests/optim/test_newton_schulz.py::TestNativeBatch::test_matches_per_matrix_loop``
         """
         matrices = grads.reshape(grads.shape[0], grads.shape[1], -1)
         rows, cols = matrices.shape[-2:]
