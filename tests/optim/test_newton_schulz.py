@@ -69,6 +69,18 @@ def _random_conditioned(rows: int, cols: int, dtype: torch.dtype) -> torch.Tenso
     return ((left * singular_values) @ right.T).to(dtype)
 
 
+def _rank_deficient(rows: int, cols: int, rank: int, dtype: torch.dtype) -> torch.Tensor:
+    """Build a random ``rows x cols`` matrix whose rank is ``rank``, below its smaller side.
+
+    Examples:
+        >>> _ = torch.manual_seed(0)
+        >>> matrix = _rank_deficient(6, 8, 1, torch.float32)
+        >>> matrix.shape, int(torch.linalg.matrix_rank(matrix))
+        (torch.Size([6, 8]), 1)
+    """
+    return (torch.randn(rows, rank) @ torch.randn(rank, cols)).to(dtype)
+
+
 class TestOrthogonality:
     """The result drives all singular values into a tight band around 1."""
 
@@ -217,7 +229,33 @@ class TestNativeBatch:
         looped = torch.stack([orthogonalize(matrix) for matrix in batch])
         batched = _orthogonalize_batched(batch)
 
+        # The bound assumes full-rank slices with singular values in [0.5, 2.0], which is what
+        # ``_random_conditioned`` builds. A slice with a null space does not fit it: the scalar
+        # map's slope at zero is ``a = 3.4445``, so five steps can scale a rounding residue in
+        # that space by up to about 485x, which is the likely reason the gap against the loop
+        # grows there. See ``test_rank_deficient_batch_matches_the_loop_within_a_looser_bound``
+        # for the measured case. Both bounds were measured on CPU only; nothing here speaks
+        # for CUDA.
         torch.testing.assert_close(batched, looped, rtol=2e-6, atol=2e-6)
+
+    def test_rank_deficient_batch_matches_the_loop_within_a_looser_bound(self) -> None:
+        """Rank-1 float32 slices agree with the scalar loop at a looser bound than full-rank ones.
+
+        The batch carries its own copy of the iteration, so it must still follow the
+        scalar one on a slice with a null space, where rounding differences are
+        amplified rather than damped. Measured on CPU with torch 2.14.1 over ten seeds of three
+        ``64 x 576`` rank-1 slices, the largest gap with ``rtol = atol`` was ``2.4e-6``,
+        which is already past the full-rank ``2e-6`` bound in
+        :meth:`test_matches_per_matrix_loop`. This bound is ``1e-5``, about four times
+        that. Much smaller slices amplify further: ``4 x 7`` rank-1 slices measured up to
+        ``1.3e-5`` in the same sweep, so this bound belongs to the shape used here.
+        """
+        batch = torch.stack([_rank_deficient(64, 576, 1, torch.float32) for _ in range(3)])
+
+        looped = torch.stack([orthogonalize(matrix) for matrix in batch])
+        batched = _orthogonalize_batched(batch)
+
+        torch.testing.assert_close(batched, looped, rtol=1e-5, atol=1e-5)
 
     def test_normalizes_each_slice_independently(self) -> None:
         """Scaling one slice cannot change a neighbour's answer."""
@@ -226,6 +264,89 @@ class TestNativeBatch:
         result = _orthogonalize_batched(batch)
 
         torch.testing.assert_close(result[0], result[1])
+
+    def test_zero_slice_stays_finite_and_matches_the_loop(self) -> None:
+        """An all-zero slice orthogonalizes to zeros and leaves its neighbours' answers alone.
+
+        The batched function carries its own copy of the normalization, so the scalar
+        function's zero-matrix guarantee (``eps`` keeps ``0 / (0 + eps)`` finite) is not
+        inherited. A zero slice that produced NaN would not stay in its slice: the next
+        optimizer step would write it into that parameter's weights.
+        """
+        zero = torch.zeros(4, 7)
+        batch = torch.stack([zero, _random_conditioned(4, 7, torch.float32), _random_conditioned(4, 7, torch.float32)])
+
+        looped = torch.stack([orthogonalize(matrix) for matrix in batch])
+        batched = _orthogonalize_batched(batch)
+
+        assert torch.isfinite(batched).all()
+        assert torch.equal(batched[0], zero)
+        torch.testing.assert_close(batched, looped)
+
+    @pytest.mark.parametrize(
+        "dtype",
+        [
+            pytest.param(torch.bfloat16, id="bfloat16"),
+            pytest.param(torch.float16, id="float16"),
+        ],
+    )
+    def test_half_precision_is_computed_at_float32_and_returned_in_kind(self, dtype: torch.dtype) -> None:
+        """A half-precision batch comes back finite in its own dtype, computed as if it were float32.
+
+        Half inputs are promoted for the arithmetic and cast back at the end, which is
+        the A5/AMP gate the scalar function already keeps. The reference is the same
+        batch widened to float32 by the caller and narrowed afterwards: promotion on
+        entry makes the two computations identical, so any difference means some step
+        ran at half precision.
+        """
+        batch = torch.stack([_random_conditioned(8, 16, dtype) for _ in range(3)])
+
+        result = _orthogonalize_batched(batch)
+
+        assert result.dtype == dtype
+        assert result.shape == batch.shape
+        assert torch.isfinite(result).all()
+        assert torch.equal(result, _orthogonalize_batched(batch.to(torch.float32)).to(dtype))
+
+    def test_float64_is_not_demoted_to_float32(self) -> None:
+        """A float64 batch keeps float64 arithmetic: a magnitude fp32 cannot hold stays finite.
+
+        Mirrors the scalar function's regression for the batched copy. ``1e200`` is
+        outside the fp32 range, so a batch silently computed at fp32 would divide
+        infinity by infinity and return NaN under a float64 dtype that claims otherwise.
+        The neighbour at unit scale also checks that one huge slice does not leak into it.
+        """
+        batch = torch.stack([torch.eye(4, dtype=torch.float64) * 1e200, torch.eye(4, dtype=torch.float64)])
+
+        result = _orthogonalize_batched(batch)
+
+        assert result.dtype == torch.float64
+        assert torch.isfinite(result).all()
+
+    @pytest.mark.parametrize(
+        "shape",
+        [
+            pytest.param((4, 4), id="square"),
+            pytest.param((4, 7), id="wide"),
+            pytest.param((7, 4), id="tall"),
+        ],
+    )
+    def test_float64_matches_per_matrix_loop_at_default_tolerance(self, shape: tuple[int, int]) -> None:
+        """In float64 the native batch agrees with the scalar loop at ``assert_close``'s own float64 bounds.
+
+        :meth:`test_matches_per_matrix_loop` shares one float32-sized bound between both
+        dtypes, which cannot show that float64 is any tighter. Reassociating a product
+        in float64 moves the result by rounding noise orders of magnitude below that
+        bound, so the stricter default holds here and catches a formula difference the
+        shared bound is loose enough to hide: dropping ``eps`` from the batched
+        normalization passes the shared bound and fails this test.
+        """
+        batch = torch.stack([_random_conditioned(*shape, torch.float64) for _ in range(3)])
+
+        looped = torch.stack([orthogonalize(matrix) for matrix in batch])
+        batched = _orthogonalize_batched(batch)
+
+        torch.testing.assert_close(batched, looped)
 
     @pytest.mark.parametrize("shape", [(4, 4), (2, 3, 4, 5)])
     def test_non_3d_raises(self, shape: tuple[int, ...]) -> None:

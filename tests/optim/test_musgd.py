@@ -278,9 +278,18 @@ class TestExactShapeBatching:
         return calls
 
     @pytest.mark.usefixtures("batching_on_every_device")
-    def test_equal_shapes_share_one_call_and_match_individual_updates(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Three equal conv kernels become one call and retain three independent answers."""
-        lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.03, 0.8, 0.6, 0.4, 0.02, 5
+    @pytest.mark.parametrize("ns_steps", [1, 3, 5])
+    def test_equal_shapes_share_one_call_and_match_individual_updates(
+        self, monkeypatch: pytest.MonkeyPatch, ns_steps: int
+    ) -> None:
+        """Three equal conv kernels become one call and retain three independent answers.
+
+        ``ns_steps`` is varied because the batched path must forward the group's
+        iteration count to the native batch. The helper's default is five, so a
+        run at five alone cannot tell a forwarded count from a dropped one; one
+        and three iterations land on visibly different matrices.
+        """
+        lr, momentum, w_muon, w_sgd, weight_decay = 0.03, 0.8, 0.6, 0.4, 0.02
         kernels = [_param_with_grad(5, 3, 3, 3) for _ in range(3)]
         starts = [param.detach().clone() for param in kernels]
         grads = [param.grad.clone() for param in kernels]
