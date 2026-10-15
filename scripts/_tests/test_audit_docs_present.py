@@ -74,7 +74,7 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     )
     _write(
         docs_dir / "DECISIONS.md",
-        "".join(f"| D{i} | t |\n" for i in range(1, 21))
+        "".join(f"| D{i} | t |\n" for i in range(1, 28))
         + "".join(
             f"## Decision D{i} — {adr}\n"
             for i, adr in enumerate(("ADR-001", "ADR-002", "ADR-003", "ADR-004", "ADR-005"), 1)
@@ -348,7 +348,7 @@ class TestCheckDecisionsIds:
     def test_flags_a_missing_adr(self, tmp_path: Path) -> None:
         """A missing ADR section heading is reported even when ids are contiguous."""
         _write_required_docs(tmp_path / "docs", tmp_path)
-        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 21)))
+        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 28)))
 
         violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
 
@@ -358,7 +358,7 @@ class TestCheckDecisionsIds:
         """Deleting D5 from a full register drops the count below the floor and is reported.
 
         The predicate this pins: a ``max(ids)`` floor grades the register by its last
-        row, so D20 surviving would hide D5's deletion behind a contiguity violation
+        row, so D27 surviving would hide D5's deletion behind a contiguity violation
         alone -- and a contiguity violation is what an id renumbering also produces.
         Counting rows makes the shrink its own finding.
         """
@@ -368,7 +368,7 @@ class TestCheckDecisionsIds:
 
         violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
 
-        assert any("decisions shrank below 20 rows: 19" in violation for violation in violations)
+        assert any("decisions shrank below 27 rows: 26" in violation for violation in violations)
 
     def test_is_clean_for_a_full_register(self, tmp_path: Path) -> None:
         """A contiguous register at the floor with every ADR section reports no violation."""
