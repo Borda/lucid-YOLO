@@ -61,11 +61,14 @@ Instance axis:
     makes a caller violating it fail loudly rather than emit crossed modalities.
 
 An instance wholly inside the canvas takes no clip at all — it is returned bit for bit —
-so the common case costs one vectorized containment test, and only boxes that actually
-cross an edge enter the per-instance Python loop the variable clipped-vertex count forces.
+so the common case costs one vectorized containment test. Finite float32 CPU boxes
+without gradients batch the remaining clips by current vertex count; other inputs keep
+the scalar clipper. Every output returns to its original instance row.
 """
 
 from __future__ import annotations
+
+import math
 
 import torch
 from fuse_augmentations import (  # type: ignore[import-untyped]
@@ -89,7 +92,7 @@ from lucid_yolo.data.targets import Targets
 # reimplemented: the geometry of "rotated box meets axis-aligned rectangle" is settled
 # there, and a second copy would be a second set of edge cases. They stay private to
 # `tiling` because emitting *tiles* is that module's public job, not this one's.
-from lucid_yolo.data.tiling import _clip_to_window, _fit_corners, _polygon_area
+from lucid_yolo.data.tiling import _clip_to_window, _clip_to_window_batch, _fit_corners, _polygon_area
 
 __all__ = [
     "check_rotated_pairing",
@@ -328,7 +331,9 @@ def clip_rboxes_to_canvas(rboxes: Tensor, height: float, width: float) -> tuple[
     for a below-threshold part. A box with nothing left inside collapses to zeros, which
     the caller's visibility rule drops (a zero-extent envelope fails any positive
     ``min_box_size`` and scores zero visibility) — augmentation drops where tiling flags,
-    per the module docstring.
+    per the module docstring. Multiple finite float32 CPU boxes without gradients
+    share clipping, area tests and fits in equal-vertex-count groups; results
+    return to the original instance rows. Other inputs retain the scalar path.
 
     Args:
         rboxes: ``(M, 5)`` rotated boxes ``(cx, cy, w, h, theta)``, canonical or not.
@@ -362,13 +367,70 @@ def clip_rboxes_to_canvas(rboxes: Tensor, height: float, width: float) -> tuple[
     inside = (lower[:, 0] >= 0.0) & (lower[:, 1] >= 0.0) & (upper[:, 0] <= width) & (upper[:, 1] <= height)
     clipped = canonicalize(rboxes)
     envelopes = torch.cat([lower, upper], dim=1)
-    for index in (~inside).nonzero(as_tuple=False).flatten().tolist():
-        part_rbox, part_box = _clip_one(
-            corners[index].to(torch.float64), clipped[index].to(torch.float64), height, width
-        )
-        clipped[index] = part_rbox.to(clipped.dtype)
-        envelopes[index] = part_box.to(envelopes.dtype)
+    indices = (~inside).nonzero(as_tuple=False).flatten().tolist()
+    batched = (
+        len(indices) > 1
+        and rboxes.device.type == "cpu"
+        and rboxes.dtype == torch.float32
+        and not rboxes.requires_grad
+        and math.isfinite(height)
+        and math.isfinite(width)
+        and bool(torch.isfinite(corners).all())
+    )
+    if batched:
+        parts = _clip_to_window_batch(corners[indices].to(torch.float64), 0.0, 0.0, width, height)
+        _refit_clipped_batch(parts, indices, clipped, envelopes)
+    else:
+        for index in indices:
+            part_rbox, part_box = _clip_one(
+                corners[index].to(torch.float64), clipped[index].to(torch.float64), height, width
+            )
+            clipped[index] = part_rbox.to(clipped.dtype)
+            envelopes[index] = part_box.to(envelopes.dtype)
     return clipped, envelopes
+
+
+def _refit_clipped_batch(parts: list[Tensor], indices: list[int], clipped: Tensor, envelopes: Tensor) -> None:
+    """Run the scalar fit's operations in equal-size polygon batches.
+
+    Fewer than three vertices still means an empty part. The existing area
+    expression decides the rest, and ``vmap`` evaluates the existing fit at each
+    original orientation. Quadrilateral conversion sees the same four vertices
+    per box. Results are scattered back to their original instance rows.
+
+    Args:
+        parts: Clipped float64 CPU rings, in ``indices`` order.
+        indices: Original rows of the boxes requiring clipping.
+        clipped: Canonical float32 boxes, updated in place at those rows only.
+        envelopes: Float32 envelopes, updated at the same rows.
+
+    Examples:
+        >>> boxes, envelopes = torch.ones(2, 5), torch.ones(2, 4)
+        >>> _refit_clipped_batch([torch.empty(0, 2, dtype=torch.float64)], [1], boxes, envelopes)
+        >>> boxes[1].tolist(), envelopes[1].tolist()
+        ([0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0])
+    """
+    source_boxes = clipped[indices].to(torch.float64)
+    clipped[indices] = 0.0
+    envelopes[indices] = 0.0
+    buckets: dict[int, list[int]] = {}
+    for position, part in enumerate(parts):
+        if part.shape[0] >= _MIN_AREA_CORNERS:
+            buckets.setdefault(part.shape[0], []).append(position)
+    for positions in buckets.values():
+        rings = torch.stack([parts[position] for position in positions])
+        area = torch.vmap(_polygon_area)(rings)
+        valid = (~(area <= 0.0)).nonzero(as_tuple=False).flatten()
+        if valid.numel() == 0:
+            continue
+        selected_positions = [positions[position] for position in valid.tolist()]
+        selected_indices = [indices[position] for position in selected_positions]
+        rings = rings[valid]
+        fitted_corners = torch.vmap(_fit_corners)(rings, source_boxes[selected_positions])
+        fitted = polygons_to_rboxes(fitted_corners.to(torch.float32))
+        envelope = torch.cat([rings.amin(dim=1), rings.amax(dim=1)], dim=1).to(torch.float32)
+        clipped[selected_indices] = fitted.to(clipped.dtype)
+        envelopes[selected_indices] = envelope.to(envelopes.dtype)
 
 
 def _clip_one(ring: Tensor, rbox: Tensor, height: float, width: float) -> tuple[Tensor, Tensor]:
@@ -391,7 +453,24 @@ def _clip_one(ring: Tensor, rbox: Tensor, height: float, width: float) -> tuple[
         >>> _clip_one(quad, rb, height=4.0, width=5.0)[1].tolist()
         [2.0, 0.0, 5.0, 2.0]
     """
-    part = _clip_to_window(ring, 0.0, 0.0, width, height)
+    return _refit_clipped(_clip_to_window(ring, 0.0, 0.0, width, height), rbox)
+
+
+def _refit_clipped(part: Tensor, rbox: Tensor) -> tuple[Tensor, Tensor]:
+    """Apply the existing area test and orientation-preserving fit to one clipped ring.
+
+    Args:
+        part: Float64 clipped polygon, in its original vertex order.
+        rbox: Float64 rotated box supplying the unchanged fit orientation.
+
+    Returns:
+        The fitted rotated box and clipped envelope; zeros for an empty part.
+
+    Examples:
+        >>> fitted, envelope = _refit_clipped(torch.empty(0, 2, dtype=torch.float64), torch.zeros(5))
+        >>> fitted.shape, envelope.shape
+        (torch.Size([5]), torch.Size([4]))
+    """
     if part.shape[0] < _MIN_AREA_CORNERS or float(_polygon_area(part)) <= 0.0:
         return torch.zeros(_RBOX_DIM), torch.zeros(_BOX_DIM)
     fitted = polygons_to_rboxes(_fit_corners(part, rbox).to(torch.float32).unsqueeze(0))[0]

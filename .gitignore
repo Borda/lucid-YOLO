@@ -112,8 +112,11 @@ results/
 # Where the demo notebooks put a downloaded or tiled dataset (`data/coco2017`,
 # `data/dota_tiles`, WP-191): gigabytes that belong to the reader's machine, never
 # to the tree. A tier run points `--data.data_root` wherever it likes; this is only
-# the default the notebooks write to from a checkout.
-data/
+# the default the notebooks write to from a checkout. Anchored to the root: an
+# unanchored `data/` also matches `tests/data/` and `src/lucid_yolo/data/`, silently
+# dropping any new file placed under either from `git add -A` and from the
+# `git ls-files`-driven `pre-commit run --all-files` file set.
+/data/
 
 # --- Documentation builds --------------------------------------------------
 # mkdocs writes site/; Sphinx writes docs/_build/
