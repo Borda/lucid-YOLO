@@ -112,6 +112,7 @@ pipeline runs and stays geometrically consistent), not the literal constants.
 from __future__ import annotations
 
 import json
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -119,6 +120,7 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 from torchvision.io import ImageReadMode, read_image
+from tqdm.auto import tqdm
 
 from lucid_yolo.data.rotated_geom import polygons_to_rboxes
 from lucid_yolo.data.targets import Targets
@@ -147,6 +149,10 @@ _LEFT = "left"
 _RIGHT = "right"
 #: 8-bit image scale factor mapping ``uint8`` pixels into ``[0, 1]`` float.
 _UINT8_MAX = 255.0
+#: Channels of the RGB tensor the image cache retains: its bytes per pixel at 8 bits.
+_RGB_CHANNELS = 3
+#: Bytes per gigabyte (decimal) in the image cache's size report.
+_BYTES_PER_GB = 1e9
 
 #: Size-aware augmentation strengths per variant ([R1] Table S3; blueprint 5.9).
 #: ``scale`` is the :class:`~lucid_yolo.data.affine.RandomAffine` half-range, ``mixup``
@@ -251,7 +257,9 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             (the default) leaves the reader, and every target it has ever produced,
             exactly as it was.
         cache_images: Decode every image once at construction and retain the RGB
-            ``uint8`` tensors in memory. The cache is opt-in because its size is the
+            tensors in memory (:meth:`cache_images`, without its progress report) —
+            ``uint8`` for an 8-bit source, ``uint16`` for a 16-bit PNG, which so takes
+            twice the 8-bit budget. The cache is opt-in because its size is the
             uncompressed dataset, but it is shared copy-on-write by forked loader
             workers and removes repeated JPEG/PNG decoding from multi-epoch training.
 
@@ -303,12 +311,72 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         anns_by_image = _group_annotations(payload["annotations"])
         self._targets = [self._build_targets(anns_by_image.get(record.image_id, ()), record) for record in self._images]
         if cache_images:
-            file_names = dict.fromkeys(record.file_name for record in self._images)
-            self._image_cache = {file_name: self._decode_image(file_name) for file_name in file_names}
+            self.cache_images()
 
     def __len__(self) -> int:
         """Return the number of images in the dataset."""
         return len(self._images)
+
+    def cache_images(self, *, progress: bool = False) -> None:
+        """Decode every distinct image file once and keep it for every later draw.
+
+        ``cache_images=True`` at construction calls this; a reader built without the flag
+        can call it later to the same effect. A second call is a no-op, and the cache is
+        installed only once every file has decoded, so a failure part-way leaves the
+        reader uncached rather than half-filled.
+
+        Records are deduplicated by ``file_name`` exactly as the annotation file spells it,
+        with no path normalisation: two records naming ``a.png`` share one decoded tensor,
+        while ``a.png`` and ``./a.png`` are two spellings and are cached once each. The cost
+        of an alias is memory only — each spelling still decodes the same file.
+
+        Args:
+            progress: Report the cache's expected size before the first decode — a
+                ``UserWarning`` naming ``sum(3 * height * width)`` bytes over the distinct
+                files, at the sizes this annotation file states and for 8-bit sources (a
+                16-bit PNG decodes to ``uint16`` and takes twice that) — and draw a progress
+                bar over the decode. ``False`` (the default) keeps a library caller quiet;
+                :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule` turns it on.
+
+        Examples:
+            ```pycon
+            >>> import json, tempfile
+            >>> from pathlib import Path
+            >>> import torch
+            >>> from torchvision.io import write_png
+            >>> payload = {
+            ...     "categories": [{"id": 1}],
+            ...     "images": [{"id": 1, "file_name": "a.png", "height": 4, "width": 6}],
+            ...     "annotations": [],
+            ... }
+            >>> with tempfile.TemporaryDirectory() as tmp:
+            ...     root = Path(tmp)
+            ...     _ = (root / "instances.json").write_text(json.dumps(payload), encoding="utf-8")
+            ...     _ = write_png(torch.zeros(3, 4, 6, dtype=torch.uint8), str(root / "a.png"))
+            ...     dataset = CocoDetectionDataset(root, root / "instances.json")
+            ...     dataset.cache_images()
+            ...     (root / "a.png").unlink()
+            ...     tuple(dataset[0][0].shape)
+            (3, 4, 6)
+
+            ```
+        """
+        if self._image_cache is not None:
+            return
+        first_record_per_file: dict[str, _ImageRecord] = {}
+        for record in self._images:
+            first_record_per_file.setdefault(record.file_name, record)
+        if progress:
+            expected = sum(_RGB_CHANNELS * record.height * record.width for record in first_record_per_file.values())
+            warnings.warn(
+                f"image cache: decoding {len(first_record_per_file)} images from {self._images_dir} needs about "
+                f"{expected / _BYTES_PER_GB:.1f} GB ({expected:,} bytes) of host RAM per training process "
+                "(3 x height x width bytes per distinct file, at the sizes the annotation file states, "
+                "for 8-bit sources; a 16-bit PNG takes twice that)",
+                stacklevel=2,
+            )
+        files = tqdm(first_record_per_file, desc="Caching images", unit="img", disable=not progress)
+        self._image_cache = {file_name: self._decode_image(file_name) for file_name in files}
 
     @property
     def image_ids(self) -> tuple[int, ...]:
@@ -455,7 +523,11 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         return raw.to(torch.float32) / _UINT8_MAX
 
     def _decode_image(self, file_name: str) -> Tensor:
-        """Decode ``file_name`` into the RGB ``uint8`` representation the cache retains."""
+        """Decode ``file_name`` into the RGB tensor the cache retains, at the source's own depth.
+
+        An 8-bit source decodes to ``uint8``; a 16-bit PNG decodes to ``uint16``, two bytes
+        per channel. Both the cached and the uncached path scale the result the same way.
+        """
         path = self._images_dir / file_name
         try:
             raw = read_image(str(path), ImageReadMode.RGB)
