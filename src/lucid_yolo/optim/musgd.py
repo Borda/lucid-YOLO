@@ -51,22 +51,25 @@ if TYPE_CHECKING:
 #: Update-RMS scaling constant for the Muon branch (R7 Eq. 4: ``0.2 * O_t``).
 _MUON_RMS_SCALE: float = 0.2
 
-#: Device types on which :meth:`MuSGD._step_group` maps its update over a stack of
-#: equal-shape matrices instead of launching it per parameter. Batching trades many
-#: small kernel launches for one large one, so it pays exactly where launch overhead
-#: dominates. Measured on the production n-scale detector: CUDA (L4) is where the win
-#: was found, while MPS runs the mapped path at 108.45 ms per optimizer step against
-#: 60.99 ms for the per-parameter loop and CPU moves 39.64 ms to 38.47 ms. A device
-#: outside this set keeps the loop, which is also the arithmetic the tests pin.
+#: Device types on which :meth:`MuSGD._step_group` stacks equal-shape matrices and
+#: updates each stack with one native batched call instead of one call per parameter.
+#: Batching trades many small kernel launches for one large one, so it pays exactly
+#: where launch overhead dominates. The gate was set on the production n-scale detector
+#: while the stack was updated through :func:`torch.vmap`: CUDA (L4) is where the win was
+#: found, while MPS ran that vmap path at 108.45 ms per optimizer step against 60.99 ms
+#: for the per-parameter loop and CPU moved 39.64 ms to 38.47 ms. The native batch that
+#: replaced it (WP-193) was measured on CUDA (L4) and not re-measured on MPS or CPU, so
+#: the CUDA-only gate is inherited rather than re-derived. A device outside this set
+#: keeps the loop, which is also the arithmetic the tests pin.
 _BATCHED_DEVICE_TYPES: frozenset[str] = frozenset({"cuda"})
 
 
 class _BucketKey(NamedTuple):
-    """The identity two matrix parameters must share to be stacked into one map.
+    """The identity two matrix parameters must share to be stacked into one batch.
 
-    Every operation inside :meth:`MuSGD._parameter_update` is elementwise or acts
-    on the final two matrix axes, so a leading batch axis cannot mix parameters
-    that agree on these four fields.
+    Every operation inside :meth:`MuSGD._batched_parameter_update` is elementwise
+    or acts on the final two matrix axes through a native batched product, so a
+    leading batch axis cannot mix parameters that agree on these four fields.
 
     The gradient dtype is one of the four because :func:`torch.stack` is applied
     to the Nesterov-adjusted gradients as well as to the parameters, and those
@@ -206,8 +209,9 @@ class MuSGD(Optimizer):
 
         The n-scale detector carries 127 matrix parameters but only 41 exact
         :class:`_BucketKey` values. Native batched matrix products once per key
-        replace the scalar products :func:`torch.vmap` dispatched for every slice,
-        while keeping the same normalization, requested iteration count, branch
+        replace the :func:`torch.vmap` layer, which had already lowered each product
+        to one batched multiply, and fold the scale-and-add into
+        :func:`torch.baddbmm`, while keeping the same normalization, requested iteration count, branch
         weights and decay.
         Vector parameters and the ``w_muon == 0`` arm stay on their scalar path;
         :meth:`_is_batchable_matrix` is what says which parameters those are, and
@@ -216,9 +220,11 @@ class MuSGD(Optimizer):
         The batched path is taken only where it pays (:data:`_BATCHED_DEVICE_TYPES`). One
         large kernel launch in place of many is a win where launch overhead
         dominates the step and a loss where it does not, and the measurement says
-        which is which per backend rather than per shape: MPS ran the batched path
-        at 108.45 ms per optimizer step against 60.99 ms for the per-parameter
-        loop. Every parameter on a device outside that set keeps the loop.
+        which is which per backend rather than per shape: MPS ran the
+        :func:`torch.vmap` path this native batch replaced at 108.45 ms per optimizer
+        step against 60.99 ms for the per-parameter loop. The native batch has not
+        been re-measured on MPS or CPU, so the CUDA-only gate is inherited from that
+        measurement. Every parameter on a device outside that set keeps the loop.
 
         A bucket holding one parameter is called directly rather than batched. There
         is nothing to combine, the stack-batch-unbind round trip costs more than the
@@ -289,8 +295,11 @@ class MuSGD(Optimizer):
         :meth:`_parameter_update` to decide which arm to run. Stating the condition
         once is the point. Written out at both call sites it would drift, and the
         two directions of drift are not equally visible -- one silently stops
-        batching, the other stacks a parameter whose branch is switched off and
-        fails inside the map.
+        batching, the other stacks a parameter whose branch is switched off. The
+        native batch raises nothing for that parameter either: it runs the full
+        Newton-Schulz iteration and multiplies the result by the zero gain, paying
+        for work :meth:`_parameter_update` skips and, should the iteration come out
+        non-finite, poisoning the update through ``0 * nan``.
 
         Args:
             param: The parameter under update.

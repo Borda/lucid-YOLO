@@ -165,8 +165,11 @@ class EMACallback(Callback):
     ``d_t = decay * (1 - exp(-t / tau))``     ``shadow <- d_t * shadow + (1 - d_t) * live``
 
     where ``t`` is the number of updates performed so far. Tensors sharing a device and
-    dtype are submitted to one foreach interpolation; this is the same recurrence with
-    fewer accelerator launches. The ramp starts the effective
+    dtype are submitted to one foreach interpolation: the same recurrence with fewer
+    accelerator launches, but not bit-identical to the per-tensor form in any dtype. It
+    agrees within the test tolerance for fp32 and fp64, and a half-precision shadow rounds
+    once per step instead of twice (a difference of about 1 ulp). A tensor whose shadow and
+    live dtypes differ keeps the per-tensor recurrence. The ramp starts the effective
     decay near zero so the early shadow tracks the fast-moving weights closely, then
     relaxes toward the nominal ``decay`` as training settles (blueprint D4). Around the
     validation loop the callback swaps the shadow in (:meth:`on_validation_start`) and the

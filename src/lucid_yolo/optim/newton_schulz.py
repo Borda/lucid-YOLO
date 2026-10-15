@@ -30,8 +30,9 @@ def _orthogonalize_batched(matrices: Tensor, steps: int = 5, eps: float = 1e-7) 
     optimizer's exact-shape buckets. Each ``matrices[index]`` keeps an independent
     Frobenius normalization and follows the same quintic iteration, but
     :func:`torch.baddbmm` submits each polynomial and update as one batched operation
-    instead of asking :func:`torch.vmap` to dispatch the scalar expression once per
-    slice. The different reduction schedule can move the last few floating-point
+    and folds the scale-and-add into the product's epilogue. :func:`torch.vmap` had
+    already lowered each product to one batched multiply, so this drops the ``vmap``
+    layer rather than a per-slice dispatch. The different reduction schedule can move the last few floating-point
     bits; it does not change the formula, coefficients, step count or scale.
 
     Args:
