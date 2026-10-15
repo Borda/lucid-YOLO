@@ -28,11 +28,13 @@ from typing import cast
 
 import pytest
 import torch
+from PIL import Image
 from pytorch_lightning import LightningModule, Trainer
 
 from lucid_yolo.cli import data as data_cli
 from lucid_yolo.data import Targets, boxes_from_polygons
 from lucid_yolo.data import check as check_data
+from lucid_yolo.data import coco as coco_data
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.ptl import datamodule as dm
 from lucid_yolo.ptl.datamodule import (
@@ -97,6 +99,178 @@ def test_sample_dtype_and_range(detseg_fixture_dir: Path) -> None:
     assert image.dtype == torch.float32
     assert image.ndim == 3 and image.shape[0] == 3
     assert float(image.min()) >= 0.0 and float(image.max()) <= 1.0
+
+
+def test_opt_in_cache_decodes_once_and_keeps_returned_images_independent(
+    detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The eager cache pays one decode per file and never exposes mutable cached storage."""
+    split = detseg_fixture_dir / "train"
+    calls: list[str] = []
+    incumbent = coco_data.read_image
+
+    def counted_read_image(path: str, mode: object) -> torch.Tensor:
+        calls.append(path)
+        return incumbent(path, mode)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(coco_data, "read_image", counted_read_image)
+    dataset = CocoDetectionDataset(split, split / "_annotations.coco.json", cache_images=True)
+    assert len(calls) == len(dataset)
+    assert dataset._image_cache is not None
+    assert all(raw.dtype == torch.uint8 and raw.ndim == 3 for raw in dataset._image_cache.values())
+
+    first, _ = dataset[0]
+    expected = first.clone()
+    assert expected.any()
+    first.zero_()
+    replay, _ = dataset[0]
+
+    assert len(calls) == len(dataset)
+    assert torch.equal(replay, expected)
+
+
+def test_opt_in_cache_deduplicates_repeated_coco_file_names(
+    detseg_fixture_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two COCO records naming one file retain one decoded tensor, not two copies.
+
+    The decode count proves one copy; it does not prove both records are served from it.
+    Locating the two positions by file name — records are sorted by id, so the duplicate
+    need not sit beside its original — and comparing their pixels closes that gap.
+    """
+    split = detseg_fixture_dir / "train"
+    source = split / "_annotations.coco.json"
+    payload = json.loads(source.read_text())
+    duplicate = dict(payload["images"][0])
+    duplicate["id"] = max(image["id"] for image in payload["images"]) + 1
+    payload["images"].append(duplicate)
+    annotation_file = tmp_path / "instances.json"
+    annotation_file.write_text(json.dumps(payload))
+    calls: list[str] = []
+    incumbent = coco_data.read_image
+
+    def counted_read_image(path: str, mode: object) -> torch.Tensor:
+        calls.append(path)
+        return incumbent(path, mode)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(coco_data, "read_image", counted_read_image)
+    dataset = CocoDetectionDataset(split, annotation_file, cache_images=True)
+    first, second = (index for index, name in enumerate(dataset.file_names) if name == duplicate["file_name"])
+
+    assert len(dataset) == _FIXTURE_IMAGE_COUNT + 1
+    assert len(calls) == _FIXTURE_IMAGE_COUNT
+    assert len(set(calls)) == _FIXTURE_IMAGE_COUNT
+    assert first != second
+    assert torch.equal(dataset[first][0], dataset[second][0])
+
+
+def _assert_same_sample(left: tuple[torch.Tensor, Targets], right: tuple[torch.Tensor, Targets]) -> None:
+    """Assert two reader samples agree on the image and on every ``Targets`` field.
+
+    Examples:
+        >>> sample = (torch.zeros(3, 2, 2), Targets.empty())
+        >>> _assert_same_sample(sample, sample)
+    """
+    assert torch.equal(left[0], right[0]), "the images differ"
+    for field in dataclasses.fields(left[1]):
+        got, want = getattr(left[1], field.name), getattr(right[1], field.name)
+        if isinstance(got, list):
+            assert len(got) == len(want), f"{field.name} has a different length"
+            assert all(torch.equal(a, b) for a, b in zip(got, want, strict=True)), f"{field.name} differs"
+        else:
+            assert torch.equal(got, want), f"{field.name} differs"
+
+
+def test_cached_reader_returns_the_same_sample_as_the_uncached_reader_at_every_index(
+    detseg_fixture_dir: Path,
+) -> None:
+    """Switching the cache on changes nothing any index returns, image or target.
+
+    The fixture's 16 images are distinct synthetic scenes with non-zero pixels, so a cache
+    that served the wrong file's bytes, or altered a value, cannot match by being all zeros.
+    """
+    split = detseg_fixture_dir / "train"
+    uncached = CocoDetectionDataset(split, split / "_annotations.coco.json")
+    cached = CocoDetectionDataset(split, split / "_annotations.coco.json", cache_images=True)
+    uncached_images = [uncached[index][0] for index in range(len(uncached))]
+    assert all(image.any() for image in uncached_images)
+    assert len({image.sum().item() for image in uncached_images}) > 1
+
+    assert cached._image_cache is not None
+    assert len(cached) == len(uncached)
+    for index in range(len(uncached)):
+        _assert_same_sample(cached[index], uncached[index])
+
+
+class TestImageCacheReport:
+    """What :meth:`CocoDetectionDataset.cache_images` tells an operator before the decode starts."""
+
+    def test_progress_reports_the_size_estimate_before_the_first_decode(
+        self, detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With ``progress`` on, the estimate is out before any image is decoded.
+
+        An undersized host dies part-way through the decode with an out-of-memory kill and
+        no Python error, so the figure only helps if it comes first. A decode failing on the
+        very first file stands in for that kill: the warning must already have been issued,
+        naming ``3 * height * width`` summed over the distinct files at the sizes the
+        annotation file states, and the reader must be left uncached rather than half-filled.
+        """
+        split = detseg_fixture_dir / "train"
+        annotation_file = split / "_annotations.coco.json"
+        expected = sum(
+            3 * image["height"] * image["width"] for image in json.loads(annotation_file.read_text())["images"]
+        )
+        dataset = CocoDetectionDataset(split, annotation_file)
+
+        def failing_read_image(path: str, mode: object) -> torch.Tensor:
+            raise RuntimeError("simulated decode failure")
+
+        monkeypatch.setattr(coco_data, "read_image", failing_read_image)
+
+        with pytest.warns(UserWarning, match=rf"\({expected:,} bytes\)"), pytest.raises(OSError, match="simulated"):
+            dataset.cache_images(progress=True)
+        assert dataset._image_cache is None
+
+    def test_a_cache_built_without_progress_stays_quiet(
+        self, detseg_fixture_dir: Path, recwarn: pytest.WarningsRecorder
+    ) -> None:
+        """Opting into the cache at construction issues no size report.
+
+        A library caller that asks for the cache has made its own memory decision; the
+        report is the datamodule's to turn on, not a warning every direct reader pays.
+        """
+        split = detseg_fixture_dir / "train"
+
+        CocoDetectionDataset(split, split / "_annotations.coco.json", cache_images=True)
+
+        assert not [warning for warning in recwarn if issubclass(warning.category, UserWarning)]
+
+
+def test_a_16_bit_png_reads_the_same_cached_or_not(tmp_path: Path) -> None:
+    """A 16-bit PNG is cached as the ``uint16`` it decodes to and reads back exactly as uncached.
+
+    ``read_image`` keeps 16 bits per channel, so such an entry takes twice the 8-bit budget
+    the docs state. How those values are scaled is shared by both paths and out of scope
+    here; the pin is only that switching the cache on changes nothing a draw returns.
+    """
+    deep = Image.new("I;16", (6, 4))
+    deep.putdata([value * 1000 for value in range(24)])
+    deep.save(tmp_path / "deep.png")
+    payload = {
+        "categories": [{"id": 1}],
+        "images": [{"id": 1, "file_name": "deep.png", "height": 4, "width": 6}],
+        "annotations": [],
+    }
+    annotation_file = tmp_path / "instances.json"
+    annotation_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    cached = CocoDetectionDataset(tmp_path, annotation_file, cache_images=True)
+    uncached = CocoDetectionDataset(tmp_path, annotation_file)
+
+    assert cached._image_cache is not None
+    assert cached._image_cache["deep.png"].dtype == torch.uint16
+    assert torch.equal(cached[0][0], uncached[0][0])
 
 
 def test_boxes_are_xyxy_within_bounds(detseg_fixture_dir: Path) -> None:

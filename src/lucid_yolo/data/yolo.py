@@ -97,6 +97,7 @@ Assumptions:
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from os.path import normpath
 from pathlib import Path
@@ -107,6 +108,7 @@ import yaml
 from torch import Tensor
 from torch.utils.data import Dataset
 from torchvision.io import ImageReadMode, read_image
+from tqdm.auto import tqdm
 
 from lucid_yolo.data.layout import DATA_YAML_NAME, resolve_yolo_split
 from lucid_yolo.data.rotated_geom import polygons_to_rboxes
@@ -144,6 +146,8 @@ _IMAGES_COMPONENT = "images"
 _LABELS_COMPONENT = "labels"
 #: 8-bit image scale factor mapping ``uint8`` pixels into ``[0, 1]`` float.
 _UINT8_MAX = 255.0
+#: Bytes per gigabyte (decimal) in the image cache's size report.
+_BYTES_PER_GB = 1e9
 
 
 @dataclass(frozen=True)
@@ -299,6 +303,11 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         allow_missing_labels: Read an image with no label file as a background image instead
             of raising. ``False`` (the default) treats the absence as the broken export it
             usually is; an empty label file means "no objects" either way.
+        cache_images: Decode all images once at construction and retain their RGB
+            tensors (:meth:`cache_images`, without its progress report) — ``uint8`` for
+            an 8-bit source, ``uint16`` for a 16-bit PNG, at twice the bytes.
+            Opt-in because the cache occupies the uncompressed
+            dataset size; forked loader workers share those read-only pages.
 
     Attributes:
         names: The class names, in index order.
@@ -327,6 +336,7 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         *,
         oriented: bool = False,
         allow_missing_labels: bool = False,
+        cache_images: bool = False,
     ) -> None:
         self._images_dir = images_dir
         self._labels_dir = labels_dir
@@ -338,6 +348,60 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         self._images = sorted(
             path for path in images_dir.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
         )
+        self._image_cache: dict[Path, Tensor] | None = None
+        if cache_images:
+            self.cache_images()
+
+    def cache_images(self, *, progress: bool = False) -> None:
+        """Decode every listed image once and keep it for every later draw.
+
+        ``cache_images=True`` at construction calls this; a reader built without the flag
+        can call it later to the same effect. A second call is a no-op, and the cache is
+        installed only once every file has decoded, so a failure part-way leaves the
+        reader uncached rather than half-filled.
+
+        Entries are keyed by each listed path as the directory listing spells it, with no
+        symlink resolution, so two directory entries aliasing one file — a symlink beside
+        its target — are cached once each. The cost of an alias is memory only.
+
+        Args:
+            progress: Draw a progress bar over the decode and, once it finishes, report
+                the image count and the bytes the cache retains as a ``UserWarning``. A YOLO
+                tree states no image sizes, so there is nothing to estimate from before
+                decoding. ``False`` (the default) keeps a library caller quiet;
+                :class:`~lucid_yolo.ptl.datamodule.DetectionDataModule` turns it on.
+
+        Examples:
+            ```pycon
+            >>> import tempfile
+            >>> from pathlib import Path
+            >>> import torch
+            >>> from torchvision.io import write_png
+            >>> with tempfile.TemporaryDirectory() as tmp:
+            ...     images, labels = Path(tmp) / "images", Path(tmp) / "labels"
+            ...     images.mkdir()
+            ...     labels.mkdir()
+            ...     _ = write_png(torch.zeros(3, 4, 6, dtype=torch.uint8), str(images / "a.png"))
+            ...     dataset = YoloDetectionDataset(images, labels, ["car"], allow_missing_labels=True)
+            ...     dataset.cache_images()
+            ...     (images / "a.png").unlink()
+            ...     tuple(dataset[0][0].shape)
+            (3, 4, 6)
+
+            ```
+        """
+        if self._image_cache is not None:
+            return
+        paths = tqdm(self._images, desc="Caching images", unit="img", disable=not progress)
+        cache = {path: self._decode_image(path) for path in paths}
+        self._image_cache = cache
+        if progress:
+            retained = sum(image.nbytes for image in cache.values())
+            warnings.warn(
+                f"image cache: decoded {len(cache)} images from {self._images_dir}, holding "
+                f"{retained / _BYTES_PER_GB:.1f} GB ({retained:,} bytes) of host RAM per training process",
+                stacklevel=2,
+            )
 
     @classmethod
     def from_root(
@@ -348,6 +412,7 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         *,
         oriented: bool = False,
         allow_missing_labels: bool = False,
+        cache_images: bool = False,
     ) -> YoloDetectionDataset:
         """Build a split's dataset from a dataset root alone.
 
@@ -362,6 +427,8 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             transforms: Optional per-image geometric transform.
             oriented: Read the oriented nine-field rows (see the class docstring).
             allow_missing_labels: Read an image with no label file as a background image.
+            cache_images: Decode and retain every split image as an RGB tensor, ``uint8``
+                for an 8-bit source and ``uint16`` for a 16-bit PNG.
 
         Returns:
             The dataset for that split.
@@ -387,6 +454,7 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             transforms,
             oriented=oriented,
             allow_missing_labels=allow_missing_labels,
+            cache_images=cache_images,
         )
 
     def __len__(self) -> int:
@@ -428,11 +496,21 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
         Raises:
             OSError: If the file is missing or cannot be decoded; the path is named.
         """
+        raw = self._image_cache[path] if self._image_cache is not None else self._decode_image(path)
+        return raw.to(torch.float32) / _UINT8_MAX
+
+    @staticmethod
+    def _decode_image(path: Path) -> Tensor:
+        """Decode ``path`` into the RGB tensor the cache retains, at the source's own depth.
+
+        An 8-bit source decodes to ``uint8``; a 16-bit PNG decodes to ``uint16``, two bytes
+        per channel. Both the cached and the uncached path scale the result the same way.
+        """
         try:
             raw = read_image(str(path), ImageReadMode.RGB)
         except (RuntimeError, OSError) as error:
             raise OSError(f"failed to read image {path}: {error}") from error
-        return cast("Tensor", raw.to(torch.float32) / _UINT8_MAX)
+        return cast("Tensor", raw)
 
     def _load_targets(self, image_path: Path, *, height: int, width: int) -> Targets:
         """Parse one image's label file, applying the missing-file policy.

@@ -15,6 +15,7 @@ malformed — each rejected with the file *and* the 1-based line named.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from collections.abc import Iterator
 from pathlib import Path
@@ -23,8 +24,10 @@ import pytest
 import torch
 from torchvision.io import write_png
 
+from lucid_yolo.data import yolo as yolo_data
 from lucid_yolo.data.layout import resolve_yolo_split
 from lucid_yolo.data.rotated_aug import rbox_envelopes
+from lucid_yolo.data.targets import Targets
 from lucid_yolo.data.yolo import (
     DATA_YAML_NAME,
     YoloDataConfig,
@@ -66,19 +69,30 @@ def reset_random_seeds() -> Iterator[None]:
     yield
 
 
-def _write_image(path: Path) -> None:
+def _write_image(path: Path, seed: int | None = None) -> None:
     """Write one fixture-sized PNG at ``path``, creating its directory.
+
+    Args:
+        path: Destination file.
+        seed: ``None`` (the default) writes an all-zero image. An integer writes seeded random
+            8-bit content instead — lossless in PNG, so a test that reads pixels sees values
+            to compare — and two seeds give two different images.
 
     Examples:
         >>> import tempfile
         >>> with tempfile.TemporaryDirectory() as tmp:
         ...     path = Path(tmp) / "images" / "frame.png"
-        ...     _write_image(path)
+        ...     _write_image(path, seed=1)
         ...     path.is_file()
         True
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_png(torch.zeros(3, _HEIGHT, _WIDTH, dtype=torch.uint8), str(path))
+    if seed is None:
+        pixels = torch.zeros(3, _HEIGHT, _WIDTH, dtype=torch.uint8)
+    else:
+        generator = torch.Generator().manual_seed(seed)
+        pixels = torch.randint(0, 256, (3, _HEIGHT, _WIDTH), generator=generator, dtype=torch.uint8)
+    write_png(pixels, str(path))
 
 
 def _write_labels(path: Path, rows: list[str]) -> Path:
@@ -128,7 +142,7 @@ def _write_data_yaml(root: Path, entry: str = "../train/images", names: tuple[st
     return path
 
 
-def _build_root(root: Path, rows: list[str], *, spelling: str = "per-split") -> Path:
+def _build_root(root: Path, rows: list[str], *, spelling: str = "per-split", seed: int | None = None) -> Path:
     """Materialise a one-image, one-split YOLO root and return it.
 
     Args:
@@ -136,6 +150,7 @@ def _build_root(root: Path, rows: list[str], *, spelling: str = "per-split") -> 
         rows: The single image's label rows.
         spelling: ``"per-split"`` for ``train/images``, ``"split-subdir"`` for
             ``images/train``.
+        seed: Passed to :func:`_write_image`; ``None`` keeps the image all zeros.
 
     Returns:
         ``root``, now holding a ``data.yaml``, one image and its label file.
@@ -152,10 +167,51 @@ def _build_root(root: Path, rows: list[str], *, spelling: str = "per-split") -> 
         if spelling == "per-split"
         else (root / "images" / "train", root / "labels" / "train")
     )
-    _write_image(images / "frame.png")
+    _write_image(images / "frame.png", seed=seed)
     _write_labels(labels / "frame.txt", rows)
     _write_data_yaml(root, entry="../train/images" if spelling == "per-split" else "images/train")
     return root
+
+
+def _build_distinct_root(root: Path, rows_per_frame: list[list[str]]) -> Path:
+    """Materialise a one-split YOLO root with one frame per entry, each its own random pixels.
+
+    Args:
+        root: Directory to build inside.
+        rows_per_frame: The label rows of each frame, in file-name order.
+
+    Returns:
+        ``root``, holding ``data.yaml`` and ``train/images/frame<N>.png`` with their labels.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = _build_distinct_root(Path(tmp), [[], []])
+        ...     len(list((root / "train" / "images").iterdir()))
+        2
+    """
+    for index, rows in enumerate(rows_per_frame):
+        _write_image(root / "train" / "images" / f"frame{index}.png", seed=index + 1)
+        _write_labels(root / "train" / "labels" / f"frame{index}.txt", rows)
+    _write_data_yaml(root)
+    return root
+
+
+def _assert_same_sample(left: tuple[torch.Tensor, Targets], right: tuple[torch.Tensor, Targets]) -> None:
+    """Assert two reader samples agree on the image and on every ``Targets`` field.
+
+    Examples:
+        >>> sample = (torch.zeros(3, 2, 2), Targets.empty())
+        >>> _assert_same_sample(sample, sample)
+    """
+    assert torch.equal(left[0], right[0]), "the images differ"
+    for field in dataclasses.fields(left[1]):
+        got, want = getattr(left[1], field.name), getattr(right[1], field.name)
+        if isinstance(got, list):
+            assert len(got) == len(want), f"{field.name} has a different length"
+            assert all(torch.equal(a, b) for a, b in zip(got, want, strict=True)), f"{field.name} differs"
+        else:
+            assert torch.equal(got, want), f"{field.name} differs"
 
 
 class TestDataYaml:
@@ -454,6 +510,69 @@ class TestDatasetRoundTrip:
         assert image.shape == (3, _HEIGHT, _WIDTH)
         assert image.dtype == torch.float32
         assert targets.boxes.tolist() == [_DETECTION_BOX]
+
+    def test_opt_in_cache_decodes_once_and_keeps_returned_images_independent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The YOLO reader pays one eager decode and never exposes cached storage.
+
+        The image has non-zero content: zeroing an all-zero return would change nothing, and
+        the isolation check would pass whatever the reader handed back.
+        """
+        root = _build_root(tmp_path, [_DETECTION_ROW], seed=1)
+        calls: list[str] = []
+        incumbent = yolo_data.read_image
+
+        def counted_read_image(path: str, mode: object) -> torch.Tensor:
+            calls.append(path)
+            return incumbent(path, mode)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(yolo_data, "read_image", counted_read_image)
+        dataset = YoloDetectionDataset.from_root(root, "train", cache_images=True)
+        assert len(calls) == len(dataset)
+        assert dataset._image_cache is not None
+        assert all(raw.dtype == torch.uint8 and raw.ndim == 3 for raw in dataset._image_cache.values())
+
+        first, _ = dataset[0]
+        expected = first.clone()
+        assert expected.any()
+        first.zero_()
+        replay, _ = dataset[0]
+
+        assert len(calls) == len(dataset)
+        assert torch.equal(replay, expected)
+
+    def test_cached_reader_returns_the_same_sample_as_the_uncached_reader_at_every_index(self, tmp_path: Path) -> None:
+        """Switching the cache on changes nothing any index returns, image or target.
+
+        Three frames carry distinct random pixels and different labels (one box, one clamped
+        box, none), so a cache serving the wrong frame's bytes cannot match by being zeros.
+        """
+        root = _build_distinct_root(tmp_path, [[_DETECTION_ROW], [_EDGE_ROW], []])
+        uncached = YoloDetectionDataset.from_root(root, "train")
+        cached = YoloDetectionDataset.from_root(root, "train", cache_images=True)
+        uncached_images = [uncached[index][0] for index in range(len(uncached))]
+        assert all(image.any() for image in uncached_images)
+        assert not torch.equal(uncached_images[0], uncached_images[1])
+
+        assert cached._image_cache is not None
+        assert len(cached) == len(uncached) == 3
+        for index in range(len(uncached)):
+            _assert_same_sample(cached[index], uncached[index])
+
+    def test_cache_progress_reports_the_count_and_the_retained_bytes(self, tmp_path: Path) -> None:
+        """With ``progress`` on, the YOLO reader reports how many images it cached and their bytes.
+
+        A YOLO tree states no image sizes, so this reader has nothing to estimate from up
+        front; the report comes after the decode and is the cache's own byte count, three
+        bytes per pixel for the 8-bit fixture image.
+        """
+        root = _build_root(tmp_path, [_DETECTION_ROW])
+        dataset = YoloDetectionDataset.from_root(root, "train")
+        expected = 3 * _HEIGHT * _WIDTH
+
+        with pytest.warns(UserWarning, match=rf"decoded 1 images .*\({expected:,} bytes\)"):
+            dataset.cache_images(progress=True)
 
     def test_the_oriented_root_round_trips_with_every_modality_aligned(self, tmp_path: Path) -> None:
         """An oriented root yields boxes, labels and rotated boxes on one instance axis.
