@@ -170,7 +170,7 @@ class _AngleFreeOrientedModule(DetectionLitModule):
         pytest.param(CANVAS_RBOX_EXTENTS_SWAPPED, 0.0, math.pi / 2, id="short-edge-first"),
     ],
 )
-def test_a_planted_rotated_box_lands_canonical_in_original_coordinates(
+def test_planted_rotated_box_lands_canonical_in_original_coordinates(
     image_file: Path,
     extents: tuple[float, float],
     raw_theta: float,
@@ -202,7 +202,7 @@ def test_a_planted_rotated_box_lands_canonical_in_original_coordinates(
     assert float(detections[0, 5]) > 0.9
 
 
-def test_a_wild_raw_angle_still_lands_inside_the_canonical_range(image_file: Path) -> None:
+def test_wild_raw_angle_still_lands_inside_canonical_range(image_file: Path) -> None:
     """An angle of 500 radians is normalized rather than returned, and the box is untouched.
 
     The range assertion is the whole point and the expected value is deliberately not
@@ -224,7 +224,7 @@ def test_a_wild_raw_angle_still_lands_inside_the_canonical_range(image_file: Pat
 
 
 @pytest.mark.parametrize("task", [pytest.param("detect", id="detect"), pytest.param("segment", id="segment")])
-def test_a_non_oriented_checkpoint_fails_naming_its_task(image_file: Path, task: str) -> None:
+def test_non_oriented_checkpoint_fails_naming_task(image_file: Path, task: str) -> None:
     """Detection and segmentation checkpoints are refused by name, never run as oriented ones.
 
     The third leg of a seam WP-089 opened: every task's head returns the same
@@ -238,7 +238,7 @@ def test_a_non_oriented_checkpoint_fails_naming_its_task(image_file: Path, task:
         predict_oriented(module, image_file, img_size=IMG_SIZE)
 
 
-def test_the_suppression_path_decodes_the_dense_branchs_rotated_boxes(image_file: Path) -> None:
+def test_suppression_path_decodes_dense_branchs_rotated_boxes(image_file: Path) -> None:
     """``--decoder nms`` runs the rotated suppression decoder and lands the same planted box.
 
     WP-091 refused this path rather than substituting the other, because suppressing
@@ -262,7 +262,7 @@ def test_the_suppression_path_decodes_the_dense_branchs_rotated_boxes(image_file
 
 
 @pytest.mark.parametrize("decoder", [pytest.param("e2e", id="e2e"), pytest.param("nms", id="nms")])
-def test_an_oriented_head_without_angle_stems_is_refused(image_file: Path, decoder: DecodePath) -> None:
+def test_oriented_head_without_angle_stems_refused(image_file: Path, decoder: DecodePath) -> None:
     """A module claiming ``obb`` but emitting no angles raises rather than decoding boxes.
 
     The oriented twin of the missing-coefficients guard: the task says a heading exists,
@@ -277,7 +277,7 @@ def test_an_oriented_head_without_angle_stems_is_refused(image_file: Path, decod
         predict_oriented(module, image_file, img_size=IMG_SIZE, decoder=decoder)
 
 
-def test_nothing_above_the_threshold_returns_an_empty_oriented_tensor(image_file: Path) -> None:
+def test_nothing_above_threshold_returns_empty_oriented_tensor(image_file: Path) -> None:
     """An image with no surviving detection yields an empty ``(0, 7)`` tensor, not an error.
 
     The planted anchor scores ``sigmoid(8) = 0.9997``, so a threshold above that empties
@@ -292,7 +292,7 @@ def test_nothing_above_the_threshold_returns_an_empty_oriented_tensor(image_file
     assert detections.shape == (0, 7)
 
 
-def test_the_default_letterbox_side_is_the_one_the_command_resolves_for_obb() -> None:
+def test_default_letterbox_side_one_command_resolves_for_obb() -> None:
     """``predict_oriented``'s default ``img_size`` equals the command's table entry for ``obb``.
 
     Two places name the oriented tier's 1024 px (R18 sec. 4): the library default, so a
@@ -307,7 +307,7 @@ def test_the_default_letterbox_side_is_the_one_the_command_resolves_for_obb() ->
     assert default == DEFAULT_IMG_SIZE["obb"]
 
 
-def test_the_report_carries_rotated_boxes_and_names_their_convention(
+def test_report_carries_rotated_boxes_and_names_convention(
     tmp_path: Path,
     image_file: Path,
     capsys: pytest.CaptureFixture[str],

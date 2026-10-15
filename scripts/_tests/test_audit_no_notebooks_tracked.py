@@ -69,11 +69,11 @@ def repo(tmp_path: Path) -> Path:
 class TestFindViolations:
     """`find_violations` reads the index, so staged and committed notebooks count alike."""
 
-    def test_an_empty_index_is_clean(self, repo: Path) -> None:
+    def test_empty_index_clean(self, repo: Path) -> None:
         """A repository tracking nothing produces no violation."""
         assert audit.find_violations(repo) == []
 
-    def test_a_staged_notebook_is_named(self, repo: Path) -> None:
+    def test_staged_notebook_named(self, repo: Path) -> None:
         """A `.ipynb` staged with `git add -f` and not yet committed is already a violation.
 
         The hook runs at commit time, before the commit exists, so the index rather than
@@ -86,7 +86,7 @@ class TestFindViolations:
             "tracked .ipynb files (notebooks are .py sources; the .ipynb is built): ['notes.ipynb']"
         ]
 
-    def test_a_notebook_in_a_subdirectory_is_named_with_its_path(self, repo: Path) -> None:
+    def test_notebook_in_subdirectory_named_with_path(self, repo: Path) -> None:
         """The pathspec star crosses directory separators, so depth does not hide a notebook."""
         _stage(repo, "docs/notebooks/deep.ipynb")
 
@@ -94,7 +94,7 @@ class TestFindViolations:
             "tracked .ipynb files (notebooks are .py sources; the .ipynb is built): ['docs/notebooks/deep.ipynb']"
         ]
 
-    def test_a_percent_format_source_is_not_a_violation(self, repo: Path) -> None:
+    def test_percent_format_source_not_violation(self, repo: Path) -> None:
         """The `.py` source is what this repository commits; only the `.ipynb` is refused."""
         _stage(repo, "notebooks/wiring_gate.py", "# %%\nprint(1)\n")
 
@@ -104,12 +104,12 @@ class TestFindViolations:
 class TestMain:
     """The CLI's exit code is the hook's verdict."""
 
-    def test_exits_zero_on_a_clean_index(self, repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_exits_zero_on_clean_index(self, repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """A clean index reports so and exits `0`."""
         assert audit.main(["--repo-root", str(repo)]) == 0
         assert "clean" in capsys.readouterr().out
 
-    def test_exits_one_and_names_the_file_when_a_notebook_is_staged(
+    def test_exits_one_and_names_file_when_notebook_staged(
         self, repo: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """A staged notebook exits `1` with the path in the report."""
@@ -119,8 +119,3 @@ class TestMain:
 
         assert code == 1
         assert "a.ipynb" in capsys.readouterr().out
-
-
-def test_the_live_index_is_currently_clean() -> None:
-    """The real repository tracks no `.ipynb` -- the state the hook asserts on every commit."""
-    assert audit.find_violations(REPO_ROOT) == []

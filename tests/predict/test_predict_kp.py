@@ -251,7 +251,7 @@ class TestPredictKeypoints:
         assert returned != pytest.approx(_flat_xy(_DECOY_EXPECTED_ORIGINAL_KEYPOINTS))
 
     @pytest.mark.parametrize("decoder", [pytest.param(path, id=path) for path in DECODE_PATHS])
-    def test_nothing_above_the_threshold_keeps_the_point_schema(self, image_file: Path, decoder: str) -> None:
+    def test_nothing_above_threshold_keeps_point_schema(self, image_file: Path, decoder: str) -> None:
         """An image with no surviving detection yields empty boxes and empty poses, with ``K`` intact.
 
         The planted anchor scores ``sigmoid(8) = 0.9997``, so a threshold above that
@@ -271,7 +271,7 @@ class TestPredictKeypoints:
         assert prediction.num_keypoints == _POINT_COUNT
 
     @pytest.mark.parametrize("task", [pytest.param(task, id=task) for task in _FOREIGN_TASKS])
-    def test_a_non_keypoint_checkpoint_is_refused_naming_its_task(self, image_file: Path, task: str) -> None:
+    def test_non_keypoint_checkpoint_refused_naming_task(self, image_file: Path, task: str) -> None:
         """Detection, segmentation and oriented checkpoints are refused by name, never posed.
 
         All three build a head whose plain forward returns the same
@@ -287,7 +287,7 @@ class TestPredictKeypoints:
             predict_keypoints(module, image_file, img_size=IMG_SIZE)
 
     @pytest.mark.parametrize("decoder", [pytest.param(path, id=path) for path in DECODE_PATHS])
-    def test_a_checkpoint_with_no_point_stems_is_refused_on_either_branch(self, image_file: Path, decoder: str) -> None:
+    def test_checkpoint_with_no_point_stems_refused_on_either_branch(self, image_file: Path, decoder: str) -> None:
         """A module claiming ``keypoints`` whose head emits no points raises rather than posing nothing.
 
         The task is the checkpoint's own declaration, and a checkpoint built without the

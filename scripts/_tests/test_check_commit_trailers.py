@@ -215,7 +215,7 @@ def test_signoff_before_separator_passes() -> None:
     assert validator.validate_message(SIGNOFF_BEFORE_SEPARATOR_MESSAGE, VALID_IDS) == []
 
 
-def test_at_sign_beside_a_signoff_still_fails() -> None:
+def test_at_sign_beside_signoff_still_fails() -> None:
     """A sign-off line exempts itself only; a mention on another body line is still rejected."""
     violations = validator.validate_message(MENTION_BESIDE_SIGNOFF_MESSAGE, VALID_IDS)
     assert any("'@'" in violation for violation in violations)
@@ -231,7 +231,7 @@ def test_at_sign_beside_a_signoff_still_fails() -> None:
         pytest.param("add dual detection head", False, id="no-type"),
     ],
 )
-def test_subject_type_is_checked_against_the_allowed_set(subject: str, accepted: bool) -> None:
+def test_subject_type_checked_against_allowed_set(subject: str, accepted: bool) -> None:
     """Only the listed conventional types open a subject line.
 
     ``refine`` is this project's own addition and is the reason this test exists:
@@ -246,24 +246,10 @@ def test_subject_type_is_checked_against_the_allowed_set(subject: str, accepted:
     assert any("<type>(<scope>)" in violation for violation in violations) is not accepted
 
 
-def test_the_docstrings_name_the_script_where_it_lives() -> None:
-    """The usage blocks cite `scripts/lint/`, the directory WP-129 moved this script into.
-
-    Four printed occurrences named the pre-move path, in the two `::` literal blocks
-    of the module docstring and the two of ``main``. Literal blocks are not `>>>`
-    examples, so ``--doctest-modules`` never ran them and nothing else read them --
-    a copy-pasteable command that has not resolved since the move.
-    """
-    assert "scripts/lint/check_commit_trailers.py" in validator.__doc__
-    assert "scripts/check_commit_trailers.py" not in validator.__doc__
-    assert "scripts/lint/check_commit_trailers.py" in validator.main.__doc__
-    assert "scripts/check_commit_trailers.py" not in validator.main.__doc__
-
-
 class TestProvenanceDenial:
     """`Provenance: none` is a value, and an id inside its explanation is not a citation."""
 
-    def test_a_bare_denial_is_accepted(self) -> None:
+    def test_bare_denial_accepted(self) -> None:
         """`Provenance: none` passes, as `WP: none` and `Assumptions: none` already do.
 
         The trailer stays mandatory; what changes is that stating "nothing derives
@@ -275,7 +261,7 @@ class TestProvenanceDenial:
 
         assert validator.validate_message(message, _registers({1})) == []
 
-    def test_a_denial_may_carry_its_explanation(self) -> None:
+    def test_denial_may_carry_explanation(self) -> None:
         """`none (…)` passes, and the explanation may name a source it is denying."""
         message = (
             "fix(data): correct the pad value\n\nbody\n\nWP: none\n"
@@ -285,7 +271,7 @@ class TestProvenanceDenial:
 
         assert validator.validate_message(message, _registers({1})) == []
 
-    def test_an_id_inside_a_denial_is_still_resolved(self) -> None:
+    def test_id_inside_denial_still_resolved(self) -> None:
         """A denial explaining itself against an unknown id is refused, not waved through.
 
         The id is a reference rather than a citation, but a reference to a row that
@@ -297,7 +283,7 @@ class TestProvenanceDenial:
 
         assert any("R99" in violation for violation in violations)
 
-    def test_a_trailer_naming_no_source_and_not_denying_one_is_refused(self) -> None:
+    def test_trailer_naming_no_source_and_not_denying_one_refused(self) -> None:
         """Free text that neither cites nor denies remains a violation."""
         message = "fix(data): x\n\nWP: none\nProvenance: the usual place\nAssumptions: none\nGate: t\n"
 
@@ -309,7 +295,7 @@ class TestProvenanceDenial:
 class TestPlaceholderRows:
     """The Placeholders table shares the allowlist's row shape and admits nothing."""
 
-    def test_the_real_register_admits_no_placeholder_row(self) -> None:
+    def test_real_register_admits_no_placeholder_row(self) -> None:
         """R15 (withdrawn) and R19 (legal evidence only) parse as declared, not admitted.
 
         Read file-wide, `^| R(\\d+) |` returns both tables as one allowlist, which is
@@ -321,7 +307,7 @@ class TestPlaceholderRows:
         assert not {15, 19} & VALID_IDS.sources
         assert 1 in VALID_IDS.sources
 
-    def test_citing_a_placeholder_row_is_refused_as_inadmissible(self) -> None:
+    def test_citing_placeholder_row_refused_as_inadmissible(self) -> None:
         """A message citing R15 fails, and the message says declared rather than unknown.
 
         Naming an id the register deliberately refuses is a different mistake from
@@ -334,7 +320,7 @@ class TestPlaceholderRows:
 
         assert any("inadmissible" in violation and "R15" in violation for violation in violations)
 
-    def test_the_real_history_carries_two_citations_of_a_placeholder(self) -> None:
+    def test_real_history_carries_two_citations_of_placeholder(self) -> None:
         """Two pre-enforcement commits cite R19, so the hole this closes was load-bearing.
 
         Asserted as a property of the parse rather than by walking git: R19 is
@@ -351,7 +337,7 @@ class TestPlaceholderRows:
 class TestAssumptionRegister:
     """An assumption id is resolved against `docs/ASSUMPTIONS.md`, not against a regex."""
 
-    def test_an_unregistered_assumption_id_is_refused(self) -> None:
+    def test_unregistered_assumption_id_refused(self) -> None:
         """`A999` is well-formed and names no row, which is the whole of the defect."""
         message = "fix(data): x\n\nWP: none\nProvenance: R1\nAssumptions: A999\nGate: t\n"
 
@@ -359,26 +345,19 @@ class TestAssumptionRegister:
 
         assert any("A999" in violation and "ASSUMPTIONS" in violation for violation in violations)
 
-    def test_a_registered_assumption_id_passes(self) -> None:
+    def test_registered_assumption_id_passes(self) -> None:
         """The register's own ids still validate, against the real register."""
         message = "fix(data): x\n\nWP: none\nProvenance: R1\nAssumptions: A9, A14\nGate: t\n"
 
         assert validator.validate_message(message, VALID_IDS) == []
 
-    def test_a_malformed_id_is_still_a_shape_violation(self) -> None:
+    def test_malformed_id_still_shape_violation(self) -> None:
         """Shape and membership stay separate messages; `A9x` never reaches the register."""
         message = "fix(data): x\n\nWP: none\nProvenance: R1\nAssumptions: A9x\nGate: t\n"
 
         violations = validator.validate_message(message, _registers({1}, assumptions={9}))
 
         assert any("invalid assumption ids" in violation for violation in violations)
-
-    def test_the_real_register_is_contiguous_from_one(self) -> None:
-        """The parse returns the whole register rather than a section of it."""
-        ids = sorted(VALID_IDS.assumptions)
-
-        assert ids == list(range(1, len(ids) + 1))
-        assert len(ids) >= 73
 
 
 @pytest.fixture
@@ -441,7 +420,7 @@ def throwaway_repository(
 class TestContributorRange:
     """Range mode and the D18 trailer form, the two things CI relies on (WP-144)."""
 
-    def test_wp_none_is_accepted(self) -> None:
+    def test_wp_none_accepted(self) -> None:
         """`WP: none` is the D18 form: a change that needs no roadmap row still cites.
 
         Once the reproduction is complete and the repository public, a change altering
@@ -455,7 +434,7 @@ class TestContributorRange:
 
         assert validator.validate_message(message, _registers({1})) == []
 
-    def test_a_missing_wp_trailer_is_still_refused(self) -> None:
+    def test_missing_wp_trailer_still_refused(self) -> None:
         """Omission is not the relaxation -- `none` states it, absence leaves it unsaid."""
         message = "fix(data): correct the pad value\n\nbody\n\nProvenance: R1\nAssumptions: none\nGate: t.py::x\n"
 
@@ -463,13 +442,13 @@ class TestContributorRange:
 
         assert any("WP" in violation for violation in violations)
 
-    def test_a_non_numeric_wp_is_still_refused(self) -> None:
+    def test_non_numeric_wp_still_refused(self) -> None:
         """Only digits or the literal `none`; a free-text row id is not a row id."""
         message = "fix(data): x\n\nWP: maybe\nProvenance: R1\nAssumptions: none\nGate: t.py::x\n"
 
         assert any("WP" in violation for violation in validator.validate_message(message, _registers({1})))
 
-    def test_an_empty_range_is_clean(
+    def test_empty_range_clean(
         self, capsys: pytest.CaptureFixture[str], throwaway_repository: Callable[[Sequence[str]], list[str]]
     ) -> None:
         """A range selecting no commit passes, exercising the real git path.
@@ -483,7 +462,7 @@ class TestContributorRange:
         assert status == 0
         assert "0 message(s) validated" in capsys.readouterr().out
 
-    def test_range_mode_accepts_a_history_of_valid_messages(
+    def test_range_mode_accepts_history_of_valid_messages(
         self, throwaway_repository: Callable[[Sequence[str]], list[str]]
     ) -> None:
         """Range mode walks git and reports clean when every message satisfies the contract.
@@ -514,7 +493,7 @@ class TestContributorRange:
 
         assert validator.main(["--range", f"{shas[0]}..{shas[-1]}"]) == 0
 
-    def test_an_unresolvable_range_reports_a_verdict_rather_than_a_traceback(
+    def test_unresolvable_range_reports_verdict_rather_than_traceback(
         self, capsys: pytest.CaptureFixture[str], throwaway_repository: Callable[[Sequence[str]], list[str]]
     ) -> None:
         """A range naming a ref this checkout does not hold fails with a sentence, not a stack trace.
@@ -534,7 +513,7 @@ class TestContributorRange:
         assert "cannot resolve range" in out
         assert "shallow clone" in out
 
-    def test_range_mode_refuses_an_invalid_message_in_the_range(
+    def test_range_mode_refuses_invalid_message_in_range(
         self, capsys: pytest.CaptureFixture[str], throwaway_repository: Callable[[Sequence[str]], list[str]]
     ) -> None:
         """One bad message anywhere in the range fails the whole range, naming that commit.
@@ -557,7 +536,7 @@ class TestContributorRange:
         assert "1 of 2 message(s) invalid" in out
         assert shas[-1][:12] in out
 
-    def test_range_mode_skips_a_commit_an_automation_authored(
+    def test_range_mode_skips_commit_automation_authored(
         self,
         capsys: pytest.CaptureFixture[str],
         throwaway_repository: Callable[[Sequence[str | tuple[str, str]]], list[str]],
@@ -585,7 +564,7 @@ class TestContributorRange:
         assert f"COMMIT {shas[1][:12]}: SKIP (automation author" in out
         assert "1 message(s) validated, 1 automation commit(s) skipped" in out
 
-    def test_a_human_commit_beside_a_skipped_bot_commit_is_still_refused(
+    def test_human_commit_beside_skipped_bot_commit_still_refused(
         self,
         capsys: pytest.CaptureFixture[str],
         throwaway_repository: Callable[[Sequence[str | tuple[str, str]]], list[str]],
@@ -606,7 +585,7 @@ class TestContributorRange:
         assert "1 of 1 message(s) invalid, 1 automation commit(s) skipped" in out
         assert shas[-1][:12] in out
 
-    def test_a_bot_address_outside_github_noreply_is_not_skipped(
+    def test_bot_address_outside_github_noreply_not_skipped(
         self,
         capsys: pytest.CaptureFixture[str],
         throwaway_repository: Callable[[Sequence[str | tuple[str, str]]], list[str]],

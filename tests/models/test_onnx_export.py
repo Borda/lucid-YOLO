@@ -666,7 +666,7 @@ class TestGraphConstruction:
     the wrapped model ends up.
     """
 
-    def test_rejects_a_canvas_the_head_cannot_tile(self) -> None:
+    def test_rejects_canvas_head_cannot_tile(self) -> None:
         """A canvas not divisible by every head stride is refused at construction.
 
         100 px is the case the divisibility rule exists for: floor division would hand
@@ -679,7 +679,7 @@ class TestGraphConstruction:
         with pytest.raises(ValueError, match="divisible by every head stride"):
             DetectExportGraph(deployed, canvas=(100, 100))
 
-    def test_segment_rejects_a_canvas_below_the_detection_cap(self) -> None:
+    def test_segment_rejects_canvas_below_detection_cap(self) -> None:
         """A segmentation canvas yielding fewer anchors than ``k`` is refused at construction.
 
         64 px yields 84 anchors against a 300-row output, so the decode emits padding rows
@@ -692,7 +692,7 @@ class TestGraphConstruction:
         with pytest.raises(ValueError, match=r"84 anchors, below the 300-detection cap"):
             SegmentExportGraph(deployed, canvas=(64, 64))
 
-    def test_moves_the_wrapped_model_onto_the_requested_device(self) -> None:
+    def test_moves_wrapped_model_onto_requested_device(self) -> None:
         """``device`` places the wrapped model, not only the anchor buffers.
 
         Buffers built on the requested device while the model stayed where the caller left

@@ -133,7 +133,7 @@ class TestEvaluateKeypoints:
         assert tuple(stats) == _KEYPOINT_STATS
         assert all(value == 0.0 for value in stats.values())
 
-    def test_unlabeled_target_coordinates_are_excluded(self) -> None:
+    def test_unlabeled_target_coordinates_excluded(self) -> None:
         """Corrupting only a ``v == 0`` target point leaves every statistic unchanged.
 
         The two evaluations differ only in a coordinate that COCO marks unlabeled;
@@ -185,7 +185,7 @@ def _keypoint_evaluator() -> COCOeval_faster:
 class TestKeypointEvaluationParams:
     """WP-166: the keypoint detection cap and area partition are this project's, not the library's."""
 
-    def test_pinned_values_equal_the_library_defaults(self) -> None:
+    def test_pinned_values_equal_library_defaults(self) -> None:
         """The pinned ``maxDets``/``areaRng`` still equal what ``Params.setKpParams`` sets.
 
         :func:`evaluate_keypoints` pins both so a report's AR lines and its
@@ -202,7 +202,7 @@ class TestKeypointEvaluationParams:
             coco_eval._KEYPOINT_AREA_RANGES
         )
 
-    def test_evaluator_carries_the_pinned_values(self) -> None:
+    def test_evaluator_carries_pinned_values(self) -> None:
         """A constructed keypoint evaluator ends up holding the constants, not the defaults.
 
         The assignment goes through ``evaluator.params``, and hotcoco's own
@@ -245,7 +245,7 @@ class TestCanonicalGroundTruthMetadata:
             }
         ]
 
-    def test_declared_area_decides_the_bucket_over_visible_extent(self) -> None:
+    def test_declared_area_decides_bucket_over_visible_extent(self) -> None:
         """A supplied ``area`` of 20000 puts the instance in the large bucket, not the medium one.
 
         The instance's visible points span 2500 px^2 while its annotation declares
@@ -264,7 +264,7 @@ class TestCanonicalGroundTruthMetadata:
         assert stats["AP_large"] == pytest.approx(1.0)
         assert stats["AP_medium"] == pytest.approx(-1.0)  # COCO's empty-bucket sentinel
 
-    def test_visible_extent_still_decides_when_no_area_is_supplied(self) -> None:
+    def test_visible_extent_still_decides_when_no_area_supplied(self) -> None:
         """Ground truth with no ``area`` keeps WP-124's reconstruction, and its medium bucket.
 
         The fallback is what every pre-WP-134 caller and every synthetic fixture with
@@ -276,7 +276,7 @@ class TestCanonicalGroundTruthMetadata:
         assert stats["AP_medium"] == pytest.approx(1.0)
         assert stats["AP_large"] == pytest.approx(-1.0)
 
-    def test_a_zero_num_keypoints_annotation_is_ignored(self) -> None:
+    def test_zero_num_keypoints_annotation_ignored(self) -> None:
         """A supplied ``num_keypoints`` of 0 removes the instance from the evaluation entirely.
 
         COCO's protocol ignores a person annotated with a box but no joints. That
@@ -409,7 +409,7 @@ class TestDualPathKeypoints:
         """Build an evaluator over the stub head and the two fixed decoders."""
         return DualPathEvaluator(head, e2e, nms, {0: 1}, Letterbox(_CANVAS), keypoint_sigmas=_TEST_SIGMAS)
 
-    def test_each_path_reads_its_own_branch_at_its_own_anchor(self) -> None:
+    def test_each_path_reads_own_branch_at_own_anchor(self) -> None:
         """Only ``o2o_keypoints`` gathered at the E2E anchor scores; the dense branch misses.
 
         Reading the other branch, or gathering with the other path's anchor indices,
@@ -431,7 +431,7 @@ class TestDualPathKeypoints:
         assert report["e2e"]["oks_AP_all"] == pytest.approx(1.0)
         assert report["nms"]["oks_AP_all"] == pytest.approx(0.0)
 
-    def test_a_padding_anchor_index_neither_crashes_nor_invents_a_pose(self) -> None:
+    def test_padding_anchor_index_neither_crashes_nor_invents_pose(self) -> None:
         """A ``PAD_ANCHOR_INDEX`` row leaves the real row's score untouched at a perfect OKS.
 
         The sentinel is ``-1``, which ``Tensor.gather`` would accept as an index and
@@ -450,7 +450,7 @@ class TestDualPathKeypoints:
 
         assert report["e2e"]["oks_AP_all"] == pytest.approx(1.0)
 
-    def test_a_detection_checkpoint_reports_no_keypoint_statistics(self) -> None:
+    def test_detection_checkpoint_reports_no_keypoint_statistics(self) -> None:
         """A head with no point branch produces exactly the box report it always produced.
 
         The keypoint machinery is reached structurally, off the head output's own
@@ -473,9 +473,7 @@ class TestDualPathKeypoints:
 class TestPoseProtocolRefusesForeignSchemas:
     """WP-134: the COCO person protocol scores 17 points or refuses to run."""
 
-    def test_a_non_seventeen_point_checkpoint_is_refused(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_non_seventeen_point_checkpoint_refused(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """A ``K=7`` checkpoint exits non-zero and names both point counts, scoring nothing.
 
         This protocol's ground truth, point ordering and sigma table are all COCO's

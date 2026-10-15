@@ -166,7 +166,7 @@ class TestCanonicalize:
         "bound",
         [pytest.param(_THETA_LOW, id="low"), pytest.param(_THETA_HIGH, id="high")],
     )
-    def test_angle_an_ulp_either_side_of_a_bound_lands_in_range(self, bound: float, step: int) -> None:
+    def test_angle_ulp_either_side_of_bound_lands_in_range(self, bound: float, step: int) -> None:
         """Angles within a couple of ulps of either range bound still canonicalize into range.
 
         Shifting by whole multiples of pi cannot rescue an angle this close to a bound at
@@ -252,7 +252,7 @@ class TestPolygonConversion:
 
     @pytest.mark.parametrize("start", [pytest.param(k, id=f"start{k}") for k in range(4)])
     @pytest.mark.parametrize("reverse", [pytest.param(False, id="forward"), pytest.param(True, id="reversed")])
-    def test_ring_order_does_not_change_the_box(self, start: int, reverse: bool) -> None:
+    def test_ring_order_not_change_box(self, start: int, reverse: bool) -> None:
         """Every cyclic rotation and reversal of one quad's ring yields the same canonical box.
 
         DOTA writes its eight coordinates in whatever order the annotator drew them, so all
@@ -291,7 +291,7 @@ class TestPolygonConversion:
 class TestPointsInRboxes:
     """Point-in-rotated-rect containment, the WP-061 assignment primitive (A25)."""
 
-    def test_centre_is_inside(self) -> None:
+    def test_centre_inside(self) -> None:
         """Every box contains its own centre."""
         boxes = torch.tensor([[7.0, -2.0, 6.0, 3.0, 0.3], [0.0, 0.0, 4.0, 4.0, -1.0]], dtype=torch.float32)
 
@@ -299,7 +299,7 @@ class TestPointsInRboxes:
 
         assert bool(inside.diagonal().all())
 
-    def test_point_just_beyond_a_corner_is_outside(self) -> None:
+    def test_point_just_beyond_corner_outside(self) -> None:
         """A point nudged diagonally past a corner falls outside."""
         box = torch.tensor([[0.0, 0.0, 4.0, 2.0, 0.0]], dtype=torch.float32)
         beyond = torch.tensor([[2.001, 1.001]], dtype=torch.float32)
@@ -308,7 +308,7 @@ class TestPointsInRboxes:
 
         assert not bool(inside[0, 0])
 
-    def test_boundary_is_inclusive(self) -> None:
+    def test_boundary_inclusive(self) -> None:
         """A point exactly on a corner counts as inside."""
         box = torch.tensor([[0.0, 0.0, 4.0, 2.0, 0.0]], dtype=torch.float32)
         corner = torch.tensor([[2.0, 1.0]], dtype=torch.float32)
@@ -317,7 +317,7 @@ class TestPointsInRboxes:
 
         assert bool(inside[0, 0])
 
-    def test_rotated_box_excludes_a_point_its_envelope_includes(self) -> None:
+    def test_rotated_box_excludes_point_envelope_includes(self) -> None:
         """A point inside the axis-aligned envelope but outside the rotated rect is rejected."""
         box = torch.tensor([[0.0, 0.0, 10.0, 2.0, math.pi / 4]], dtype=torch.float32)
         point = torch.tensor([[3.0, -3.0]], dtype=torch.float32)
@@ -329,7 +329,7 @@ class TestPointsInRboxes:
         assert bool((point[0] <= corners.amax(dim=0)).all())
         assert not bool(inside[0, 0])
 
-    def test_output_is_points_by_boxes(self) -> None:
+    def test_output_points_by_boxes(self) -> None:
         """The result is a ``(P, M)`` bool tensor over every point/box pair."""
         points = torch.zeros((5, 2), dtype=torch.float32)
         boxes = torch.tensor([[0.0, 0.0, 4.0, 2.0, 0.0]], dtype=torch.float32).repeat(3, 1)
@@ -393,7 +393,7 @@ class TestRotatedIouRejectsImpossibleGeometry:
     #: A well-formed 4x2 box at the origin, the honest counterpart of the rows below.
     VALID = (0.0, 0.0, 4.0, 2.0, 0.0)
 
-    def test_two_negative_extents_no_longer_score_a_perfect_match(self) -> None:
+    def test_two_negative_extents_no_longer_score_perfect_match(self) -> None:
         """``[-4, -2]`` against itself scored ``1.0``; it is an invalid row, so ``0.0``.
 
         The half-turn case: negating both extents names the same rectangle, so
@@ -404,7 +404,7 @@ class TestRotatedIouRejectsImpossibleGeometry:
 
         assert float(rotated_iou(negative, negative)) == 0.0
 
-    def test_a_negative_row_does_not_match_a_real_box(self) -> None:
+    def test_negative_row_not_match_real_box(self) -> None:
         """``[-4, -2]`` scored ``1.0`` against the honest ``[4, 2]`` describing that region.
 
         Worse than the self-pair: an impossible row was not merely self-consistent,
@@ -444,7 +444,7 @@ class TestRotatedIouRejectsImpossibleGeometry:
         assert float(overlap) == 0.0
         assert bool(torch.isfinite(overlap).all())
 
-    def test_valid_pairs_are_untouched_by_the_validity_mask(self) -> None:
+    def test_valid_pairs_untouched_by_validity_mask(self) -> None:
         """The refusal costs nothing on well-formed geometry: identity and a known overlap."""
         valid = torch.tensor([self.VALID])
         shifted = torch.tensor([[2.0, 0.0, 4.0, 2.0, 0.0]])  # half its width along +x
@@ -452,7 +452,7 @@ class TestRotatedIouRejectsImpossibleGeometry:
         assert float(rotated_iou(valid, valid)) == 1.0
         assert float(rotated_iou(valid, shifted)) == pytest.approx(1.0 / 3.0, abs=1e-4)
 
-    def test_an_invalid_row_does_not_poison_its_neighbours(self) -> None:
+    def test_invalid_row_not_poison_neighbours(self) -> None:
         """Only the pairs involving the bad row collapse; the rest of the matrix stands.
 
         The mask is per-box and folded into the pair grid, so a single corrupt

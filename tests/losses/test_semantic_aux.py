@@ -60,7 +60,7 @@ def test_confident_wrong_predictions_make_both_terms_large() -> None:
     assert out.dice.item() > 0.9
 
 
-def test_total_is_the_unweighted_sum_of_the_two_terms() -> None:
+def test_total_unweighted_sum_of_two_terms() -> None:
     """``total`` equals ``bce + dice`` bit for bit, pinning the A36 unit coefficients.
 
     Catches a gain silently baked into the term (e.g. a 0.5 or 4.0 on Dice),
@@ -116,7 +116,7 @@ def test_consumes_semantic_branch_training_output_directly() -> None:
     assert (branch.classifier.weight.grad != 0.0).any()
 
 
-def test_dice_is_averaged_per_class_not_pooled_over_the_batch() -> None:
+def test_dice_averaged_per_class_not_pooled_over_batch() -> None:
     """A tiny wrong class keeps its full weight beside a large correct one.
 
     Pins the A36 reduction: Dice is one ratio per ``(B, C)`` pair, averaged
@@ -150,7 +150,7 @@ class TestEmptyBatch:
     EMPTY_SHAPES: ClassVar[list[tuple[int, ...]]] = [(0, 3, 4, 4), (2, 0, 4, 4), (2, 3, 0, 4), (2, 3, 4, 0)]
 
     @pytest.mark.parametrize("shape", EMPTY_SHAPES)
-    def test_every_term_is_an_exact_finite_zero(self, shape: tuple[int, ...]) -> None:
+    def test_every_term_exact_finite_zero(self, shape: tuple[int, ...]) -> None:
         """All three fields are exactly zero and finite, whichever dimension is empty."""
         out = semantic_aux_loss(torch.zeros(*shape), torch.zeros(*shape))
 
@@ -158,7 +158,7 @@ class TestEmptyBatch:
             assert bool(torch.isfinite(term)), f"{name} is not finite"
             assert float(term) == 0.0, f"{name} is not exactly zero"
 
-    def test_the_zero_still_carries_gradient_to_the_logits(self) -> None:
+    def test_zero_still_carries_gradient_to_logits(self) -> None:
         """The zero is a function of ``logits``, so the composition site needs no branch."""
         logits = torch.zeros(0, 3, 4, 4, requires_grad=True)
 
@@ -167,7 +167,7 @@ class TestEmptyBatch:
         assert logits.grad is not None
         assert logits.grad.shape == logits.shape
 
-    def test_the_terms_stay_scalar(self) -> None:
+    def test_terms_stay_scalar(self) -> None:
         """Shape contract is unchanged: zero-dimensional tensors, as for a full batch."""
         out = semantic_aux_loss(torch.zeros(0, 3, 4, 4), torch.zeros(0, 3, 4, 4))
 
@@ -175,7 +175,7 @@ class TestEmptyBatch:
         assert out.bce.ndim == 0
         assert out.dice.ndim == 0
 
-    def test_a_non_empty_batch_is_untouched_by_the_guard(self) -> None:
+    def test_non_empty_batch_untouched_by_guard(self) -> None:
         """The guard is an early return, so every non-empty reduction is bit-unchanged.
 
         Pins the reason the fix is a branch rather than a swap of the two divisors:

@@ -9,14 +9,12 @@ fixed ``(B, 300, 6)`` shape with score-zero padding rows when fewer anchors
 exist; that scores come out sorted descending; that a crafted class spike is
 decoded to the right class index; that a confidence threshold zeroes low entries
 without changing the shape; that the letterbox inverse round-trips box
-coordinates on a known geometry; and that decoding is deterministic. A meta-test
-reads the module source and asserts it references no suppression operator or IoU
-helper, pinning the no-suppression claim structurally.
+coordinates on a known geometry; and that decoding is deterministic. The structural
+pin -- the module source names no suppression operator or IoU helper -- is the
+``content-pins`` pre-commit hook (``scripts/lint/audit_content_pins.py``).
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import pytest
 import torch
@@ -25,7 +23,7 @@ from torch import Tensor
 from lucid_yolo.assign.grid import make_anchor_points
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.targets import Targets
-from lucid_yolo.decode import TopKDecoder, to_letterboxed_original, topk_e2e
+from lucid_yolo.decode import TopKDecoder, to_letterboxed_original
 from lucid_yolo.models.heads.detect import decode_ltrb
 
 _DET_CAP = 300
@@ -159,7 +157,7 @@ def test_conf_threshold_zeroes_low_entries_without_reshaping() -> None:
     assert torch.equal(filtered[..., 5], unfiltered[..., 5])  # classes untouched
 
 
-def test_the_scored_rows_are_a_leading_run() -> None:
+def test_scored_rows_leading_run() -> None:
     """Rows with a live score are always a prefix, whatever zeroed them.
 
     Three separate mechanisms can leave a zero score in the output, and all three
@@ -211,7 +209,7 @@ def test_inverse_letterbox_round_trip() -> None:
     assert torch.allclose(mapped[0, 0, :4], orig_box[0], atol=1e-5)
 
 
-def test_decode_is_deterministic() -> None:
+def test_decode_deterministic() -> None:
     """Two decodes of the same inputs are bit-for-bit identical."""
     points, strides = _grid(4, 4, stride=8)
     cls_logits = torch.randn(2, 16, 6)
@@ -222,15 +220,6 @@ def test_decode_is_deterministic() -> None:
     second = decoder(cls_logits, raw_ltrb, points, strides)
 
     assert torch.equal(first, second)
-
-
-def test_module_source_has_no_suppression_or_iou_helper() -> None:
-    """The module text references no suppression operator or IoU helper (structural pin)."""
-    source = Path(topk_e2e.__file__).read_text(encoding="utf-8").lower()
-
-    assert "nms" not in source
-    assert "box_iou" not in source
-    assert "torchvision" not in source
 
 
 def _ranking_scores() -> Tensor:
@@ -252,7 +241,7 @@ def _ranking_scores() -> Tensor:
     return scores
 
 
-def test_decode_with_indices_names_the_ranked_anchors() -> None:
+def test_decode_with_indices_names_ranked_anchors() -> None:
     """Gathering the dense boxes by the returned indices reproduces the detections' own corners (WP-053b).
 
     The segmentation decode reads its mask coefficients from the dense

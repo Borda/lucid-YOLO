@@ -49,7 +49,7 @@ class TestAffineCouplingInvertibility:
             z_back, _ = layer.invert(x)
             assert torch.allclose(z_back, z, atol=1e-5)
 
-    def test_conditioning_axis_is_unchanged_by_synthesize(self) -> None:
+    def test_conditioning_axis_unchanged_by_synthesize(self) -> None:
         """The coordinate a layer conditions on rides through untouched.
 
         RealNVP's coupling identity only transforms one axis per layer; the
@@ -62,7 +62,7 @@ class TestAffineCouplingInvertibility:
 
         assert torch.equal(x[..., 0], z[..., 0])
 
-    def test_rejects_a_transform_index_outside_the_2d_residual(self) -> None:
+    def test_rejects_transform_index_outside_2d_residual(self) -> None:
         """A ``transform_index`` other than 0 or 1 raises rather than silently no-op.
 
         The 2-D residual has exactly two coordinates; any other index would
@@ -85,7 +85,7 @@ class TestRealNVPFlowInvertibility:
 
         assert torch.allclose(z_back, z, atol=1e-4)
 
-    def test_forward_and_inverse_log_determinants_are_negatives(self) -> None:
+    def test_forward_and_inverse_log_determinants_negatives(self) -> None:
         """The stack's forward log-det and its inverse's log-det sum to zero.
 
         A layer's inverse divides by exactly what synthesis multiplied by, so
@@ -191,7 +191,7 @@ class TestSigmaRange:
         assert bool((sigma_hat < 1.0).all())
         assert bool((sigma_hat > 0.99).all())
 
-    def test_large_negative_raw_input_stays_above_the_floor(self) -> None:
+    def test_large_negative_raw_input_stays_above_floor(self) -> None:
         """A large negative raw sigma logit saturates near, but strictly above, the numeric floor."""
         sigma_raw = torch.full((1, 1, 2), -100.0)
 
@@ -204,7 +204,7 @@ class TestSigmaRange:
 class TestVisibilityMasking:
     """Only ``v >= 1`` points contribute to the loss (A66)."""
 
-    def test_unlabeled_points_are_excluded(self) -> None:
+    def test_unlabeled_points_excluded(self) -> None:
         """An instance whose only point is ``v == 0`` contributes nothing to the loss.
 
         Compares a batch carrying one visible and one unlabeled point against
@@ -225,7 +225,7 @@ class TestVisibilityMasking:
 
         assert torch.equal(baseline, corrupted)
 
-    def test_occluded_but_labeled_points_are_included(self) -> None:
+    def test_occluded_but_labeled_points_included(self) -> None:
         """A ``v == 1`` (occluded) point changes the loss exactly like ``v == 2`` does.
 
         A66 reads COCO's ``v in {1, 2}`` as equally valid supervision; this
@@ -241,7 +241,7 @@ class TestVisibilityMasking:
 
         assert torch.equal(loss_occluded, loss_visible)
 
-    def test_no_visible_points_gives_a_finite_zero_still_attached_to_the_graph(self) -> None:
+    def test_no_visible_points_gives_finite_zero_still_attached_to_graph(self) -> None:
         """All-``v=0`` input returns a finite zero, not ``NaN``, still connected to gradients.
 
         Mirrors :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s
@@ -263,7 +263,7 @@ class TestVisibilityMasking:
         assert torch.equal(mu_hat.grad, torch.zeros_like(mu_hat))
 
 
-def test_gradient_shortcut_reaches_mu_and_sigma_with_the_flow_frozen() -> None:
+def test_gradient_shortcut_reaches_mu_and_sigma_with_flow_frozen() -> None:
     """R14's own claim: gradients through the Laplace base term do not depend on the flow.
 
     R14 sec. 3.2 motivates summing a fixed base density with the learned flow
@@ -336,7 +336,7 @@ class TestCouplingScaleBound:
     magnitude outside the residual range the equations are usually read at.
     """
 
-    def test_the_log_scale_stays_inside_its_learned_bound(self) -> None:
+    def test_log_scale_stays_inside_learned_bound(self) -> None:
         """However extreme the conditioning value, ``|log_scale| <= scale``."""
         layer = _AffineCoupling(transform_index=0)
         bound = float(layer.conditioner.scale.detach().abs())
@@ -345,7 +345,7 @@ class TestCouplingScaleBound:
 
         assert torch.all(log_scale.abs() <= bound + _LAPLACE_ATOL)
 
-    def test_a_far_out_residual_still_yields_a_finite_loss_and_gradient(self) -> None:
+    def test_far_out_residual_still_yields_finite_loss_and_gradient(self) -> None:
         """The regression this bound exists to prevent, stated as the property that failed.
 
         A residual two orders of magnitude outside the ``O(1)`` range R14's equations are
@@ -365,7 +365,7 @@ class TestCouplingScaleBound:
         assert torch.isfinite(mu_hat.grad).all()
         assert torch.isfinite(sigma_raw.grad).all()
 
-    def test_the_bound_is_learnable_rather_than_a_constant(self) -> None:
+    def test_bound_learnable_rather_than_constant(self) -> None:
         """RealNVP's scale is *learned*; a hard constant would be a different layer.
 
         Pinning it as a parameter keeps the deviation honest: A72 claims to restore the
@@ -433,7 +433,7 @@ class TestUnlabeledPointsReachNoGradient:
         return float(loss.detach()), [mu_hat.grad, sigma_raw.grad, *(p.grad for p in loss_fn.parameters())]
 
     @pytest.mark.parametrize("corrupt", CORRUPTIONS)
-    def test_gradients_are_identical_to_the_clean_run(self, corrupt: float) -> None:
+    def test_gradients_identical_to_clean_run(self, corrupt: float) -> None:
         """Corrupting the unlabeled target changes no gradient anywhere, bit for bit.
 
         The strong form of A66: not "the masked point contributes little" but "the
@@ -460,7 +460,7 @@ class TestUnlabeledPointsReachNoGradient:
         assert all(bool(torch.isfinite(grad).all()) for grad in grads)
 
     @pytest.mark.parametrize("corrupt", CORRUPTIONS)
-    def test_a_masked_point_does_not_raise_from_argument_validation(self, corrupt: float) -> None:
+    def test_masked_point_not_raise_from_argument_validation(self, corrupt: float) -> None:
         """A non-finite unlabeled target is not rejected by the base distribution.
 
         ``torch.distributions`` validates its arguments by default, so before the
@@ -474,7 +474,7 @@ class TestUnlabeledPointsReachNoGradient:
 
         assert bool(torch.isfinite(loss))
 
-    def test_the_flow_only_sees_the_labelled_points(self) -> None:
+    def test_flow_only_sees_labelled_points(self) -> None:
         """Selection happens before the flow, so its input is ``(V, 2)`` not ``(N*K, 2)``.
 
         The structural claim behind the two assertions above, and the reason the
@@ -516,7 +516,7 @@ class TestConditionerOutputActivation:
     way, is a deliberate edit to a failing test rather than a quiet one.
     """
 
-    def test_the_output_projection_is_followed_by_a_leaky_relu(self) -> None:
+    def test_output_projection_followed_by_leaky_relu(self) -> None:
         """The last two modules of the conditioner stack are ``Linear(64, 2)`` then the activation."""
         conditioner = _CouplingConditioner()
 
@@ -533,7 +533,7 @@ class TestConditionerOutputActivation:
         assert sum(isinstance(layer, nn.Linear) for layer in layers) == 3
         assert sum(isinstance(layer, nn.LeakyReLU) for layer in layers) == 3
 
-    def test_the_shift_output_is_one_sided_as_the_assumption_states(self) -> None:
+    def test_shift_output_one_sided_as_assumption_states(self) -> None:
         """The consequence the assumption names: ``shift`` is squashed towards non-negative.
 
         With the projection's weights driven negative, every raw output is negative

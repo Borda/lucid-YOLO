@@ -126,7 +126,7 @@ def _posed_targets() -> Targets:
 class TestKeypoints:
     """Points shift with their image, filter with their boxes, and are never clamped."""
 
-    def test_points_shift_by_the_placement_offset(self) -> None:
+    def test_points_shift_by_placement_offset(self) -> None:
         """Each image's points move onto the canvas by exactly that image's placement offset.
 
         Placement is a pure translation, so a point must land at ``local + offset`` — the
@@ -143,7 +143,7 @@ class TestKeypoints:
         assert out.boxes.shape[0] == _MOSAIC_COUNT
         assert out.keypoints[0, 0].tolist() == [16.0 + cx - _TILE, 16.0 + cy - _TILE]
 
-    def test_keypoint_free_targets_keep_the_canonical_empty(self) -> None:
+    def test_keypoint_free_targets_keep_canonical_empty(self) -> None:
         """A detection-only mosaic returns the canonical empty keypoint pair, untouched.
 
         Mosaic is on the train path of every task, and the frozen goldens run through it
@@ -156,7 +156,7 @@ class TestKeypoints:
         assert out.keypoints.shape == (0, 0, 2)
         assert out.keypoint_vis.shape == (0, 0)
 
-    def test_dropped_instance_takes_its_points_with_it(self) -> None:
+    def test_dropped_instance_takes_points_with_it(self) -> None:
         """An instance clipped away by its quadrant removes its keypoint rows too.
 
         Points share the box instance axis. A drop that removed the box alone would shift
@@ -176,7 +176,7 @@ class TestKeypoints:
         assert out.boxes.shape[0] == out.keypoints.shape[0]
         assert out.keypoints.shape[0] == _MOSAIC_COUNT
 
-    def test_point_pushed_off_canvas_is_neither_clamped_nor_zeroed(self) -> None:
+    def test_point_pushed_off_canvas_neither_clamped_nor_zeroed(self) -> None:
         """A70: a point placed outside the canvas on a kept instance keeps coordinate and visibility.
 
         Image 0 is anchored with its bottom-right corner at the sampled centre, so its
@@ -201,7 +201,7 @@ class TestKeypoints:
 class TestCanvasGeometry:
     """The stitched canvas is ``2S x 2S`` and every output box lies within it."""
 
-    def test_canvas_is_twice_target_size(self) -> None:
+    def test_canvas_twice_target_size(self) -> None:
         """The output image spans ``2S x 2S`` regardless of centre sampling."""
         mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
 
@@ -296,7 +296,7 @@ class TestKeepThresholdsReachUpstream:
     site per threshold, plus the control that the drop is the threshold's doing.
     """
 
-    def test_size_threshold_drops_the_sliver(self, route: str) -> None:
+    def test_size_threshold_drops_sliver(self, route: str) -> None:
         """A four-column clipped box falls below ``min_box_size`` and is dropped.
 
         ``min_visibility`` is pinned at ``0.0`` so nothing but the size rule can account
@@ -308,7 +308,7 @@ class TestKeepThresholdsReachUpstream:
 
         assert out.boxes.shape[0] == 0
 
-    def test_visibility_threshold_drops_the_sliver(self, route: str) -> None:
+    def test_visibility_threshold_drops_sliver(self, route: str) -> None:
         """A box retaining 4% of its area falls below ``min_visibility`` and is dropped.
 
         ``min_box_size`` is pinned at ``0.0`` so nothing but the visibility rule can
@@ -378,7 +378,7 @@ class TestBoxPolygonConsistency:
 class TestGreyFill:
     """Regions no tile covers keep the grey pad value."""
 
-    def test_uncovered_canvas_is_grey(self) -> None:
+    def test_uncovered_canvas_grey(self) -> None:
         """Small tiles leave grey gaps between the quadrants."""
         small = 8
         mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())

@@ -220,7 +220,7 @@ def test_gradients_reach_both_branches_angle_stems() -> None:
         pytest.param("angle_gain", "train/angle", _ANGLE_GAIN, id="angle-term"),
     ],
 )
-def test_each_oriented_gain_enters_the_total_at_its_weight(gain: str, term: str, value: float) -> None:
+def test_each_oriented_gain_enters_total_at_weight(gain: str, term: str, value: float) -> None:
     """Zeroing any one oriented gain drops exactly ``gain * term`` from the total.
 
     A term that is wired but weightless is the Phase 8 defect wearing a disguise: the
@@ -246,7 +246,7 @@ def test_each_oriented_gain_enters_the_total_at_its_weight(gain: str, term: str,
     assert dropped == pytest.approx(value * recorder.values[term], rel=_LEVERAGE_RTOL)
 
 
-def test_the_angle_gain_default_is_the_registered_a22_value() -> None:
+def test_angle_gain_default_registered_a22_value() -> None:
     """The angle term's default weight is A22's measured ``0.25``, not the assumed ``1.0``.
 
     Every other test here passes its gains explicitly, so until this one nothing read the
@@ -260,7 +260,7 @@ def test_the_angle_gain_default_is_the_registered_a22_value() -> None:
     assert DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=1, task="obb")._angle_gain == 0.25
 
 
-def test_obb_state_dict_is_the_detection_state_dict_plus_the_angle_stems() -> None:
+def test_obb_state_dict_detection_state_dict_plus_angle_stems() -> None:
     """Dropping the angle-stem keys from an ``obb`` module leaves exactly a ``detect`` module's.
 
     Pins the composition rule WP-087 established: the oriented module builds through
@@ -278,7 +278,7 @@ def test_obb_state_dict_is_the_detection_state_dict_plus_the_angle_stems() -> No
     assert any(".angle_stems." in key for key in oriented.state_dict())
 
 
-def test_detect_step_reproduces_the_pre_change_snapshot(single_threaded: None) -> None:
+def test_detect_step_reproduces_pre_change_snapshot(single_threaded: None) -> None:
     """A ``task="detect"`` step reproduces the total and every component captured before this WP.
 
     WP-088 edited modules that also sit on the detection path — the dual loss, the
@@ -394,7 +394,7 @@ def test_obb_step_needs_one_rotated_box_per_instance() -> None:
         module.training_step((images, boxes_only), 0)
 
 
-def test_image_without_instances_gives_a_finite_loss() -> None:
+def test_image_without_instances_gives_finite_loss() -> None:
     """An empty batch yields finite oriented terms rather than a ``0 / 0`` NaN.
 
     With no ground truth the padded rotated axis has length zero, which no ``gather``
@@ -412,7 +412,7 @@ def test_image_without_instances_gives_a_finite_loss() -> None:
     assert recorder.values["train/angle"] == 0.0
 
 
-def test_rotated_candidacy_reaches_the_assigner() -> None:
+def test_rotated_candidacy_reaches_assigner() -> None:
     """``gt_rboxes`` threads through the dual loss into both assigners' candidate filter.
 
     A25 restricts the rotated ground truth to candidacy, so the only observable effect
@@ -473,7 +473,7 @@ def _dense_inputs(module: DetectionLitModule, images: Tensor, target: Targets) -
     )
 
 
-def test_oriented_terms_follow_the_assignment_not_the_positive_order() -> None:
+def test_oriented_terms_follow_assignment_not_positive_order() -> None:
     """Positive ``k``'s rotated box is scored against ``gt_index[k]``, not against instance ``k``.
 
     The decisive pairing test, and the one no loss value can stand in for: pairing an
@@ -533,7 +533,7 @@ def _validated_module(batch: tuple[Tensor, list[Targets]]) -> tuple[DetectionLit
     return module, recorder
 
 
-def test_validation_logs_the_rotated_map_and_not_the_box_map() -> None:
+def test_validation_logs_rotated_map_and_not_box_map() -> None:
     """An ``obb`` run reports the metric of the branch it exists for, and only that one.
 
     ``val/mAP`` reads the A44 composition's pre-rotation rectangle: a run whose
@@ -564,7 +564,7 @@ def test_detection_validation_logs_no_rotated_metric() -> None:
     assert "val/rotated_mAP50" not in recorder.values
 
 
-def test_the_epoch_metric_clears_its_buffers() -> None:
+def test_epoch_metric_clears_buffers() -> None:
     """The accumulators are emptied at the epoch end, so no epoch scores another's detections."""
     module, _ = _validated_module(_oriented_batch())
 
@@ -572,7 +572,7 @@ def test_the_epoch_metric_clears_its_buffers() -> None:
     assert module._val_rotated_targets == []
 
 
-def test_rotated_targets_survive_the_loader_transport_into_the_metric() -> None:
+def test_rotated_targets_survive_loader_transport_into_metric() -> None:
     """Rotated ground truth reaches ``evaluate_rotated_map`` through the loader's packed batch.
 
     The whole target-side path in one assertion: pack for the worker boundary, unpack
@@ -598,7 +598,7 @@ def test_rotated_targets_survive_the_loader_transport_into_the_metric() -> None:
     assert evaluate_rotated_map(perfect, collected)["map_50"] == pytest.approx(1.0)
 
 
-def test_difficult_flags_reach_the_metric_through_the_loader() -> None:
+def test_difficult_flags_reach_metric_through_loader() -> None:
     """An R18 difficult flag survives packing, unpacking and the letterbox (A48).
 
     Filtering difficult instances at load — or dropping the flag anywhere between the
@@ -618,7 +618,7 @@ def test_difficult_flags_reach_the_metric_through_the_loader() -> None:
     assert torch.equal(module._val_rotated_targets[0]["difficult"], flagged.difficult)
 
 
-def test_an_oriented_train_pipeline_suppresses_copy_paste() -> None:
+def test_oriented_train_pipeline_suppresses_copy_paste() -> None:
     """An oriented loader never attempts copy-paste, which cannot act on rotated targets.
 
     Found by the acceptance run rather than by any component test, and it could only
@@ -659,7 +659,7 @@ class _FakeBase:
         return 4
 
 
-def test_the_letterbox_inverse_returns_rotated_boxes_unturned() -> None:
+def test_letterbox_inverse_returns_rotated_boxes_unturned() -> None:
     """Un-letterboxing an oriented detection scales it and leaves ``theta`` alone.
 
     A letterbox is an isotropic scale plus a translation, so the inverse is exact

@@ -57,7 +57,7 @@ def test_axis_aligned_square_fills_exact_half_open_block() -> None:
     assert torch.equal(mask, expected)
 
 
-def test_triangle_matches_the_analytic_half_plane_lattice() -> None:
+def test_triangle_matches_analytic_half_plane_lattice() -> None:
     """A diagonal edge includes exactly the pixel centres the three half-planes admit.
 
     A right triangle is the cheapest shape whose edges are not axis-aligned, so it
@@ -113,7 +113,7 @@ def _regular_ring(vertices: int, radius: float = 5.1) -> torch.Tensor:
 
 
 @pytest.mark.parametrize("vertices", [3, 4, 17, 64])
-def test_vectorised_crossing_test_matches_the_per_vertex_loop(vertices: int) -> None:
+def test_vectorised_crossing_test_matches_per_vertex_loop(vertices: int) -> None:
     """All edges at once produces the mask the per-vertex loop produced, exactly.
 
     The loop cost one full ``height x width`` tensor op per vertex, on CPU, inside
@@ -184,7 +184,7 @@ def test_batched_rings_match_one_call_per_ring(vertex_counts: tuple[int, ...]) -
     assert bool(masks.all(dim=0).any())  # not vacuously equal on empty masks
 
 
-def test_chunking_the_edge_axis_does_not_change_the_masks(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_chunking_edge_axis_not_change_masks(monkeypatch: pytest.MonkeyPatch) -> None:
     """A chunk budget small enough to split every ring yields the unchunked masks exactly.
 
     A ring's edge axis is chunked so that one that is both unusually detailed and
@@ -215,7 +215,7 @@ def test_batch_helper_returns_empty_stack_for_no_rings() -> None:
     assert masks.dtype == torch.bool
 
 
-def test_copy_paste_uses_the_promoted_rasteriser() -> None:
+def test_copy_paste_uses_promoted_rasteriser() -> None:
     """Copy-paste rasterises through the promoted function itself, not a private copy.
 
     The whole point of the promotion is that the pixels an instance *moves* and the
@@ -246,7 +246,7 @@ def test_copy_paste_uses_the_promoted_rasteriser() -> None:
         pytest.param((0.0, 0.0), 40.0, id="covers-the-whole-grid"),
     ],
 )
-def test_windowed_rasterisation_matches_the_full_grid_rule(offset: tuple[float, float], span: float) -> None:
+def test_windowed_rasterisation_matches_full_grid_rule(offset: tuple[float, float], span: float) -> None:
     """Testing only a ring's own window gives what testing every pixel gave, exactly.
 
     Rings are rasterised inside their bounding window because a COCO instance
@@ -273,7 +273,7 @@ def test_windowed_rasterisation_matches_the_full_grid_rule(offset: tuple[float, 
 
 
 @pytest.mark.parametrize("points", [0, 1, 2])
-def test_a_ring_without_area_rasterises_to_nothing(points: int) -> None:
+def test_ring_without_area_rasterises_to_nothing(points: int) -> None:
     """A ring of fewer than three points encloses no area and yields an empty mask.
 
     Fewer than three points cannot bound a region, and the crossing test agrees —

@@ -193,7 +193,7 @@ def test_gains_scale_total_linearly() -> None:
     assert math.isclose(doubled.l1.item(), base.l1.item(), rel_tol=1e-6)
 
 
-def test_batched_output_is_scalar_and_finite() -> None:
+def test_batched_output_scalar_and_finite() -> None:
     """Batched (B>1) inputs still yield scalar, finite loss terms."""
     logits = torch.randn(2, 5, 3)
     boxes = torch.randn(2, 5, 4).abs()
@@ -364,7 +364,7 @@ class TestDenseBoxTermsMatchMaskedReference:
         assert torch.allclose(dense_grad, oracle_grad, atol=1e-6)
         assert bool(torch.isfinite(dense_grad).all())
 
-    def test_all_background_batch_is_zero_and_connected(self) -> None:
+    def test_all_background_batch_zero_and_connected(self) -> None:
         """A batch with no positive anywhere gives exact zeros and a finite, all-zero gradient.
 
         This is the empty-mask contract the module docstring states; the oracle

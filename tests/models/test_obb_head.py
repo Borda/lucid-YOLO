@@ -117,7 +117,7 @@ def _oriented_head() -> DualDetectionHead:
     return DualDetectionHead(_N_SCALE_CHANNELS, num_classes=_NUM_CLASSES, predict_angle=True).eval()
 
 
-def test_angle_branch_is_absent_by_default() -> None:
+def test_angle_branch_absent_by_default() -> None:
     """A head built without the flag owns no angle stems and emits no angle.
 
     The opt-in half of A20: the accepted detection head must be reachable by
@@ -135,7 +135,7 @@ def test_angle_branch_is_absent_by_default() -> None:
     assert out.o2m_angle is None
 
 
-def test_enabling_the_angle_branch_only_adds_angle_keys() -> None:
+def test_enabling_angle_branch_only_adds_angle_keys() -> None:
     """Enabling the branch adds angle-stem keys and renames or drops nothing.
 
     The additive half of A20 at the level of the checkpoint: a flag that shipped
@@ -157,7 +157,7 @@ def test_enabling_the_angle_branch_only_adds_angle_keys() -> None:
     assert count_params(oriented) - count_params(plain) == angle_params
 
 
-def test_enabling_the_angle_branch_leaves_the_shipped_branch_bit_identical() -> None:
+def test_enabling_angle_branch_leaves_shipped_branch_bit_identical() -> None:
     """No one-to-one parameter moves when the angle branch is enabled.
 
     The stems are constructed *after* the box and class stems, so the branch draws
@@ -196,7 +196,7 @@ def test_enabling_the_angle_branch_leaves_the_shipped_branch_bit_identical() -> 
         pytest.param(256, 54017, id="p5-256ch"),
     ],
 )
-def test_angle_stem_parameter_count_is_exact(level_channels: int, expected_params: int) -> None:
+def test_angle_stem_parameter_count_exact(level_channels: int, expected_params: int) -> None:
     """Each level's angle stem holds exactly the hand-derived parameter count.
 
     The gate that keeps the A20 structure honest independently of the fidelity
@@ -218,7 +218,7 @@ def test_angle_stem_parameter_count_is_exact(level_channels: int, expected_param
     assert sum(parameter.numel() for parameter in stem.parameters()) == expected_params
 
 
-def test_angle_branch_uses_a_wider_stem_than_the_box_and_class_stems() -> None:
+def test_angle_branch_uses_wider_stem_than_box_and_class_stems() -> None:
     """The angle stem is half the level width while the others stay at a third.
 
     The split is load-bearing and easy to "tidy" away: A28's ``channels // 3`` is
@@ -233,7 +233,7 @@ def test_angle_branch_uses_a_wider_stem_than_the_box_and_class_stems() -> None:
     assert _stem_width(256) == 85
 
 
-def test_angle_outputs_are_dense_per_anchor_scalars() -> None:
+def test_angle_outputs_dense_per_anchor_scalars() -> None:
     """Both branches emit one raw angle per anchor, shaped (B, A, 1).
 
     A20 specifies a single scalar per location; an angle map shaped per level, or
@@ -253,7 +253,7 @@ def test_angle_outputs_are_dense_per_anchor_scalars() -> None:
         assert angle.shape == (batch, anchor_points.shape[0], 1)
 
 
-def test_branch_angle_stems_are_disjoint() -> None:
+def test_branch_angle_stems_disjoint() -> None:
     """The one-to-one and one-to-many angle stems share no parameter object.
 
     The dual head's defining invariant extended to the new stems: a shared
@@ -269,7 +269,7 @@ def test_branch_angle_stems_are_disjoint() -> None:
     assert o2o_ids.isdisjoint(o2m_ids)
 
 
-def test_angle_output_is_unsquashed_beyond_the_legacy_range() -> None:
+def test_angle_output_unsquashed_beyond_legacy_range() -> None:
     """A stem driven to 100 radians emits 100 radians, not a bounded value.
 
     The Eq. 13 gate. Under the removed Eq. 12 squashing,
@@ -291,7 +291,7 @@ def test_angle_output_is_unsquashed_beyond_the_legacy_range() -> None:
     assert torch.allclose(angle, torch.full_like(angle, 100.0))
 
 
-def test_zero_angle_decode_reproduces_the_axis_aligned_box() -> None:
+def test_zero_angle_decode_reproduces_axis_aligned_box() -> None:
     """With theta = 0 the rotated decode equals the axis-aligned decode exactly.
 
     The composition rule's anchor: the angle branch adds orientation on top of the
@@ -355,7 +355,7 @@ def test_decode_canonicalizes_adversarial_raw_angles(raw_angle: float) -> None:
     assert bool((rboxes[..., 2] >= rboxes[..., 3]).all()), "long-edge convention violated"
 
 
-def test_decode_is_continuous_across_the_half_turn_identification() -> None:
+def test_decode_continuous_across_half_turn_identification() -> None:
     """Raw angles a half turn apart decode to the same rectangle.
 
     The boundary-continuity check A23's register row names. A rectangle is
@@ -380,7 +380,7 @@ def test_decode_is_continuous_across_the_half_turn_identification() -> None:
 class TestRotatedTopk:
     """Tests for ``o2o_rotated_topk``."""
 
-    def test_emits_the_oriented_detection_tuple(self) -> None:
+    def test_emits_oriented_detection_tuple(self) -> None:
         """The rotated top-k returns (B, k, 7) rows of [cx, cy, w, h, theta, score, class].
 
         The oriented analogue of the A9 tuple: the same trailing score and class
@@ -398,7 +398,7 @@ class TestRotatedTopk:
         assert torch.equal(detections[..., 6], detections[..., 6].round()), "class column must be integral"
         assert bool((detections[..., 5].diff(dim=1) <= 0.0).all()), "rows must be score-descending"
 
-    def test_pairs_each_angle_with_its_own_anchor(self) -> None:
+    def test_pairs_each_angle_with_own_anchor(self) -> None:
         """The kept rows' full five-column boxes are the selected anchors' own rows.
 
         The failure this guards is silent and specific: a second ranking computed for
@@ -454,7 +454,7 @@ def test_oriented_detector_forward_emits_angles_on_both_branches() -> None:
     assert out.o2o_cls.shape == (1, anchor_points.shape[0], _NUM_CLASSES)
 
 
-def test_deployed_view_drops_the_one_to_many_branch_entirely() -> None:
+def test_deployed_view_drops_one_to_many_branch_entirely() -> None:
     """The deployed model holds no one-to-many parameter, angle stems included.
 
     The R6 convention the Table S11 FLOP column is read under. A deployed view

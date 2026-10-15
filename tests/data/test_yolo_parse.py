@@ -217,7 +217,7 @@ def _assert_same_sample(left: tuple[torch.Tensor, Targets], right: tuple[torch.T
 class TestDataYaml:
     """The dataset's own ``data.yaml``, which supplies the class names and the split paths."""
 
-    def test_names_are_read_in_index_order(self, tmp_path: Path) -> None:
+    def test_names_read_in_index_order(self, tmp_path: Path) -> None:
         """The ``names`` list *is* the label space, so its order is preserved verbatim.
 
         Unlike COCO's sparse category ids, a YOLO row's class field indexes this list
@@ -227,7 +227,7 @@ class TestDataYaml:
 
         assert config.names == _NAMES
 
-    def test_a_mapping_of_names_is_accepted_when_it_is_index_keyed(self, tmp_path: Path) -> None:
+    def test_mapping_of_names_accepted_when_it_index_keyed(self, tmp_path: Path) -> None:
         """``names`` written as ``{0: ..., 1: ...}`` resolves by its own keys, not by file order.
 
         The mapping form states each index explicitly, so accepting it needs no convention;
@@ -238,7 +238,7 @@ class TestDataYaml:
 
         assert YoloDataConfig.read(path).names == _NAMES
 
-    def test_a_mapping_that_is_not_index_keyed_is_rejected(self, tmp_path: Path) -> None:
+    def test_mapping_not_index_keyed_rejected(self, tmp_path: Path) -> None:
         """Keys that are not exactly ``0..K-1`` leave the class order unstated, so the file is refused.
 
         Guessing an order here would assign labels the dataset never claimed — the silent
@@ -250,7 +250,7 @@ class TestDataYaml:
         with pytest.raises(ValueError, match=r"must be keyed by 0\.\.K-1"):
             YoloDataConfig.read(path)
 
-    def test_an_nc_contradicting_names_is_rejected(self, tmp_path: Path) -> None:
+    def test_nc_contradicting_names_rejected(self, tmp_path: Path) -> None:
         """A file disagreeing with itself about its class count is refused rather than half-trusted.
 
         ``nc`` is redundant with ``names``; when the two differ, neither can be taken as the
@@ -262,7 +262,7 @@ class TestDataYaml:
         with pytest.raises(ValueError, match="nc=3 contradicts 2 names"):
             YoloDataConfig.read(path)
 
-    def test_the_published_parent_prefixed_entry_resolves(self, tmp_path: Path) -> None:
+    def test_published_parent_prefixed_entry_resolves(self, tmp_path: Path) -> None:
         """``train: ../train/images`` beside a real ``<root>/train/images`` resolves to that tree.
 
         This is what the published export writes; read literally it escapes the root, so the
@@ -273,7 +273,7 @@ class TestDataYaml:
 
         assert config.images_dir("train") == tmp_path / "train" / "images"
 
-    def test_an_entry_resolving_to_nothing_names_every_path_tried(self, tmp_path: Path) -> None:
+    def test_entry_resolving_to_nothing_names_every_path_tried(self, tmp_path: Path) -> None:
         """An unresolvable split entry raises listing its candidates rather than guessing a third.
 
         A dataset whose split directory is absent is a provisioning problem; the message has
@@ -284,7 +284,7 @@ class TestDataYaml:
         with pytest.raises(FileNotFoundError, match="resolves to no directory; tried"):
             config.images_dir("train")
 
-    def test_an_unnamed_split_is_a_key_error_listing_what_the_file_has(self, tmp_path: Path) -> None:
+    def test_unnamed_split_key_error_listing_what_file_has(self, tmp_path: Path) -> None:
         """Asking for a split the file never named reports which splits it did name.
 
         An export that ships only ``train`` is legitimate; the caller asking for ``val``
@@ -317,7 +317,7 @@ class TestLayoutResolution:
 
         assert resolve_yolo_split(tmp_path, "train") == (tmp_path / images, tmp_path / labels)
 
-    def test_a_half_present_layout_is_not_a_match(self, tmp_path: Path) -> None:
+    def test_half_present_layout_not_match(self, tmp_path: Path) -> None:
         """Images without their labels tree does not match, so two spellings cannot be mixed.
 
         The same both-halves rule the COCO table uses — resolving into one convention's
@@ -327,7 +327,7 @@ class TestLayoutResolution:
 
         assert resolve_yolo_split(tmp_path, "train")[0] == tmp_path / "train" / "images"
 
-    def test_an_unknown_layout_falls_back_to_the_per_split_names(self, tmp_path: Path) -> None:
+    def test_unknown_layout_falls_back_to_per_split_names(self, tmp_path: Path) -> None:
         """A root matching nothing resolves to the first row, so the reader names the path it wanted.
 
         Resolution is a naming rule, not an existence check: raising here would replace the
@@ -354,7 +354,7 @@ class TestDetectionReading:
         assert targets.boxes.tolist() == [_DETECTION_BOX]
         assert targets.labels.tolist() == [1]
 
-    def test_a_box_running_past_an_edge_is_clamped_to_the_canvas(self, tmp_path: Path) -> None:
+    def test_box_running_past_edge_clamped_to_canvas(self, tmp_path: Path) -> None:
         """A normalized row whose box extends past an image edge is clipped, as the COCO path clips.
 
         The file's own numbers must be normalized (rejected otherwise), but the geometry they
@@ -366,7 +366,7 @@ class TestDetectionReading:
 
         assert targets.boxes.tolist() == [_EDGE_BOX]
 
-    def test_an_empty_file_is_a_background_image(self, tmp_path: Path) -> None:
+    def test_empty_file_background_image(self, tmp_path: Path) -> None:
         """A zero-row label file yields empty targets, the format's way of saying "no objects".
 
         Background images are a normal part of a detection split; the empty file is the
@@ -379,7 +379,7 @@ class TestDetectionReading:
         assert targets.boxes.shape == (0, 4)
         assert targets.labels.shape == (0,)
 
-    def test_the_format_carries_no_difficult_flag(self, tmp_path: Path) -> None:
+    def test_format_carries_no_difficult_flag(self, tmp_path: Path) -> None:
         """Every instance reads non-difficult, which is what A51's default already means.
 
         The format has no per-instance flag column, so the channel exists and is uniformly
@@ -424,7 +424,7 @@ class TestOrientedReading:
         assert targets.polygons == []
         assert torch.allclose(rbox_envelopes(targets.rboxes), targets.boxes, atol=_TOL)
 
-    def test_the_variant_is_declared_and_never_sniffed(self, tmp_path: Path) -> None:
+    def test_variant_declared_and_never_sniffed(self, tmp_path: Path) -> None:
         """A nine-field file read as detection is rejected, not silently re-read as oriented.
 
         Deducing the variant from the field count would make a truncated oriented export
@@ -451,7 +451,7 @@ class TestMalformedRows:
             pytest.param("7 0.5 0.5 0.2 0.2", re.escape("class index 7 is outside 0..1"), id="unknown-class"),
         ],
     )
-    def test_a_malformed_row_names_its_file_and_line(self, tmp_path: Path, row: str, message: str) -> None:
+    def test_malformed_row_names_file_and_line(self, tmp_path: Path, row: str, message: str) -> None:
         """Each distinct mistake raises its own message, prefixed with ``<file>:<line>``.
 
         The bad row sits third so the line number is a real count rather than a constant, and
@@ -463,7 +463,7 @@ class TestMalformedRows:
         with pytest.raises(ValueError, match=f"{re.escape(str(label_file))}:3: .*{message}"):
             load_yolo_targets(label_file, height=_HEIGHT, width=_WIDTH, num_classes=2, oriented=False)
 
-    def test_an_oriented_row_with_a_trailing_flag_is_rejected(self, tmp_path: Path) -> None:
+    def test_oriented_row_with_trailing_flag_rejected(self, tmp_path: Path) -> None:
         """A ten-field oriented row is refused rather than read as eight coordinates plus noise.
 
         R18's own label lines carry a trailing ``difficult`` flag; the normalized variant has
@@ -475,7 +475,7 @@ class TestMalformedRows:
         with pytest.raises(ValueError, match=f"{re.escape(str(label_file))}:1: expected 9 fields"):
             load_yolo_targets(label_file, height=_HEIGHT, width=_WIDTH, num_classes=2, oriented=True)
 
-    def test_blank_lines_are_skipped_without_shifting_the_line_count(self, tmp_path: Path) -> None:
+    def test_blank_lines_skipped_without_shifting_line_count(self, tmp_path: Path) -> None:
         """Blank lines are ignored, and the reported line number still counts them.
 
         A trailing newline or a blank separator is not a malformed row, but the number in the
@@ -494,7 +494,7 @@ class TestDatasetRoundTrip:
         "spelling",
         [pytest.param("per-split", id="per-split"), pytest.param("split-subdir", id="split-subdir")],
     )
-    def test_a_root_round_trips_from_data_root_alone(self, tmp_path: Path, spelling: str) -> None:
+    def test_root_round_trips_from_data_root_alone(self, tmp_path: Path, spelling: str) -> None:
         """Both spellings reach their images and labels from the root, with names from the yaml.
 
         This is the whole point of the layout row: a YOLO root is usable from
@@ -542,7 +542,7 @@ class TestDatasetRoundTrip:
         assert len(calls) == len(dataset)
         assert torch.equal(replay, expected)
 
-    def test_cached_reader_returns_the_same_sample_as_the_uncached_reader_at_every_index(self, tmp_path: Path) -> None:
+    def test_cached_reader_returns_same_sample_as_uncached_reader_at_every_index(self, tmp_path: Path) -> None:
         """Switching the cache on changes nothing any index returns, image or target.
 
         Three frames carry distinct random pixels and different labels (one box, one clamped
@@ -560,7 +560,7 @@ class TestDatasetRoundTrip:
         for index in range(len(uncached)):
             _assert_same_sample(cached[index], uncached[index])
 
-    def test_cache_progress_reports_the_count_and_the_retained_bytes(self, tmp_path: Path) -> None:
+    def test_cache_progress_reports_count_and_retained_bytes(self, tmp_path: Path) -> None:
         """With ``progress`` on, the YOLO reader reports how many images it cached and their bytes.
 
         A YOLO tree states no image sizes, so this reader has nothing to estimate from up
@@ -574,7 +574,7 @@ class TestDatasetRoundTrip:
         with pytest.warns(UserWarning, match=rf"decoded 1 images .*\({expected:,} bytes\)"):
             dataset.cache_images(progress=True)
 
-    def test_the_oriented_root_round_trips_with_every_modality_aligned(self, tmp_path: Path) -> None:
+    def test_oriented_root_round_trips_with_every_modality_aligned(self, tmp_path: Path) -> None:
         """An oriented root yields boxes, labels and rotated boxes on one instance axis.
 
         The DoD's round trip: the file on disk, through the loader, into the same ``Targets``
@@ -590,7 +590,7 @@ class TestDatasetRoundTrip:
         assert torch.allclose(rbox_envelopes(targets.rboxes), targets.boxes, atol=_TOL)
         assert targets.difficult.tolist() == [False, False]
 
-    def test_images_are_indexed_in_sorted_name_order(self, tmp_path: Path) -> None:
+    def test_images_indexed_in_sorted_name_order(self, tmp_path: Path) -> None:
         """The sorted image listing is the index, since the format publishes no manifest.
 
         Directory iteration order is filesystem-dependent; sorting is what makes sample ``i``
@@ -605,7 +605,7 @@ class TestDatasetRoundTrip:
 
         assert [path.stem for path in dataset._images] == ["aaa", "frame", "zzz"]
 
-    def test_a_missing_label_file_is_rejected_by_default(self, tmp_path: Path) -> None:
+    def test_missing_label_file_rejected_by_default(self, tmp_path: Path) -> None:
         """An image with no label file raises, naming both the image and the path looked for.
 
         A YOLO tree has no image manifest, so an absent file is indistinguishable from a
@@ -617,7 +617,7 @@ class TestDatasetRoundTrip:
         with pytest.raises(FileNotFoundError, match="no label file at"):
             _ = YoloDetectionDataset.from_root(root, "train")[0]
 
-    def test_a_missing_label_file_may_be_opted_into(self, tmp_path: Path) -> None:
+    def test_missing_label_file_may_be_opted_into(self, tmp_path: Path) -> None:
         """``allow_missing_labels=True`` reads the absence as a background image instead.
 
         A dataset that genuinely omits files for its background images stays usable, but the

@@ -60,7 +60,7 @@ def test_every_named_layout_resolves_to_itself(tmp_path: Path, images: str, anno
     assert resolve_split(tmp_path, "val") == expected
 
 
-def test_an_unknown_layout_falls_back_to_the_coco_2017_names(tmp_path: Path) -> None:
+def test_unknown_layout_falls_back_to_coco_2017_names(tmp_path: Path) -> None:
     """A root matching nothing resolves to COCO 2017, so the reader reports the path it wanted.
 
     Resolution is a naming rule, not an existence check: raising here would turn every
@@ -73,14 +73,14 @@ def test_an_unknown_layout_falls_back_to_the_coco_2017_names(tmp_path: Path) -> 
     assert annotation_file == tmp_path / "annotations" / "instances_train2017.json"
 
 
-def test_a_directory_without_its_annotation_file_is_not_a_match(tmp_path: Path) -> None:
+def test_directory_without_annotation_file_not_match(tmp_path: Path) -> None:
     """Both halves must exist, so a root cannot be resolved into one layout's dir and another's JSON."""
     (tmp_path / "val").mkdir()
 
     assert resolve_split(tmp_path, "val")[0] == tmp_path / "val2017"
 
 
-def test_coco_2017_wins_when_a_root_satisfies_two_layouts(tmp_path: Path) -> None:
+def test_coco_2017_wins_when_root_satisfies_two_layouts(tmp_path: Path) -> None:
     """Precedence is the table's order, so a root satisfying two resolves the same way every time."""
     _write_layout(tmp_path, "val", "annotations/instances_val.json")
     expected = _write_layout(tmp_path, "val2017", "annotations/instances_val2017.json")
@@ -88,7 +88,7 @@ def test_coco_2017_wins_when_a_root_satisfies_two_layouts(tmp_path: Path) -> Non
     assert resolve_split(tmp_path, "val") == expected
 
 
-def test_the_datamodule_needs_no_overrides_for_a_tiled_root(tmp_path: Path) -> None:
+def test_datamodule_needs_no_overrides_for_tiled_root(tmp_path: Path) -> None:
     """A tiled oriented root is reached from ``data_root`` alone — the four overrides were the defect."""
     train = _write_layout(tmp_path, "train", "annotations/instances_train.json")
     val = _write_layout(tmp_path, "val", "annotations/instances_val.json")
@@ -99,7 +99,7 @@ def test_the_datamodule_needs_no_overrides_for_a_tiled_root(tmp_path: Path) -> N
     assert (datamodule._val_images_dir, datamodule._val_ann_file) == val
 
 
-def test_an_explicit_override_still_wins(tmp_path: Path) -> None:
+def test_explicit_override_still_wins(tmp_path: Path) -> None:
     """Resolution is a default: a caller naming a path gets that path, matched layout or not."""
     _write_layout(tmp_path, "val", "annotations/instances_val.json")
     elsewhere = tmp_path / "elsewhere"
@@ -111,7 +111,7 @@ def test_an_explicit_override_still_wins(tmp_path: Path) -> None:
     assert datamodule._val_images_dir == elsewhere
 
 
-def test_the_oriented_evaluator_resolves_the_same_way(tmp_path: Path) -> None:
+def test_oriented_evaluator_resolves_same_way(tmp_path: Path) -> None:
     """The evaluator's builder reads the shared rule rather than its own copy of the tiled names."""
     val = _write_layout(tmp_path, "val", "annotations/instances_val.json")
 

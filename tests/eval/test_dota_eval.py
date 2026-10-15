@@ -233,14 +233,14 @@ class TestRotatedIou:
         """Edge-inclusive clipping keeps the shared vertices but they bound zero area."""
         assert float(rotated_iou(_rbox(first), _rbox(second))) == 0.0
 
-    def test_containment_is_the_area_ratio(self) -> None:
+    def test_containment_area_ratio(self) -> None:
         """A box wholly inside another scores exactly the ratio of their areas."""
         outer = _rbox([0.0, 0.0, 10.0, 8.0, 0.3])
         inner = _rbox([0.0, 0.0, 4.0, 2.0, 0.3])
 
         assert float(rotated_iou(outer, inner)) == pytest.approx(8.0 / 80.0, abs=1e-6)
 
-    def test_symmetric_in_its_arguments(self) -> None:
+    def test_symmetric_in_arguments(self) -> None:
         """``iou(a, b)`` equals ``iou(b, a)`` transposed."""
         boxes_a, boxes_b = _sweep_pairs(40)
 
@@ -263,7 +263,7 @@ class TestRotatedIou:
         "dtype",
         [pytest.param(torch.float32, id="float32"), pytest.param(torch.float64, id="float64")],
     )
-    def test_working_dtype_follows_the_input(self, dtype: torch.dtype) -> None:
+    def test_working_dtype_follows_input(self, dtype: torch.dtype) -> None:
         """The result keeps the input dtype — no silent promotion to float64 (MPS has none)."""
         boxes = torch.tensor([[0.0, 0.0, 4.0, 2.0, 0.3]], dtype=dtype)
 
@@ -273,7 +273,7 @@ class TestRotatedIou:
         ("rows_a", "rows_b"),
         [pytest.param(0, 3, id="no-detections"), pytest.param(3, 0, id="no-targets"), pytest.param(0, 0, id="neither")],
     )
-    def test_empty_inputs_give_an_empty_grid(self, rows_a: int, rows_b: int) -> None:
+    def test_empty_inputs_give_empty_grid(self, rows_a: int, rows_b: int) -> None:
         """An empty box set yields the correctly shaped empty overlap grid, not an error."""
         computed = rotated_iou(torch.zeros(rows_a, 5), torch.zeros(rows_b, 5))
 
@@ -300,11 +300,11 @@ class TestProtocolConstants:
         """Decision 1: ten thresholds, 0.50 to 0.95 inclusive, in steps of 0.05."""
         assert IOU_THRESHOLDS == (0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95)
 
-    def test_recall_grid_is_the_coco_101_point_one(self) -> None:
+    def test_recall_grid_coco_101_point_one(self) -> None:
         """Decision 2: 101 interpolation points, the COCO convention."""
         assert RECALL_POINTS == 101
 
-    def test_detection_cap_is_300_not_cocos_100(self) -> None:
+    def test_detection_cap_300_not_cocos_100(self) -> None:
         """Decision 3: the cap matches what the oriented head actually emits."""
         detections = o2o_rotated_topk(torch.zeros(1, 1000, 3), torch.zeros(1, 1000, 5))
         assert MAX_DETECTIONS == detections.shape[1] == 300
@@ -361,7 +361,7 @@ class TestAccumulator:
         assert stats["map_75"] == pytest.approx(56 / 101, abs=1e-6)
         assert stats["mar_300"] == pytest.approx(2 / 3, abs=1e-6)
 
-    def test_matches_the_axis_aligned_instrument_at_zero_angle(self) -> None:
+    def test_matches_axis_aligned_instrument_at_zero_angle(self) -> None:
         """Decision 2's purpose: at ``theta = 0`` this and COCOeval report the same mAP.
 
         The rotated and axis-aligned instruments then face the same overlaps and the same
@@ -376,7 +376,7 @@ class TestAccumulator:
         What it does **not** test is the recall-grid boundary — no class here attains a
         recall that lands exactly on a grid point, which is the one place the two
         implementations are known to disagree. That case is pinned separately and
-        exactly by :meth:`TestRecallGridBoundary.test_boundary_recall_is_sampled_exactly`;
+        exactly by :meth:`TestRecallGridBoundary.test_boundary_recall_sampled_exactly`;
         this fixture would pass with the boundary handled either way, and saying so is the
         difference between a cross-check and a claim it cannot support.
         """
@@ -398,7 +398,7 @@ class TestAccumulator:
 
         assert stats == {"map": 1.0, "map_50": 1.0, "map_75": 1.0, "mar_300": 1.0}
 
-    def test_greedy_matching_is_one_to_one(self) -> None:
+    def test_greedy_matching_one_to_one(self) -> None:
         """A second detection on an already-claimed ground truth is a false positive.
 
         Two targets, three detections: the first claims target one, the second repeats it
@@ -432,7 +432,7 @@ class TestAccumulator:
         assert stats["mar_300"] == pytest.approx(1.0)
         assert stats["map"] == pytest.approx((51 + 50 * 2 / 3) / 101, abs=1e-5)
 
-    def test_duplicate_after_full_recall_is_hidden_by_interpolation(self) -> None:
+    def test_duplicate_after_full_recall_hidden_by_interpolation(self) -> None:
         """A duplicate past the last target costs nothing — COCO's envelope, not a bug.
 
         Once recall has saturated, every one of the 101 points is first reached at or
@@ -477,7 +477,7 @@ class TestAccumulator:
 class TestThresholdIndependence:
     """The ten thresholds are matched in one pass (WP-104) and must still decide separately."""
 
-    def test_each_threshold_consumes_ground_truth_on_its_own(self) -> None:
+    def test_each_threshold_consumes_ground_truth_on_own(self) -> None:
         """A ground truth claimed at a loose threshold is still free at a strict one.
 
         One ground truth and two detections of it: the higher-scoring one overlaps by
@@ -514,7 +514,7 @@ class TestThresholdIndependence:
         assert stats["map"] == pytest.approx(0.65, abs=1e-6)
         assert stats["mar_300"] == pytest.approx(1.0, abs=1e-6)
 
-    def test_a_detection_reaching_nothing_is_a_false_positive_and_consumes_nothing(self) -> None:
+    def test_detection_reaching_nothing_false_positive_and_consumes_nothing(self) -> None:
         """The skipped-walk path: no overlap anywhere means false positive at every threshold.
 
         WP-104 keeps such a detection out of the matching loop entirely, which is only
@@ -564,7 +564,7 @@ class TestRecallGridBoundary:
             pytest.param(21, 25, 84, id="twenty-one-of-twenty-five"),
         ],
     )
-    def test_boundary_recall_is_sampled_exactly(self, found: int, positives: int, grid_index: int) -> None:
+    def test_boundary_recall_sampled_exactly(self, found: int, positives: int, grid_index: int) -> None:
         """A recall landing exactly on grid point ``k`` samples it, giving ``(k+1)/101``.
 
         Every detection here is a perfect copy of a ground truth, so precision is 1 all
@@ -588,7 +588,7 @@ class TestRecallGridBoundary:
         assert stats["map_50"] == pytest.approx((grid_index + 1) / 101, abs=1e-6)
         assert stats["mar_300"] == pytest.approx(found / positives, abs=1e-6)
 
-    def test_agrees_with_the_axis_aligned_instrument_at_a_float32_boundary(self) -> None:
+    def test_agrees_with_axis_aligned_instrument_at_float32_boundary(self) -> None:
         """At a boundary float32 forfeits, both instruments keep the point (WP-092).
 
         This pinned a **divergence** until WP-092. ``evaluate_bbox`` reached 13/20 through
@@ -618,7 +618,7 @@ class TestRecallGridBoundary:
 class TestDifficultGroundTruths:
     """Decision 5 — R18's devkit rule, and what it is worth."""
 
-    def test_detection_on_a_difficult_target_is_discarded(self) -> None:
+    def test_detection_on_difficult_target_discarded(self) -> None:
         """A detection matching a difficult instance is neither a true nor a false positive.
 
         The contrast is the point. With the difficult instance present and flagged, the
@@ -656,7 +656,7 @@ class TestDifficultGroundTruths:
         assert stats["map"] == pytest.approx(1.0)
         assert evaluate_rotated_map(preds, deleted)["map"] == pytest.approx(0.5, abs=1e-6)
 
-    def test_difficult_targets_leave_the_recall_denominator(self) -> None:
+    def test_difficult_targets_leave_recall_denominator(self) -> None:
         """Recall is measured against non-difficult instances only."""
         found = [10.0, 10.0, 6.0, 4.0, 0.3]
         missed_difficult = [500.0, 500.0, 6.0, 4.0, 0.0]
@@ -714,7 +714,7 @@ class TestDifficultGroundTruths:
 class TestClassExclusion:
     """Decision 4 — classes without non-difficult ground truth leave the mean."""
 
-    def test_class_with_no_ground_truth_is_excluded(self) -> None:
+    def test_class_with_no_ground_truth_excluded(self) -> None:
         """Spurious detections of an unannotated class do not drag the mean to zero."""
         box = torch.tensor([[10.0, 10.0, 6.0, 4.0, 0.3]])
         spurious = torch.tensor([[400.0, 400.0, 6.0, 4.0, 0.0]])
@@ -756,7 +756,7 @@ class TestClassExclusion:
         assert stats["map"] == pytest.approx(0.5)
         assert stats["mar_300"] == pytest.approx(0.5)
 
-    def test_class_whose_targets_are_all_difficult_is_excluded(self) -> None:
+    def test_class_whose_targets_all_difficult_excluded(self) -> None:
         """An all-difficult class has an empty recall denominator, so it leaves the mean."""
         plain = [10.0, 10.0, 6.0, 4.0, 0.3]
         all_difficult = [400.0, 400.0, 6.0, 4.0, 0.0]
@@ -783,7 +783,7 @@ class TestClassExclusion:
 class TestDetectionCap:
     """Decision 3 — 300 detections per image, applied across classes."""
 
-    def test_detections_beyond_the_cap_are_dropped(self) -> None:
+    def test_detections_beyond_cap_dropped(self) -> None:
         """A correct detection ranked below 300 is cut and its recall is lost."""
         preds, targets = _perfect_case(count=400, match_index=350)
 
@@ -792,7 +792,7 @@ class TestDetectionCap:
         assert stats["mar_300"] == 0.0
         assert stats["map"] == 0.0
 
-    def test_detections_within_the_cap_survive(self) -> None:
+    def test_detections_within_cap_survive(self) -> None:
         """The same correct detection ranked inside 300 is kept, so the cap is the cause."""
         preds, targets = _perfect_case(count=400, match_index=299)
 
@@ -800,7 +800,7 @@ class TestDetectionCap:
 
         assert stats["mar_300"] == pytest.approx(1.0)
 
-    def test_cap_keeps_the_highest_scoring_rows(self) -> None:
+    def test_cap_keeps_highest_scoring_rows(self) -> None:
         """The cap ranks by score, so a low-ranked correct row loses to high-ranked noise."""
         kept, _ = _perfect_case(count=MAX_DETECTIONS, match_index=MAX_DETECTIONS - 1)
         _, targets = _perfect_case(count=MAX_DETECTIONS, match_index=MAX_DETECTIONS - 1)
@@ -811,7 +811,7 @@ class TestDetectionCap:
 class TestAdapters:
     """Conversion from the shipped detection tuple and from WP-057's tiled targets."""
 
-    def test_padding_rows_are_dropped(self) -> None:
+    def test_padding_rows_dropped(self) -> None:
         """Score-zero padding rows of the fixed-size batch do not reach the accumulator."""
         detections = torch.zeros(2, 4, 7)
         detections[0, 0] = torch.tensor([5.0, 5.0, 4.0, 2.0, 0.3, 0.9, 1.0])
@@ -833,7 +833,7 @@ class TestAdapters:
 
         assert preds[0]["scores"].tolist() == [pytest.approx(0.9)]
 
-    def test_adapter_output_feeds_the_accumulator(self) -> None:
+    def test_adapter_output_feeds_accumulator(self) -> None:
         """The adapter's dicts are exactly what :func:`evaluate_rotated_map` consumes."""
         detections = torch.zeros(1, 3, 7)
         detections[0, 0] = torch.tensor([5.0, 5.0, 4.0, 2.0, 0.3, 0.9, 0.0])
@@ -849,12 +849,12 @@ class TestAdapters:
 
         assert stats["map"] == pytest.approx(1.0)
 
-    def test_rejects_a_batch_of_the_wrong_width(self) -> None:
+    def test_rejects_batch_of_wrong_width(self) -> None:
         """An axis-aligned ``(B, N, 6)`` batch is rejected rather than misread."""
         with pytest.raises(ValueError, match=r"must be \(B, N, 7\)"):
             rotated_detections_to_predictions(torch.zeros(1, 4, 6))
 
-    def test_tiled_targets_carry_their_difficult_flags(self) -> None:
+    def test_tiled_targets_carry_difficult_flags(self) -> None:
         """The R18 flag travels with the box it belongs to, on the shared instance axis."""
         targets = Targets(
             boxes=torch.tensor([[0.0, 0.0, 4.0, 2.0], [10.0, 10.0, 6.0, 4.0]]),
@@ -869,7 +869,7 @@ class TestAdapters:
         assert ground_truth["difficult"].tolist() == [False, True]
         assert torch.equal(ground_truth["rboxes"], targets.rboxes)
 
-    def test_tiled_targets_survive_an_empty_tile(self) -> None:
+    def test_tiled_targets_survive_empty_tile(self) -> None:
         """A window containing no instance converts to empty tensors of the right shape."""
         tiled = TiledTargets(Targets.empty(), torch.zeros(0, dtype=torch.bool), torch.zeros(0))
 

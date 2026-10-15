@@ -181,7 +181,7 @@ def _assert_same_sample(left: tuple[torch.Tensor, Targets], right: tuple[torch.T
             assert torch.equal(got, want), f"{field.name} differs"
 
 
-def test_cached_reader_returns_the_same_sample_as_the_uncached_reader_at_every_index(
+def test_cached_reader_returns_same_sample_as_uncached_reader_at_every_index(
     detseg_fixture_dir: Path,
 ) -> None:
     """Switching the cache on changes nothing any index returns, image or target.
@@ -205,7 +205,7 @@ def test_cached_reader_returns_the_same_sample_as_the_uncached_reader_at_every_i
 class TestImageCacheReport:
     """What :meth:`CocoDetectionDataset.cache_images` tells an operator before the decode starts."""
 
-    def test_progress_reports_the_size_estimate_before_the_first_decode(
+    def test_progress_reports_size_estimate_before_first_decode(
         self, detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """With ``progress`` on, the estimate is out before any image is decoded.
@@ -232,7 +232,7 @@ class TestImageCacheReport:
             dataset.cache_images(progress=True)
         assert dataset._image_cache is None
 
-    def test_a_cache_built_without_progress_stays_quiet(
+    def test_cache_built_without_progress_stays_quiet(
         self, detseg_fixture_dir: Path, recwarn: pytest.WarningsRecorder
     ) -> None:
         """Opting into the cache at construction issues no size report.
@@ -247,7 +247,7 @@ class TestImageCacheReport:
         assert not [warning for warning in recwarn if issubclass(warning.category, UserWarning)]
 
 
-def test_a_16_bit_png_reads_the_same_cached_or_not(tmp_path: Path) -> None:
+def test_16_bit_png_reads_same_cached_or_not(tmp_path: Path) -> None:
     """A 16-bit PNG is cached as the ``uint16`` it decodes to and reads back exactly as uncached.
 
     ``read_image`` keeps 16 bits per channel, so such an entry takes twice the 8-bit budget
@@ -273,7 +273,7 @@ def test_a_16_bit_png_reads_the_same_cached_or_not(tmp_path: Path) -> None:
     assert torch.equal(cached[0][0], uncached[0][0])
 
 
-def test_boxes_are_xyxy_within_bounds(detseg_fixture_dir: Path) -> None:
+def test_boxes_xyxy_within_bounds(detseg_fixture_dir: Path) -> None:
     """Boxes are ordered ``xyxy`` and lie inside the image extent."""
     image, targets = _first_nonempty(_dataset(detseg_fixture_dir))
     _, height, width = image.shape
@@ -291,7 +291,7 @@ def test_polygons_present_and_agree_with_boxes(detseg_fixture_dir: Path) -> None
     assert torch.allclose(derived, targets.boxes, atol=_EXTENT_TOL)
 
 
-def test_label_remap_is_contiguous(detseg_fixture_dir: Path) -> None:
+def test_label_remap_contiguous(detseg_fixture_dir: Path) -> None:
     """Labels form a contiguous ``0..K-1`` space and the maps are inverse."""
     dataset = _dataset(detseg_fixture_dir)
     labels = sorted(dataset.category_id_to_label.values())
@@ -301,7 +301,7 @@ def test_label_remap_is_contiguous(detseg_fixture_dir: Path) -> None:
     assert torch.all(targets.labels >= 0) and torch.all(targets.labels < len(labels))
 
 
-def test_an_ordinary_coco_file_reads_as_nothing_difficult(detseg_fixture_dir: Path) -> None:
+def test_ordinary_coco_file_reads_as_nothing_difficult(detseg_fixture_dir: Path) -> None:
     """A file with no ``difficult`` key means "no instance is difficult" (A51)."""
     _, targets = _first_nonempty(_dataset(detseg_fixture_dir))
     assert targets.difficult.shape == (targets.boxes.shape[0],)
@@ -309,7 +309,7 @@ def test_an_ordinary_coco_file_reads_as_nothing_difficult(detseg_fixture_dir: Pa
 
 
 @pytest.mark.parametrize("oriented", [pytest.param(False, id="axis-aligned"), pytest.param(True, id="oriented")])
-def test_the_difficult_key_reaches_the_targets_channel(tmp_path: Path, oriented: bool) -> None:
+def test_difficult_key_reaches_targets_channel(tmp_path: Path, oriented: bool) -> None:
     """R18's flag, written per annotation, lands on the A51 channel on both readings.
 
     The flag says something about the annotation rather than about the box modality, so
@@ -436,7 +436,7 @@ class TestKeypointParsing:
         assert targets.keypoints.shape == (0, 0, 2)
         assert targets.keypoint_vis.shape == (0, 0)
 
-    def test_malformed_length_names_the_image(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
+    def test_malformed_length_names_image(self, keypoint_coco: tuple[Path, dict[str, object]]) -> None:
         """A non-triplet annotation fails with its image name and bad length.
 
         Four flat values cannot describe repeating ``x, y, v`` triples; raising
@@ -621,7 +621,7 @@ def ringless_coco(tmp_path: Path) -> Path:
 class TestRinglessAnnotations:
     """A missing ``segmentation`` ring is fatal only for an oriented reading (WP-121b)."""
 
-    def test_plain_reading_keeps_boxes_without_a_ring(self, ringless_coco: Path) -> None:
+    def test_plain_reading_keeps_boxes_without_ring(self, ringless_coco: Path) -> None:
         """Both ringless boxes survive and ``polygons`` comes back empty, not one-per-box.
 
         The fixed-write bug (WP-121b) let a keypoints-only export silently parse to zero
@@ -633,7 +633,7 @@ class TestRinglessAnnotations:
         assert targets.boxes.shape == (2, 4)
         assert targets.polygons == []
 
-    def test_oriented_reading_still_requires_a_ring(self, ringless_coco: Path) -> None:
+    def test_oriented_reading_still_requires_ring(self, ringless_coco: Path) -> None:
         """An oriented reading keeps skipping ringless annotations; it has no other rotated-box source.
 
         Locks in that relaxing the plain/keypoints path did not loosen ``oriented=True``,
@@ -674,7 +674,7 @@ def _write_split(split: Path, payload: dict[str, object], *, side: int = 8) -> P
 class TestMultiRingAnnotations:
     """A multi-ring COCO polygon keeps one ring, and the box is derived from it (M-38)."""
 
-    def test_the_box_is_the_retained_ring_not_the_annotation_bbox(self, tmp_path: Path) -> None:
+    def test_box_retained_ring_not_annotation_bbox(self, tmp_path: Path) -> None:
         """A two-lobe object reads as the lobe whose ring survived, box and mask together.
 
         COCO writes ``bbox`` as the envelope of *every* ring, so an object split by an
@@ -706,7 +706,7 @@ class TestMultiRingAnnotations:
         assert targets.boxes.tolist() == [[0.0, 0.0, 8.0, 8.0]]
         assert torch.equal(boxes_from_polygons(targets.polygons), targets.boxes)
 
-    def test_an_image_with_any_ringless_instance_keeps_its_bbox_boxes(self, tmp_path: Path) -> None:
+    def test_image_with_any_ringless_instance_keeps_bbox_boxes(self, tmp_path: Path) -> None:
         """Where no polygons survive, boxes stay COCO's own ``bbox`` — the rule is per image.
 
         ``Targets`` holds 0 or N rings, never a mix, so one ringless instance collapses
@@ -739,7 +739,7 @@ class TestMultiRingAnnotations:
 class TestDegenerateBoxes:
     """An instance whose final box has no extent is dropped at the read (L-30)."""
 
-    def test_a_box_clamped_flat_is_dropped_with_its_whole_instance(self, tmp_path: Path) -> None:
+    def test_box_clamped_flat_dropped_with_whole_instance(self, tmp_path: Path) -> None:
         """A ``bbox`` outside the canvas clamps to zero width and takes its label and flag with it.
 
         This is the val/train disagreement the drop closes: the train pipeline's
@@ -762,7 +762,7 @@ class TestDegenerateBoxes:
         assert targets.boxes.tolist() == [[2.0, 2.0, 5.0, 5.0]]
         assert targets.difficult.tolist() == [False]
 
-    def test_the_keypoint_channels_are_dropped_in_lock_step(self, tmp_path: Path) -> None:
+    def test_keypoint_channels_dropped_in_lock_step(self, tmp_path: Path) -> None:
         """The surviving instance keeps its own points, not the dropped instance's.
 
         Keypoints are stacked onto the instance axis after the drop, so a filter that
@@ -785,7 +785,7 @@ class TestDegenerateBoxes:
         assert targets.keypoint_vis is not None and targets.keypoint_vis.tolist() == [[1]]
 
 
-def test_a_keypoint_run_names_the_image_whose_annotation_has_no_points(tmp_path: Path) -> None:
+def test_keypoint_run_names_image_whose_annotation_has_no_points(tmp_path: Path) -> None:
     """A missing ``keypoints`` field raises the reader's named error, not a bare ``KeyError`` (L-29).
 
     Every neighbouring read in the parser is a defaulted ``.get``; this one was a
@@ -827,7 +827,7 @@ def test_image_ids_name_each_loader_position(tmp_path: Path) -> None:
     assert len(dataset.image_ids) == len(dataset)
 
 
-def test_file_names_and_targets_at_read_a_position_without_decoding_its_image(tmp_path: Path) -> None:
+def test_file_names_and_targets_at_read_position_without_decoding_image(tmp_path: Path) -> None:
     """``file_names`` aligns with ``image_ids``, and ``targets_at`` returns that position's targets alone (WP-189).
 
     The figure overlay arrives with an image file and wants its labels without the decode
@@ -942,7 +942,7 @@ def test_unpack_batch_restores_float_images_and_targets() -> None:
     _assert_targets_identical(restored, targets)
 
 
-def test_collate_batch_is_a_small_constant_segment_count() -> None:
+def test_collate_batch_small_constant_segment_count() -> None:
     """The packed batch is a handful of tensors regardless of instance count (IPC segment cap)."""
     _images, packed = collate_detection([(torch.zeros(3, 8, 8), target) for target in _ragged_targets()])
     packed_tensors = sum(isinstance(getattr(packed, field.name), torch.Tensor) for field in dataclasses.fields(packed))
@@ -966,7 +966,7 @@ def test_collate_batch_is_a_small_constant_segment_count() -> None:
         pytest.param([Targets.empty(), Targets.empty()], id="all-empty"),
     ],
 )
-def test_pack_unpack_round_trip_is_byte_identical(targets: list[Targets]) -> None:
+def test_pack_unpack_round_trip_byte_identical(targets: list[Targets]) -> None:
     """Unpacking a packed batch reproduces the input targets tensor-for-tensor."""
     _assert_targets_identical(unpack_targets(pack_targets(targets)), targets)
 
@@ -1085,7 +1085,7 @@ def test_unpack_batch_dtype_argument_controls_image_precision() -> None:
     assert images.dtype == torch.float16
 
 
-def test_datamodule_train_batch_is_deterministic(detseg_fixture_dir: Path) -> None:
+def test_datamodule_train_batch_deterministic(detseg_fixture_dir: Path) -> None:
     """Two datamodules with the same seed yield an identical first train batch."""
     first = _datamodule(detseg_fixture_dir, seed=7)
     second = _datamodule(detseg_fixture_dir, seed=7)
@@ -1163,7 +1163,7 @@ def test_init_worker_reseeds_pipeline_per_worker_seed(
         pytest.param(lambda: None, id="outside-a-worker-process"),
     ],
 )
-def test_init_worker_caps_threads_without_a_seedable_dataset(
+def test_init_worker_caps_threads_without_seedable_dataset(
     monkeypatch: pytest.MonkeyPatch, worker_info: object
 ) -> None:
     """No ``_generator`` to seed (val pipeline, or num_workers=0) still caps the worker's threads."""
@@ -1209,7 +1209,7 @@ def test_dataloader_num_workers_auto_scales_with_batch(detseg_fixture_dir: Path)
     assert datamodule.train_dataloader().num_workers >= 1
 
 
-def test_a_named_worker_count_reaches_the_val_loader(detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_named_worker_count_reaches_val_loader(detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A worker count the caller stated is honoured by both loaders when it fits (WP-102).
 
     The letterbox cap belongs to what this class chose, not to what an operator named:
@@ -1226,7 +1226,7 @@ def test_a_named_worker_count_reaches_the_val_loader(detseg_fixture_dir: Path, m
     assert datamodule.val_dataloader().num_workers == 8
 
 
-def test_an_inherited_worker_count_is_bounded_by_the_memory_budget(
+def test_inherited_worker_count_bounded_by_memory_budget(
     detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A count named for training and inherited by validation still fits the host (WP-103).
@@ -1245,9 +1245,7 @@ def test_an_inherited_worker_count_is_bounded_by_the_memory_budget(
     assert datamodule.train_dataloader().num_workers == 8
 
 
-def test_a_named_val_worker_count_is_bounded_by_nothing(
-    detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_named_val_worker_count_bounded_by_nothing(detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``val_num_workers`` stated outright outranks the budget — the flag that says so (WP-103)."""
     monkeypatch.setattr(dm, "_shm_capped_workers", lambda workers, *args, **kwargs: 1)
 
@@ -1257,7 +1255,7 @@ def test_a_named_val_worker_count_is_bounded_by_nothing(
     assert datamodule.val_dataloader().num_workers == 6
 
 
-def test_an_auto_chosen_worker_count_is_still_capped_for_val(
+def test_auto_chosen_worker_count_still_capped_for_val(
     detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When the count was this class's own guess, the cap still applies (WP-073).
@@ -1275,7 +1273,7 @@ def test_an_auto_chosen_worker_count_is_still_capped_for_val(
     assert datamodule.val_dataloader().num_workers < datamodule.train_dataloader().num_workers
 
 
-def test_the_val_worker_target_scales_with_the_letterbox_side() -> None:
+def test_val_worker_target_scales_with_letterbox_side() -> None:
     """The cap encodes how many workers saturate a letterbox-only loader, which is pixel-bound.
 
     Four was reasoned about 640 px samples, where val work was "a fraction of the train

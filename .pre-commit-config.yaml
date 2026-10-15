@@ -29,6 +29,7 @@ ci:
     - license-headers
     - no-ipynb-tracked
     - frozen-manifest
+    - content-pins
     - version-single-source
     - commit-trailers-history
     - release-guard
@@ -233,6 +234,15 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # Literal content pins that used to run as pytest tests reading files as text:
+      # the top-k decoder names no suppression operator, and the packaged recipes
+      # leave determinism to the CLI and state their task outside detection.
+      - id: content-pins
+        name: "📌 content pins on decoder source and packaged configs"
+        entry: .venv/bin/python scripts/lint/audit_content_pins.py
+        language: system
+        pass_filenames: false
+        files: ^(src/lucid_yolo/decode/topk_e2e\.py|src/lucid_yolo/configs/[^/]+\.yaml|scripts/lint/audit_content_pins\.py)$
       # pyproject.toml and src/lucid_yolo/__init__.py must name the same version.
       - id: version-single-source
         name: "🔢 package version single source of truth"

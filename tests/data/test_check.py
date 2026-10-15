@@ -126,7 +126,7 @@ def yolo_root(tmp_path: Path) -> _YoloFixture:
 class TestCheckYoloRoot:
     """The YOLO layout validator over a synthetic root."""
 
-    def test_accepts_a_well_formed_root(self, yolo_root: _YoloFixture) -> None:
+    def test_accepts_well_formed_root(self, yolo_root: _YoloFixture) -> None:
         """A root whose layout, pairing and rows are all sound passes on its layout alone.
 
         No total is stated, which is the way an operator first runs this: the published
@@ -138,7 +138,7 @@ class TestCheckYoloRoot:
 
         assert result.ok, result.problems
 
-    def test_reports_each_split_in_the_shared_vocabulary(self, yolo_root: _YoloFixture) -> None:
+    def test_reports_each_split_in_shared_vocabulary(self, yolo_root: _YoloFixture) -> None:
         """A passing split prints the same ``N images, M instances, K classes`` line as the others.
 
         One output vocabulary across the three layouts is what lets an operator read a report
@@ -150,7 +150,7 @@ class TestCheckYoloRoot:
         assert "PASS train — 3 images, 3 instances, 2 classes" in report
         assert "PASS val — 1 images, 1 instances, 1 classes" in report
 
-    def test_reports_the_totals_and_the_declared_class_list(self, yolo_root: _YoloFixture) -> None:
+    def test_reports_totals_and_declared_class_list(self, yolo_root: _YoloFixture) -> None:
         """Unstated totals are notes, and the ``data.yaml``'s own class list is one of them.
 
         The declared count is what a run's ``model.num_classes`` has to match, so the check
@@ -162,7 +162,7 @@ class TestCheckYoloRoot:
         assert any(f"{yolo_root.instances} instances" in note for note in result.notes)
         assert any("data.yaml declares 2 classes: car, truck" in note for note in result.notes)
 
-    def test_enforces_a_total_it_was_given(self, yolo_root: _YoloFixture) -> None:
+    def test_enforces_total_it_was_given(self, yolo_root: _YoloFixture) -> None:
         """A stated count is still enforced, naming both the wanted and the found number.
 
         This is how a truncated download or a half-unpacked archive is caught on a layout
@@ -173,7 +173,7 @@ class TestCheckYoloRoot:
         assert not result.ok
         assert any("expected 99 images" in problem for problem in result.problems)
 
-    def test_names_an_image_without_a_label_file(self, yolo_root: _YoloFixture) -> None:
+    def test_names_image_without_label_file(self, yolo_root: _YoloFixture) -> None:
         """A missing label file fails the split and names the image it belongs to.
 
         The format carries no image manifest (A54), so an absent label file cannot be told
@@ -187,7 +187,7 @@ class TestCheckYoloRoot:
         assert not result.ok
         assert any("without a label file" in problem and "'b'" in problem for problem in result.splits[0].problems)
 
-    def test_names_a_label_file_without_an_image(self, yolo_root: _YoloFixture) -> None:
+    def test_names_label_file_without_image(self, yolo_root: _YoloFixture) -> None:
         """Pairing is checked in both directions: an orphaned label file is a problem too.
 
         A label file whose image never arrived is a silently smaller dataset than the one the
@@ -200,7 +200,7 @@ class TestCheckYoloRoot:
         assert not result.ok
         assert any("without an image" in problem and "'z'" in problem for problem in result.splits[0].problems)
 
-    def test_names_the_file_and_line_of_a_malformed_row(self, yolo_root: _YoloFixture) -> None:
+    def test_names_file_and_line_of_malformed_row(self, yolo_root: _YoloFixture) -> None:
         """A row of the wrong shape is reported with its file and 1-based line, never raised.
 
         The bad row is placed third so the reported number is a real count rather than a
@@ -215,7 +215,7 @@ class TestCheckYoloRoot:
         assert not result.ok
         assert any(f"{broken}:3:" in problem for problem in result.splits[0].problems)
 
-    def test_rejects_a_row_naming_a_class_the_data_yaml_does_not(self, yolo_root: _YoloFixture) -> None:
+    def test_rejects_row_naming_class_absent_from_data_yaml(self, yolo_root: _YoloFixture) -> None:
         """A class index outside the declared ``names`` fails, naming the file and the line.
 
         This is where the class count and the rows are held to agree: the index is 0-based
@@ -230,7 +230,7 @@ class TestCheckYoloRoot:
         assert not result.ok
         assert any(f"{broken}:1:" in problem and "outside 0..1" in problem for problem in result.splits[0].problems)
 
-    def test_reports_a_missing_data_yaml_as_the_one_problem(self, tmp_path: Path) -> None:
+    def test_reports_missing_data_yaml_as_one_problem(self, tmp_path: Path) -> None:
         """Without a ``data.yaml`` there is no class space, so no split is worth checking.
 
         A labels tree alone is not a dataset this project can read: the file *is* the label
@@ -242,7 +242,7 @@ class TestCheckYoloRoot:
         assert result.splits == []
         assert any(DATA_YAML_NAME in problem for problem in result.problems)
 
-    def test_reports_a_data_yaml_that_contradicts_itself(self, yolo_root: _YoloFixture) -> None:
+    def test_reports_data_yaml_contradicts_itself(self, yolo_root: _YoloFixture) -> None:
         """An ``nc`` disagreeing with ``names`` is reported, not raised out of the check (A57).
 
         A file whose own class count is wrong cannot be trusted to state the label space, and
@@ -255,7 +255,7 @@ class TestCheckYoloRoot:
         assert not result.ok
         assert any("nc=3 contradicts 2 names" in problem for problem in result.problems)
 
-    def test_names_both_directories_a_split_is_missing(self, tmp_path: Path) -> None:
+    def test_names_both_directories_split_missing(self, tmp_path: Path) -> None:
         """A root with only a ``data.yaml`` names the images and labels directories it wanted.
 
         With no split entry in the file the naming convention applies, and its verdict has to
@@ -269,7 +269,7 @@ class TestCheckYoloRoot:
         assert any("images directory missing" in problem for problem in result.splits[0].problems)
         assert any("labels directory missing" in problem for problem in result.splits[0].problems)
 
-    def test_names_a_split_entry_that_resolves_nowhere(self, yolo_root: _YoloFixture) -> None:
+    def test_names_split_entry_resolves_nowhere(self, yolo_root: _YoloFixture) -> None:
         """A ``data.yaml`` pointing a split at a directory that is not there fails that split.
 
         Both readings of the entry are tried (A58), so the message lists every path attempted
@@ -315,7 +315,7 @@ class TestCheckYoloRootOriented:
         assert not result.ok
         assert any(":1: expected 5 fields" in problem for problem in result.splits[0].problems)
 
-    def test_the_cli_carries_the_flag_through(self, oriented_root: Path) -> None:
+    def test_cli_carries_flag_through(self, oriented_root: Path) -> None:
         """``lucid-data check --oriented true`` reaches the oriented reading and exits 0.
 
         The flag is only useful in the spelling an operator types: it is derived from the
@@ -328,7 +328,7 @@ class TestCheckYoloRootOriented:
 class TestCheckDatasetDispatch:
     """Which layout ``check_dataset`` validates, and which flags belong to it."""
 
-    def test_infers_the_yolo_layout_of_an_unstated_root(self, yolo_root: _YoloFixture, capsys) -> None:
+    def test_infers_yolo_layout_of_unstated_root(self, yolo_root: _YoloFixture, capsys) -> None:
         """An unstated ``--dataset`` probes the root, so a YOLO tree validates as itself.
 
         This is the pre-flight for a ``fit`` that has no ``--data.layout`` either, and that
@@ -340,7 +340,7 @@ class TestCheckDatasetDispatch:
         assert code == 0
         assert "PASS: dataset layout valid" in capsys.readouterr().out
 
-    def test_the_cli_infers_it_too(self, yolo_root: _YoloFixture) -> None:
+    def test_cli_infers_it_too(self, yolo_root: _YoloFixture) -> None:
         """``lucid-data check --data_root <yolo root>`` exits 0 with no ``--dataset`` at all.
 
         The command an operator actually runs is the one that has to work unaided; the flag
@@ -348,7 +348,7 @@ class TestCheckDatasetDispatch:
         """
         assert data_cli.main(["check", "--data_root", str(yolo_root.root)]) == 0
 
-    def test_infers_the_coco_layout_of_a_coco_shaped_root(self, tmp_path: Path, capsys) -> None:
+    def test_infers_coco_layout_of_coco_shaped_root(self, tmp_path: Path, capsys) -> None:
         """A COCO-spelled root still reaches the COCO branch when nothing is stated.
 
         Asserted through the published per-split count in the report, which only that branch
@@ -378,7 +378,7 @@ class TestCheckDatasetDispatch:
         assert "satisfies no dataset convention" in out
         assert f"--dataset {check_data.DOTA_DATASET}" in out
 
-    def test_rejects_an_unknown_layout_name(self) -> None:
+    def test_rejects_unknown_layout_name(self) -> None:
         """A ``--dataset`` naming no layout is refused with the list of the ones there are.
 
         A typo that fell through to inference would validate *something*, and report a pass
@@ -387,7 +387,7 @@ class TestCheckDatasetDispatch:
         with pytest.raises(ValueError, match="unknown dataset"):
             check_data.check_dataset(Path("/nonexistent"), dataset="yolov8")
 
-    def test_rejects_the_oriented_flag_on_another_layout(self) -> None:
+    def test_rejects_oriented_flag_on_another_layout(self) -> None:
         """``oriented`` names a YOLO row grammar, so it is refused elsewhere rather than ignored.
 
         A flag silently dropped makes the report read as though it had been honoured, which is
@@ -396,7 +396,7 @@ class TestCheckDatasetDispatch:
         with pytest.raises(ValueError, match="oriented applies to --dataset yolo"):
             check_data.check_dataset(Path("/nonexistent"), dataset="coco", oriented=True)
 
-    def test_rejects_a_count_expectation_aimed_at_coco(self) -> None:
+    def test_rejects_count_expectation_aimed_at_coco(self) -> None:
         """The count expectations belong to the two layouts with no published totals.
 
         COCO's per-split counts are published and are this check's own defaults, so a count
@@ -405,7 +405,7 @@ class TestCheckDatasetDispatch:
         with pytest.raises(ValueError, match="apply to --dataset dota"):
             check_data.check_dataset(Path("/nonexistent"), dataset="coco", expected_images=1)
 
-    def test_accepts_a_count_expectation_on_a_yolo_root(self, yolo_root: _YoloFixture) -> None:
+    def test_accepts_count_expectation_on_yolo_root(self, yolo_root: _YoloFixture) -> None:
         """The same expectations do apply to a YOLO root, whose totals nobody publishes either.
 
         A third-party export's correct counts are known only to the operator who downloaded
@@ -452,7 +452,7 @@ class TestCheckDatasetSplits:
         (labels_dir / "P0001.txt").write_text("0 0 2 0 2 1 0 1 plane 0\n", encoding="utf-8")
         return tmp_path
 
-    def test_a_train_only_root_passes_when_its_one_split_is_named(self, train_only_root: Path) -> None:
+    def test_train_only_root_passes_when_one_split_named(self, train_only_root: Path) -> None:
         """Naming the split a root actually ships is what makes it pass the pre-flight.
 
         An export with no validation split is a correct export, and this command is the first
@@ -463,7 +463,7 @@ class TestCheckDatasetSplits:
 
         assert code == 0
 
-    def test_the_same_root_fails_on_the_unstated_default_pair(self, train_only_root: Path, capsys) -> None:
+    def test_same_root_fails_on_unstated_default_pair(self, train_only_root: Path, capsys) -> None:
         """Left unstated the YOLO default still checks ``train`` and ``val``, so this root fails.
 
         The default is deliberately unchanged: a root that means to hold both splits and is
@@ -477,7 +477,7 @@ class TestCheckDatasetSplits:
         assert "images directory missing" in out
         assert "totals across ['train', 'val']" in out
 
-    def test_a_dota_subset_is_honoured_too(self, dota_train_only_root: Path) -> None:
+    def test_dota_subset_honoured_too(self, dota_train_only_root: Path) -> None:
         """The DOTA branch takes the named subset through the same dispatch, and passes on it.
 
         DOTA reaches the flag by the same route as YOLO — a root provisioned with one split is
@@ -488,7 +488,7 @@ class TestCheckDatasetSplits:
 
         assert code == 0
 
-    def test_the_same_dota_root_fails_on_the_unstated_default_pair(self, dota_train_only_root: Path, capsys) -> None:
+    def test_same_dota_root_fails_on_unstated_default_pair(self, dota_train_only_root: Path, capsys) -> None:
         """Unstated, the DOTA default is still both annotated splits, so a train-only root fails.
 
         Asserted as the contrast to the subset passing: without it, a passing subset would be
@@ -510,7 +510,7 @@ class TestCheckDatasetSplits:
         with pytest.raises(ValueError, match="splits applies to --dataset dota"):
             check_data.check_dataset(Path("/nonexistent"), dataset="coco", splits=("train2017",))
 
-    def test_rejects_a_splits_that_names_nothing(self) -> None:
+    def test_rejects_splits_names_nothing(self) -> None:
         """An empty ``splits`` is refused rather than obeyed: it would check nothing and pass.
 
         Every other bad argument here produces a loud failure, but this one produces a *clean*
@@ -520,7 +520,7 @@ class TestCheckDatasetSplits:
         with pytest.raises(ValueError, match="names no split"):
             check_data.check_dataset(Path("/nonexistent"), dataset="yolo", splits=())
 
-    def test_the_root_checkers_refuse_it_too(self, train_only_root: Path) -> None:
+    def test_root_checkers_refuse_it_too(self, train_only_root: Path) -> None:
         """The empty guard holds for a library caller, who never passes the entry point.
 
         Both root checkers are documented as the importable core, so guarding only in
@@ -533,7 +533,7 @@ class TestCheckDatasetSplits:
         with pytest.raises(ValueError, match="names no split"):
             check_data.check_dota_root(train_only_root, splits=())
 
-    def test_the_cli_carries_the_flag_through(self, train_only_root: Path) -> None:
+    def test_cli_carries_flag_through(self, train_only_root: Path) -> None:
         """``lucid-data check --splits '[train]'`` reaches the split selection and exits 0.
 
         The flag is only useful in the spelling an operator types, and jsonargparse derives it

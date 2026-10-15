@@ -178,7 +178,7 @@ def test_iou_threshold_governs_same_class_suppression() -> None:
     assert torch.allclose(tight_survivors[0, :4], torch.tensor([0.0, 0.0, 10.0, 10.0]))  # higher-score box kept
 
 
-def test_decode_is_deterministic() -> None:
+def test_decode_deterministic() -> None:
     """Two decodes of the same inputs are bit-for-bit identical."""
     points, strides = _grid(4, 4, stride=8)
     cls_logits = torch.randn(2, 16, 6)
@@ -216,7 +216,7 @@ def _two_stage_scores() -> Tensor:
     return scores
 
 
-def test_decode_with_indices_names_the_surviving_anchors() -> None:
+def test_decode_with_indices_names_surviving_anchors() -> None:
     """Gathering the dense boxes by the returned indices reproduces the survivors' own corners (WP-053b).
 
     This path composes two index remappings — the confidence threshold's ``keep``
@@ -282,7 +282,7 @@ class TestDegenerateBoxesAreDropped:
         raw_ltrb = torch.tensor([list(distances)])
         return NMSDecoder(conf_threshold=0.5, iou_threshold=0.7, max_det=8)(cls_logits, raw_ltrb, points, strides)
 
-    def test_inverted_boxes_no_longer_survive_beside_a_real_one(self) -> None:
+    def test_inverted_boxes_no_longer_survive_beside_real_one(self) -> None:
         """The finding's own scene: three same-class rows, two inverted, one survivor.
 
         All three were kept before the drop — the inverted pair suppressed nothing
@@ -307,7 +307,7 @@ class TestDegenerateBoxesAreDropped:
             pytest.param((float("inf"),) * 4, id="infinite"),
         ],
     )
-    def test_every_degenerate_shape_is_dropped(self, degenerate: tuple[float, ...]) -> None:
+    def test_every_degenerate_shape_dropped(self, degenerate: tuple[float, ...]) -> None:
         """No non-positive-area row reaches the output, whichever axis collapsed.
 
         A non-finite row falls out of the same mask for free: it fails both
@@ -317,7 +317,7 @@ class TestDegenerateBoxesAreDropped:
 
         assert torch.equal(detections, torch.zeros_like(detections))
 
-    def test_a_real_detection_beside_them_is_untouched(self) -> None:
+    def test_real_detection_beside_them_untouched(self) -> None:
         """The drop removes only the degenerate rows, never the honest one it sits beside."""
         detections = self._decode([self.REAL, (0.0, 0.0, 0.0, 0.0)], [6.0, 5.5])
 
@@ -325,7 +325,7 @@ class TestDegenerateBoxesAreDropped:
         assert survivors.shape[0] == 1
         assert survivors[0, :4].tolist() == [0.0, 0.0, 8.0, 8.0]
 
-    def test_anchor_indices_stay_aligned_with_the_boxes_they_describe(self) -> None:
+    def test_anchor_indices_stay_aligned_with_boxes_they_describe(self) -> None:
         """The index of each survivor still names the anchor its box came from.
 
         The mask is folded into ``keep`` rather than applied afterwards precisely

@@ -51,7 +51,7 @@ def test_tiny_target_tal_zero_stal_positive() -> None:
     assert metrics["stal_positives_tiny"] >= 1.0
 
 
-def test_surrogate_clamp_is_per_dimension() -> None:
+def test_surrogate_clamp_per_dimension() -> None:
     """Scenario (ii): the surrogate inflates only the sub-``s_min`` side, leaving the other."""
     metrics = assignment_cases()
 
@@ -77,6 +77,6 @@ def test_assignment_golden_passes_harness() -> None:
     assert result.passed, harness.format_result(result, harness.DEFAULT_GOLDENS_DIR)
 
 
-def test_producer_is_deterministic() -> None:
+def test_producer_deterministic() -> None:
     """Two producer calls return byte-identical metric mappings (no RNG)."""
     assert assignment_cases() == assignment_cases()

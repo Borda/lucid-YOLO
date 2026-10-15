@@ -140,7 +140,7 @@ def dota_fixture(obb_fixture_dir: Path, tmp_path: Path) -> _DotaFixture:
     return _build_dota_root(obb_fixture_dir, tmp_path / "dota")
 
 
-def test_header_and_blank_lines_are_skipped(tmp_path: Path) -> None:
+def test_header_and_blank_lines_skipped(tmp_path: Path) -> None:
     """Metadata headers (quoted or bare) and blank lines contribute no objects."""
     text = (
         "imagesource:GoogleEarth\n"
@@ -157,7 +157,7 @@ def test_header_and_blank_lines_are_skipped(tmp_path: Path) -> None:
     assert [obj.label for obj in objects] == [0, 1]
 
 
-def test_clockwise_quad_becomes_the_expected_long_edge_box(tmp_path: Path) -> None:
+def test_clockwise_quad_becomes_expected_long_edge_box(tmp_path: Path) -> None:
     """A rotated rectangle's four corners convert to its canonical (cx, cy, w, h, theta)."""
     targets = load_dota_targets(_write_labels(tmp_path / "P0002.txt", _ROTATED_QUAD_LINE), keep_difficult=True)
 
@@ -165,7 +165,7 @@ def test_clockwise_quad_becomes_the_expected_long_edge_box(tmp_path: Path) -> No
     assert torch.allclose(targets.boxes[0], torch.tensor(_ROTATED_ENVELOPE), atol=1e-5)
 
 
-def test_every_category_resolves_to_its_index(tmp_path: Path) -> None:
+def test_every_category_resolves_to_index(tmp_path: Path) -> None:
     """All 15 DOTA-v1.0 categories parse, in the hyphenated spelling the files use."""
     objects = parse_dota_label_file(_write_labels(tmp_path / "P0003.txt", _ALL_CATEGORY_LINES))
 
@@ -189,7 +189,7 @@ def test_multi_word_category_spellings_normalize_to_one_class(tmp_path: Path, wr
     assert [obj.label for obj in objects] == [DOTA_CLASSES.index("storage tank")]
 
 
-def test_unknown_category_is_rejected(tmp_path: Path) -> None:
+def test_unknown_category_rejected(tmp_path: Path) -> None:
     """An unlisted category raises, naming the file, the line and both spellings."""
     text = "gsd:0.1\n0 0 2 0 2 1 0 1 plane 0\n0 0 2 0 2 1 0 1 container-crane 0\n"
     path = _write_labels(tmp_path / "P0005.txt", text)
@@ -198,7 +198,7 @@ def test_unknown_category_is_rejected(tmp_path: Path) -> None:
         parse_dota_label_file(path)
 
 
-def test_difficult_flag_round_trips_through_the_parse(tmp_path: Path) -> None:
+def test_difficult_flag_round_trips_through_parse(tmp_path: Path) -> None:
     """The per-object difficult flag survives parsing exactly as written."""
     text = "0 0 2 0 2 1 0 1 plane 0\n0 0 4 0 4 2 0 2 ship 1\n"
 
@@ -214,7 +214,7 @@ def test_difficult_flag_round_trips_through_the_parse(tmp_path: Path) -> None:
         pytest.param(False, [0], id="dropped"),
     ],
 )
-def test_keep_difficult_selects_which_instances_reach_the_targets(
+def test_keep_difficult_selects_which_instances_reach_targets(
     tmp_path: Path, keep_difficult: bool, expected_labels: list[int]
 ) -> None:
     """A39: the caller decides the fate of difficult instances, at load time."""
@@ -227,7 +227,7 @@ def test_keep_difficult_selects_which_instances_reach_the_targets(
     assert targets.rboxes.shape[0] == len(expected_labels)
 
 
-def test_rboxes_share_the_instance_axis_with_boxes_and_labels(tmp_path: Path) -> None:
+def test_rboxes_share_instance_axis_with_boxes_and_labels(tmp_path: Path) -> None:
     """rboxes[i] is the same instance as boxes[i]/labels[i], so one mask filters both."""
     path = _write_labels(tmp_path / "P0008.txt", _THREE_OBJECT_LINES)
 
@@ -258,7 +258,7 @@ def test_targets_carry_no_polygons(tmp_path: Path) -> None:
         pytest.param("0 0 2 0 2 1 0 1 plane yes", r"difficult flag must be 0 or 1", id="worded-difficult"),
     ],
 )
-def test_malformed_object_line_is_rejected(tmp_path: Path, line: str, message: str) -> None:
+def test_malformed_object_line_rejected(tmp_path: Path, line: str, message: str) -> None:
     """Every malformed line raises, with the file and the 1-based line number named."""
     path = _write_labels(tmp_path / "P0010.txt", f"gsd:0.1\n{line}\n")
 
@@ -284,7 +284,7 @@ def test_empty_label_file_gives_empty_targets(tmp_path: Path, text: str) -> None
     assert targets.polygons == []
 
 
-def test_objects_can_be_converted_without_a_file() -> None:
+def test_objects_can_be_converted_without_file() -> None:
     """dota_targets works on hand-built objects, keeping the three axes aligned."""
     quad = torch.tensor([[0.0, 0.0], [4.0, 0.0], [4.0, 2.0], [0.0, 2.0]])
 
@@ -294,7 +294,7 @@ def test_objects_can_be_converted_without_a_file() -> None:
     assert targets.rboxes.tolist() == [[2.0, 1.0, 4.0, 2.0, 0.0]]
 
 
-def test_the_annotated_totals_are_the_published_ones_less_the_testing_third() -> None:
+def test_annotated_totals_published_ones_less_testing_third() -> None:
     """The measured train-plus-val counts sit where R18's split ratios put them.
 
     R18 sec. 4 takes half the images as training, a sixth as validation and a third as
@@ -316,7 +316,7 @@ def test_the_annotated_totals_are_the_published_ones_less_the_testing_third() ->
 class TestCheckData:
     """Tests for ``check_data`` (``check_dota_root``/``check_dataset``/``check_coco_root``)."""
 
-    def test_passes_on_a_dota_fixture_root(self, dota_fixture: _DotaFixture) -> None:
+    def test_passes_on_dota_fixture_root(self, dota_fixture: _DotaFixture) -> None:
         """The DOTA validator accepts a well-formed root when told that root's own counts."""
         result = check_data.check_dota_root(
             dota_fixture.root,
@@ -349,7 +349,7 @@ class TestCheckData:
         assert any(f"{dota_fixture.instances} instances" in note for note in result.notes)
         assert str(check_data.DOTA_IMAGE_COUNT) not in check_data.format_report(result, dota_fixture.root)
 
-    def test_fails_on_a_total_it_was_given(self, dota_fixture: _DotaFixture) -> None:
+    def test_fails_on_total_it_was_given(self, dota_fixture: _DotaFixture) -> None:
         """A stated expectation is still enforced, and names both the wanted and the found count."""
         result = check_data.check_dota_root(
             dota_fixture.root,
@@ -374,12 +374,12 @@ class TestCheckData:
             == 1
         )
 
-    def test_rejects_a_dota_expectation_aimed_at_coco(self) -> None:
+    def test_rejects_dota_expectation_aimed_at_coco(self) -> None:
         """A DOTA-only count passed with --dataset coco is rejected rather than ignored."""
         with pytest.raises(ValueError, match="apply to --dataset dota"):
             check_data.check_dataset(Path("/nonexistent"), dataset="coco", expected_images=1)
 
-    def test_reports_an_image_without_a_label_file(self, dota_fixture: _DotaFixture) -> None:
+    def test_reports_image_without_label_file(self, dota_fixture: _DotaFixture) -> None:
         """Pairing is checked by stem in both directions."""
         orphaned = sorted((dota_fixture.root / _SPLIT / "labelTxt").glob("*.txt"))[0]
         orphaned.unlink()
@@ -388,7 +388,7 @@ class TestCheckData:
 
         assert any("without a label file" in problem for problem in result.splits[0].problems)
 
-    def test_reports_a_label_file_without_an_image(self, dota_fixture: _DotaFixture) -> None:
+    def test_reports_label_file_without_image(self, dota_fixture: _DotaFixture) -> None:
         """A label file whose image is absent is a problem, not a silently extra annotation."""
         _write_labels(dota_fixture.root / _SPLIT / "labelTxt" / "P9999.txt", "0 0 2 0 2 1 0 1 plane 0\n")
 
@@ -396,7 +396,7 @@ class TestCheckData:
 
         assert any("without an image" in problem for problem in result.splits[0].problems)
 
-    def test_reports_an_unparsable_label_file(self, dota_fixture: _DotaFixture) -> None:
+    def test_reports_unparsable_label_file(self, dota_fixture: _DotaFixture) -> None:
         """A malformed label file is reported as a problem rather than raising out of the check."""
         broken = sorted((dota_fixture.root / _SPLIT / "labelTxt").glob("*.txt"))[0]
         _write_labels(broken, "0 0 2 0 2 1 0 1 container-crane 0\n")
@@ -413,7 +413,7 @@ class TestCheckData:
         assert any("images directory missing" in problem for problem in result.splits[0].problems)
         assert any("labelTxt directory missing" in problem for problem in result.splits[0].problems)
 
-    def test_reaches_the_coco_branch_when_it_is_named(self, tmp_path: Path) -> None:
+    def test_reaches_coco_branch_when_it_named(self, tmp_path: Path) -> None:
         """--dataset coco still validates a COCO root; an unstated layout is probed, not assumed.
 
         ``coco`` was the default until WP-099c made an unstated ``--dataset`` infer the layout

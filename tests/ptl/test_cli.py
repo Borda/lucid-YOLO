@@ -74,7 +74,7 @@ def test_progress_bar_choice_selects_callback(flags: tuple[str, ...], expected: 
     assert (None if bar is None else type(bar).__name__) == expected
 
 
-def test_default_loggers_are_tensorboard_plus_csv(tmp_path: Path) -> None:
+def test_default_loggers_tensorboard_plus_csv(tmp_path: Path) -> None:
     """An unset trainer.logger yields TensorBoard + CSV sharing one version directory."""
     cli = _build_cli(
         "--config",
@@ -105,12 +105,6 @@ def test_default_determinism_matches_accelerator() -> None:
     assert default_determinism() == expected
 
 
-def test_configs_leave_determinism_to_cli_default() -> None:
-    """No shipped config pins trainer.deterministic; the accelerator-aware default rules."""
-    for path in _CONFIG_PATHS:
-        assert "deterministic:" not in path.read_text(encoding="utf-8")
-
-
 def _config_cli(path: Path, *extra: str) -> DetectionCLI:
     """Build the CLI from a config file plus any extra override args.
 
@@ -122,7 +116,7 @@ def _config_cli(path: Path, *extra: str) -> DetectionCLI:
     return _build_cli("--config", str(path), *extra)
 
 
-def test_configs_dir_is_non_empty() -> None:
+def test_configs_dir_non_empty() -> None:
     """Every shipped config is discovered (guards against an empty glob)."""
     names = {path.name for path in _CONFIG_PATHS}
     assert {
@@ -167,7 +161,7 @@ def test_smoke_tier_resolves_variant_n_multipliers_and_gains() -> None:
         pytest.param(("--model.compile_step", "true"), True, id="flag-on"),
     ],
 )
-def test_compile_step_flag_reaches_the_module(flags: tuple[str, ...], expected: bool) -> None:
+def test_compile_step_flag_reaches_module(flags: tuple[str, ...], expected: bool) -> None:
     """``--model.compile_step`` parses onto the module's hyperparameters, and defaults to off (WP-184)."""
     cli = _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", *flags)
     assert cli.model.hparams.compile_step is expected
@@ -180,7 +174,7 @@ def test_compile_step_flag_reaches_the_module(flags: tuple[str, ...], expected: 
         pytest.param(("--data.cache_train_images", "true"), True, id="flag-on"),
     ],
 )
-def test_cache_train_images_flag_reaches_the_datamodule(flags: tuple[str, ...], expected: bool) -> None:
+def test_cache_train_images_flag_reaches_datamodule(flags: tuple[str, ...], expected: bool) -> None:
     """``--data.cache_train_images`` parses onto the datamodule, and defaults to off.
 
     The flag is the public switch for the train image cache; nothing but the CLI parse proves a
@@ -217,13 +211,13 @@ def test_yaml_roundtrip(config_path: Path) -> None:
     assert "variant:" in dumped
 
 
-def test_unknown_topology_key_is_rejected() -> None:
+def test_unknown_topology_key_rejected() -> None:
     """A topology-like key the module does not accept aborts parsing (ADR-001)."""
     with pytest.raises(SystemExit):
         _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", "--model.layers=5")
 
 
-def test_direct_multiplier_override_is_rejected() -> None:
+def test_direct_multiplier_override_rejected() -> None:
     """A link-computed multiplier cannot be set directly; ``variant`` is the seam."""
     with pytest.raises(SystemExit):
         _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", "--model.depth=0.9")
@@ -278,7 +272,7 @@ def test_fit_without_config_defaults_to_packaged_recipe(capsys) -> None:
         pytest.param("det_nano_smoke.yaml", False, id="detect-does-not"),
     ],
 )
-def test_mask_targets_follows_the_model_task(config_name: str, expected: bool) -> None:
+def test_mask_targets_follows_model_task(config_name: str, expected: bool) -> None:
     """``model.task`` decides whether the loader rasterises mask targets, with no second knob.
 
     A detection loader that rasterised would raise on the first box without a ring;
@@ -298,7 +292,7 @@ def test_mask_targets_follows_the_model_task(config_name: str, expected: bool) -
         pytest.param("det_nano_smoke.yaml", False, id="detect-does-not"),
     ],
 )
-def test_rotated_targets_follows_the_model_task(config_name: str, expected: bool) -> None:
+def test_rotated_targets_follows_model_task(config_name: str, expected: bool) -> None:
     """``model.task`` decides whether the loader reads rotated boxes, with no second knob.
 
     The failure this guards is silent in exactly the WP-088 way: a loader left in

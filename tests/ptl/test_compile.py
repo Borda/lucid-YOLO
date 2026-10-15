@@ -137,7 +137,7 @@ class TestDetectObjectiveTracesAsOneGraph:
         assert explanation.graph_break_count == 0, explanation.break_reasons
         assert explanation.graph_count == 1
 
-    def test_region_total_matches_the_shared_step(self) -> None:
+    def test_region_total_matches_shared_step(self) -> None:
         """The extracted region scores exactly what ``_shared_step`` scores for ``detect``."""
         module = _module()
         module.log = MagicMock()  # type: ignore[method-assign]
@@ -153,7 +153,7 @@ class TestDetectObjectiveTracesAsOneGraph:
         assert torch.equal(out.total, total)
 
     @pytest.mark.parametrize("alpha", [0.8, 0.1, 0.25])
-    def test_tensor_alpha_blends_exactly_as_the_eager_float(self, alpha: float) -> None:
+    def test_tensor_alpha_blends_exactly_as_eager_float(self, alpha: float) -> None:
         """The region's tensor-``alpha`` total is bit-equal to the loss called with the float attribute alone.
 
         ``0.8`` is the schedule's first value and the one a ``float32`` scalar would
@@ -187,7 +187,7 @@ class TestDetectObjectiveTracesAsOneGraph:
 class TestAlphaScheduleDoesNotRecompile:
     """The epoch-written branch weight is a tensor input of the region, never a value guard (WP-187)."""
 
-    def test_three_alpha_values_compile_the_region_once(self) -> None:
+    def test_three_alpha_values_compile_region_once(self) -> None:
         """Stepping at ``alpha`` 0.8, 0.1 and 0.5 adds no compiled frame after the first, and each total tracks alpha.
 
         Read as a float attribute inside the region, Dynamo guarded on ``0.8`` and
@@ -226,7 +226,7 @@ class TestAlphaScheduleDoesNotRecompile:
 class TestSetupDecidesOnce:
     """``setup`` installs the wrapper on CUDA + detect, warns and stays eager otherwise, and does so once."""
 
-    def test_cuda_detect_installs_the_compiled_wrapper_once(self) -> None:
+    def test_cuda_detect_installs_compiled_wrapper_once(self) -> None:
         """On a CUDA accelerator the objective is the compiled wrapper, kept across a second ``setup``."""
         torch._dynamo.config.capture_scalar_outputs = False
         module = _module(compile_step=True)
@@ -241,7 +241,7 @@ class TestSetupDecidesOnce:
         assert module._objective is objective
         assert torch._dynamo.config.capture_scalar_outputs is True
 
-    def test_state_dict_keys_are_unchanged_with_the_wrapper_installed(self) -> None:
+    def test_state_dict_keys_unchanged_with_wrapper_installed(self) -> None:
         """Function-level compile leaves every parameter name as built — no ``_orig_mod.`` prefix."""
         expected = list(_module().state_dict())
         module = _module(compile_step=True)
@@ -266,7 +266,7 @@ class TestSetupDecidesOnce:
         assert not module._objective_compiled
         assert module._objective == module._detect_objective
 
-    def test_default_off_never_touches_the_objective(self) -> None:
+    def test_default_off_never_touches_objective(self) -> None:
         """Without the flag a CUDA ``setup`` leaves the bare method and the config flag alone."""
         torch._dynamo.config.capture_scalar_outputs = False
         module = _module()
@@ -278,7 +278,7 @@ class TestSetupDecidesOnce:
         assert module._objective == module._detect_objective
         assert torch._dynamo.config.capture_scalar_outputs is False
 
-    def test_dynamic_marks_apply_only_to_a_compiled_objective(self) -> None:
+    def test_dynamic_marks_apply_only_to_compiled_objective(self) -> None:
         """The marks are a no-op while eager, and mark ``B`` and ``N`` once the wrapper is installed."""
         module = _module(compile_step=True)
         images, _points, _strides, gt_boxes, gt_labels, gt_mask, _alpha = _region_inputs(module, (0, 0))
@@ -309,7 +309,7 @@ class TestCompiledStepOverChangingShapes:
             pytest.param((4, 2, 0), id="three_images"),
         ],
     )
-    def test_matches_eager_through_the_shared_step(self, counts: tuple[int, ...]) -> None:
+    def test_matches_eager_through_shared_step(self, counts: tuple[int, ...]) -> None:
         """A compiled objective steps every shape to the eager total, marks and all.
 
         ``mark_dynamic`` is the enforcing form: a marked dim the traced code then pins

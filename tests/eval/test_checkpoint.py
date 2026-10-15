@@ -230,7 +230,7 @@ def torch_defaults_to_unrestricted(monkeypatch: pytest.MonkeyPatch) -> Iterator[
 class TestOverlayEma:
     """The overlay itself, against hand-built payloads — no checkpoint file involved."""
 
-    def test_every_floating_point_tensor_takes_the_shadows_value(self) -> None:
+    def test_every_floating_point_tensor_takes_shadows_value(self) -> None:
         """A complete shadow lands on parameters and float buffers alike, leaving counters alone.
 
         The buffers are the half a parameters-only overlay silently misses: batch-norm
@@ -254,7 +254,7 @@ class TestOverlayEma:
         for name, before in integer_buffers.items():
             assert torch.equal(module.get_buffer(name), before), f"{name} is not an EMA quantity"
 
-    def test_a_parametrized_state_key_is_resolved_and_handed_back(self) -> None:
+    def test_parametrized_state_key_resolved_and_handed_back(self) -> None:
         """A key carrying the callback's arguments resolves, and the overlay names it to its caller.
 
         Returning the resolved key is the whole fix: the caller's ``num_updates`` lookup
@@ -272,7 +272,7 @@ class TestOverlayEma:
         "shadow",
         [pytest.param(None, id="absent"), pytest.param({}, id="empty")],
     )
-    def test_a_checkpoint_with_no_shadow_raises_rather_than_evaluating_raw_weights(
+    def test_checkpoint_with_no_shadow_raises_rather_than_evaluating_raw_weights(
         self, shadow: dict[str, Tensor] | None
     ) -> None:
         """A shadow that is missing or empty refuses, because raw numbers are a different claim.
@@ -286,7 +286,7 @@ class TestOverlayEma:
         with pytest.raises(ValueError, match="carries no shadow"):
             loader._overlay_ema(module, _payload(shadow))
 
-    def test_no_entry_naming_the_callback_raises_and_lists_what_is_there(self) -> None:
+    def test_no_entry_naming_callback_raises_and_lists_what_there(self) -> None:
         """A checkpoint saved without the EMA callback names the callbacks it does carry.
 
         The remedy differs by cause — a run trained without the callback needs ``--no-ema``,
@@ -298,7 +298,7 @@ class TestOverlayEma:
         with pytest.raises(ValueError, match="no callback entry names"):
             loader._overlay_ema(module, {"callbacks": {"ModelCheckpoint": {}}})
 
-    def test_two_entries_naming_the_callback_raise_rather_than_the_last_one_winning(self) -> None:
+    def test_two_entries_naming_callback_raise_rather_than_last_one_winning(self) -> None:
         """Two EMA-ish entries are ambiguous, and ambiguity is refused, not resolved by order.
 
         The previous loop kept overwriting ``shadow`` as it walked the dict, so whichever
@@ -318,7 +318,7 @@ class TestOverlayEma:
         with pytest.raises(ValueError, match="2 callback entries naming"):
             loader._overlay_ema(module, payload)
 
-    def test_a_partial_shadow_names_what_is_missing_and_leaves_the_module_untouched(self) -> None:
+    def test_partial_shadow_names_what_missing_and_leaves_module_untouched(self) -> None:
         """A shadow short of one tensor refuses **before** copying, so no half-overlaid module exists.
 
         This is the failure the old code could not report at all: it copied the shadow's own
@@ -345,7 +345,7 @@ class TestOverlayEma:
 class TestLoadEvalModuleWithEma:
     """The overlay reached the way every command reaches it: through a real checkpoint file."""
 
-    def test_a_parametrized_callback_key_survives_the_whole_load(self, tmp_path: Path) -> None:
+    def test_parametrized_callback_key_survives_whole_load(self, tmp_path: Path) -> None:
         """``--ema`` on a checkpoint whose callback carries arguments loads and reports its counter.
 
         The end-to-end shape of the WP-174 defect. The substring match accepted this
@@ -373,7 +373,7 @@ class TestLoadEvalModuleWithEma:
 class TestCheckpointTrust:
     """A checkpoint is refused when reading it would run code this loader did not choose."""
 
-    def test_a_disallowed_object_is_refused_before_its_reducer_runs(self, tmp_path: Path) -> None:
+    def test_disallowed_object_refused_before_reducer_runs(self, tmp_path: Path) -> None:
         """A planted object that restricted loading rejects is never reconstructed.
 
         The acceptance check for the trust boundary as it stands on the installed stack:
@@ -391,7 +391,7 @@ class TestCheckpointTrust:
         assert not marker.exists(), "the planted reducer ran: the file reached unrestricted pickle"
 
     @pytest.mark.usefixtures("torch_defaults_to_unrestricted")
-    def test_the_refusal_holds_where_torch_still_defaults_to_unrestricted_loading(self, tmp_path: Path) -> None:
+    def test_refusal_holds_where_torch_still_defaults_to_unrestricted_loading(self, tmp_path: Path) -> None:
         """On the declared ``torch>=2.4`` floor the restricted read still happens first.
 
         This is the case the installed torch hides. Below 2.6 an unpassed ``weights_only``
@@ -409,7 +409,7 @@ class TestCheckpointTrust:
 
         assert not marker.exists(), "the planted reducer ran: the file reached unrestricted pickle"
 
-    def test_an_ordinary_checkpoint_still_loads_through_the_gate(self, tmp_path: Path) -> None:
+    def test_ordinary_checkpoint_still_loads_through_gate(self, tmp_path: Path) -> None:
         """A checkpoint carrying nothing unusual loads and reports its provenance.
 
         The half of the acceptance check a loader that refused everything would also pass.
@@ -432,7 +432,7 @@ class TestMalformedCheckpointsAreNamed:
         "missing",
         [pytest.param("epoch", id="epoch"), pytest.param("global_step", id="global_step")],
     )
-    def test_a_missing_provenance_key_names_itself_and_the_file(self, tmp_path: Path, missing: str) -> None:
+    def test_missing_provenance_key_names_itself_and_file(self, tmp_path: Path, missing: str) -> None:
         """A checkpoint short of a provenance key raises ``ValueError`` naming it, not ``KeyError``.
 
         ``lucid-eval`` and ``lucid-predict`` hand whatever this raises straight to an
@@ -450,7 +450,7 @@ class TestMalformedCheckpointsAreNamed:
 
         assert str(path) in str(refusal.value)
 
-    def test_a_shadow_without_its_update_counter_names_the_entry(self, tmp_path: Path) -> None:
+    def test_shadow_without_update_counter_names_entry(self, tmp_path: Path) -> None:
         """An EMA entry carrying a shadow but no ``num_updates`` is named rather than raising ``KeyError``.
 
         The counter is read out of the same entry the shadow came from, *after* the overlay
@@ -495,7 +495,7 @@ class TestPickDevice:
         ],
     )
     @pytest.mark.usefixtures("no_accelerator")
-    def test_a_named_backend_the_machine_lacks_is_refused(self, requested: str) -> None:
+    def test_named_backend_machine_lacks_refused(self, requested: str) -> None:
         """The refusal names the request and what this machine does have.
 
         Both halves are asserted because both are what the caller needs: the request
@@ -511,7 +511,7 @@ class TestPickDevice:
         assert "cpu" in str(refusal.value)
 
     @pytest.mark.usefixtures("cuda_present")
-    def test_a_named_backend_that_is_present_is_passed_through(self) -> None:
+    def test_named_backend_present_passed_through(self) -> None:
         """A request the machine can satisfy still wins over the auto-resolution.
 
         The check is availability, not agreement: an operator naming a device is stating
@@ -521,7 +521,7 @@ class TestPickDevice:
         assert pick_device("cuda") == torch.device("cuda")
 
     @pytest.mark.usefixtures("no_accelerator")
-    def test_cpu_is_accepted_on_a_machine_with_no_accelerator(self) -> None:
+    def test_cpu_accepted_on_machine_with_no_accelerator(self) -> None:
         """``cpu`` is never refused: it is the one backend every machine has."""
         assert pick_device("cpu") == torch.device("cpu")
 
@@ -536,7 +536,7 @@ class TestPickDevice:
 
 
 @pytest.mark.usefixtures("no_accelerator")
-def test_the_alternatives_offered_are_the_ones_that_would_be_accepted() -> None:
+def test_alternatives_offered_ones_would_be_accepted() -> None:
     """Every name the refusal offers is a name :func:`pick_device` takes.
 
     The message is only useful if its list is a list of *working* commands, so this

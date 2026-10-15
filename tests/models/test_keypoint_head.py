@@ -101,7 +101,7 @@ class TestKeypointHead:
         assert output.o2o_keypoint_sigma.shape == expected_shape
         assert output.o2m_keypoint_sigma.shape == expected_shape
 
-    def test_is_absent_by_default_without_detection_output_changes(
+    def test_absent_by_default_without_detection_output_changes(
         self, features: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> None:
         """The default head owns no keypoint modules and preserves class/box outputs.
@@ -134,7 +134,7 @@ class TestKeypointHead:
         assert torch.equal(output.o2o_cls, expected[1][0])
         assert torch.equal(output.o2o_box, expected[1][1])
 
-    def test_stems_are_disjoint_from_both_branches_and_other_outputs(self) -> None:
+    def test_stems_disjoint_from_both_branches_and_other_outputs(self) -> None:
         """Keypoint parameters share with neither branch nor any existing stem set.
 
         Enabling coefficients, angles, and keypoints together makes every
@@ -198,7 +198,7 @@ class TestKeypointHead:
 class TestDecodeKeypoints:
     """Tests for composing raw coordinate offsets with anchors and strides."""
 
-    def test_matches_a_hand_computable_anchor_offset(self) -> None:
+    def test_matches_hand_computable_anchor_offset(self) -> None:
         """The decode adds each stride-scaled offset to its anchor centre exactly.
 
         One anchor at ``(10, 20)`` with stride 4 and two signed point offsets
@@ -256,7 +256,7 @@ class TestKeypointDetector:
         assert out.o2o_keypoint_sigma is not None
         assert out.o2o_keypoint_sigma.shape == (1, num_anchors, _NUM_KEYPOINTS, 2)
 
-    def test_deployed_view_drops_the_one_to_many_branch_entirely(self) -> None:
+    def test_deployed_view_drops_one_to_many_branch_entirely(self) -> None:
         """The deployed model holds no one-to-many parameter, point stems included.
 
         The R6 convention the keypoint golden's GFLOP column is read under. A
@@ -307,7 +307,7 @@ class TestKeypointDetector:
             pytest.param(build_keypoint_detector, id="builder"),
         ],
     )
-    def test_rejects_an_omitted_point_count(self, factory: Callable[..., KeypointDetector]) -> None:
+    def test_rejects_omitted_point_count(self, factory: Callable[..., KeypointDetector]) -> None:
         """Building without ``num_keypoints`` raises instead of picking a count.
 
         ``K`` is a property of the dataset's annotation schema, so a default would

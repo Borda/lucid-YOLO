@@ -163,7 +163,7 @@ def test_coeff_anchor_order_agreement() -> None:
     assert start == coefficients.shape[1]
 
 
-def test_coeffs_are_off_by_default_without_detection_head_changes() -> None:
+def test_coeffs_off_by_default_without_detection_head_changes() -> None:
     """The default head retains the exact WP-046 module/state/parameter contract."""
     torch.manual_seed(0)
     head = DualDetectionHead(in_channels=(64, 128, 256), num_classes=80).eval()
@@ -185,7 +185,7 @@ def test_coeffs_are_off_by_default_without_detection_head_changes() -> None:
     assert out.o2o_coeff is None
 
 
-def test_coefficient_stems_are_disjoint_between_branches() -> None:
+def test_coefficient_stems_disjoint_between_branches() -> None:
     """One-to-one and one-to-many coefficient stems own separate parameters."""
     head = DualDetectionHead(in_channels=_CHANNELS, num_classes=4, num_coeffs=32)
     o2m_ids = {id(parameter) for parameter in head.o2m.coeff_stems.parameters()}

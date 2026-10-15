@@ -164,7 +164,7 @@ def pose_root(tmp_path: Path) -> Path:
 class TestPoseReport:
     """The scoring body: annotation load, batching, OKS accumulation and the written report."""
 
-    def test_the_split_is_scored_and_the_report_names_both_paths(
+    def test_split_scored_and_report_names_both_paths(
         self, pose_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """A pose evaluation writes both paths' box and OKS figures, into a directory it creates.
@@ -211,7 +211,7 @@ class TestPoseReport:
         assert f"K={_COCO_POINTS}" in printed
         assert "the e2e row is the one comparable to a training run's own val/mAP" in printed
 
-    def test_the_limit_scores_a_prefix_rather_than_the_whole_split(self, pose_root: Path, tmp_path: Path) -> None:
+    def test_limit_scores_prefix_rather_than_whole_split(self, pose_root: Path, tmp_path: Path) -> None:
         """``--limit`` stops after N images, and the report counts what it actually scored.
 
         The count in the report is what a reader compares two runs by, so a limit that
@@ -259,7 +259,7 @@ class TestPoseReport:
 class TestPoseProtocolBoundary:
     """``K != 17`` is refused before any annotation file is opened, at the boundary too."""
 
-    def test_a_sixteen_point_checkpoint_is_refused_at_the_boundary(
+    def test_sixteen_point_checkpoint_refused_at_boundary(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """``K=16`` exits non-zero naming both counts, scoring nothing against COCO's sigmas.

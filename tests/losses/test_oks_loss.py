@@ -44,7 +44,7 @@ def _two_point_instance() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, tor
 class TestDefinition:
     """The value is R12's ``1 - OKS``, with ``s^2`` the area and ``k_i = 2 sigma_i``."""
 
-    def test_matches_a_hand_computed_oks(self) -> None:
+    def test_matches_hand_computed_oks(self) -> None:
         """One instance, two points: ``1 - mean_i exp(-d_i^2 / (2 * area * (2 sigma_i)^2))``."""
         mu_hat, mu_gt, area, visibility = _two_point_instance()
         first = math.exp(-25.0 / (2.0 * 100.0 * (2.0 * 0.1) ** 2))  # d^2 = 3^2 + 4^2
@@ -55,7 +55,7 @@ class TestDefinition:
 
         assert float(loss) == pytest.approx(expected, abs=_REFERENCE_ATOL)
 
-    def test_a_perfect_prediction_scores_zero(self) -> None:
+    def test_perfect_prediction_scores_zero(self) -> None:
         """``OKS = 1`` at zero distance, so the loss is exactly zero there."""
         _, mu_gt, area, visibility = _two_point_instance()
 
@@ -63,7 +63,7 @@ class TestDefinition:
 
         assert float(loss) == 0.0
 
-    def test_instances_are_meaned_after_their_own_per_point_mean(self) -> None:
+    def test_instances_meaned_after_own_per_point_mean(self) -> None:
         """Two instances weigh equally however many labelled points each carries.
 
         R12 normalizes each instance by *its* labelled count before anything is
@@ -83,7 +83,7 @@ class TestDefinition:
 
         assert float(paired) == pytest.approx((alone_both + alone_one) / 2.0, abs=_REFERENCE_ATOL)
 
-    def test_the_area_is_floored_at_one_square_pixel(self) -> None:
+    def test_area_floored_at_one_square_pixel(self) -> None:
         """A zero or negative area scores as one square pixel rather than dividing by zero."""
         loss_fn = OKSLoss(sigmas=_SIGMAS)
         mu_hat, mu_gt, _, visibility = _two_point_instance()
@@ -98,7 +98,7 @@ class TestDefinition:
 class TestVisibilityMasking:
     """``v = 0`` points are excluded before any arithmetic (A66)."""
 
-    def test_an_unlabelled_point_is_outside_the_graph(self) -> None:
+    def test_unlabelled_point_outside_graph(self) -> None:
         """Corrupting a ``v = 0`` coordinate with ``inf`` changes neither the loss nor a gradient.
 
         The decisive form of the check: a mask applied *after* the distance would keep
@@ -120,7 +120,7 @@ class TestVisibilityMasking:
         assert bool(torch.isfinite(mu_hat.grad).all())
         assert bool((mu_hat.grad[0, 1] == 0).all())  # nothing flows to the unlabelled point
 
-    def test_an_instance_without_labelled_points_is_left_out_of_the_mean(self) -> None:
+    def test_instance_without_labelled_points_left_out_of_mean(self) -> None:
         """An all-``v = 0`` instance has no OKS (R12's denominator is zero) and is skipped."""
         loss_fn = OKSLoss(sigmas=_SIGMAS)
         mu_hat, mu_gt, area, visibility = _two_point_instance()
@@ -135,7 +135,7 @@ class TestVisibilityMasking:
 
         assert float(with_unlabelled) == pytest.approx(alone, abs=_REFERENCE_ATOL)
 
-    def test_an_all_unlabelled_batch_is_a_finite_attached_zero(self) -> None:
+    def test_all_unlabelled_batch_finite_attached_zero(self) -> None:
         """No labelled point anywhere: zero, finite, and still on ``mu_hat``'s graph."""
         mu_hat = torch.zeros(2, 2, 2, requires_grad=True)
 
@@ -144,7 +144,7 @@ class TestVisibilityMasking:
         assert float(loss.detach()) == 0.0
         assert loss.requires_grad
 
-    def test_an_empty_batch_is_a_finite_attached_zero(self) -> None:
+    def test_empty_batch_finite_attached_zero(self) -> None:
         """``N = 0``: zero, finite, and still on ``mu_hat``'s graph."""
         mu_hat = torch.zeros(0, 2, 2, requires_grad=True)
 
@@ -159,7 +159,7 @@ class TestVisibilityMasking:
 class TestModuleShape:
     """No parameters, no persistent state, gradient where it belongs."""
 
-    def test_holds_no_parameters_and_an_empty_state_dict(self) -> None:
+    def test_holds_no_parameters_and_empty_state_dict(self) -> None:
         """``k`` is a non-persistent buffer: nothing to train, nothing for a checkpoint to gain.
 
         The pinned key set of a keypoints module is the detection keys plus the point
@@ -172,13 +172,13 @@ class TestModuleShape:
         assert dict(loss_fn.state_dict()) == {}
         assert loss_fn.k.tolist() == [pytest.approx(2.0 * sigma) for sigma in _SIGMAS]
 
-    def test_the_buffer_follows_the_module_dtype(self) -> None:
+    def test_buffer_follows_module_dtype(self) -> None:
         """Non-persistent still means device- and dtype-placed with the module."""
         loss_fn = OKSLoss(sigmas=_SIGMAS).to(torch.float64)
 
         assert loss_fn.k.dtype == torch.float64
 
-    def test_gradient_reaches_the_prediction(self) -> None:
+    def test_gradient_reaches_prediction(self) -> None:
         """A labelled, imperfect point leaves a non-zero gradient on ``mu_hat``."""
         mu_hat, mu_gt, area, visibility = _two_point_instance()
         mu_hat = mu_hat.requires_grad_(True)
@@ -188,7 +188,7 @@ class TestModuleShape:
         assert mu_hat.grad is not None
         assert bool((mu_hat.grad != 0).any())
 
-    def test_rejects_a_point_count_that_is_not_the_sigma_tables(self) -> None:
+    def test_rejects_point_count_not_sigma_tables(self) -> None:
         """``K`` must match the table — a mismatch is a schema error, not a broadcast."""
         with pytest.raises(ValueError, match="sigma table has 2 keypoints but the inputs carry 3"):
             OKSLoss(sigmas=_SIGMAS)(
@@ -196,7 +196,7 @@ class TestModuleShape:
             )
 
     @pytest.mark.parametrize("sigmas", [(), (0.1, 0.0), (0.1, -0.2)])
-    def test_rejects_an_empty_or_non_positive_sigma_table(self, sigmas: tuple[float, ...]) -> None:
+    def test_rejects_empty_or_non_positive_sigma_table(self, sigmas: tuple[float, ...]) -> None:
         """A zero sigma makes a point's tolerance zero and the loss constant off the optimum."""
         with pytest.raises(ValueError, match="non-empty sequence of positive values"):
             OKSLoss(sigmas=sigmas)

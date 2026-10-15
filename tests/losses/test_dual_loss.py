@@ -92,7 +92,7 @@ def test_every_gt_covered_by_o2o() -> None:
     assert int((o2o.gt_index[0] == 1).sum()) == 1
 
 
-def test_alpha_weights_the_two_branch_totals() -> None:
+def test_alpha_weights_two_branch_totals() -> None:
     """total equals alpha*o2m + (1-alpha)*o2o exactly, and tracks a changed alpha."""
     gt = torch.tensor([[[0.0, 0.0, 32.0, 32.0]]])  # covers all 16 anchors
     logits = torch.zeros(1, 16, 1)
@@ -114,7 +114,7 @@ def test_alpha_weights_the_two_branch_totals() -> None:
 
 
 @pytest.mark.parametrize("alpha", [0.8, 0.1, 0.25])
-def test_tensor_alpha_blends_bit_equal_to_the_attribute_and_records_the_attribute(alpha: float) -> None:
+def test_tensor_alpha_blends_bit_equal_to_attribute_and_records_attribute(alpha: float) -> None:
     """A keyword ``alpha`` tensor drives the blend, bit-equal to the float attribute; ``out.alpha`` stays the float.
 
     The compiled step (WP-187) passes the weight as a ``float64`` 0-d tensor so the
@@ -140,7 +140,7 @@ def test_tensor_alpha_blends_bit_equal_to_the_attribute_and_records_the_attribut
     assert from_attribute.alpha == alpha
 
 
-def test_zero_gt_batch_is_finite() -> None:
+def test_zero_gt_batch_finite() -> None:
     """A batch with no ground truths produces a finite combined loss."""
     logits = torch.zeros(1, 16, 3)
     boxes = torch.zeros(1, 16, 4)

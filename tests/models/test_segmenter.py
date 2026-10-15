@@ -120,7 +120,7 @@ def test_deployed_view_holds_no_semantic_submodule() -> None:
     assert not any(isinstance(module, SemanticAux) for module in deployed.modules())
 
 
-def test_deployed_parameter_count_is_full_model_minus_training_only_branches() -> None:
+def test_deployed_parameter_count_full_model_minus_training_only_branches() -> None:
     """Deployed params equal the full model minus the auxiliary and one-to-many branches.
 
     The blueprint's fused-parameter identity, extended by the one-to-many branch
@@ -151,7 +151,7 @@ def test_deployed_view_shares_backbone_and_neck_parameters() -> None:
     assert id(next(deployed.neck.parameters())) == id(next(segmenter.neck.parameters()))
 
 
-def test_deployed_output_shapes_are_mutually_consistent() -> None:
+def test_deployed_output_shapes_mutually_consistent() -> None:
     """The four deployed tensors agree on batch, anchor, coefficient, and proto axes.
 
     Catches an axis swap or a stale width between the head and the prototype
@@ -191,7 +191,7 @@ def test_deployed_outputs_assemble_into_instance_masks() -> None:
     assert torch.isfinite(masks).all()
 
 
-def test_semantic_branch_is_none_at_eval_and_a_tensor_in_training() -> None:
+def test_semantic_branch_none_at_eval_and_tensor_in_training() -> None:
     """The composite's semantic field follows the branch's own training-mode gate.
 
     Catches a wiring that materializes the auxiliary logits regardless of mode —
@@ -210,7 +210,7 @@ def test_semantic_branch_is_none_at_eval_and_a_tensor_in_training() -> None:
     assert isinstance(train_output.semantic, Tensor)
 
 
-def test_fused_feature_is_shared_by_prototype_and_auxiliary_branches() -> None:
+def test_fused_feature_shared_by_prototype_and_auxiliary_branches() -> None:
     """Both mask-side consumers receive the identical fused-feature tensor object.
 
     Catches a forward that calls ProtoFusion twice: the results would be equal by
@@ -229,7 +229,7 @@ def test_fused_feature_is_shared_by_prototype_and_auxiliary_branches() -> None:
     assert received["protonet"] is received["semantic"]
 
 
-def test_flop_counting_traces_both_the_full_and_deployed_models() -> None:
+def test_flop_counting_traces_both_full_and_deployed_models() -> None:
     """Both segmentation dataclass outputs survive the fvcore JIT trace.
 
     ``FlopCountAnalysis`` traces through ``torch.jit.trace``, which rejects
@@ -250,7 +250,7 @@ def test_flop_counting_traces_both_the_full_and_deployed_models() -> None:
     assert full > deployed, "the training-only branches must cost something"
 
 
-def test_builder_forwards_a_non_default_coefficient_width() -> None:
+def test_builder_forwards_non_default_coefficient_width() -> None:
     """``build_segmenter`` reaches the ``num_coeffs`` its own class accepts.
 
     The builder used to call ``Segmenter(variant, num_classes)`` and drop the third
@@ -266,7 +266,7 @@ def test_builder_forwards_a_non_default_coefficient_width() -> None:
     assert model.protonet.num_prototypes == _NUM_COEFFS, "one prototype per coefficient"
 
 
-def test_builder_default_coefficient_width_is_unchanged() -> None:
+def test_builder_default_coefficient_width_unchanged() -> None:
     """Omitting ``num_coeffs`` still builds the A14 default the frozen goldens measure.
 
     The forwarding above added a parameter with a default rather than changing one, and

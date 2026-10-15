@@ -190,7 +190,7 @@ class TestChannelsLastStep:
 
     @pytest.mark.parametrize("variant", [pytest.param(variant, id=variant) for variant in _VARIANTS])
     @pytest.mark.parametrize("task", [pytest.param(task, id=task) for task in _TASKS])
-    def test_loss_is_finite(self, task: str, variant: str) -> None:
+    def test_loss_finite(self, task: str, variant: str) -> None:
         """``channels_last`` weights over ``channels_last`` images run the whole step.
 
         The PSA attention views its ``qkv`` projection straight into heads, so this is

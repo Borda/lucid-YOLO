@@ -57,7 +57,7 @@ def test_data_golden_passes_check() -> None:
     assert result.passed, harness.format_result(result, GOLDEN.parent)
 
 
-def test_producer_is_deterministic() -> None:
+def test_producer_deterministic() -> None:
     """Two producer calls return byte-identical metrics on this platform (DoD b)."""
     first = producers.data_pipeline_metrics()
     second = producers.data_pipeline_metrics()

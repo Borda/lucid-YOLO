@@ -53,7 +53,7 @@ def detection_metrics(tmp_path: Path) -> Path:
 class TestLoadSeries:
     """``load_series`` reads one column of a sparse Lightning table."""
 
-    def test_keeps_only_the_rows_that_carry_the_column(self, tmp_path: Path) -> None:
+    def test_keeps_only_rows_carry_column(self, tmp_path: Path) -> None:
         """A step row without the validation column is skipped rather than read as zero.
 
         Lightning writes a sparse table — a step row carries only the training metrics —
@@ -65,7 +65,7 @@ class TestLoadSeries:
 
         assert (epochs, values) == ([0, 1], [0.1, 0.3])
 
-    def test_a_column_the_run_never_logged_is_empty(self, tmp_path: Path) -> None:
+    def test_column_run_never_logged_empty(self, tmp_path: Path) -> None:
         """Asking for an absent column yields two empty lists, not a ``KeyError``.
 
         The panel logic keys off emptiness — a run predating ``val/mAP`` still plots —
@@ -76,7 +76,7 @@ class TestLoadSeries:
         assert load_series(path, "val/mAP") == ([], [])
 
 
-def test_epoch_means_collapse_a_per_step_series_to_one_point_per_epoch() -> None:
+def test_epoch_means_collapse_per_step_series_to_one_point_per_epoch() -> None:
     """Three samples over two epochs become two means, in epoch order.
 
     The training sawtooth is what this smooths: without it the untrained opening loss
@@ -88,7 +88,7 @@ def test_epoch_means_collapse_a_per_step_series_to_one_point_per_epoch() -> None
 class TestBuildRunFigure:
     """``build_run_figure`` chooses its panels from the CSV's own columns."""
 
-    def test_a_detection_run_gets_three_panels(self, detection_metrics: Path) -> None:
+    def test_detection_run_gets_three_panels(self, detection_metrics: Path) -> None:
         """A CSV with none of the task-specific columns draws exactly the three shared panels.
 
         The three-panel geometry is the committed detection figure's, so a fourth panel
@@ -111,7 +111,7 @@ class TestBuildRunFigure:
             pytest.param("train/keypoint", "keypoint loss (epoch mean)", id="keypoints"),
         ],
     )
-    def test_a_task_column_adds_its_own_fourth_panel(self, tmp_path: Path, column: str, title: str) -> None:
+    def test_task_column_adds_own_fourth_panel(self, tmp_path: Path, column: str, title: str) -> None:
         """One task-specific column is enough to add the fourth panel, titled for that task.
 
         Which panel appears is decided by the columns and nothing else — there is no
@@ -124,7 +124,7 @@ class TestBuildRunFigure:
         assert len(figure.axes) == 4
         assert figure.axes[3].get_title() == title
 
-    def test_a_run_without_any_metric_switches_the_first_panel_off(self, tmp_path: Path) -> None:
+    def test_run_without_any_metric_switches_first_panel_off(self, tmp_path: Path) -> None:
         """No ``val/mAP`` and no rotated pair leaves panel 1 present but axis-less.
 
         The older runs predate the headline column; they still plot, with the first
@@ -138,7 +138,7 @@ class TestBuildRunFigure:
         assert not figure.axes[0].axison
         assert figure.axes[1].axison
 
-    def test_the_close_mosaic_epoch_is_marked_on_the_metric_panel(self, detection_metrics: Path) -> None:
+    def test_close_mosaic_epoch_marked_on_metric_panel(self, detection_metrics: Path) -> None:
         """``close_mosaic`` adds one vertical line at that epoch to the first panel only.
 
         The marker is what lets a reader attribute a late-run kink to the augmentation
@@ -155,7 +155,7 @@ class TestBuildRunFigure:
 class TestPlotCurves:
     """``plot_curves`` is the notebook entry: same figure, titled by the run directory."""
 
-    def test_returns_the_report_figure_with_every_panel(self, detection_metrics: Path) -> None:
+    def test_returns_report_figure_with_every_panel(self, detection_metrics: Path) -> None:
         """The notebook figure has the same panels the script's figure has.
 
         One implementation behind both callers is the point of the move; a panel that
@@ -167,7 +167,7 @@ class TestPlotCurves:
             axis.get_title() for axis in build_run_figure(detection_metrics, "x").axes
         ]
 
-    def test_the_title_defaults_to_the_run_directory_name(self, detection_metrics: Path) -> None:
+    def test_title_defaults_to_run_directory_name(self, detection_metrics: Path) -> None:
         """With no title, the suptitle is ``version_8`` — the directory the CSV sits in.
 
         A reader scrolling past several runs in a notebook tells them apart by that
@@ -175,6 +175,6 @@ class TestPlotCurves:
         """
         assert plot_curves(detection_metrics).get_suptitle() == "version_8"
 
-    def test_an_explicit_title_is_used_verbatim(self, detection_metrics: Path) -> None:
+    def test_explicit_title_used_verbatim(self, detection_metrics: Path) -> None:
         """A given title replaces the directory default rather than prefixing it."""
         assert plot_curves(detection_metrics, title="Det-smoke v8").get_suptitle() == "Det-smoke v8"

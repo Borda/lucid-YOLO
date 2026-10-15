@@ -163,7 +163,7 @@ def test_segmentation_checkpoint_reports_segm_statistics(detseg_fixture_dir: Pat
         assert all(value == pytest.approx(value) for value in stats.values())  # finite, not NaN
 
 
-def test_detection_checkpoint_is_unchanged(detseg_fixture_dir: Path, tmp_path: Path) -> None:
+def test_detection_checkpoint_unchanged(detseg_fixture_dir: Path, tmp_path: Path) -> None:
     """A detection checkpoint reports the same twelve keys it always did, and no masks.
 
     Segmentation support must be reachable only through a checkpoint that carries
@@ -180,7 +180,7 @@ def test_detection_checkpoint_is_unchanged(detseg_fixture_dir: Path, tmp_path: P
         assert set(stats) == set(_METRIC_KEYS)
 
 
-def test_no_masks_forces_the_detection_reading(detseg_fixture_dir: Path, tmp_path: Path) -> None:
+def test_no_masks_forces_detection_reading(detseg_fixture_dir: Path, tmp_path: Path) -> None:
     """``--masks false`` scores a segmentation checkpoint on boxes alone."""
     torch.manual_seed(0)
     checkpoint = _write_checkpoint(_module("segment"), tmp_path / "segment.ckpt")

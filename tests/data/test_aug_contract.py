@@ -123,7 +123,7 @@ def _boxed(boxes: torch.Tensor) -> Targets:
 class TestAffineDerived:
     """Tier A -- closed-form affine results, independent of any implementation."""
 
-    def test_identity_returns_the_image_unchanged(self) -> None:
+    def test_identity_returns_image_unchanged(self) -> None:
         """An identity affine resamples every pixel centre onto itself.
 
         This is the case that would catch a half-pixel error in the pixel-to-
@@ -136,7 +136,7 @@ class TestAffineDerived:
 
         assert torch.allclose(warped, image, atol=EXACT)
 
-    def test_integer_translation_is_an_exact_shifted_copy(self) -> None:
+    def test_integer_translation_exact_shifted_copy(self) -> None:
         """A two-pixel translation copies columns exactly and fills the vacated ones.
 
         At ``align_corners=False`` an integer translation lands on pixel centres, so
@@ -150,7 +150,7 @@ class TestAffineDerived:
         assert torch.allclose(warped[:, :, 2:], image[:, :, :-2], atol=EXACT)
         assert torch.allclose(warped[:, :, :2], torch.full_like(warped[:, :, :2], FILL), atol=EXACT)
 
-    def test_quarter_turn_maps_a_known_box_to_a_known_box(self) -> None:
+    def test_quarter_turn_maps_known_box_to_known_box(self) -> None:
         """A 90-degree rotation about the canvas centre maps ``[1,2,3,6]`` to ``[1,1,5,3]``.
 
         Derived, not observed: on an 8-pixel canvas the pixel centre is ``(3.5, 3.5)``
@@ -167,7 +167,7 @@ class TestAffineDerived:
 
         assert torch.allclose(warped.boxes, torch.tensor([[1.0, 1.0, 5.0, 3.0]]), atol=EXACT)
 
-    def test_a_known_scale_scales_box_coordinates_about_the_centre(self) -> None:
+    def test_known_scale_scales_box_coordinates_about_centre(self) -> None:
         """Doubling about the centre sends ``[2,2,4,4]`` to ``[0.5,0.5,4.5,4.5]`` on an 8-pixel canvas.
 
         Derived: a scale of two about the pixel centre ``(3.5, 3.5)`` maps ``x`` to
@@ -186,7 +186,7 @@ class TestAffineDerived:
 class TestLetterboxDerived:
     """Tier A -- the letterbox's ratio, padding and exact analytic inverse."""
 
-    def test_forward_then_inverse_is_the_identity(self) -> None:
+    def test_forward_then_inverse_identity(self) -> None:
         """Mapping points forward through the letterbox and back returns them exactly.
 
         The inverse is what every prediction path uses to return detections to
@@ -202,7 +202,7 @@ class TestLetterboxDerived:
 
         assert torch.allclose(recovered, points, atol=EXACT)
 
-    def test_ratio_and_padding_are_the_aspect_preserving_ones(self) -> None:
+    def test_ratio_and_padding_aspect_preserving_ones(self) -> None:
         """A 10x20 source into a 16x16 canvas scales by 0.8 and pads 4 rows above.
 
         Derived: the ratio is ``min(16/10, 16/20) = 0.8``, the scaled content is
@@ -219,7 +219,7 @@ class TestLetterboxDerived:
 class TestFlipDerived:
     """Tier A -- mirroring is an involution, on pixels and on keypoint identities."""
 
-    def test_two_mirrors_restore_the_image_and_every_modality(self) -> None:
+    def test_two_mirrors_restore_image_and_every_modality(self) -> None:
         """Flipping twice returns the image, boxes, keypoints and visibilities exactly.
 
         The keypoint half is the part worth pinning: a mirror that reflected
@@ -244,7 +244,7 @@ class TestFlipDerived:
         assert torch.allclose(twice.keypoints, targets.keypoints, atol=EXACT)
         assert torch.equal(twice.keypoint_vis, targets.keypoint_vis)
 
-    def test_one_mirror_reflects_a_box_about_the_vertical_axis(self) -> None:
+    def test_one_mirror_reflects_box_about_vertical_axis(self) -> None:
         """On a 6-wide canvas the box ``[0,0,1,2]`` mirrors to ``[4,0,5,2]``.
 
         Derived: the axis is ``(W - 1) / 2 = 2.5``, so ``x1' = (W - 1) - x2`` and
@@ -261,7 +261,7 @@ class TestFlipDerived:
 class TestRotatedDerived:
     """Tier A -- a similarity maps a rectangle to a rectangle, so an rbox re-fits exactly."""
 
-    def test_pure_rotation_refits_a_rotated_box_exactly(self) -> None:
+    def test_pure_rotation_refits_rotated_box_exactly(self) -> None:
         """Rotating by a quarter turn moves the centre and adds to the angle, nothing else.
 
         Derived: a rotation is a similarity, so the warped corners are still a
@@ -283,7 +283,7 @@ class TestRotatedDerived:
 class TestPhotometricDerived:
     """Tier A -- HSV gains with a closed form on a known colour."""
 
-    def test_zero_gains_are_the_identity(self) -> None:
+    def test_zero_gains_identity(self) -> None:
         """Zero gains round-trip RGB through HSV and back to the same pixels.
 
         The conversion pair is exercised by every jittered sample, so an asymmetry
@@ -296,7 +296,7 @@ class TestPhotometricDerived:
 
         assert torch.allclose(jittered, image, atol=1e-5)
 
-    def test_a_value_gain_scales_a_grey_image_exactly(self) -> None:
+    def test_value_gain_scales_grey_image_exactly(self) -> None:
         """On a grey image, value is the pixel itself, so a gain of ``+0.5`` scales it by 1.5.
 
         Derived: grey has zero saturation and undefined hue, so the value channel is
@@ -312,7 +312,7 @@ class TestPhotometricDerived:
 class TestAssemblyDerived:
     """Tier A -- mosaic placement, mixup blending and copy-paste, all from stated parameters."""
 
-    def test_a_stated_mosaic_centre_places_four_known_boxes(self) -> None:
+    def test_stated_mosaic_centre_places_four_known_boxes(self) -> None:
         """With the centre at ``(8, 8)`` and four 8-pixel images, each box shifts by its quadrant.
 
         Derived: image 0 is anchored so its bottom-right corner sits at the centre,
@@ -334,7 +334,7 @@ class TestAssemblyDerived:
         assert torch.allclose(merged.boxes, expected, atol=EXACT)
         assert [float(canvas[0, y, x]) for y, x in ((0, 0), (0, 15), (15, 0), (15, 15))] == [0.0, 1.0, 2.0, 3.0]
 
-    def test_mixup_at_a_stated_factor_is_the_convex_blend(self) -> None:
+    def test_mixup_at_stated_factor_convex_blend(self) -> None:
         """``lam = 0.25`` on constant images returns exactly ``0.25a + 0.75b``.
 
         Constant inputs make the expectation a single number, so a transposed blend
@@ -347,7 +347,7 @@ class TestAssemblyDerived:
 
         assert torch.allclose(blended, torch.full((3, 4, 4), 0.25), atol=EXACT)
 
-    def test_mixup_at_unit_factor_returns_the_first_image(self) -> None:
+    def test_mixup_at_unit_factor_returns_first_image(self) -> None:
         """``lam = 1.0`` is the identity on the first image, by the blend's own algebra."""
         first = torch.rand(3, 4, 4, generator=torch.Generator().manual_seed(4))
         items = [(first, Targets.empty()), (torch.zeros(3, 4, 4), Targets.empty())]
@@ -356,7 +356,7 @@ class TestAssemblyDerived:
 
         assert torch.allclose(blended, first, atol=EXACT)
 
-    def test_copy_paste_writes_exactly_the_rasterised_mask(self) -> None:
+    def test_copy_paste_writes_exactly_rasterised_mask(self) -> None:
         """The pasted pixels are exactly those the ring rasterises to, and no others.
 
         The paste is a mask write, so its correctness is entirely the mask's: an
@@ -376,7 +376,7 @@ class TestAssemblyDerived:
 class TestRasterisationDerived:
     """Tier A -- the half-open rasterisation rule (A11), stated as a pixel count."""
 
-    def test_an_axis_aligned_ring_covers_its_half_open_interior(self) -> None:
+    def test_axis_aligned_ring_covers_half_open_interior(self) -> None:
         """The ring spanning ``[1,4] x [1,4]`` rasterises to the 3x3 block at rows and columns 1..3.
 
         Derived from A11's half-open convention: the upper edge is excluded, so a
@@ -423,7 +423,7 @@ class TestModalityInvariants:
         assert kept == warped.keypoint_vis.shape[0]
         assert warped.labels.tolist() == [4]
 
-    def test_a_derived_box_equals_the_transported_box(self) -> None:
+    def test_derived_box_equals_transported_box(self) -> None:
         """For an instance that never touches an edge, the ring and the box agree.
 
         This is the alignment invariant the whole ring-transport route rests on: the
@@ -440,7 +440,7 @@ class TestModalityInvariants:
 
         assert torch.allclose(boxes_from_polygons(warped.polygons), warped.boxes, atol=1e-4)
 
-    def test_rotated_boxes_leave_a_transform_canonical(self) -> None:
+    def test_rotated_boxes_leave_transform_canonical(self) -> None:
         """Whatever a warp does to an rbox, its long-edge form is restored on the way out.
 
         Canonical form is a task convention (A22) rather than a resampling property,
@@ -456,7 +456,7 @@ class TestModalityInvariants:
 
         assert torch.allclose(warped.rboxes, canonicalize(warped.rboxes), atol=1e-5)
 
-    def test_out_of_canvas_pixels_are_exactly_the_fill(self) -> None:
+    def test_out_of_canvas_pixels_exactly_fill(self) -> None:
         """A translation past the canvas leaves nothing but the grey fill.
 
         The fill value is a convention shared with the letterbox and the mosaic pad;
@@ -486,7 +486,7 @@ class TestModalityInvariants:
         assert merged.labels.tolist() == [1, 9]
         assert merged.boxes.shape[0] == 2
 
-    def test_a_keypoint_rides_its_own_pixel_through_a_warp(self) -> None:
+    def test_keypoint_rides_own_pixel_through_warp(self) -> None:
         """A point marking a bright pixel still marks it after an integer translation.
 
         This ties the image transport and the keypoint transport to each other
@@ -513,7 +513,7 @@ class TestModalityInvariants:
         "letterbox",
         [pytest.param(None, id="affine-only"), pytest.param(24, id="affine-and-letterbox")],
     )
-    def test_the_geometry_fuses_into_one_matrix_bearing_segment(self, letterbox: int | None) -> None:
+    def test_geometry_fuses_into_one_matrix_bearing_segment(self, letterbox: int | None) -> None:
         """The affine, and the letterbox with it, reach the image as exactly one warp.
 
         Upstream groups only *adjacent* geometric operations into one segment, so a
@@ -532,7 +532,7 @@ class TestModalityInvariants:
         assert isinstance(segment, FusedAffineSegment)
         assert len(segment.transforms) == (1 if letterbox is None else 2)
 
-    def test_the_local_adapter_satisfies_the_published_protocol(self) -> None:
+    def test_local_adapter_satisfies_published_protocol(self) -> None:
         """The bridge to upstream's engine conforms to the protocol it is passed as.
 
         The adapter conforms structurally rather than by inheritance — the package
@@ -543,7 +543,7 @@ class TestModalityInvariants:
         """
         assert isinstance(_ADAPTER, TransformAdapter)
 
-    def test_a_letterboxed_warp_lands_where_the_two_transform_path_lands(self) -> None:
+    def test_letterboxed_warp_lands_where_two_transform_path_lands(self) -> None:
         """Fusing the letterbox into the affine moves no coordinate.
 
         The composition is upstream's (``M_letterbox @ M_affine``) and the target

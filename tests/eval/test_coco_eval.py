@@ -241,7 +241,7 @@ class _ZeroHead(torch.nn.Module):
         )
 
 
-def test_each_path_is_scored_from_its_own_decoder() -> None:
+def test_each_path_scored_from_own_decoder() -> None:
     """The ``e2e`` report comes from the E2E decoder and ``nms`` from the NMS decoder.
 
     Which predictions reach which path's metric cannot be checked with a real
@@ -268,7 +268,7 @@ def test_each_path_is_scored_from_its_own_decoder() -> None:
     assert report["nms"]["map"] == pytest.approx(0.0)
 
 
-def test_evaluate_bbox_empty_preds_is_zeroed() -> None:
+def test_evaluate_bbox_empty_preds_zeroed() -> None:
     """An empty prediction list yields an all-zero stat dict rather than a metric crash."""
     stats = evaluate_bbox([], [])
 
@@ -580,7 +580,7 @@ class TestRecallGridBoundary:
             pytest.param(19, 20, 95, id="nineteen-of-twenty"),
         ],
     )
-    def test_boundary_recall_is_sampled_exactly(self, found: int, positives: int, grid_index: int) -> None:
+    def test_boundary_recall_sampled_exactly(self, found: int, positives: int, grid_index: int) -> None:
         """A recall landing exactly on grid point ``k`` samples it, giving ``(k + 1) / 101``.
 
         The expected value is derived by hand, not read off another implementation: the
@@ -600,7 +600,7 @@ class TestRecallGridBoundary:
         assert stats["map_50"] == pytest.approx((grid_index + 1) / 101, abs=1e-6)
         assert stats["mar_100"] == pytest.approx(found / positives, abs=1e-6)
 
-    def test_the_torchmetrics_default_grid_overshoots_at_thirty_six_boundaries(self) -> None:
+    def test_torchmetrics_default_grid_overshoots_at_thirty_six_boundaries(self) -> None:
         """Pin the dependency defect this module works around, so its removal is noticed.
 
         ``rec_thresholds=None`` makes torchmetrics build the grid with a **float32**
@@ -617,7 +617,7 @@ class TestRecallGridBoundary:
         assert {14, 28, 65, 78, 84} <= overshoot  # the five indices parametrized above
         assert not any(value > index / 100 for index, value in enumerate(COCO_RECALL_GRID))
 
-    def test_guard_fires_when_the_metric_stops_honouring_rec_thresholds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_guard_fires_when_metric_stops_honouring_rec_thresholds(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A metric that accepts ``rec_thresholds`` and ignores it must fail loudly, not silently.
 
         The fix rests on a documented constructor parameter, so a future torchmetrics that
@@ -763,7 +763,7 @@ def _crowd_and_area_masks_case() -> tuple[list[dict[str, Tensor]], list[dict[str
 class TestHotcocoIsUsableHere:
     """The canary under the parity class's ``skipif`` (WP-174)."""
 
-    def test_hotcoco_is_available_and_working(self) -> None:
+    def test_hotcoco_available_and_working(self) -> None:
         """Hotcoco imports and its compiled extension constructs, unconditionally.
 
         Every parity case below is guarded by ``skipif`` on this same probe, so if hotcoco
@@ -792,7 +792,7 @@ class TestBackendDefaults:
     ``auto`` rule on one machine.
     """
 
-    def test_the_library_default_is_faster_coco_eval(self) -> None:
+    def test_library_default_faster_coco_eval(self) -> None:
         """Constructing the evaluator without naming a backend scores with ``faster_coco_eval``.
 
         This is the conservative half of the claim: a caller who predates WP-138,
@@ -802,7 +802,7 @@ class TestBackendDefaults:
 
         assert default == "faster_coco_eval"
 
-    def test_the_cli_default_is_auto(self) -> None:
+    def test_cli_default_auto(self) -> None:
         """``lucid-eval`` defaults ``--eval_backend`` to ``auto``, not to the library default.
 
         The half the prose used to omit. ``auto`` is a resolution rule rather than
@@ -812,7 +812,7 @@ class TestBackendDefaults:
 
         assert default == "auto"
 
-    def test_auto_takes_hotcoco_when_hotcoco_is_usable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_auto_takes_hotcoco_when_hotcoco_usable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With a usable hotcoco, ``auto`` resolves to hotcoco -- silently, and with no reason recorded.
 
         This is why a ``lucid-eval`` report on a normal host is a hotcoco report:
@@ -926,7 +926,7 @@ class TestHotcocoParity:
         for key in (*_METRIC_KEYS, *(coco_eval._SEGM_PREFIX + key for key in _METRIC_KEYS)):
             assert hotcoco_stats[key] == pytest.approx(faster_stats[key], abs=1e-6), key
 
-    def test_empty_preds_is_zeroed_like_the_faster_coco_eval_path(self) -> None:
+    def test_empty_preds_zeroed_like_faster_coco_eval_path(self) -> None:
         """No batch ever fed the scorer -> the same all-zero dict :func:`evaluate_bbox` returns."""
         scorer = coco_eval._HotcocoStreamingScorer()
 
@@ -966,7 +966,7 @@ class TestHotcocoParity:
             for key in _METRIC_KEYS:
                 assert hotcoco_report[path][key] == pytest.approx(faster_report[path][key], abs=1e-6), (path, key)
 
-    def test_an_unknown_backend_is_refused_at_construction(self) -> None:
+    def test_unknown_backend_refused_at_construction(self) -> None:
         """A misspelled ``backend`` raises, naming both arms, rather than silently defaulting."""
         module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=2).eval()
 

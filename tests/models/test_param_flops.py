@@ -255,7 +255,7 @@ class TestCountFlopsTrainingMode:
     statistics and mutate BN running statistics, with nothing reporting it.
     """
 
-    def test_eval_parent_stays_eval_through_a_deployed_view(self) -> None:
+    def test_eval_parent_stays_eval_through_deployed_view(self) -> None:
         """Counting a deploy() view of an eval model leaves every shared submodule in eval.
 
         The measured failure: ``build_detector("n", 4).eval()`` then
@@ -269,7 +269,7 @@ class TestCountFlopsTrainingMode:
 
         assert not any(submodule.training for submodule in model.modules())
 
-    def test_train_parent_stays_train_through_a_deployed_view(self) -> None:
+    def test_train_parent_stays_train_through_deployed_view(self) -> None:
         """Counting a deploy() view of a training model leaves every shared submodule in train.
 
         The other direction, which the old single-flag restore happened to get right

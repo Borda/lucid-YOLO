@@ -50,7 +50,7 @@ def _annotation_bytes(dataset_dir: Path) -> bytes:
 class TestFixtureCacheKey:
     """The cache is keyed on the generation request, not on the annotation file existing."""
 
-    def test_a_changed_seed_regenerates_the_set(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_changed_seed_regenerates_set(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Changing a seed replaces the cached scene instead of serving the previous one.
 
         This is the M-45 failure exactly: the seed constants are edited in the source, and
@@ -66,7 +66,7 @@ class TestFixtureCacheKey:
 
         assert after != before, "a changed seed served the previously cached scene"
 
-    def test_a_changed_image_count_regenerates_the_set(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_changed_image_count_regenerates_set(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Changing the image count replaces the cached scene, leaving no surplus images behind.
 
         Shrinking the set is the case a fingerprint check alone would not fix: regenerating
@@ -82,9 +82,7 @@ class TestFixtureCacheKey:
         images = sorted((dataset_dir / _SPLIT).glob("*.jpg"))
         assert len(images) == synthetic.OBB_NUM_IMAGES
 
-    def test_an_unchanged_request_is_served_from_the_cache(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_unchanged_request_served_from_cache(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """An identical second call returns without invoking the generator at all.
 
         The cache still has to *be* a cache: the fixture suite generates once per session
@@ -98,7 +96,7 @@ class TestFixtureCacheKey:
 
         assert second == first
 
-    def test_a_missing_fingerprint_regenerates_the_set(self, tmp_path: Path) -> None:
+    def test_missing_fingerprint_regenerates_set(self, tmp_path: Path) -> None:
         """A set cached before fingerprints existed is refreshed once rather than trusted.
 
         Every warm machine at the time of this change holds exactly that: a complete set
@@ -112,7 +110,7 @@ class TestFixtureCacheKey:
 
         assert (dataset_dir / synthetic._FINGERPRINT_NAME).is_file()
 
-    def test_the_pinned_generator_commit_is_part_of_the_key(self) -> None:
+    def test_pinned_generator_commit_part_of_key(self) -> None:
         """The fingerprint names the exact upstream commit, not just its version string.
 
         ``fuse-augmentations`` is pinned to a git SHA and reports a dev version that does
@@ -138,7 +136,7 @@ def _refuse_to_generate(*_args: object, **_kwargs: object) -> None:
     raise AssertionError("the fixture cache regenerated a set whose fingerprint already matched")
 
 
-def test_make_clean_removes_the_generated_fixture_cache() -> None:
+def test_make_clean_removes_generated_fixture_cache() -> None:
     """``make clean`` clears ``tests/fixtures/_generated`` along with the other caches.
 
     The directory is gitignored, so it survives every checkout and every branch switch; a

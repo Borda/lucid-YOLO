@@ -97,7 +97,7 @@ def _posed_targets(boxes: torch.Tensor, keypoints: torch.Tensor, visibility: tor
 class TestKeypoints:
     """Keypoints ride the affine's matrix, filter with their boxes, and are never clipped."""
 
-    def test_points_warp_by_the_sampled_translation(self) -> None:
+    def test_points_warp_by_sampled_translation(self) -> None:
         """A translation-only warp moves each keypoint by exactly the sampled offset.
 
         This is the contract that makes a keypoint target usable at all: the points must
@@ -115,7 +115,7 @@ class TestKeypoints:
         offset = torch.tensor([affine.last_params.translate_x, affine.last_params.translate_y])
         assert torch.allclose(out.keypoints - points, offset.expand_as(points), atol=1e-4)
 
-    def test_visibility_survives_the_warp_unchanged(self) -> None:
+    def test_visibility_survives_warp_unchanged(self) -> None:
         """Visibility codes are carried across the warp verbatim, not recomputed.
 
         The affine moves coordinates; it has no basis for revising whether a point was
@@ -132,7 +132,7 @@ class TestKeypoints:
 
         assert torch.equal(out.keypoint_vis, visibility)
 
-    def test_keypoint_free_targets_keep_the_canonical_empty(self) -> None:
+    def test_keypoint_free_targets_keep_canonical_empty(self) -> None:
         """A detection-only warp returns the canonical empty keypoint pair, untouched.
 
         Every golden in the repo sits on this path. If the keypoint carry-through were not
@@ -145,7 +145,7 @@ class TestKeypoints:
         assert out.keypoints.shape == (0, 0, 2)
         assert out.keypoint_vis.shape == (0, 0)
 
-    def test_dropped_instance_takes_its_points_with_it(self) -> None:
+    def test_dropped_instance_takes_points_with_it(self) -> None:
         """When the canvas filter drops an instance, the surviving keypoint rows stay aligned.
 
         The points share the box instance axis, so a filter that removed a box without
@@ -164,7 +164,7 @@ class TestKeypoints:
         assert out.boxes.shape[0] == 1
         assert out.keypoints.tolist() == [[[6.0, 7.0]]]
 
-    def test_point_pushed_off_canvas_is_neither_clamped_nor_zeroed(self) -> None:
+    def test_point_pushed_off_canvas_neither_clamped_nor_zeroed(self) -> None:
         """A70: a point warped outside the canvas on a kept instance keeps coordinate and visibility.
 
         The affine translates a box that stays comfortably inside the canvas while one of
@@ -183,7 +183,7 @@ class TestKeypoints:
         assert torch.allclose(out.keypoints, outside, atol=1e-4)
         assert out.keypoint_vis.tolist() == [[2, 2]]
 
-    def test_polygon_path_warps_points_from_the_unclamped_matrix(self) -> None:
+    def test_polygon_path_warps_points_from_unclamped_matrix(self) -> None:
         """On the polygon path an off-canvas point is still unclamped, though rings are clamped.
 
         The two modalities take deliberately opposite treatment on the same call: a ring is
@@ -365,7 +365,7 @@ class TestKeepThresholdsReachUpstream:
     site per threshold, plus the control that the drop is the threshold's doing.
     """
 
-    def test_size_threshold_drops_the_sliver(self, route: str) -> None:
+    def test_size_threshold_drops_sliver(self, route: str) -> None:
         """A four-column clipped box falls below ``min_box_size`` and is dropped.
 
         ``min_visibility`` is pinned at ``0.0`` so nothing but the size rule can account
@@ -378,7 +378,7 @@ class TestKeepThresholdsReachUpstream:
 
         assert out.boxes.shape[0] == 0
 
-    def test_visibility_threshold_drops_the_sliver(self, route: str) -> None:
+    def test_visibility_threshold_drops_sliver(self, route: str) -> None:
         """A box retaining 4% of its area falls below ``min_visibility`` and is dropped.
 
         ``min_box_size`` is pinned at ``0.0`` so nothing but the visibility rule can
@@ -391,7 +391,7 @@ class TestKeepThresholdsReachUpstream:
 
         assert out.boxes.shape[0] == 0
 
-    def test_upstream_defaults_would_keep_the_sliver(self, route: str) -> None:
+    def test_upstream_defaults_would_keep_sliver(self, route: str) -> None:
         """With both thresholds at upstream's defaults the same instance survives.
 
         The control for the two cases above: it pins that they fail for the reason claimed
@@ -421,7 +421,7 @@ class TestRotatedBoxesGuard:
 class TestLetterboxCanvas:
     """``letterbox=`` composes the aspect-preserving fit into the same single warp (WP-156)."""
 
-    def test_a_same_size_letterbox_matches_the_plain_targets(self) -> None:
+    def test_same_size_letterbox_matches_plain_targets(self) -> None:
         """A letterbox onto the source canvas reproduces the plain path's targets exactly.
 
         The fit is the identity when target and source agree, so the letterboxed
@@ -443,7 +443,7 @@ class TestLetterboxCanvas:
         for got, want in zip(boxed_targets.polygons, plain_targets.polygons, strict=True):
             assert torch.equal(got, want)
 
-    def test_a_smaller_letterbox_emits_its_own_canvas(self) -> None:
+    def test_smaller_letterbox_emits_own_canvas(self) -> None:
         """A half-size letterbox emits a half-size image from one resample.
 
         The output size comes from the fit rather than from the input, which is the
@@ -469,7 +469,7 @@ class TestGateStreamSeeding:
     the caller's generator makes the reproducibility a property of this class instead.
     """
 
-    def test_a_seeded_caller_seeds_the_gate_stream(self) -> None:
+    def test_seeded_caller_seeds_gate_stream(self) -> None:
         """A caller-supplied generator determines the gate stream rather than leaving it default.
 
         The default ``torch.Generator()`` state is the same constant in every process, so an
@@ -491,7 +491,7 @@ class TestGateStreamSeeding:
 
         assert first._gate_stream.initial_seed() != second._gate_stream.initial_seed()
 
-    def test_the_same_caller_seed_gives_the_same_gate_stream(self) -> None:
+    def test_same_caller_seed_gives_same_gate_stream(self) -> None:
         """Rebuilding an affine at one seed rebuilds the same gate stream.
 
         The point of seeding it at all is reproducibility, so the property the module
@@ -502,7 +502,7 @@ class TestGateStreamSeeding:
 
         assert first._gate_stream.initial_seed() == second._gate_stream.initial_seed()
 
-    def test_the_gate_stream_is_not_the_callers_own(self) -> None:
+    def test_gate_stream_not_callers_own(self) -> None:
         """The gate draws never come out of the caller's generator.
 
         This is the property WP-079 was opened by losing: a gate drawn from the caller's
@@ -515,7 +515,7 @@ class TestGateStreamSeeding:
         assert affine._gate_stream is not caller
         assert affine._gate_stream.initial_seed() != caller.initial_seed()
 
-    def test_an_unseeded_caller_leaves_the_gate_stream_anonymous(self) -> None:
+    def test_unseeded_caller_leaves_gate_stream_anonymous(self) -> None:
         """With no caller generator there is no seed to derive from, and none is invented.
 
         A default-constructed affine has nothing to be reproducible *with*; giving its gate

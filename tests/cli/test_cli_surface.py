@@ -115,7 +115,7 @@ def test_every_declared_console_script_resolves() -> None:
         assert callable(getattr(importlib.import_module(module_name), attribute))
 
 
-def test_the_train_command_exits_zero_after_its_subcommand_ran(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_train_command_exits_zero_after_subcommand_ran(monkeypatch: pytest.MonkeyPatch) -> None:
     """``lucid-yolo`` reports success as ``0``, not as the CLI object it built.
 
     The console-script wrapper calls ``sys.exit(main())``, and :func:`sys.exit`
@@ -130,12 +130,12 @@ def test_the_train_command_exits_zero_after_its_subcommand_ran(monkeypatch: pyte
     assert train_cli.main(["fit"]) == 0
 
 
-def test_the_data_command_offers_the_three_dataset_operations() -> None:
+def test_data_command_offers_three_dataset_operations() -> None:
     """``lucid-data`` covers download, check and build-tiles, and nothing task-specific."""
     assert list(data_cli.SUBCOMMANDS) == ["download", "check", "build-tiles"]
 
 
-def test_the_check_subcommand_reports_a_missing_root(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_check_subcommand_reports_missing_root(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """``lucid-data check`` exits non-zero and names the root it could not validate."""
     code = data_cli.main(["check", "--data_root", str(tmp_path / "absent")])
 
@@ -143,7 +143,7 @@ def test_the_check_subcommand_reports_a_missing_root(tmp_path: Path, capsys: pyt
     assert "absent" in capsys.readouterr().out
 
 
-def test_build_tiles_rejects_an_unknown_source(tmp_path: Path) -> None:
+def test_build_tiles_rejects_unknown_source(tmp_path: Path) -> None:
     """A reader that does not exist fails loudly rather than tiling nothing."""
     with pytest.raises(ValueError, match="unknown source"):
         data_cli.main(["build-tiles", "--root", str(tmp_path), "--out", str(tmp_path / "out"), "--source", "kitti"])
@@ -157,7 +157,7 @@ def test_build_tiles_rejects_an_unknown_source(tmp_path: Path) -> None:
         pytest.param("keypoints", "pose_eval", 640, 32, id="keypoints"),
     ],
 )
-def test_eval_dispatches_on_the_checkpoints_own_task(
+def test_eval_dispatches_on_checkpoints_own_task(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     task: str,
@@ -192,7 +192,7 @@ def test_eval_dispatches_on_the_checkpoints_own_task(
     assert calls[expected_module]["batch_size"] == expected_batch_size
 
 
-def test_an_explicit_size_beats_the_task_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_explicit_size_beats_task_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A caller who names ``--img_size`` gets it, oriented default or not."""
     seen: dict[str, Any] = {}
 
@@ -219,7 +219,7 @@ def test_an_explicit_size_beats_the_task_default(tmp_path: Path, monkeypatch: py
         pytest.param("keypoints", "predict_keypoints", id="keypoints"),
     ],
 )
-def test_predict_dispatches_on_the_checkpoints_own_task(
+def test_predict_dispatches_on_checkpoints_own_task(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     task: str,
@@ -263,7 +263,7 @@ def test_predict_dispatches_on_the_checkpoints_own_task(
     assert called == [expected_entry_point]
 
 
-def test_a_keypoint_report_names_its_point_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_keypoint_report_names_point_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A keypoint report carries the point layout and ``K``; the other reports are untouched.
 
     ``K`` is a property of the checkpoint's schema (A64), so a report that omitted it
@@ -288,7 +288,7 @@ def test_a_keypoint_report_names_its_point_layout(tmp_path: Path, monkeypatch: p
     assert payload["detections"][0]["keypoints"] == [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]
 
 
-def test_the_deprecated_download_alias_is_gone() -> None:
+def test_deprecated_download_alias_gone() -> None:
     """``lucid-download`` is no longer declared, and the entry point it named is gone too.
 
     0.3.0 deprecated the alias in favour of ``lucid-data download`` and put the removal in
@@ -310,7 +310,7 @@ def test_the_deprecated_download_alias_is_gone() -> None:
         pytest.param("--img_size=641", "img_size", id="canvas-off-the-stride"),
     ],
 )
-def test_eval_refuses_an_argument_outside_its_domain(tmp_path: Path, argument: str, flag: str) -> None:
+def test_eval_refuses_argument_outside_domain(tmp_path: Path, argument: str, flag: str) -> None:
     """``lucid-eval`` refuses each unusable flag by name, before it opens the checkpoint.
 
     The checkpoint path does not exist and that is the assertion's other half: the
@@ -326,7 +326,7 @@ def test_eval_refuses_an_argument_outside_its_domain(tmp_path: Path, argument: s
         eval_cli.main(["--checkpoint", str(tmp_path / "absent.ckpt"), "--data_root", str(tmp_path), argument])
 
 
-def test_eval_refuses_a_task_it_has_no_protocol_for(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_eval_refuses_task_it_has_no_protocol_for(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A checkpoint task this command implements nothing for is named, not scored as detection.
 
     The dispatch branches for ``obb`` and ``keypoints`` and ends in the detection
@@ -355,7 +355,7 @@ def test_eval_refuses_a_task_it_has_no_protocol_for(tmp_path: Path, monkeypatch:
         pytest.param({"img_size": 641}, "img_size", id="canvas-off-the-stride"),
     ],
 )
-def test_predict_refuses_an_argument_outside_its_domain(tmp_path: Path, overrides: dict[str, Any], flag: str) -> None:
+def test_predict_refuses_argument_outside_domain(tmp_path: Path, overrides: dict[str, Any], flag: str) -> None:
     """``lucid-predict`` refuses each unusable flag by name, before it reads the image.
 
     The refusal belongs to the four entry points of :mod:`lucid_yolo.predict` rather than
@@ -372,7 +372,7 @@ def test_predict_refuses_an_argument_outside_its_domain(tmp_path: Path, override
         predict_cli.predict(checkpoint=checkpoint, image=tmp_path / "image.jpg", ema=False, **overrides)
 
 
-def test_the_per_task_defaults_are_themselves_usable_values() -> None:
+def test_per_task_defaults_themselves_usable_values() -> None:
     """Both default tables cover the same tasks, and every value in them would be accepted.
 
     The task guard reads its vocabulary off :data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE`,
@@ -390,7 +390,7 @@ def test_the_per_task_defaults_are_themselves_usable_values() -> None:
 class TestDataCommandConfigFlag:
     """``lucid-data`` honours ``--config`` on every subcommand (audit M-10)."""
 
-    def test_a_config_file_supplies_a_subcommands_arguments(self, tmp_path: Path) -> None:
+    def test_config_file_supplies_subcommands_arguments(self, tmp_path: Path) -> None:
         """Values in a ``--config`` YAML land on the subcommand's own arguments.
 
         ``AGENTS.md`` sec. 2 states that every command takes ``--config``, and three of
@@ -412,7 +412,7 @@ class TestDataCommandConfigFlag:
         "subcommand",
         [pytest.param(name, id=name) for name in ("download", "check", "build-tiles")],
     )
-    def test_every_subcommand_advertises_the_flag(self, subcommand: str) -> None:
+    def test_every_subcommand_advertises_flag(self, subcommand: str) -> None:
         """All three subcommands carry ``--config``, not just the one that was tested first.
 
         The claim in ``AGENTS.md`` is about commands, and a fix applied to one subparser
@@ -424,7 +424,7 @@ class TestDataCommandConfigFlag:
 
         assert any("--config" in getattr(action, "option_strings", []) for action in actions)
 
-    def test_the_config_key_does_not_reach_the_operation_function(self, tmp_path: Path) -> None:
+    def test_config_key_not_reach_operation_function(self, tmp_path: Path) -> None:
         """``main`` drops the ``config`` namespace key before splatting into the operation.
 
         This is the half a parse-level assertion cannot see. ``main`` calls
@@ -441,7 +441,7 @@ class TestDataCommandConfigFlag:
 
         assert exit_code == 1, "the root does not exist, so the check fails -- but it ran"
 
-    def test_an_invocation_without_a_config_still_runs(self, tmp_path: Path) -> None:
+    def test_invocation_without_config_still_runs(self, tmp_path: Path) -> None:
         """Omitting ``--config`` is unaffected by the key the flag adds to the namespace.
 
         The ``None``-valued key is present whether or not the flag was typed, so this is
@@ -463,7 +463,7 @@ class TestPredictReportSerialisation:
             pytest.param(float("-inf"), id="-inf"),
         ],
     )
-    def test_a_non_finite_number_anywhere_is_refused(self, bad: float) -> None:
+    def test_non_finite_number_anywhere_refused(self, bad: float) -> None:
         """A ``NaN`` or infinity in any record raises instead of being written out.
 
         ``json.dumps`` emits these as the bare tokens ``NaN``/``Infinity``, which Python's
@@ -478,7 +478,7 @@ class TestPredictReportSerialisation:
         with pytest.raises(ValueError, match=r"detections\[0\]\.box\[2\]"):
             predict_cli._report_json(payload)
 
-    def test_the_message_names_the_offending_field(self) -> None:
+    def test_message_names_offending_field(self) -> None:
         """The refusal points at the field, not merely at the report.
 
         A report holds up to ``max_det`` records of several numeric fields each; "this
@@ -490,7 +490,7 @@ class TestPredictReportSerialisation:
         with pytest.raises(ValueError, match=r"report\.detections\[1\]\.score"):
             predict_cli._report_json(payload)
 
-    def test_a_finite_report_serialises_unchanged(self) -> None:
+    def test_finite_report_serialises_unchanged(self) -> None:
         """The guard costs the normal path nothing -- a clean payload round-trips.
 
         Without this the refusals above would pass against a serializer that rejected
@@ -502,27 +502,3 @@ class TestPredictReportSerialisation:
 
         assert json.loads(text) == payload
         assert text.endswith("\n")
-
-
-class TestPackagedConfigInheritance:
-    """What a user config inherits from the packaged default (audit L-37)."""
-
-    def test_every_packaged_non_detection_config_states_its_own_task(self) -> None:
-        """The recipes that are not detection all set ``model.task`` explicitly.
-
-        ``det_nano_smoke.yaml`` is a ``default_config_files`` entry for every run
-        subcommand, so it is loaded even when the caller passes ``--config`` of their own
-        and jsonargparse merges per key: a config that omits ``model.task`` inherits
-        ``detect`` and trains a detector under the file's name, with the point or mask
-        branches never built. Dropping the packaged default would not close that hole --
-        ``task`` also defaults to ``"detect"`` on the module constructor -- so the guard
-        is that a task-specific config states its task, and this pins that it does. The
-        inheritance itself is documented in ``lucid_yolo.cli.train``'s module docstring.
-        """
-        config_dir = Path(train_cli.__file__).resolve().parent.parent / "configs"
-        non_detection = sorted(p for p in config_dir.glob("*.yaml") if not p.name.startswith("det_"))
-
-        stated = {path.name: "task:" in path.read_text() for path in non_detection}
-
-        assert non_detection, "the packaged config directory must be found for this to mean anything"
-        assert all(stated.values()), f"a non-detection recipe omits its own task: {stated}"

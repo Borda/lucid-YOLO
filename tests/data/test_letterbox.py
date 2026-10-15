@@ -112,7 +112,7 @@ class TestRoundTrip:
 class TestAspectPreservation:
     """The output canvas is the target size with symmetric, ratio-preserving content."""
 
-    def test_output_is_target_size(self) -> None:
+    def test_output_target_size(self) -> None:
         """The letterboxed image has exactly the requested canvas dimensions."""
         out_image, _ = Letterbox(_TARGET)(_image(), Targets.empty())
 
@@ -128,7 +128,7 @@ class TestAspectPreservation:
         assert abs(expected_new_w / _ORIG_W - _EXPECTED_R) < 1e-6
         assert abs(expected_new_h / _ORIG_H - _EXPECTED_R) < 1e-6
 
-    def test_padding_split_is_symmetric_within_one_pixel(self) -> None:
+    def test_padding_split_symmetric_within_one_pixel(self) -> None:
         """A box at the source origin lands at (pad_left, pad_top) with balanced slack."""
         origin_box = Targets(boxes=torch.zeros((1, 4)), labels=torch.zeros(1, dtype=torch.int64))
 
@@ -145,7 +145,7 @@ class TestAspectPreservation:
 class TestUpstreamFit:
     """The fit and the fill are upstream's, not a second local implementation of them (WP-155)."""
 
-    def test_forward_affine_is_upstreams_matrix(self) -> None:
+    def test_forward_affine_upstreams_matrix(self) -> None:
         """``forward_affine`` returns exactly what ``letterbox_matrix`` builds for the same size.
 
         The whole point of delegating: a local re-derivation that agreed today could drift
@@ -158,7 +158,7 @@ class TestUpstreamFit:
         assert torch.equal(matrix, upstream)
         assert (out_h, out_w) == (_TARGET, _TARGET)
 
-    def test_pad_value_reaches_the_upstream_resample(self) -> None:
+    def test_pad_value_reaches_upstream_resample(self) -> None:
         """The requested pad colour fills the padded band of the resampled image.
 
         ``pad_value`` travels as upstream's ``fill=`` with ``padding_mode="zeros"``; drop
@@ -207,7 +207,7 @@ class TestRotatedBoxes:
 class TestKeypoints:
     """Keypoints ride the same affine as the box corners, and cost nothing when absent."""
 
-    def test_a_keypoint_lands_where_the_box_corner_it_sits_on_lands(self) -> None:
+    def test_keypoint_lands_where_box_corner_it_sits_on_lands(self) -> None:
         """Points placed on a box's own corners warp onto that box's warped corners.
 
         The decisive statement that the two modalities share one geometry rather than two
@@ -271,7 +271,7 @@ class TestKeypoints:
         assert out_targets.keypoint_vis.shape == reference.keypoint_vis.shape
         assert out_targets.keypoint_vis.dtype == reference.keypoint_vis.dtype
 
-    def test_warp_targets_without_an_image_maps_points_identically(self) -> None:
+    def test_warp_targets_without_image_maps_points_identically(self) -> None:
         """``warp_targets`` moves keypoints exactly as ``__call__`` does.
 
         The fused-warp entry point shares ``_warp_targets`` with the imaged call, and the

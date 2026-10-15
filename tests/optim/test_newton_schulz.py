@@ -178,7 +178,7 @@ class TestEdgeCases:
 
         assert torch.equal(matrix, original)
 
-    def test_float64_is_not_demoted_to_float32(self) -> None:
+    def test_float64_not_demoted_to_float32(self) -> None:
         """A float64 input keeps float64 arithmetic instead of being computed at fp32.
 
         The iteration used to cast every input to float32 unconditionally, then return
@@ -233,12 +233,12 @@ class TestNativeBatch:
         # ``_random_conditioned`` builds. A slice with a null space does not fit it: the scalar
         # map's slope at zero is ``a = 3.4445``, so five steps can scale a rounding residue in
         # that space by up to about 485x, which is the likely reason the gap against the loop
-        # grows there. See ``test_rank_deficient_batch_matches_the_loop_within_a_looser_bound``
+        # grows there. See ``test_rank_deficient_batch_matches_loop_within_looser_bound``
         # for the measured case. Both bounds were measured on CPU only; nothing here speaks
         # for CUDA.
         torch.testing.assert_close(batched, looped, rtol=2e-6, atol=2e-6)
 
-    def test_rank_deficient_batch_matches_the_loop_within_a_looser_bound(self) -> None:
+    def test_rank_deficient_batch_matches_loop_within_looser_bound(self) -> None:
         """Rank-1 float32 slices agree with the scalar loop at a looser bound than full-rank ones.
 
         The batch carries its own copy of the iteration, so it must still follow the
@@ -265,7 +265,7 @@ class TestNativeBatch:
 
         torch.testing.assert_close(result[0], result[1])
 
-    def test_zero_slice_stays_finite_and_matches_the_loop(self) -> None:
+    def test_zero_slice_stays_finite_and_matches_loop(self) -> None:
         """An all-zero slice orthogonalizes to zeros and leaves its neighbours' answers alone.
 
         The batched function carries its own copy of the normalization, so the scalar
@@ -290,7 +290,7 @@ class TestNativeBatch:
             pytest.param(torch.float16, id="float16"),
         ],
     )
-    def test_half_precision_is_computed_at_float32_and_returned_in_kind(self, dtype: torch.dtype) -> None:
+    def test_half_precision_computed_at_float32_and_returned_in_kind(self, dtype: torch.dtype) -> None:
         """A half-precision batch comes back finite in its own dtype, computed as if it were float32.
 
         Half inputs are promoted for the arithmetic and cast back at the end, which is
@@ -308,7 +308,7 @@ class TestNativeBatch:
         assert torch.isfinite(result).all()
         assert torch.equal(result, _orthogonalize_batched(batch.to(torch.float32)).to(dtype))
 
-    def test_float64_is_not_demoted_to_float32(self) -> None:
+    def test_float64_not_demoted_to_float32(self) -> None:
         """A float64 batch keeps float64 arithmetic: a magnitude fp32 cannot hold stays finite.
 
         Mirrors the scalar function's regression for the batched copy. ``1e200`` is
@@ -424,7 +424,7 @@ class TestInputValidation:
         with pytest.raises(ValueError, match="steps"):
             orthogonalize(matrix, steps=steps)
 
-    def test_a_single_step_still_moves_the_singular_values(self) -> None:
+    def test_single_step_still_moves_singular_values(self) -> None:
         """``steps=1`` is accepted and is not a no-op, which is what makes 1 the boundary.
 
         The refusal above is a claim about where the usable range starts; asserting the

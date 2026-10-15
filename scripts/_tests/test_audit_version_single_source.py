@@ -23,9 +23,6 @@ from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AUDIT_PATH = REPO_ROOT / "scripts" / "lint" / "audit_version_single_source.py"
-PYPROJECT = REPO_ROOT / "pyproject.toml"
-INIT = REPO_ROOT / "src" / "lucid_yolo" / "__init__.py"
-README = REPO_ROOT / "README.md"
 
 
 def _load_audit() -> ModuleType:
@@ -48,7 +45,7 @@ def _load_audit() -> ModuleType:
 audit = _load_audit()
 
 
-def test_pyproject_declares_no_static_version_flags_a_version_key(tmp_path: Path) -> None:
+def test_pyproject_declares_no_static_version_flags_version_key(tmp_path: Path) -> None:
     """A static ``version`` key in ``[project]`` is the drift this script guards against."""
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "demo"\nversion = "0.1.0"\n', encoding="utf-8")
@@ -64,7 +61,7 @@ def test_pyproject_declares_no_static_version_passes_without_one(tmp_path: Path)
     assert audit.check_pyproject_declares_no_static_version(pyproject) == []
 
 
-def test_pyproject_reads_the_module_attribute_flags_a_missing_dynamic_entry(tmp_path: Path) -> None:
+def test_pyproject_reads_module_attribute_flags_missing_dynamic_entry(tmp_path: Path) -> None:
     """``version`` absent from ``[project.dynamic]`` is rejected."""
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "demo"\n', encoding="utf-8")
@@ -72,7 +69,7 @@ def test_pyproject_reads_the_module_attribute_flags_a_missing_dynamic_entry(tmp_
     assert audit.check_pyproject_reads_the_module_attribute(pyproject) != []
 
 
-def test_pyproject_reads_the_module_attribute_passes_when_wired_to_the_module(tmp_path: Path) -> None:
+def test_pyproject_reads_module_attribute_passes_when_wired_to_module(tmp_path: Path) -> None:
     """``dynamic`` lists ``version`` and ``[tool.setuptools.dynamic]`` points at the module attribute."""
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
@@ -84,7 +81,7 @@ def test_pyproject_reads_the_module_attribute_passes_when_wired_to_the_module(tm
     assert audit.check_pyproject_reads_the_module_attribute(pyproject) == []
 
 
-def test_version_is_a_plain_literal_flags_a_computed_expression(tmp_path: Path) -> None:
+def test_version_plain_literal_flags_computed_expression(tmp_path: Path) -> None:
     """A computed ``__version__`` (not a bare string literal) is rejected.
 
     A computed value (``importlib.metadata``, an f-string, a read from a file)
@@ -98,22 +95,12 @@ def test_version_is_a_plain_literal_flags_a_computed_expression(tmp_path: Path) 
     assert audit.check_version_is_a_plain_literal(init) != []
 
 
-def test_version_is_a_plain_literal_passes_for_a_bare_string(tmp_path: Path) -> None:
+def test_version_plain_literal_passes_for_bare_string(tmp_path: Path) -> None:
     """A single bare string-literal assignment to ``__version__`` reports no violation."""
     init = tmp_path / "__init__.py"
     init.write_text("__version__ = '1.2.3'\n", encoding="utf-8")
 
     assert audit.check_version_is_a_plain_literal(init) == []
-
-
-def test_the_live_pyproject_and_init_are_currently_clean() -> None:
-    """The real ``pyproject.toml`` / ``__init__.py`` pair the pre-commit hook scans has no violations.
-
-    This is the one place this file touches the live pair rather than a synthetic
-    one: a regression here means the hook itself would fail on the next commit
-    that touches either file, not just a new one.
-    """
-    assert audit.find_violations(PYPROJECT, INIT, README) == []
 
 
 class TestReadmeNamesTheCurrentVersion:
@@ -133,7 +120,7 @@ class TestReadmeNamesTheCurrentVersion:
         readme.write_text(readme_body, encoding="utf-8")
         return readme, init
 
-    def test_accepts_a_readme_in_step(self, tmp_path: Path) -> None:
+    def test_accepts_readme_in_step(self, tmp_path: Path) -> None:
         """A README naming the same version the module attribute carries reports no violation.
 
         The passing shape: the Versioning section's ``Current release`` line and
@@ -143,7 +130,7 @@ class TestReadmeNamesTheCurrentVersion:
 
         assert audit.check_readme_names_the_current_version(readme, init) == []
 
-    def test_names_the_stale_version_and_the_live_one(self, tmp_path: Path) -> None:
+    def test_names_stale_version_and_live_one(self, tmp_path: Path) -> None:
         """A README naming an older release is reported with both versions in the message.
 
         The exact state WP-175 audited -- README at 0.4.0 against ``__version__`` 0.7.0 --
@@ -155,7 +142,7 @@ class TestReadmeNamesTheCurrentVersion:
             "README names 0.4.0 as the current release; lucid_yolo.__version__ is 0.7.0"
         ]
 
-    def test_refuses_a_readme_that_states_no_current_release(self, tmp_path: Path) -> None:
+    def test_refuses_readme_states_no_current_release(self, tmp_path: Path) -> None:
         """A README with no ``Current release`` line at all is a violation, not a pass.
 
         Deleting the sentence would otherwise be the one edit that silences the check:
@@ -167,7 +154,7 @@ class TestReadmeNamesTheCurrentVersion:
             'README states no "Current release: **<version>**" line to check against lucid_yolo.__version__'
         ]
 
-    def test_stays_silent_when_the_version_literal_is_unreadable(self, tmp_path: Path) -> None:
+    def test_stays_silent_when_version_literal_unreadable(self, tmp_path: Path) -> None:
         """A computed ``__version__`` yields no violation here -- the literal check owns that failure.
 
         Both checks run in one pass, so reporting an unreadable attribute twice would

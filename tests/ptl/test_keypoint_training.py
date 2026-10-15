@@ -209,7 +209,7 @@ class TestHeadConstruction:
         assert module.head.o2m.keypoint_stems is not None
         assert module.head.num_keypoints == _NUM_KEYPOINTS
 
-    def test_carries_the_rle_flow_as_a_submodule(self) -> None:
+    def test_carries_rle_flow_as_submodule(self) -> None:
         """The RLE flow is registered on the module, so it is optimized and checkpointed.
 
         R14's flow is the one loss in the project holding parameters. Held anywhere but
@@ -224,7 +224,7 @@ class TestHeadConstruction:
         assert flow_parameters
         assert flow_parameters <= set(module.state_dict())
 
-    def test_other_tasks_refuse_a_point_count(self) -> None:
+    def test_other_tasks_refuse_point_count(self) -> None:
         """A non-keypoint task refuses ``num_keypoints`` rather than storing and ignoring it.
 
         ``num_keypoints`` names a property of the *dataset*, and a config that carried it
@@ -233,14 +233,14 @@ class TestHeadConstruction:
         ``save_hyperparameters`` still recorded a ``K`` the head has no stem to predict,
         leaving a later reader a documented point schema and no points (audit L-25). The
         refusal keeps the state-dict guarantee and drops the silence; the shape half is
-        pinned by ``test_state_dict_is_the_detection_state_dict_plus_the_point_stems_and_flow``.
+        pinned by ``test_state_dict_detection_state_dict_plus_point_stems_and_flow``.
         """
         with pytest.raises(ValueError, match="meaningless for task='detect'"):
             DetectionLitModule(
                 depth=0.34, width=0.25, max_channels=256, num_classes=_NUM_CLASSES, num_keypoints=_NUM_KEYPOINTS
             )
 
-    def test_the_task_requires_an_explicit_point_count(self) -> None:
+    def test_task_requires_explicit_point_count(self) -> None:
         """``task="keypoints"`` without ``num_keypoints`` is refused at construction.
 
         There is no defensible default: COCO person is 17 points and another pose schema
@@ -251,7 +251,7 @@ class TestHeadConstruction:
         with pytest.raises(ValueError, match="num_keypoints"):
             DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=1, task="keypoints")
 
-    def test_state_dict_is_the_detection_state_dict_plus_the_point_stems_and_flow(self) -> None:
+    def test_state_dict_detection_state_dict_plus_point_stems_and_flow(self) -> None:
         """Dropping the point-stem and flow keys from a keypoints module leaves a detect module's.
 
         Pins the composition rule WP-087 established and WP-088 re-pinned: the pose module
@@ -279,7 +279,7 @@ class TestKeypointLossSelection:
     to would read as evidence for the flow rather than as a broken control.
     """
 
-    def test_defaults_to_the_rle_objective(self) -> None:
+    def test_defaults_to_rle_objective(self) -> None:
         """A keypoints module built without ``keypoint_loss`` gets ``RLELoss``, as before WP-135.
 
         The non-breaking half of an additive change, asserted rather than assumed: every
@@ -289,7 +289,7 @@ class TestKeypointLossSelection:
         """
         assert isinstance(_tiny_module().rle_loss, RLELoss)
 
-    def test_selects_the_flow_free_ablation_when_asked(self) -> None:
+    def test_selects_flow_free_ablation_when_asked(self) -> None:
         """``keypoint_loss="laplace_nll"`` puts a ``LaplaceNLLLoss`` in the slot instead.
 
         The attribute keeps its ``rle_loss`` spelling under either objective because it
@@ -301,7 +301,7 @@ class TestKeypointLossSelection:
         assert isinstance(module.rle_loss, LaplaceNLLLoss)
         assert not isinstance(module.rle_loss, RLELoss)
 
-    def test_an_unknown_objective_is_refused_at_construction(self) -> None:
+    def test_unknown_objective_refused_at_construction(self) -> None:
         """A misspelled ``keypoint_loss`` raises, naming both arms, rather than falling back.
 
         The failure a silent fallback buys is the worst one this WP could ship: an
@@ -320,7 +320,7 @@ class TestKeypointLossSelection:
                 keypoint_loss="laplace",
             )
 
-    def test_the_ablation_adds_no_parameters_to_the_model(self) -> None:
+    def test_ablation_adds_no_parameters_to_model(self) -> None:
         """An ablation module's state dict is a detection module's plus the point stems only.
 
         The structural difference between the two arms, stated where the model can see
@@ -336,7 +336,7 @@ class TestKeypointLossSelection:
         assert not any(key.startswith("rle_loss.") for key in ablation.state_dict())
         assert [key for key in ablation.state_dict() if ".keypoint_stems." not in key] == list(detection.state_dict())
 
-    def test_one_step_of_the_ablation_arm_trains_the_point_stems(self) -> None:
+    def test_one_step_of_ablation_arm_trains_point_stems(self) -> None:
         """A ``laplace_nll`` step yields a finite scalar loss and gradient on both point stems.
 
         The RLE path's own wiring test asserts gradient on the stems *and* on the flow;
@@ -362,7 +362,7 @@ class TestKeypointLossSelection:
 class TestTrainingStep:
     """What one ``task="keypoints"`` step does to the total and to the gradients."""
 
-    def test_gradients_reach_both_branches_point_stems_and_the_flow(self) -> None:
+    def test_gradients_reach_both_branches_point_stems_and_flow(self) -> None:
         """One step leaves non-zero gradients on both branches' point stems and on the flow.
 
         This is the test that would have caught the Phase 12 gap: the stems and the loss
@@ -379,7 +379,7 @@ class TestTrainingStep:
         assert module.rle_loss is not None
         assert _has_gradient(module.rle_loss)
 
-    def test_the_keypoint_gain_enters_the_total_at_its_weight(self) -> None:
+    def test_keypoint_gain_enters_total_at_weight(self) -> None:
         """Zeroing ``keypoint_gain`` drops exactly ``gain * term`` from the total.
 
         A term that is wired but weightless is the Phase 12 gap wearing a disguise: the
@@ -401,7 +401,7 @@ class TestTrainingStep:
         assert dropped != 0.0
         assert dropped == pytest.approx(_KEYPOINT_GAIN * recorder.values["train/keypoint"], rel=_LEVERAGE_RTOL)
 
-    def test_zero_gain_reproduces_the_detection_step_bit_for_bit(self) -> None:
+    def test_zero_gain_reproduces_detection_step_bit_for_bit(self) -> None:
         """At ``keypoint_gain=0`` the total equals a ``task="detect"`` module's, exactly.
 
         The decisive statement that this task **adds** rather than rearranges: ``"obb"``
@@ -427,7 +427,7 @@ class TestTrainingStep:
         detection_total = detection.training_step((images, _boxes_only(targets)), 0)
         assert float(posed_total.detach()) == float(detection_total.detach())
 
-    def test_the_oks_gain_enters_the_total_at_its_weight(self) -> None:
+    def test_oks_gain_enters_total_at_weight(self) -> None:
         """Switching ``oks_gain`` from its zero default to one adds exactly ``1.0 * oks`` (WP-178).
 
         The same leverage check the RLE gain gets, run from the other side: the default
@@ -449,7 +449,7 @@ class TestTrainingStep:
         assert added != 0.0
         assert added == pytest.approx(1.0 * recorder.values["train/oks"], rel=_LEVERAGE_RTOL)
 
-    def test_the_oks_term_is_logged_pre_gain_at_the_default_zero_gain(self) -> None:
+    def test_oks_term_logged_pre_gain_at_default_zero_gain(self) -> None:
         """A default module still logs a non-zero, finite ``train/oks`` it is not training on.
 
         The reading a dose-response run against R1 Table 9's ``(24, 1)`` needs before it
@@ -464,7 +464,7 @@ class TestTrainingStep:
         assert math.isfinite(logged)
         assert 0.0 < logged <= 1.0  # 1 - OKS of an untrained head, bounded by construction
 
-    def test_zero_gains_reproduce_the_detection_step_bit_for_bit(self) -> None:
+    def test_zero_gains_reproduce_detection_step_bit_for_bit(self) -> None:
         """At ``keypoint_gain=0`` **and** ``oks_gain=0`` the total is a ``task="detect"`` module's, exactly.
 
         The test above with the OKS term made explicit rather than left at its default:
@@ -482,12 +482,12 @@ class TestTrainingStep:
         detection_total = detection.training_step((images, _boxes_only(targets)), 0)
         assert float(posed_total.detach()) == float(detection_total.detach())
 
-    def test_the_oks_loss_is_built_for_keypoints_only_and_adds_no_checkpoint_key(self) -> None:
+    def test_oks_loss_built_for_keypoints_only_and_adds_no_checkpoint_key(self) -> None:
         """``oks_loss`` exists under ``"keypoints"`` with the metric's sigmas and no state-dict key.
 
         Its sigma table is the ``val/oks_mAP`` evaluator's own, at the tiny head's ``K``
         (A67's uniform value, since 3 is not COCO's 17), and it lives in a non-persistent
-        buffer so the pinned key set of ``test_state_dict_is_the_detection_state_dict_plus_the_point_stems_and_flow``
+        buffer so the pinned key set of ``test_state_dict_detection_state_dict_plus_point_stems_and_flow``
         is untouched.
         """
         posed = _tiny_module()
@@ -498,7 +498,7 @@ class TestTrainingStep:
         assert detection.oks_loss is None
         assert not any(key.startswith("oks_loss.") for key in posed.state_dict())
 
-    def test_an_image_without_instances_gives_a_finite_loss(self) -> None:
+    def test_image_without_instances_gives_finite_loss(self) -> None:
         """An empty batch yields a finite, exactly-zero keypoint term rather than a ``0 / 0`` NaN.
 
         With no ground truth there are no positives to gather and the padded point axis has
@@ -513,7 +513,7 @@ class TestTrainingStep:
         assert bool(torch.isfinite(loss))
         assert recorder.values["train/keypoint"] == 0.0
 
-    def test_a_detection_batch_is_refused_rather_than_trained_on(self) -> None:
+    def test_detection_batch_refused_rather_than_trained_on(self) -> None:
         """Point-free targets under ``task="keypoints"`` raise instead of training on nothing.
 
         The silent-subset failure of this path, and the one it is most exposed to today: the
@@ -528,7 +528,7 @@ class TestTrainingStep:
         with pytest.raises(ValueError, match="keypoint sets"):
             module.training_step((images, _boxes_only(targets)), 0)
 
-    def test_an_annotation_schema_of_the_wrong_width_is_refused(self) -> None:
+    def test_annotation_schema_of_wrong_width_refused(self) -> None:
         """A batch annotating a different ``K`` than the head predicts raises, naming both.
 
         A head built for 17 points fed a 5-point annotation set is a misconfiguration, not a
@@ -551,7 +551,7 @@ class TestTrainingStep:
 class TestVisibilityMasking:
     """A66: ``v == 0`` means no annotation exists, so it must not pull the model anywhere."""
 
-    def test_an_unlabeled_point_moves_the_term_by_nothing(self) -> None:
+    def test_unlabeled_point_moves_term_by_nothing(self) -> None:
         """Relocating a ``v == 0`` point across the canvas leaves the keypoint term identical.
 
         The end-to-end statement of A66, from ``Targets.keypoint_vis`` through
@@ -601,7 +601,7 @@ class TestVisibilityMasking:
 class TestPadKeypoints:
     """The instance-axis padding and the errors it refuses to paper over."""
 
-    def test_pads_to_the_batch_maximum_on_the_instance_axis(self) -> None:
+    def test_pads_to_batch_maximum_on_instance_axis(self) -> None:
         """Every image is padded to the batch's largest instance count, keeping its own rows.
 
         The instance axis is shared with ``boxes`` and ``labels`` (WP-120), which is the only
@@ -615,7 +615,7 @@ class TestPadKeypoints:
         assert torch.equal(coords[1, :1], second.keypoints)
         assert torch.equal(visibility[0], first.keypoint_vis)
 
-    def test_a_count_mismatch_is_a_hard_error(self) -> None:
+    def test_count_mismatch_hard_error(self) -> None:
         """An image whose point-set count differs from its instance count raises, naming the image.
 
         Whichever way such a batch were reconciled, some anchor would end up supervised
@@ -624,7 +624,7 @@ class TestPadKeypoints:
         with pytest.raises(ValueError, match="image 0 carries 1 instances but 0 keypoint sets"):
             pad_keypoints([Targets(boxes=torch.zeros(1, 4), labels=torch.zeros(1, dtype=torch.int64))])
 
-    def test_images_disagreeing_on_the_point_count_are_refused(self) -> None:
+    def test_images_disagreeing_on_point_count_refused(self) -> None:
         """Two images annotating different ``K`` raise rather than padding to the wider one.
 
         No single head predicts both counts, so padding the narrower image would invent
@@ -641,7 +641,7 @@ class TestPadKeypoints:
         with pytest.raises(ValueError, match="disagree on the keypoint count"):
             pad_keypoints([wide, narrow])
 
-    def test_an_all_empty_batch_pads_to_a_zero_point_axis(self) -> None:
+    def test_all_empty_batch_pads_to_zero_point_axis(self) -> None:
         """A batch holding no instances yields zero-width tensors rather than raising.
 
         The finite no-ground-truth case :func:`~lucid_yolo.ptl.module.pad_targets` already
@@ -676,7 +676,7 @@ def _keypoint_context(anchor_points: Tensor, strides: Tensor, gt_keypoints: Tens
     )
 
 
-def test_the_keypoint_term_follows_the_assignment_not_the_positive_order() -> None:
+def test_keypoint_term_follows_assignment_not_positive_order() -> None:
     """Positive ``k``'s points are scored against ``gt_index[k]``, not against instance ``k``.
 
     The decisive pairing test, and the one no loss value can stand in for: pairing an anchor
@@ -732,7 +732,7 @@ def test_the_keypoint_term_follows_the_assignment_not_the_positive_order() -> No
 class TestLoaderTransport:
     """Keypoints crossing the DataLoader worker boundary and back."""
 
-    def test_keypoints_survive_the_packed_transport(self) -> None:
+    def test_keypoints_survive_packed_transport(self) -> None:
         """Packing and unpacking a posed batch returns the point channels tensor-for-tensor.
 
         Without this the ``keypoint_targets`` flag would be the worst kind of dead code: the
@@ -748,7 +748,7 @@ class TestLoaderTransport:
         assert torch.equal(restored[1].keypoints, targets[1].keypoints)
         assert torch.equal(restored[0].keypoint_vis, targets[0].keypoint_vis)
 
-    def test_an_instance_free_image_packs_beside_an_annotated_one(self) -> None:
+    def test_instance_free_image_packs_beside_annotated_one(self) -> None:
         """A batch mixing posed and empty images packs, and each side restores to its own form.
 
         The empty image's canonical ``(0, 0, 2)`` point tensor disagrees with the batch's
@@ -765,7 +765,7 @@ class TestLoaderTransport:
         assert restored[1].keypoints.shape == (0, 0, 2)
         assert restored[1].keypoint_vis.shape == (0, 0)
 
-    def test_a_detection_batch_carries_no_point_axis(self) -> None:
+    def test_detection_batch_carries_no_point_axis(self) -> None:
         """A batch with no point annotations packs a zero-width keypoint axis, costing nothing.
 
         The transport is shared by every task, so the pose channels must not make a detection
@@ -814,7 +814,7 @@ def _keypoint_datamodule(fixture_dir: Path, keypoint_targets: bool = True) -> De
 class TestFlipPairWiring:
     """The dataset's own pairing must reach the flip, not stop at the reader (A64)."""
 
-    def test_the_dataset_schema_reaches_the_flip(self, keypoints_fixture_dir: Path) -> None:
+    def test_dataset_schema_reaches_flip(self, keypoints_fixture_dir: Path) -> None:
         """The train pipeline's ``HorizontalFlip`` is constructed with the reader's derived pairs.
 
         This is the assertion whose absence let the bug sit unnoticed. The flip fires at
@@ -830,7 +830,7 @@ class TestFlipPairWiring:
 
         assert datamodule._train._flip.keypoint_flip_pairs == _ANIMAL_FLIP_PAIRS
 
-    def test_a_detection_run_passes_no_pairing(self, keypoints_fixture_dir: Path) -> None:
+    def test_detection_run_passes_no_pairing(self, keypoints_fixture_dir: Path) -> None:
         """Without ``keypoint_targets`` the flip receives ``None`` and only mirrors coordinates.
 
         The same fixture read as plain detection carries no point channel for a swap to act
@@ -844,7 +844,7 @@ class TestFlipPairWiring:
 
         assert datamodule._train._flip.keypoint_flip_pairs is None
 
-    def test_points_survive_the_full_train_pipeline(self, keypoints_fixture_dir: Path) -> None:
+    def test_points_survive_full_train_pipeline(self, keypoints_fixture_dir: Path) -> None:
         """A fully augmented training sample still carries one point set per surviving box.
 
         Every geometric stage on this path — mosaic, the fused affine, mixup, copy-paste,
@@ -872,7 +872,7 @@ class TestBoxFrameNormalization:
     is ``O(1)`` and not ``O(10^3)``.
     """
 
-    def test_the_box_corners_map_to_the_unit_square(self) -> None:
+    def test_box_corners_map_to_unit_square(self) -> None:
         """The frame is the box: its top-left is the origin, its bottom-right is ``(1, 1)``."""
         points = torch.tensor([[[10.0, 20.0], [30.0, 40.0], [20.0, 30.0]]])
         boxes = torch.tensor([[10.0, 20.0, 30.0, 40.0]])
@@ -881,7 +881,7 @@ class TestBoxFrameNormalization:
 
         assert torch.allclose(normalized, torch.tensor([[[0.0, 0.0], [1.0, 1.0], [0.5, 0.5]]]))
 
-    def test_each_axis_uses_its_own_extent(self) -> None:
+    def test_each_axis_uses_own_extent(self) -> None:
         """Width normalizes ``x`` and height normalizes ``y``, not one shared object scale.
 
         The distinction is invisible on a square box and is the whole content of the
@@ -894,7 +894,7 @@ class TestBoxFrameNormalization:
 
         assert torch.allclose(normalized, torch.tensor([[[0.5, 0.5]]]))
 
-    def test_a_point_outside_its_box_leaves_the_unit_square(self) -> None:
+    def test_point_outside_box_leaves_unit_square(self) -> None:
         """A70's off-canvas points must stay representable rather than being clipped here.
 
         This function is a change of frame and nothing else: a point the affine pushed
@@ -908,7 +908,7 @@ class TestBoxFrameNormalization:
 
         assert torch.allclose(normalized, torch.tensor([[[-3.0, 6.0]]]))
 
-    def test_a_degenerate_box_floors_at_one_pixel_instead_of_dividing_by_zero(self) -> None:
+    def test_degenerate_box_floors_at_one_pixel_instead_of_dividing_by_zero(self) -> None:
         """A zero-extent box returns a finite number, not an infinity.
 
         A sub-pixel box carries no pose to normalize by. The floor is not a correctness
@@ -922,7 +922,7 @@ class TestBoxFrameNormalization:
         assert torch.isfinite(normalized).all()
         assert torch.allclose(normalized, torch.tensor([[[2.0, 0.0]]]))
 
-    def test_the_residual_the_loss_receives_is_order_one(self) -> None:
+    def test_residual_loss_receives_order_one(self) -> None:
         """The property the frame exists for, measured where it broke: on a real step.
 
         Un-normalized, this batch's median residual is in the hundreds and the flow

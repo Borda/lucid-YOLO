@@ -73,7 +73,7 @@ def test_prior_probability_bias_init() -> None:
     assert torch.allclose(output.sigmoid(), torch.full_like(output, CLS_PRIOR_PROB), atol=1e-6)
 
 
-def test_output_is_raw_logits() -> None:
+def test_output_raw_logits() -> None:
     """A zeroed weight and a bias of 5.0 must surface as 5.0, not a squashed value.
 
     Catches an activation slipped in ahead of the WP-051 with-logits loss, which
@@ -90,7 +90,7 @@ def test_output_is_raw_logits() -> None:
     assert torch.equal(output, torch.full_like(output, 5.0))
 
 
-def test_parameter_count_is_a_single_pointwise_convolution() -> None:
+def test_parameter_count_single_pointwise_convolution() -> None:
     """Parameters equal one 1x1 conv's weights plus biases, pinning the A17 reading.
 
     A heavier stack (ConvBNAct units, a hidden width, normalization) would change

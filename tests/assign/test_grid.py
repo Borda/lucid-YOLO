@@ -13,7 +13,7 @@ import torch
 from lucid_yolo.assign import anchor_grid, make_anchor_points
 
 
-def test_single_level_centers_are_row_major() -> None:
+def test_single_level_centers_row_major() -> None:
     """A 2x2 grid at stride 4 yields the four cell centres in row-major order."""
     points, strides = make_anchor_points([(2, 2)], [4])
     expected = torch.tensor([[2.0, 2.0], [6.0, 2.0], [2.0, 6.0], [6.0, 6.0]])
@@ -38,7 +38,7 @@ def test_multi_level_concatenates_in_level_order() -> None:
     assert torch.equal(strides, torch.tensor([4.0, 4.0, 4.0, 4.0, 8.0]))
 
 
-def test_total_count_is_8400_at_640_input() -> None:
+def test_total_count_8400_at_640_input() -> None:
     """The canonical [8,16,32] pyramid at 640 px produces 8400 anchor points."""
     points, strides = make_anchor_points([(80, 80), (40, 40), (20, 20)], [8, 16, 32])
     assert points.shape == (8400, 2)
@@ -63,7 +63,7 @@ def test_length_mismatch_raises() -> None:
         pytest.param((-640, 640), id="negative-height"),
     ],
 )
-def test_a_canvas_the_strides_do_not_divide_is_refused(canvas: tuple[int, int]) -> None:
+def test_canvas_strides_do_not_divide_refused(canvas: tuple[int, int]) -> None:
     """A canvas that does not tile every level raises instead of flooring silently (WP-171).
 
     The docstring has declared the precondition since WP-025 and nothing checked it, so
@@ -77,7 +77,7 @@ def test_a_canvas_the_strides_do_not_divide_is_refused(canvas: tuple[int, int]) 
         anchor_grid(canvas, torch.device("cpu"))
 
 
-def test_the_640_canvas_the_evaluators_use_still_builds_its_8400_anchors() -> None:
+def test_640_canvas_evaluators_use_still_builds_8400_anchors() -> None:
     """The guard leaves the deployed canvas untouched, at the size every protocol runs.
 
     A precondition added to a function four call sites already depend on is worth

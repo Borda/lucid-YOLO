@@ -152,7 +152,7 @@ def test_empty_predicted_mask_scores_zero_segm() -> None:
     assert stats["map"] == pytest.approx(0.0)
 
 
-def test_polygon_and_rle_targets_decode_to_the_same_mask() -> None:
+def test_polygon_and_rle_targets_decode_to_same_mask() -> None:
     """One rectangle expressed as a polygon and as an RLE yields the identical target mask.
 
     COCO stores ordinary instances as polygons and ``iscrowd`` regions as RLE, so
@@ -175,7 +175,7 @@ def test_polygon_and_rle_targets_decode_to_the_same_mask() -> None:
     assert int(from_polygon["masks"].sum()) == 24  # the 6x4 rectangle, not its transpose
 
 
-def test_padding_rows_drop_masks_and_boxes_by_the_same_filter() -> None:
+def test_padding_rows_drop_masks_and_boxes_by_same_filter() -> None:
     """The surviving mask is the surviving detection's own, not the first row of the stack.
 
     The batch is built so a "keep the first N rows" filter — the shape an
@@ -393,7 +393,7 @@ def test_evaluate_feeds_every_batch_to_both_paths(detseg_fixture_dir: Path) -> N
     assert seen == [1] * (2 * _NUM_IMAGES)  # both paths, every batch, one image each
 
 
-def test_predicted_masks_land_on_the_original_grid_with_content(detseg_fixture_dir: Path) -> None:
+def test_predicted_masks_land_on_original_grid_with_content(detseg_fixture_dir: Path) -> None:
     """Every path's masks come back at the original image size, row-matched to its boxes, non-empty.
 
     The gate on the geometry the report itself cannot show. A mask left on the
@@ -421,7 +421,7 @@ def test_predicted_masks_land_on_the_original_grid_with_content(detseg_fixture_d
             assert bool(masks.any())
 
 
-def test_masks_stay_paired_with_their_own_detections() -> None:
+def test_masks_stay_paired_with_own_detections() -> None:
     """Each surviving mask stays attached to the box it was decoded for.
 
     The score filter keeps masks and boxes in step, but keeping the right *count*
@@ -497,7 +497,7 @@ class TestPaddedRowMaskDecode:
         )
         return evaluator, detections, anchor_index, coefficients, geometry
 
-    def test_the_prefix_decode_matches_decoding_every_padded_row(self) -> None:
+    def test_prefix_decode_matches_decoding_every_padded_row(self) -> None:
         """Slicing to the real detections returns exactly what decoding all 300 rows returned.
 
         The padded block is the fixed ``max_det`` shape ``pad_detections`` emits, so an
@@ -520,7 +520,7 @@ class TestPaddedRowMaskDecode:
         assert torch.equal(sliced[:3], unsliced[:3])
         assert not bool(sliced[3:].any()), "a padding row decoded to a non-empty mask"
 
-    def test_an_image_with_no_real_detections_yields_the_padded_shape(self) -> None:
+    def test_image_with_no_real_detections_yields_padded_shape(self) -> None:
         """An all-padding image returns ``max_det`` empty masks rather than an empty stack.
 
         The stack is indexed downstream by a boolean mask over every padded row, so a

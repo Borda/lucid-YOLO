@@ -42,7 +42,7 @@ def test_full_grid_box_gives_per_pixel_bce() -> None:
     assert math.isclose(loss.item(), _LN2, abs_tol=1e-6)
 
 
-def test_pixels_outside_the_box_are_ignored() -> None:
+def test_pixels_outside_box_ignored() -> None:
     """Wildly wrong logits outside the box leave the loss numerically unchanged.
 
     This is the test that fails if the crop is dropped: the out-of-box logits are
@@ -113,7 +113,7 @@ def test_no_instances_gives_finite_zero() -> None:
     assert loss.item() == 0.0
 
 
-def test_gradients_reach_only_the_cropped_region() -> None:
+def test_gradients_reach_only_cropped_region() -> None:
     """backward() leaves non-zero grad inside the box and exactly zero outside it.
 
     Catches a crop applied to the forward value alone (e.g. via indexing that
@@ -150,7 +150,7 @@ def test_sub_pixel_box_selects_nothing() -> None:
     assert loss.item() == 0.0
 
 
-def test_upper_edge_is_exclusive() -> None:
+def test_upper_edge_exclusive() -> None:
     """A centre lying exactly on the box's far edge belongs to neither of two abutting boxes.
 
     The crop is documented as half-open, ``[x1, x2) x [y1, y2)``, so that two
@@ -206,21 +206,21 @@ class TestNormalizerFromInvertedBoxes:
     defect is invisible at the public boundary and would otherwise go untested.
     """
 
-    def test_a_doubly_inverted_box_normalizes_by_the_minimum_area(self) -> None:
+    def test_doubly_inverted_box_normalizes_by_minimum_area(self) -> None:
         """The measured defect: ``(1 - 4) * (1 - 4) = 9`` for a box enclosing nothing."""
         left, top = torch.tensor([4.0]), torch.tensor([4.0])
         right, bottom = torch.tensor([1.0]), torch.tensor([1.0])
 
         assert torch.equal(_box_areas(left, top, right, bottom), torch.tensor([1.0]))
 
-    def test_a_singly_inverted_box_normalizes_by_the_minimum_area(self) -> None:
+    def test_singly_inverted_box_normalizes_by_minimum_area(self) -> None:
         """One negative extent already clamped correctly; it must keep doing so."""
         left, top = torch.tensor([4.0, 0.0]), torch.tensor([0.0, 4.0])
         right, bottom = torch.tensor([1.0, 3.0]), torch.tensor([3.0, 1.0])
 
         assert torch.equal(_box_areas(left, top, right, bottom), torch.tensor([1.0, 1.0]))
 
-    def test_well_formed_boxes_keep_their_exact_area(self) -> None:
+    def test_well_formed_boxes_keep_exact_area(self) -> None:
         """The clamps are no-ops on any box of at least unit area, sub-pixel ones aside."""
         left, top = torch.tensor([0.0, 2.0, 0.0]), torch.tensor([0.0, 1.0, 0.0])
         right, bottom = torch.tensor([3.0, 5.0, 0.5]), torch.tensor([2.0, 4.5, 0.5])
@@ -229,7 +229,7 @@ class TestNormalizerFromInvertedBoxes:
 
         assert torch.equal(areas, torch.tensor([6.0, 10.5, 1.0]))  # third clamps up from 0.25
 
-    def test_the_public_loss_is_unmoved_by_the_correction(self) -> None:
+    def test_public_loss_unmoved_by_correction(self) -> None:
         """An inverted box crops to nothing, so its contribution is zero under either divisor."""
         logits = torch.zeros(2, 4, 4)
         targets = torch.ones(2, 4, 4)

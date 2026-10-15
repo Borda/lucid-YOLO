@@ -69,7 +69,7 @@ def test_anchor_indices_come_out_at_exactly_max_det(kept: int, max_det: int) -> 
     assert padded.shape == (1, max_det)
 
 
-def test_truncation_keeps_the_highest_ranked_rows() -> None:
+def test_truncation_keeps_highest_ranked_rows() -> None:
     """Truncation drops the tail, so the surviving rows are the top-ranked ones.
 
     Detections reach the padders score-descending, so cutting to ``max_det`` has to
@@ -84,7 +84,7 @@ def test_truncation_keeps_the_highest_ranked_rows() -> None:
     assert truncated[0, :, 0].tolist() == [0.0, 1.0]
 
 
-def test_the_padders_agree_on_length_for_one_over_length_batch() -> None:
+def test_padders_agree_on_length_for_one_over_length_batch() -> None:
     """A detection and its anchor index are dropped together, never one without the other.
 
     The two functions are called back to back by every decoder with the same
@@ -101,7 +101,7 @@ def test_the_padders_agree_on_length_for_one_over_length_batch() -> None:
     assert padded_detections.shape[-2] == padded_indices.shape[-1]
 
 
-def test_short_indices_are_filled_with_the_padding_sentinel() -> None:
+def test_short_indices_filled_with_padding_sentinel() -> None:
     """A shortfall is filled with :data:`PAD_ANCHOR_INDEX`, not with a usable anchor row.
 
     The sentinel is negative precisely so a padding row cannot be mistaken for a real

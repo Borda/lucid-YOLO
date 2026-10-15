@@ -141,7 +141,7 @@ def test_keypoints_set_loads(keypoints_fixture_dir: Path) -> None:
     _assert_category_ids_resolve(doc)
 
 
-def test_keypoints_generation_is_deterministic(tmp_path: Path) -> None:
+def test_keypoints_generation_deterministic(tmp_path: Path) -> None:
     """Same seed -> byte-identical annotation JSON and identical image SHA-256 hashes (A26)."""
     first = synthetic.generate_keypoints_fixtures(tmp_path / "run_a")
     second = synthetic.generate_keypoints_fixtures(tmp_path / "run_b")
@@ -158,7 +158,7 @@ def test_keypoints_generation_is_deterministic(tmp_path: Path) -> None:
         assert _sha256(a) == _sha256(b), f"image bytes differ across seeded runs: {a.name}"
 
 
-def test_detseg_generation_is_deterministic(tmp_path: Path) -> None:
+def test_detseg_generation_deterministic(tmp_path: Path) -> None:
     """Same seed -> byte-identical annotation JSON and identical image SHA-256 hashes (A26)."""
     first = synthetic.generate_detseg_fixtures(tmp_path / "run_a")
     second = synthetic.generate_detseg_fixtures(tmp_path / "run_b")

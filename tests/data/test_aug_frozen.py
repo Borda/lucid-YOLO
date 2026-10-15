@@ -92,7 +92,7 @@ class TestAffineComposite:
         expected = torch.tensor([[6.7768, 0.3623, 23.2884, 17.5889], [23.3996, 2.4148, 32.0000, 16.1548]])
         assert torch.allclose(warped.boxes, expected, atol=GEOM)
 
-    def test_a_polygon_ring_lands_on_frozen_vertices(self) -> None:
+    def test_polygon_ring_lands_on_frozen_vertices(self) -> None:
         """The first instance's ring is pinned vertex by vertex under the same composite.
 
         No closed form for the same reason as the box, with one addition: the ring
@@ -135,7 +135,7 @@ class TestAffineOntoLetterboxCanvas:
 class TestLetterboxOddPadding:
     """Tier B -- how a half-pixel of leftover padding is split between the two sides."""
 
-    def test_an_odd_leftover_puts_the_extra_pixel_below(self) -> None:
+    def test_odd_leftover_puts_extra_pixel_below(self) -> None:
         """A 10x20 source into a 15x15 canvas scales by 0.75 and offsets by 3, not 3.75.
 
         Not derived, because it is not derivable: the ratio 0.75 leaves 7.5 rows of
@@ -154,7 +154,7 @@ class TestLetterboxOddPadding:
 class TestMosaicOffCentre:
     """Tier B -- an off-centre stitch, where placement meets the canvas clip and the filter."""
 
-    def test_an_off_centre_stitch_keeps_eight_frozen_boxes(self) -> None:
+    def test_off_centre_stitch_keeps_eight_frozen_boxes(self) -> None:
         """A centre at ``(26, 38)`` on four 32-pixel images yields eight boxes at frozen coordinates.
 
         The four offsets are derivable and the tier-A case covers them. What is not
@@ -187,7 +187,7 @@ class TestMosaicOffCentre:
 class TestPhotometricFrozen:
     """Tier B -- a hue rotation on a saturated colour, where the conversion pair has no shortcut."""
 
-    def test_a_hue_rotation_on_pure_red_lands_on_frozen_rgb(self) -> None:
+    def test_hue_rotation_on_pure_red_lands_on_frozen_rgb(self) -> None:
         """Red at 0.8 under gains ``(+0.06 hue, -0.25 saturation, +0.2 value)`` freezes to a literal RGB.
 
         The value and saturation halves are multiplicative and derivable on a pure
@@ -208,7 +208,7 @@ class TestPhotometricFrozen:
 class TestRotatedUnderShear:
     """Tier B -- an rbox re-fitted under a transform that is not a similarity."""
 
-    def test_a_sheared_rotated_box_lands_on_frozen_parameters(self) -> None:
+    def test_sheared_rotated_box_lands_on_frozen_parameters(self) -> None:
         """The composite's shear makes the re-fit lossy, and the five numbers are pinned.
 
         No closed form, and this is the sharpest example of why the tier exists: a
@@ -262,7 +262,7 @@ class TestKeypointsThroughMirrorAndWarp:
 class TestCopyPasteRasterisedTriangle:
     """Tier B -- how many pixels a non-axis-aligned ring covers."""
 
-    def test_a_triangle_ring_writes_a_frozen_pixel_count(self) -> None:
+    def test_triangle_ring_writes_frozen_pixel_count(self) -> None:
         """The triangle ``(2,2)-(10,3)-(6,11)`` rasterises to exactly 32 pixels on a 16-pixel canvas.
 
         No closed form: an axis-aligned ring's pixel count follows from A11's

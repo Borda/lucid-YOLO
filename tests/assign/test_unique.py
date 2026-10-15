@@ -132,7 +132,7 @@ def test_collision_loser_gets_zero_without_remaining_candidate() -> None:
     assert int(out.gt_index[0, _CENTRE_ANCHOR]) == 0
 
 
-def test_zero_gt_batch_is_all_background() -> None:
+def test_zero_gt_batch_all_background() -> None:
     """A batch with no ground truths yields no positives."""
     empty_boxes = torch.zeros(1, 0, 4)
     empty_labels = torch.zeros(1, 0, dtype=torch.long)
@@ -145,7 +145,7 @@ def test_zero_gt_batch_is_all_background() -> None:
     assert bool(out.fg_mask.any()) is False
 
 
-def test_disabling_hyperparameters_are_rejected_through_the_subclass() -> None:
+def test_disabling_hyperparameters_rejected_through_subclass() -> None:
     """``UniqueAssigner`` inherits the base assigner's parameter validation.
 
     The o2o branch constructs its assigner through this subclass, never through
@@ -165,7 +165,7 @@ def test_disabling_hyperparameters_are_rejected_through_the_subclass() -> None:
         pytest.param("s_ref", 0.0, id="s-ref-zero"),
     ],
 )
-def test_disabling_surrogate_sizes_are_rejected_through_the_subclass(parameter: str, value: float) -> None:
+def test_disabling_surrogate_sizes_rejected_through_subclass(parameter: str, value: float) -> None:
     """``UniqueAssigner`` inherits the STAL surrogate-size validation, under the right name.
 
     The same reason as the base assigner's hyper-parameters — the o2o branch only ever

@@ -176,7 +176,7 @@ def _reference_detection_loss(module: DetectionLitModule, batch: tuple[Tensor, l
     ).total
 
 
-def test_segment_loss_exceeds_the_detection_only_loss() -> None:
+def test_segment_loss_exceeds_detection_only_loss() -> None:
     """The mask and auxiliary terms are live: sharing every detection weight, segment > detect.
 
     Catches the WP-034 stub surviving — an inert ``_task_extra_loss`` leaves the
@@ -216,7 +216,7 @@ def test_gradients_reach_every_mask_branch() -> None:
     assert _has_gradient(module.head.o2m.coeff_stems)
 
 
-def test_image_without_instances_gives_a_finite_zero_mask_term() -> None:
+def test_image_without_instances_gives_finite_zero_mask_term() -> None:
     """An empty image yields a finite loss and no positives, not a ``0 / 0`` NaN.
 
     Catches a mean over an empty instance axis: the mask term would be NaN and
@@ -233,7 +233,7 @@ def test_image_without_instances_gives_a_finite_zero_mask_term() -> None:
     assert recorder.values["train/mask"] == 0.0
 
 
-def test_boxes_without_polygons_are_rejected() -> None:
+def test_boxes_without_polygons_rejected() -> None:
     """A detection-only annotation under ``task="segment"`` raises instead of training on nothing.
 
     Catches the silent-subset failure: without the guard, an image whose rings were
@@ -249,7 +249,7 @@ def test_boxes_without_polygons_are_rejected() -> None:
         module.training_step((images, boxes_only), 0)
 
 
-def test_validation_step_runs_without_the_training_only_semantic_branch() -> None:
+def test_validation_step_runs_without_training_only_semantic_branch() -> None:
     """A segment module validates in eval mode, where the auxiliary branch returns ``None`` (A17).
 
     Catches an unguarded ``semantic_aux_loss`` call: the branch is training-only,
@@ -263,7 +263,7 @@ def test_validation_step_runs_without_the_training_only_semantic_branch() -> Non
     assert bool(torch.isfinite(loss))
 
 
-def test_mask_targets_follow_the_assignment_not_the_positive_order() -> None:
+def test_mask_targets_follow_assignment_not_positive_order() -> None:
     """Positive ``k``'s mask is scored against ``gt_index[k]``, not against instance ``k``.
 
     The decisive test of the WP-087 pairing: with two positives whose assigned
@@ -333,7 +333,7 @@ def _looped_branch_mask_loss(
         pytest.param([4, 4], [2, 2], id="equal-counts-no-padding"),
     ],
 )
-def test_batched_mask_loss_equals_the_per_image_loop(positives: list[int], instances: list[int]) -> None:
+def test_batched_mask_loss_equals_per_image_loop(positives: list[int], instances: list[int]) -> None:
     """The batched gather reproduces the per-image loop's value bit for bit.
 
     The looped form selected each image's positives with a boolean mask, whose
@@ -378,7 +378,7 @@ def test_batched_mask_loss_equals_the_per_image_loop(positives: list[int], insta
     assert bool(torch.isfinite(batched))
 
 
-def test_detect_total_is_exactly_the_dual_detection_loss() -> None:
+def test_detect_total_exactly_dual_detection_loss() -> None:
     """``task="detect"`` is bit-for-bit the dual detection loss — the extra term adds exactly zero.
 
     Catches any segmentation quantity leaking into the detection objective, which
@@ -416,7 +416,7 @@ def _collated_masks(images: Tensor, targets: list[Targets]) -> list[Tensor]:
         pytest.param((0, 0), id="no-instances-at-all"),
     ],
 )
-def test_loader_rasterises_the_masks_the_step_would_have(counts: tuple[int, ...]) -> None:
+def test_loader_rasterises_masks_step_would_have(counts: tuple[int, ...]) -> None:
     """The collate's transported masks equal what the step rasterises from the same targets.
 
     The whole point of moving rasterisation into the loader workers is that it is
@@ -440,7 +440,7 @@ def test_loader_rasterises_the_masks_the_step_would_have(counts: tuple[int, ...]
     assert all(torch.equal(mask, reference) for mask, reference in zip(masks, expected, strict=True))
 
 
-def test_loader_rasterised_masks_give_the_identical_loss() -> None:
+def test_loader_rasterised_masks_give_identical_loss() -> None:
     """A batch carrying the loader's masks scores exactly what the in-step fallback scores.
 
     This is the bit-exactness claim of the move, end to end through the real
@@ -456,7 +456,7 @@ def test_loader_rasterised_masks_give_the_identical_loss() -> None:
     assert torch.equal(from_loader, module.training_step((images, targets), 0))
 
 
-def test_masks_rasterised_for_another_grid_are_rejected() -> None:
+def test_masks_rasterised_for_another_grid_rejected() -> None:
     """Masks whose grid disagrees with the prototypes raise instead of supervising at the wrong scale.
 
     The collate derives the grid from the input canvas (A15) while the step reads
@@ -489,7 +489,7 @@ def _validated_module(batch: tuple[Tensor, list[Targets]] | tuple[Tensor, list[T
     return recorder
 
 
-def test_validation_logs_a_mask_map_beside_the_box_map() -> None:
+def test_validation_logs_mask_map_beside_box_map() -> None:
     """A segmentation run reports the quality of the branch it exists for.
 
     Without this the only epoch metric of a ``task="segment"`` run is ``val/mAP``,
@@ -513,7 +513,7 @@ def test_detection_validation_logs_no_mask_metric() -> None:
     assert "val/segm_mAP" not in recorder.values
 
 
-def test_mask_map_is_skipped_when_the_batch_carries_no_ground_truth_masks() -> None:
+def test_mask_map_skipped_when_batch_carries_no_ground_truth_masks() -> None:
     """A segment module validating a two-element batch scores boxes only, rather than raising.
 
     ``compute`` on a metric no batch ever updated raises, so the epoch end has to
@@ -622,7 +622,7 @@ def _toy_segment_output() -> SegmentOutput:
     return SegmentOutput(detect=detect, prototypes=prototypes, semantic=None)
 
 
-def test_scored_masks_are_paired_with_the_boxes_own_anchors() -> None:
+def test_scored_masks_paired_with_boxes_own_anchors() -> None:
     """Detection ``j``'s mask is assembled from the coefficients of the anchor ``j`` came from.
 
     The decisive test of the metric. A coefficient row gathered by anything other
@@ -654,7 +654,7 @@ def test_scored_masks_are_paired_with_the_boxes_own_anchors() -> None:
     assert lit_rows == [[index % _TOY_COEFFS] for index in anchor_indices[0].tolist()]
 
 
-def test_zero_scored_rows_are_dropped_before_the_decode_rather_than_after() -> None:
+def test_zero_scored_rows_dropped_before_decode_rather_than_after() -> None:
     """A row the score filter drops never reaches the decode, and the kept row is still its own.
 
     WP-164 replaced a decode of every row followed by ``masks[keep]`` with a decode
@@ -691,7 +691,7 @@ def test_zero_scored_rows_are_dropped_before_the_decode_rather_than_after() -> N
     assert lit_rows == [anchor_indices[0, 0].item() % _TOY_COEFFS]  # anchor 5's own mask
 
 
-def test_scored_masks_and_ground_truth_share_the_prototype_grid() -> None:
+def test_scored_masks_and_ground_truth_share_prototype_grid() -> None:
     """Predicted and ground-truth masks reach the metric on one grid, at the cap.
 
     Two frames would make every mask IoU wrong while leaving ``val/segm_mAP``

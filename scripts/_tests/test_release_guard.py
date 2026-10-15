@@ -164,7 +164,7 @@ def test_missing_frozen_goldens_refuses_tag(tmp_path: Path) -> None:
     assert guard.main([*args, *flags]) == 1
 
 
-def test_version_check_reads_the_source_without_importing_it(tmp_path: Path) -> None:
+def test_version_check_reads_source_without_importing_it(tmp_path: Path) -> None:
     """``__version__`` is parsed statically, so an unimportable package still answers.
 
     A guard deciding whether a distribution is shippable must not require that
@@ -176,7 +176,7 @@ def test_version_check_reads_the_source_without_importing_it(tmp_path: Path) -> 
     assert guard.check_version("v0.7.0", init).passed
 
 
-def test_version_check_reports_an_unreadable_version(tmp_path: Path) -> None:
+def test_version_check_reports_unreadable_version(tmp_path: Path) -> None:
     """A module assigning no literal ``__version__`` is refused rather than assumed to match."""
     init = tmp_path / "__init__.py"
     init.write_text("__version__ = compute_it()\n", encoding="utf-8")
@@ -187,7 +187,7 @@ def test_version_check_reports_an_unreadable_version(tmp_path: Path) -> None:
     assert "no literal __version__" in result.detail
 
 
-def test_frozen_goldens_check_names_the_freeze_command(tmp_path: Path) -> None:
+def test_frozen_goldens_check_names_freeze_command(tmp_path: Path) -> None:
     """The refusal says which command writes the missing snapshot, so it diagnoses."""
     result = guard.check_frozen_goldens("v0.9.0", tmp_path)
 
@@ -195,7 +195,7 @@ def test_frozen_goldens_check_names_the_freeze_command(tmp_path: Path) -> None:
     assert "make freeze-goldens MINOR=0.9" in result.detail
 
 
-def test_frozen_goldens_check_accepts_a_patch_release_of_a_frozen_minor(tmp_path: Path) -> None:
+def test_frozen_goldens_check_accepts_patch_release_of_frozen_minor(tmp_path: Path) -> None:
     """A patch tag reuses its minor's snapshot: 0.7.1 ships against goldens/frozen/0.7."""
     (tmp_path / "0.7").mkdir()
     (tmp_path / "0.7" / "optim_toy.json").write_text("{}", encoding="utf-8")
@@ -203,7 +203,7 @@ def test_frozen_goldens_check_accepts_a_patch_release_of_a_frozen_minor(tmp_path
     assert guard.check_frozen_goldens("v0.7.1", tmp_path).passed
 
 
-def test_adr_002_refusal_names_the_policy() -> None:
+def test_adr_002_refusal_names_policy() -> None:
     """The 1.x refusal detail cites ADR-002's perpetual 0.x train, hard-coded."""
     result = guard.check_tag("v1.4.2")
     assert not result.passed
@@ -263,7 +263,7 @@ def _write_manifest(tmp_path: Path, runtime: str, dev: str = "") -> Path:
     return path
 
 
-def test_group_only_dependency_is_refused(tmp_path: Path) -> None:
+def test_group_only_dependency_refused(tmp_path: Path) -> None:
     """A module whose distribution is declared only in a group refuses the tag.
 
     This is WP-159's own defect, stated as a test: `fuse-augmentations` sat in the
@@ -289,7 +289,7 @@ def test_runtime_declared_dependency_passes(tmp_path: Path) -> None:
     assert guard.check_dependency_tiers(manifest, root, {"helper": ["helper-lib"]}).passed
 
 
-def test_import_with_no_installed_distribution_is_refused(tmp_path: Path) -> None:
+def test_import_with_no_installed_distribution_refused(tmp_path: Path) -> None:
     """An import no distribution provides is reported, never silently accepted.
 
     A guard that reads "unknown" as "fine" is the failure mode this check closes.
@@ -311,7 +311,7 @@ def test_stdlib_and_relative_imports_need_no_declaration(tmp_path: Path) -> None
     assert guard.check_dependency_tiers(manifest, root, {}).passed
 
 
-def test_conditional_import_is_still_an_import(tmp_path: Path) -> None:
+def test_conditional_import_still_import(tmp_path: Path) -> None:
     """An import inside a function or a branch is one the installed package can run.
 
     Walking the module preamble alone would miss it, and a lazily imported
@@ -324,7 +324,7 @@ def test_conditional_import_is_still_an_import(tmp_path: Path) -> None:
     assert not guard.check_dependency_tiers(manifest, root, {"helper": ["helper-lib"]}).passed
 
 
-def test_cli_refuses_a_tag_whose_package_imports_an_undeclared_module(tmp_path: Path) -> None:
+def test_cli_refuses_tag_whose_package_imports_undeclared_module(tmp_path: Path) -> None:
     """The check is wired into the CLI, not merely importable from it."""
     changelog = _write_changelog(tmp_path, "0.1.0")
     manifest = _write_manifest(tmp_path, "")
@@ -366,7 +366,7 @@ def _gate_receipt_cmd(receipt: Path) -> str:
     return f"printf 'ran\\n' >> '{receipt}'"
 
 
-def test_metadata_only_leaves_the_gate_command_unrun(tmp_path: Path) -> None:
+def test_metadata_only_leaves_gate_command_unrun(tmp_path: Path) -> None:
     """``--metadata-only`` never launches the gate command at all.
 
     This is the release-recursion defect stated as a test. The guard's default gate
@@ -386,7 +386,7 @@ def test_metadata_only_leaves_the_gate_command_unrun(tmp_path: Path) -> None:
     assert not receipt.exists()
 
 
-def test_a_certifying_run_invokes_the_gate_exactly_once(tmp_path: Path) -> None:
+def test_certifying_run_invokes_gate_exactly_once(tmp_path: Path) -> None:
     """Without the flag the gate runs, and runs a single time.
 
     The other half of the acceptance check, and the reason the receipt counts lines
@@ -402,7 +402,7 @@ def test_a_certifying_run_invokes_the_gate_exactly_once(tmp_path: Path) -> None:
     assert receipt.read_text(encoding="utf-8").splitlines() == ["ran"]
 
 
-def test_metadata_only_still_refuses_a_changelog_that_does_not_name_the_tag(tmp_path: Path) -> None:
+def test_metadata_only_still_refuses_changelog_not_name_tag(tmp_path: Path) -> None:
     """The reduced mode is not a reduced standard: malformed metadata is refused as before.
 
     An escape hatch would be a mode that accepts what the full run refuses. This one
@@ -415,7 +415,7 @@ def test_metadata_only_still_refuses_a_changelog_that_does_not_name_the_tag(tmp_
     assert guard.main([*args, *_release_flags(tmp_path, "0.1.0")]) == 1
 
 
-def test_metadata_only_verdict_refuses_to_call_the_tag_shippable(tmp_path, capsys) -> None:
+def test_metadata_only_verdict_refuses_to_call_tag_shippable(tmp_path, capsys) -> None:
     """A passing metadata run reports that the gate did not run, not that the tag may ship.
 
     The verdict line is the whole of what a reader of hook output sees, and the gate
@@ -471,7 +471,7 @@ def _release_steps() -> list[dict]:
     return _release_workflow()["jobs"]["release"]["steps"]
 
 
-def test_the_pre_commit_hook_asks_the_guard_for_metadata_only(tmp_path: Path) -> None:
+def test_pre_commit_hook_asks_guard_for_metadata_only(tmp_path: Path) -> None:
     """The committed hook entry carries ``--metadata-only``, which is what breaks the cycle.
 
     Asserted against the file rather than described in a comment because the defect
@@ -483,7 +483,7 @@ def test_the_pre_commit_hook_asks_the_guard_for_metadata_only(tmp_path: Path) ->
     assert "--metadata-only" in _local_hook("release-guard")["entry"]
 
 
-def test_exactly_one_release_workflow_step_certifies_a_tag_push() -> None:
+def test_exactly_one_release_workflow_step_certifies_tag_push() -> None:
     """release.yml runs the full guard once, on a tag push, and the rehearsal never certifies.
 
     The counterpart to the hook assertion above: the mode split is only safe while
@@ -498,7 +498,7 @@ def test_exactly_one_release_workflow_step_certifies_a_tag_push() -> None:
     assert certifying[0]["if"] == "github.event_name == 'push'"
 
 
-def test_the_release_workflow_is_runnable_by_hand_before_any_tag_exists() -> None:
+def test_release_workflow_runnable_by_hand_before_any_tag_exists() -> None:
     """A ``workflow_dispatch`` trigger takes the tag to rehearse against.
 
     Six releases shipped with zero tags, so the guard, the README rewrite and the
@@ -510,7 +510,7 @@ def test_the_release_workflow_is_runnable_by_hand_before_any_tag_exists() -> Non
     assert dispatch["inputs"]["tag"]["required"] is True
 
 
-def test_no_release_step_interpolates_a_workflow_context_into_shell_source() -> None:
+def test_no_release_step_interpolates_workflow_context_into_shell_source() -> None:
     """Every context value reaches a ``run:`` script through the environment instead.
 
     ``git check-ref-format`` permits ``;``, ``$``, backticks and parentheses in a tag

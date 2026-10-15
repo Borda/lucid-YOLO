@@ -120,7 +120,7 @@ def test_center_inside_filter_excludes_outside_anchor() -> None:
     assert torch.equal(out.gt_index[0], torch.tensor([0, -1]))
 
 
-def test_zero_gt_image_is_all_background() -> None:
+def test_zero_gt_image_all_background() -> None:
     """An image with no ground truths yields empty fg_mask and finite weights."""
     points = torch.zeros(4, 2)
     scores = torch.zeros(1, 4, 1)
@@ -148,7 +148,7 @@ def test_all_masked_gts_give_no_nan_weights() -> None:
     assert (out.align_weights == 0).all()
 
 
-def test_padded_gt_is_never_assigned() -> None:
+def test_padded_gt_never_assigned() -> None:
     """A padded GT (gt_mask False) attracts no anchors even with a real box."""
     points, _ = make_anchor_points([(4, 4)], [4])
     scores = torch.zeros(1, 16, 2)
@@ -210,7 +210,7 @@ def test_conflict_resolution_assigns_highest_t() -> None:
         pytest.param(6, id="k-above-c-below-anchor-count"),
     ],
 )
-def test_all_zero_metric_still_keeps_min_k_c_of_the_gts_own_candidates(topk: int) -> None:
+def test_all_zero_metric_still_keeps_min_k_c_of_gts_own_candidates(topk: int) -> None:
     """A ground truth with an all-zero alignment metric keeps ``min(k, c)`` of its candidates.
 
     This is the state the head is in at initialization: ``decode_ltrb`` applies no
@@ -311,7 +311,7 @@ def item_calls() -> Iterator[list[str]]:
         pytest.param("beta", float("inf"), id="beta-inf"),
     ],
 )
-def test_hyperparameter_values_that_disable_a_safeguard_are_rejected(parameter: str, value: float) -> None:
+def test_hyperparameter_values_disable_safeguard_rejected(parameter: str, value: float) -> None:
     """``alpha``, ``beta`` and ``eps`` are validated at construction, naming the parameter.
 
     Each of the three exists to keep the alignment metric well-behaved, and each
@@ -326,7 +326,7 @@ def test_hyperparameter_values_that_disable_a_safeguard_are_rejected(parameter: 
         TaskAlignedAssigner(topk=3, **{parameter: value})
 
 
-def test_zero_exponents_are_accepted() -> None:
+def test_zero_exponents_accepted() -> None:
     """``alpha = 0`` and ``beta = 0`` construct, since dropping a factor is a coherent request.
 
     The validation rejects values that disable a safeguard, not every unusual one.
@@ -347,9 +347,7 @@ def test_zero_exponents_are_accepted() -> None:
         pytest.param([[0, -3]], [[True, True]], r"^gt_labels must be in \[0, 2\)", id="real-label-negative"),
     ],
 )
-def test_out_of_range_labels_are_rejected_at_entry(
-    labels: list[list[int]], mask: list[list[bool]], expected: str
-) -> None:
+def test_out_of_range_labels_rejected_at_entry(labels: list[list[int]], mask: list[list[bool]], expected: str) -> None:
     """A label the score gather cannot honour raises at entry, naming the class bound.
 
     The gather in ``_alignment_metric`` indexes the predicted scores by the ground
@@ -370,7 +368,7 @@ def test_out_of_range_labels_are_rejected_at_entry(
         TaskAlignedAssigner(topk=1)(scores, boxes, points, gt_boxes, torch.tensor(labels), torch.tensor(mask))
 
 
-def test_negative_label_at_a_padding_slot_is_accepted() -> None:
+def test_negative_label_at_padding_slot_accepted() -> None:
     """A padding slot may carry a negative label, which the documented clamp neutralizes.
 
     The collate is free to fill unused ground-truth slots with a background sentinel,

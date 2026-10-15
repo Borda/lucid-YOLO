@@ -191,7 +191,7 @@ def _elongated_sweep(aspect: float, count: int = 1024, scale: float = 1024.0) ->
 
 
 @pytest.mark.parametrize(("pred", "target"), _PAIRS)
-def test_matches_numerical_integration_of_the_definition(pred: list[float], target: list[float]) -> None:
+def test_matches_numerical_integration_of_definition(pred: list[float], target: list[float]) -> None:
     """``exp(-B_D)`` equals the numerically integrated Bhattacharyya coefficient.
 
     Relative tolerance 1e-9, which is loose by five orders: the measured agreement is
@@ -225,7 +225,7 @@ def test_matches_literal_transcription_of_r17(pred: list[float], target: list[fl
 
 @pytest.mark.parametrize("theta", _ANGLES)
 @pytest.mark.parametrize("aspect", [1.0, 1.5, 10.0, 200.0])
-def test_a_box_against_itself_scores_exactly_one(theta: float, aspect: float) -> None:
+def test_box_against_itself_scores_exactly_one(theta: float, aspect: float) -> None:
     """ProbIoU is exactly 1 and both losses exactly 0 for a box compared with itself.
 
     Bit-exact, not to tolerance: every squared difference in the implementation vanishes
@@ -239,7 +239,7 @@ def test_a_box_against_itself_scores_exactly_one(theta: float, aspect: float) ->
 
 
 @pytest.mark.parametrize(("pred", "target"), _PAIRS)
-def test_symmetric_in_its_two_arguments(pred: list[float], target: list[float]) -> None:
+def test_symmetric_in_two_arguments(pred: list[float], target: list[float]) -> None:
     """``B_D(p, q)`` equals ``B_D(q, p)``: a distance, not a directed penalty."""
     pred_t, target_t = _pair(pred, target)
 
@@ -281,7 +281,7 @@ def test_probiou_decays_monotonically_with_angle_difference() -> None:
 
 
 @pytest.mark.parametrize(("pred", "target"), _PAIRS[:3] + _PAIRS[4:])
-def test_the_two_losses_are_one_quantity(pred: list[float], target: list[float]) -> None:
+def test_two_losses_one_quantity(pred: list[float], target: list[float]) -> None:
     """``L2 == -ln(1 - L1^2)``: R17's two losses are two forms of the same distance.
 
     Float64, and ``log1p`` on the test side, because ``1 - L1^2`` cancels catastrophically
@@ -331,7 +331,7 @@ def test_bhattacharyya_gradient_vanishes_only_at_coincidence() -> None:
     assert far.grad is not None and torch.isfinite(far.grad).all() and (far.grad[0, :2] != 0).all()
 
 
-def test_hellinger_gradient_at_coincidence_is_zero_not_nan() -> None:
+def test_hellinger_gradient_at_coincidence_zero_not_nan() -> None:
     """A coincident pair backpropagates zeros through ``L1``, not the ``sqrt``'s ``NaN``.
 
     ``d(sqrt(u))/du`` is infinite at ``u = 0`` and ``dB_D/dbox`` is zero there, so an
@@ -386,7 +386,7 @@ def test_clamped_sides_take_no_gradient() -> None:
 
 
 @pytest.mark.parametrize(("pred", "target"), _PAIRS)
-def test_invariant_under_the_two_canonical_moves(pred: list[float], target: list[float]) -> None:
+def test_invariant_under_two_canonical_moves(pred: list[float], target: list[float]) -> None:
     """``theta + pi`` and the ``(w, h)`` swap with ``theta + pi/2`` describe one rectangle.
 
     Both moves preserve WP-055's rectangle, and R1 sec. 3.4.3 adopts the long-edge range
@@ -408,7 +408,7 @@ def test_invariant_under_the_two_canonical_moves(pred: list[float], target: list
 
 
 @pytest.mark.parametrize("aspect", [1.0, 10.0, 100.0, 1000.0])
-def test_float32_accuracy_is_aspect_ratio_independent(aspect: float) -> None:
+def test_float32_accuracy_aspect_ratio_independent(aspect: float) -> None:
     """Float32 stays within 1e-5 relative of float64 truth from 1:1 to 1000:1.
 
     The property the cancellation-free identities exist for: measured 1.7e-6 to 2.9e-6
@@ -440,7 +440,7 @@ def test_float32_survives_thousand_to_one_elongation() -> None:
     assert torch.all(implemented_error < 1e-5)
 
 
-def test_float32_holds_in_the_converged_regime() -> None:
+def test_float32_holds_in_converged_regime() -> None:
     """Near-coincident boxes keep their Hellinger loss accurate in float32.
 
     The regime a regression loss spends its training in, and the one the literal form
@@ -505,7 +505,7 @@ def test_wrong_trailing_dimension_raises(shape: tuple[int, ...]) -> None:
         probiou_bhattacharyya_loss(good, torch.zeros(shape))
 
 
-def test_extra_leading_dimensions_are_accepted() -> None:
+def test_extra_leading_dimensions_accepted() -> None:
     """The loss takes any leading shape — the guard asserts the trailing five and nothing else.
 
     Pins the divergence from :func:`lucid_yolo.data.rotated_geom` deliberately (WP-091e):
@@ -521,7 +521,7 @@ def test_extra_leading_dimensions_are_accepted() -> None:
         canonicalize(boxes)
 
 
-def test_scores_stay_in_range_over_a_random_sweep() -> None:
+def test_scores_stay_in_range_over_random_sweep() -> None:
     """ProbIoU stays in [0, 1] and B_D stays non-negative for arbitrary pairs."""
     pred = torch.rand(2048, 5) * torch.tensor([200.0, 200.0, 50.0, 50.0, math.pi]) + torch.tensor(
         [0.0, 0.0, 0.1, 0.1, -math.pi / 4]
@@ -563,7 +563,7 @@ class TestHalfPrecision:
     COINCIDENT = (3.0, 4.0, 9.0, 2.0, 0.4)
 
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-    def test_a_degenerate_pair_stays_finite_in_value_and_gradient(self, dtype: torch.dtype) -> None:
+    def test_degenerate_pair_stays_finite_in_value_and_gradient(self, dtype: torch.dtype) -> None:
         """``B_D`` of a finite degenerate pair is finite, and so are its gradients.
 
         In float16 the numerator ``(w1 h1 - w2 h2)^2`` reaches ~3.6e3 over a
@@ -580,7 +580,7 @@ class TestHalfPrecision:
         assert pred.grad is not None and torch.isfinite(pred.grad).all()
 
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-    def test_a_degenerate_pair_agrees_with_the_float32_evaluation(self, dtype: torch.dtype) -> None:
+    def test_degenerate_pair_agrees_with_float32_evaluation(self, dtype: torch.dtype) -> None:
         """The finite value is the *right* one, not merely a number that fits the dtype."""
         reference = probiou_bhattacharyya_loss(torch.tensor([self.DEGENERATE]), torch.tensor([self.ORDINARY]))
         low = probiou_bhattacharyya_loss(
@@ -590,7 +590,7 @@ class TestHalfPrecision:
         assert float(low) == pytest.approx(float(reference), rel=1e-2)
 
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-    def test_a_coincident_pair_takes_zero_gradient_not_nan(self, dtype: torch.dtype) -> None:
+    def test_coincident_pair_takes_zero_gradient_not_nan(self, dtype: torch.dtype) -> None:
         """The Hellinger branch's own guard survives the narrow dtype.
 
         ``_RADICAND_FLOOR`` exists to keep a coincident pair differentiable; at
@@ -609,7 +609,7 @@ class TestHalfPrecision:
         assert torch.equal(pred.grad, torch.zeros_like(pred.grad))
 
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-    def test_both_losses_return_the_callers_dtype(self, dtype: torch.dtype) -> None:
+    def test_both_losses_return_callers_dtype(self, dtype: torch.dtype) -> None:
         """The promotion is internal: what comes back is what the caller passed in."""
         pred = torch.tensor([self.COINCIDENT], dtype=dtype)
         target = torch.tensor([self.ORDINARY], dtype=dtype)
@@ -630,7 +630,7 @@ class TestHalfPrecision:
         assert torch.isfinite(pred.grad).all()
         assert float(pred.grad.abs().sum()) > 0.0
 
-    def test_float32_is_untouched_by_the_promotion(self) -> None:
+    def test_float32_untouched_by_promotion(self) -> None:
         """Float32 and float64 take an identity cast, so no landed value moves.
 
         The property that bounds this change's blast radius: the oriented training
@@ -685,7 +685,7 @@ class TestSideFloorValidation:
     ]
 
     @pytest.mark.parametrize("bad", [0.0, -1e-4, math.nan, math.inf, -math.inf])
-    def test_a_disabling_min_side_is_refused_by_name(self, bad: float) -> None:
+    def test_disabling_min_side_refused_by_name(self, bad: float) -> None:
         """Zero, negative and non-finite floors all raise, naming the parameter."""
         box = torch.tensor([[3.0, 4.0, 9.0, 2.0, 0.4]])
 
@@ -693,7 +693,7 @@ class TestSideFloorValidation:
             with pytest.raises(ValueError, match="min_side must be finite and > 0"):
                 loss(box, box, min_side=bad)
 
-    def test_the_value_a_zero_floor_used_to_produce_is_what_is_being_refused(self) -> None:
+    def test_value_zero_floor_used_to_produce_what_being_refused(self) -> None:
         """A degenerate pair under a tighter-but-valid floor is finite; the floor is load-bearing."""
         collapsed = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0]])
         target = torch.tensor([[5.0, 1.0, 7.0, 3.0, -0.2]])
@@ -702,7 +702,7 @@ class TestSideFloorValidation:
 
         assert bool(torch.isfinite(distance).all())
 
-    def test_a_smaller_working_floor_is_accepted(self) -> None:
+    def test_smaller_working_floor_accepted(self) -> None:
         """The check refuses only the disabling values, not an unusual but usable floor."""
         box = torch.tensor([[3.0, 4.0, 9.0, 2.0, 0.4]])
 

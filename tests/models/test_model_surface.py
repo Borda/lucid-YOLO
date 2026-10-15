@@ -40,7 +40,7 @@ class TestPackageExports:
     """What ``lucid_yolo.models`` re-exports from ``lucid_yolo.models.heads``."""
 
     @pytest.mark.parametrize("name", [pytest.param(n, id=n) for n in _TASK_DECODERS])
-    def test_every_task_decoder_is_importable_from_the_package(self, name: str) -> None:
+    def test_every_task_decoder_importable_from_package(self, name: str) -> None:
         """Each task's decoder is reachable from ``lucid_yolo.models``, not only from ``.heads``.
 
         ``decode_keypoints`` was the one that was not. Its three siblings were imported
@@ -56,7 +56,7 @@ class TestPackageExports:
 class TestVariantRegistry:
     """The compound-scaling table's readability and its immutability."""
 
-    def test_reading_a_row_is_unchanged(self) -> None:
+    def test_reading_row_unchanged(self) -> None:
         """Subscript, membership and iteration all still work on the exported table.
 
         The immutability below is only worth having if it costs nothing to read, and the
@@ -67,7 +67,7 @@ class TestVariantRegistry:
         assert "x" in VARIANTS
         assert list(VARIANTS) == ["n", "s", "m", "l", "x"]
 
-    def test_a_row_cannot_be_rebound_through_the_exported_name(self) -> None:
+    def test_row_cannot_be_rebound_through_exported_name(self) -> None:
         """Assigning into ``VARIANTS`` raises rather than redefining a published variant.
 
         The registry module calls itself "the one place the multipliers live", and while
@@ -79,7 +79,7 @@ class TestVariantRegistry:
         with pytest.raises(TypeError):
             VARIANTS["n"] = ScaleSpec(depth=9.0, width=9.0, max_channels=9)  # type: ignore[index]
 
-    def test_a_new_variant_cannot_be_added_through_the_exported_name(self) -> None:
+    def test_new_variant_cannot_be_added_through_exported_name(self) -> None:
         """Inserting an unknown key raises too, so the table cannot grow a row at runtime.
 
         The rebinding case above covers overwriting a published row; this covers the
@@ -93,7 +93,7 @@ class TestVariantRegistry:
 class TestKeypointHyperparameterContract:
     """``DetectionLitModule``'s two-directional gate on ``num_keypoints``."""
 
-    def test_a_point_count_is_refused_for_a_task_with_no_point_stem(self) -> None:
+    def test_point_count_refused_for_task_with_no_point_stem(self) -> None:
         """``num_keypoints`` on a non-keypoint task raises instead of being stored and ignored.
 
         The constructor already refused the missing case -- ``task='keypoints'`` without
@@ -111,7 +111,7 @@ class TestKeypointHyperparameterContract:
                 num_keypoints=17,
             )
 
-    def test_the_keypoints_task_still_requires_a_point_count(self) -> None:
+    def test_keypoints_task_still_requires_point_count(self) -> None:
         """The pre-existing missing-count refusal is untouched by the added one.
 
         Both directions are errors and they must stay distinguishable: this one says the
@@ -126,7 +126,7 @@ class TestKeypointHyperparameterContract:
                 task="keypoints",
             )
 
-    def test_the_keypoints_task_accepts_its_own_point_count(self) -> None:
+    def test_keypoints_task_accepts_own_point_count(self) -> None:
         """The normal keypoint construction is unaffected -- the gate rejects only the mismatch.
 
         Without this the two refusals above would pass against a constructor that refused

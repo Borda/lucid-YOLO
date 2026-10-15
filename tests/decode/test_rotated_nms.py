@@ -193,7 +193,7 @@ class TestRotatedSuppression:
         assert survivors.shape[0] == 2
         assert survivors[:, 4].tolist() == pytest.approx([0.7, -0.7])
 
-    def test_the_axis_aligned_decoder_deletes_one_of_that_crossing_pair(self) -> None:
+    def test_axis_aligned_decoder_deletes_one_of_crossing_pair(self) -> None:
         """The upright decoder, on the very same plant, keeps one box where this one keeps two.
 
         The contrast that makes the previous test's claim executable rather than argued.
@@ -212,7 +212,7 @@ class TestRotatedSuppression:
         assert int((upright[0, :, 4] > 0.0).sum()) == 1
         assert int((rotated[0, :, 5] > 0.0).sum()) == 2
 
-    def test_a_same_class_duplicate_collapses_to_one(self) -> None:
+    def test_same_class_duplicate_collapses_to_one(self) -> None:
         """Two identical rotated boxes of one class leave exactly one survivor, the higher-scoring.
 
         The suppression half of the contract, and the mirror of the axis-aligned path's
@@ -230,7 +230,7 @@ class TestRotatedSuppression:
         assert int(survivors[0, 6]) == 1
         assert float(survivors[0, 5]) == pytest.approx(torch.sigmoid(torch.tensor(6.0)).item())
 
-    def test_an_overlapping_pair_of_different_classes_both_survive(self) -> None:
+    def test_overlapping_pair_of_different_classes_both_survive(self) -> None:
         """The same identical-box pair survives intact when the two carry different labels.
 
         Class-wise suppression, on the geometry that collapses within one class — so the
@@ -250,7 +250,7 @@ class TestRotatedSuppression:
         ("iou_threshold", "expected"),
         [pytest.param(0.7, 2, id="above-the-overlap"), pytest.param(0.5, 1, id="below-the-overlap")],
     )
-    def test_the_threshold_decides_a_partial_overlap(self, iou_threshold: float, expected: int) -> None:
+    def test_threshold_decides_partial_overlap(self, iou_threshold: float, expected: int) -> None:
         """A pair overlapping at 0.667 survives at threshold 0.7 and collapses at 0.5.
 
         Proof that the threshold is consulted rather than effectively hard-coded at an
@@ -273,7 +273,7 @@ class TestRotatedSuppression:
 class TestOutputContract:
     """The A45 batch shape, ordering and padding this decoder promises its consumers."""
 
-    def test_the_batch_is_the_fixed_size_a45_shape_with_zero_padding(self) -> None:
+    def test_batch_fixed_size_a45_shape_with_zero_padding(self) -> None:
         """Output is ``(B, max_det, 7)`` with score-zero padding rows after the survivors.
 
         The contract every consumer downstream relies on:
@@ -289,7 +289,7 @@ class TestOutputContract:
         assert detections.shape == (1, 5, 7)
         assert torch.equal(detections[0, 2:], torch.zeros(3, 7))
 
-    def test_the_score_column_is_non_increasing(self) -> None:
+    def test_score_column_non_increasing(self) -> None:
         """Survivors come out in descending score order, padding included.
 
         Greedy suppression keeps boxes in the order it visits them, which is the score
@@ -304,7 +304,7 @@ class TestOutputContract:
         scores = detections[0, :, 5]
         assert torch.all(scores[:-1] >= scores[1:])
 
-    def test_nothing_above_the_threshold_is_all_padding(self) -> None:
+    def test_nothing_above_threshold_all_padding(self) -> None:
         """An image whose every anchor is below the confidence threshold decodes to zeros.
 
         The degenerate input the fixed-size contract exists to absorb. Suppression never
@@ -318,7 +318,7 @@ class TestOutputContract:
         assert detections.shape == (1, 4, 7)
         assert torch.equal(detections, torch.zeros(1, 4, 7))
 
-    def test_each_image_of_a_batch_is_decoded_on_its_own(self) -> None:
+    def test_each_image_of_batch_decoded_on_own(self) -> None:
         """Two images decode independently: a duplicate in one does not suppress the other's box.
 
         Suppression is per image by definition, and the batch axis is the one place that
@@ -337,7 +337,7 @@ class TestOutputContract:
         assert int((detections[0, :, 5] > 0.0).sum()) == 1
         assert int((detections[1, :, 5] > 0.0).sum()) == 1
 
-    def test_survivors_are_canonical_however_the_head_stated_them(self) -> None:
+    def test_survivors_canonical_however_head_stated_them(self) -> None:
         """A wild raw angle and short-edge-first extents both come out canonical (A23).
 
         The decoder inherits canonicalization from
@@ -356,7 +356,7 @@ class TestOutputContract:
         assert torch.all(survivors[:, 2] >= survivors[:, 3])  # long edge first
         assert torch.all((survivors[:, 4] >= _THETA_LOW) & (survivors[:, 4] < _THETA_HIGH))
 
-    def test_decoding_is_deterministic(self) -> None:
+    def test_decoding_deterministic(self) -> None:
         """The same planted scene decodes to the same tensor twice, bit for bit.
 
         Greedy suppression is order-sensitive, and the order comes from a sort over scores
@@ -376,7 +376,7 @@ class TestOutputContract:
 class TestRegisteredThreshold:
     """Where the suppression threshold comes from."""
 
-    def test_the_default_is_the_registered_constant(self) -> None:
+    def test_default_registered_constant(self) -> None:
         """The decoder's default IoU threshold is the module constant, not a repeated literal.
 
         The work package's own definition of done: the threshold is an assumption on the
@@ -403,7 +403,7 @@ class TestNonFiniteRowsAreDropped:
     VALID_BOX = (32.0, 32.0, 20.0, 4.0, 0.3)
 
     @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
-    def test_a_non_finite_angle_is_not_emitted(self, bad: float) -> None:
+    def test_non_finite_angle_not_emitted(self, bad: float) -> None:
         """A box whose ``theta`` is non-finite is dropped, and the valid box beside it stays.
 
         The realistic entry path: an angle head that has diverged emits ``NaN``
@@ -419,7 +419,7 @@ class TestNonFiniteRowsAreDropped:
         assert bool(torch.isfinite(survivors).all())
         assert int(survivors[0, 6]) == 0  # the valid box's class, not the poisoned one's
 
-    def test_a_non_finite_extent_is_not_emitted(self) -> None:
+    def test_non_finite_extent_not_emitted(self) -> None:
         """A box whose decoded ``w``/``h`` is non-finite is dropped the same way.
 
         Reaches the decoder through the ltrb distances rather than the angle, so
@@ -436,7 +436,7 @@ class TestNonFiniteRowsAreDropped:
         assert bool(torch.isfinite(survivors).all())
         assert int(survivors[0, 6]) == 0
 
-    def test_a_non_finite_row_does_not_shield_a_duplicate(self) -> None:
+    def test_non_finite_row_not_shield_duplicate(self) -> None:
         """Dropping the bad row leaves ordinary suppression intact behind it.
 
         Two same-class copies of one bar sit either side of a ``NaN`` row in score
@@ -455,7 +455,7 @@ class TestNonFiniteRowsAreDropped:
         assert survivors.shape[0] == 1
         assert bool(torch.isfinite(survivors).all())
 
-    def test_an_all_non_finite_image_yields_only_padding(self) -> None:
+    def test_all_non_finite_image_yields_only_padding(self) -> None:
         """Every row poisoned leaves an all-zero padded output rather than a crash."""
         cls_logits, raw_ltrb, angles, points, strides = _plant([(32.0, 32.0, 20.0, 4.0, float("nan"))], [6.0], [0])
 
@@ -465,7 +465,7 @@ class TestNonFiniteRowsAreDropped:
         assert torch.equal(detections, torch.zeros_like(detections))
 
 
-def test_empty_batch_decodes_to_an_empty_result() -> None:
+def test_empty_batch_decodes_to_empty_result() -> None:
     """``B = 0`` returns a zero-row A45 batch rather than raising inside ``torch.stack``.
 
     The oriented decoder stacks one result per image, and ``torch.stack`` rejects an
@@ -527,7 +527,7 @@ class TestScreenedSuppression:
 
     @pytest.mark.parametrize("num_classes", [1, 3, 15])
     @pytest.mark.parametrize("seed", [0, 1, 2])
-    def test_screening_reproduces_the_unscreened_survivors(self, num_classes: int, seed: int) -> None:
+    def test_screening_reproduces_unscreened_survivors(self, num_classes: int, seed: int) -> None:
         """Screened and unscreened suppression return the same indices, in the same order.
 
         The screen drops two kinds of pair before the polygon intersection: one whose
@@ -544,7 +544,7 @@ class TestScreenedSuppression:
 
         assert torch.equal(screened, _unscreened_suppress(decoder, rboxes, scores, labels))
 
-    def test_the_reach_bound_rejects_only_exactly_disjoint_pairs(self) -> None:
+    def test_reach_bound_rejects_only_exactly_disjoint_pairs(self) -> None:
         """Every pair the reach test drops has an exact rotated IoU of ``0.0``.
 
         The class half of the screen is a restatement of the rule, but the reach half is

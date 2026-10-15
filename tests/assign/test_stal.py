@@ -145,7 +145,7 @@ def test_targets_unchanged() -> None:
         pytest.param("s_ref", float("inf"), id="s-ref-inf"),
     ],
 )
-def test_surrogate_sizes_that_disable_the_inflation_are_rejected(parameter: str, value: float) -> None:
+def test_surrogate_sizes_disable_inflation_rejected(parameter: str, value: float) -> None:
     """``s_min`` and ``s_ref`` are validated at construction, naming the parameter.
 
     The surrogate is the whole of STAL, and both of its sizes accept values that switch
@@ -162,7 +162,7 @@ def test_surrogate_sizes_that_disable_the_inflation_are_rejected(parameter: str,
         SmallTargetAssigner(topk=4, **{parameter: value})
 
 
-def test_a_replacement_below_the_threshold_is_rejected() -> None:
+def test_replacement_below_threshold_rejected() -> None:
     """``s_ref < s_min`` raises, because a replacement under the threshold shrinks the box.
 
     A dimension lying between the two sizes is replaced by a *smaller* one, so the
@@ -175,7 +175,7 @@ def test_a_replacement_below_the_threshold_is_rejected() -> None:
         SmallTargetAssigner(topk=4, s_min=8.0, s_ref=4.0)
 
 
-def test_a_replacement_equal_to_the_threshold_is_accepted() -> None:
+def test_replacement_equal_to_threshold_accepted() -> None:
     """``s_ref == s_min`` constructs and still inflates; the boundary is usable, not refused.
 
     The check refuses the values that disable or invert the inflation, not every unusual

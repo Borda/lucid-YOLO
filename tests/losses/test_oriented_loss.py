@@ -121,14 +121,14 @@ class TestFlooredExtentKeepsAGradient:
         return magnitudes[0], magnitudes[1]
 
     @pytest.mark.parametrize(("name", "column"), [("width", 2), ("height", 3)])
-    def test_rl1_is_non_zero_exactly_where_rbox_is_floored(self, name: str, column: int) -> None:
+    def test_rl1_non_zero_exactly_where_rbox_floored(self, name: str, column: int) -> None:
         """The compensating pair, asserted as a pair: one term stops, the other does not."""
         rbox_gradient, rl1_gradient = self._side_gradients(column)
 
         assert rbox_gradient == 0.0, f"ProbIoU is expected to be gradient-dead on a collapsed {name}"
         assert rl1_gradient > 0.0, f"nothing would pull a collapsed {name} back out"
 
-    def test_the_floor_is_what_kills_the_rbox_gradient(self) -> None:
+    def test_floor_what_kills_rbox_gradient(self) -> None:
         """Names the mechanism: a side above the floor still moves the rotated IoU term."""
         target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
         box = torch.tensor([4.0, 4.0, 8.0, 6.0, 0.2])
@@ -140,7 +140,7 @@ class TestFlooredExtentKeepsAGradient:
         assert pred.grad is not None
         assert float(pred.grad[0, 0, 2].abs()) > 0.0
 
-    def test_a_doubly_collapsed_prediction_still_moves(self) -> None:
+    def test_doubly_collapsed_prediction_still_moves(self) -> None:
         """Both extents floored at once — the untrained-head state A50 names — stays trainable."""
         target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
         pred = torch.tensor([4.0, 4.0, 0.0, 0.0, 0.2]).expand(1, 2, 5).clone().requires_grad_(True)
@@ -157,7 +157,7 @@ class TestFlooredExtentKeepsAGradient:
 class TestNormalizer:
     """Both weighted terms divide by the alignment-weight sum floored at one."""
 
-    def test_a_weight_sum_above_one_divides_by_the_sum(self) -> None:
+    def test_weight_sum_above_one_divides_by_sum(self) -> None:
         """Two unit weights halve a term that a single unit weight reports in full."""
         target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
         pred = torch.tensor([5.0, 4.0, 8.0, 6.0, 0.2]).expand(1, 2, 5).clone()
@@ -179,7 +179,7 @@ class TestNormalizer:
 
         assert float(both_positive.rl1) == pytest.approx(float(one_positive.rl1), rel=1e-6)
 
-    def test_below_unit_weight_the_floor_makes_the_term_a_weighted_sum(self) -> None:
+    def test_below_unit_weight_floor_makes_term_weighted_sum(self) -> None:
         """The documented consequence of ``clamp(min=1.0)``: a sparse batch weighs less."""
         target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
         pred = torch.tensor([5.0, 4.0, 8.0, 6.0, 0.2]).expand(1, 2, 5).clone()
@@ -193,12 +193,12 @@ class TestNormalizer:
 class TestFormSelection:
     """The rotated-IoU form is a named lookup with a stated default (A49)."""
 
-    def test_the_default_is_the_bounded_hellinger_form(self) -> None:
+    def test_default_bounded_hellinger_form(self) -> None:
         """A49 selects ``H_D`` so A13's ``box_gain`` transfers without inventing a magnitude."""
         assert DEFAULT_ROTATED_IOU_FORM == "hellinger"
         assert set(ROTATED_IOU_FORMS) == {"hellinger", "bhattacharyya"}
 
-    def test_the_unbounded_form_scores_a_separated_pair_higher(self) -> None:
+    def test_unbounded_form_scores_separated_pair_higher(self) -> None:
         """``B_D`` is unbounded above where ``H_D`` saturates towards one."""
         target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
         pred = torch.tensor([400.0, 400.0, 8.0, 6.0, 0.2]).expand(1, 2, 5).clone()
@@ -211,7 +211,7 @@ class TestFormSelection:
         assert float(unbounded.rbox) > float(bounded.rbox)
         assert float(bounded.rbox) <= 1.0
 
-    def test_an_unknown_form_names_the_alternatives(self) -> None:
+    def test_unknown_form_names_alternatives(self) -> None:
         """The error is actionable rather than a bare ``KeyError``."""
         target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
         pred = target.expand(1, 2, 5).clone()
@@ -225,7 +225,7 @@ class TestFormSelection:
 class TestNoGroundTruth:
     """An empty ground truth gives three exact zeros that still carry gradient."""
 
-    def test_every_term_is_zero_finite_and_connected(self) -> None:
+    def test_every_term_zero_finite_and_connected(self) -> None:
         """``N == 0`` pads to a tensor no ``gather`` can index; the step needs no special case."""
         pred = torch.tensor([4.0, 4.0, 8.0, 6.0, 0.2]).expand(1, 2, 5).clone().requires_grad_(True)
 
@@ -372,7 +372,7 @@ class TestDenseOrientedTermsMatchMaskedReference:
 
         self._assert_agree(dense, oracle)
 
-    def test_all_background_batch_is_zero_and_connected(self) -> None:
+    def test_all_background_batch_zero_and_connected(self) -> None:
         """No positive anywhere gives three exact zeros and finite, all-zero gradients.
 
         The ground truth is padded but every anchor is background, so the masked form

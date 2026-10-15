@@ -74,7 +74,7 @@ class TestConverters:
         assert torch.allclose(rgb_to_hsv(green).flatten(), torch.tensor([1.0 / 3.0, 1.0, 1.0]), atol=1e-6)
         assert torch.allclose(rgb_to_hsv(blue).flatten(), torch.tensor([2.0 / 3.0, 1.0, 1.0]), atol=1e-6)
 
-    def test_greyscale_is_achromatic(self) -> None:
+    def test_greyscale_achromatic(self) -> None:
         """A grey pixel has zero saturation and its value equals the grey level."""
         grey = torch.full((3, 2, 2), 0.4)
         hsv = rgb_to_hsv(grey)
@@ -92,7 +92,7 @@ class TestConverters:
 class TestHSVJitter:
     """HSV jitter perturbs colour only, honouring wrap/clamp and leaving targets alone."""
 
-    def test_zero_gain_is_identity(self) -> None:
+    def test_zero_gain_identity(self) -> None:
         """Zeroed gain ranges reduce to a pure rgb->hsv->rgb round trip (identity)."""
         jitter = HSVJitter(hsv_h=0.0, hsv_s=0.0, hsv_v=0.0, generator=_generator())
         image = torch.rand(3, 16, 16)
@@ -150,7 +150,7 @@ class TestHorizontalFlip:
         assert out.boxes.tolist() == [[3.0, 1.0, 7.0, 3.0]]
         assert flip.last_flipped is True
 
-    def test_the_mirror_axis_is_the_image_column_reversal(self) -> None:
+    def test_mirror_axis_image_column_reversal(self) -> None:
         """The mirror is about ``(W-1)/2``, the axis ``image.flip(-1)`` itself reflects about — not ``W/2``.
 
         ``W-1`` versus ``W`` is a real choice and both appear in the wild, so it is
@@ -173,7 +173,7 @@ class TestHorizontalFlip:
         assert out.boxes[0, 0].item() == float(min(lit))
         assert out.boxes[0, 2].item() == float(max(lit))
 
-    def test_a_box_at_the_canvas_bound_is_re_clipped(self) -> None:
+    def test_box_at_canvas_bound_re_clipped(self) -> None:
         """A box whose ``x2`` sits at the reader's clamp bound ``W`` mirrors to ``x1 = -1`` and is re-clipped.
 
         The two conventions meet here: extents are clamped to ``[0, W]`` (``coco.py``,
@@ -190,7 +190,7 @@ class TestHorizontalFlip:
 
         assert out.boxes.tolist() == [[0.0, 1.0, 5.0, 3.0]]
 
-    def test_double_flip_is_identity(self) -> None:
+    def test_double_flip_identity(self) -> None:
         """Flipping boxes twice returns the original coordinates.
 
         The canvas holds the whole target set here: the involution is a property of the
@@ -241,7 +241,7 @@ class TestHorizontalFlip:
         assert out.keypoints.tolist() == [[[2.0, 3.0], [8.0, 2.0]]]
         assert out.keypoint_vis.tolist() == [[1, 2]]
 
-    def test_mirrored_visibility_flags_follow_their_own_points(self) -> None:
+    def test_mirrored_visibility_flags_follow_own_points(self) -> None:
         """Every flag stays attached to its own point across the mirror and the identity swap.
 
         The coordinate permutation is upstream's and moves coordinates only, so the
@@ -304,7 +304,7 @@ class TestHorizontalFlip:
         out_image, _ = flip(image, Targets.empty())
         assert torch.equal(out_image, image.flip(-1))
 
-    def test_p_zero_is_identity(self) -> None:
+    def test_p_zero_identity(self) -> None:
         """p=0 never flips: image and targets are returned unchanged."""
         flip = HorizontalFlip(p=0.0, generator=_generator())
         image = torch.rand(3, 4, 6)
@@ -314,7 +314,7 @@ class TestHorizontalFlip:
         assert out_targets is targets
         assert flip.last_flipped is False
 
-    def test_mirrored_angle_above_quarter_pi_is_re_canonicalized(self) -> None:
+    def test_mirrored_angle_above_quarter_pi_re_canonicalized(self) -> None:
         """An angle above pi/4 mirrors to pi - theta, inside the range the bare negation left (WP-058)."""
         flip = HorizontalFlip(p=1.0, generator=_generator())
         theta = 3.0 * math.pi / 8.0

@@ -104,13 +104,13 @@ def _l1_term(strides: torch.Tensor | None) -> float:
     return float(out.o2o.l1)
 
 
-def test_converged_boxes_keep_the_l1_term_small() -> None:
+def test_converged_boxes_keep_l1_term_small() -> None:
     """With boxes essentially correct the stride-unit L1 term stays well under one stride (WP-078 guard)."""
     _, _, _, strides, _, _ = _converged_state()
     assert _l1_term(strides) < _MAX_CONVERGED_L1
 
 
-def test_pixel_frame_l1_would_trip_the_scale_guard() -> None:
+def test_pixel_frame_l1_would_trip_scale_guard() -> None:
     """The identical predictions read far larger in the pixel frame — the defect this guard exists for."""
     _, _, _, strides, _, _ = _converged_state()
     assert _l1_term(None) > _l1_term(strides)
@@ -121,7 +121,7 @@ def test_pixel_frame_l1_would_trip_the_scale_guard() -> None:
     "stride",
     [pytest.param(8.0, id="p3"), pytest.param(16.0, id="p4"), pytest.param(32.0, id="p5")],
 )
-def test_l1_term_is_measured_in_stride_units(stride: float) -> None:
+def test_l1_term_measured_in_stride_units(stride: float) -> None:
     """The stride-normalized L1 term scales as 1/stride against the pixel frame (WP-078 guard).
 
     Pins the coordinate frame directly: whatever the predictions happen to be,

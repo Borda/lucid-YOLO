@@ -105,9 +105,7 @@ def _stub_derivation(monkeypatch: pytest.MonkeyPatch, derived: bool | None) -> N
     monkeypatch.setattr(freeze_goldens, "_derives_from_generator", lambda spec: derived)
 
 
-def test_freeze_refuses_a_generator_derived_golden_that_omits_the_flag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_freeze_refuses_generator_derived_golden_omits_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A golden whose producer reaches the dataset generator cannot be frozen by omitting the flag (M-42).
 
     ``freezable`` defaulted to ``True``, so the WP-132 defect only stayed fixed while
@@ -123,7 +121,7 @@ def test_freeze_refuses_a_generator_derived_golden_that_omits_the_flag(
     assert not (tmp_path / "frozen" / "0.9" / "generator.json").exists()
 
 
-def test_freeze_refuses_a_stale_non_freezable_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_freeze_refuses_stale_non_freezable_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A golden declaring ``"freezable": false`` whose producer no longer reaches the generator is refused.
 
     The flag is hand-written in both directions. A producer that stopped rendering
@@ -137,7 +135,7 @@ def test_freeze_refuses_a_stale_non_freezable_flag(tmp_path: Path, monkeypatch: 
         freeze_goldens.freeze(tmp_path, "0.9")
 
 
-def test_freeze_proceeds_when_the_flag_matches_the_producer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_freeze_proceeds_when_flag_matches_producer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A declared flag agreeing with the derived one freezes exactly as before."""
     _write_golden(tmp_path / "pure.json", freezable=True)
     _stub_derivation(monkeypatch, derived=False)
@@ -148,7 +146,7 @@ def test_freeze_proceeds_when_the_flag_matches_the_producer(tmp_path: Path, monk
     assert skipped == []
 
 
-def test_freeze_falls_back_to_the_declared_flag_when_derivation_is_impossible(tmp_path: Path) -> None:
+def test_freeze_falls_back_to_declared_flag_when_derivation_impossible(tmp_path: Path) -> None:
     """A golden with no resolvable producer keeps its declared flag rather than blocking the freeze.
 
     ``freeze_goldens`` reads raw JSON and does not validate the golden schema;

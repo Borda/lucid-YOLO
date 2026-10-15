@@ -140,7 +140,7 @@ class TestDegenerateGradientMagnitude:
     #: ratio produced, so it separates the two regimes without pinning an exact value.
     GRADIENT_BOUND = 1.0e3
 
-    def test_collapsed_box_gradient_is_bounded(self) -> None:
+    def test_collapsed_box_gradient_bounded(self) -> None:
         """A zero-area prediction backpropagates a small gradient, not a 1/eps spike.
 
         The measured regression: against this target, ``[5, 5, 5, 5]`` gave
@@ -156,7 +156,7 @@ class TestDegenerateGradientMagnitude:
         assert torch.isfinite(pred.grad).all()
         assert float(pred.grad.abs().max()) < self.GRADIENT_BOUND
 
-    def test_a_thin_box_does_not_spike_as_height_vanishes(self) -> None:
+    def test_thin_box_not_spike_as_height_vanishes(self) -> None:
         """The bound holds as ``h`` is driven to zero, not only exactly at it.
 
         ``1 / (h + eps)`` grows without bound as ``h`` shrinks, so a test sitting
@@ -173,7 +173,7 @@ class TestDegenerateGradientMagnitude:
         assert torch.isfinite(pred.grad).all()
         assert float(pred.grad.abs().max()) < self.GRADIENT_BOUND
 
-    def test_inverted_box_is_gradient_dead_by_design(self) -> None:
+    def test_inverted_box_gradient_dead_by_design(self) -> None:
         """An inverted box takes exactly zero gradient on the inverted axis.
 
         Documented behaviour rather than an accident (``losses/ciou.py`` module
@@ -190,7 +190,7 @@ class TestDegenerateGradientMagnitude:
         assert float(pred.grad[0, 0]) == 0.0  # dL/dx1
         assert float(pred.grad[0, 2]) == 0.0  # dL/dx2
 
-    def test_a_well_formed_pair_keeps_an_informative_gradient(self) -> None:
+    def test_well_formed_pair_keeps_informative_gradient(self) -> None:
         """The bound above is not satisfied by zeroing everything.
 
         Guards the obvious wrong fix -- clamping the aspect term away entirely --
@@ -231,7 +231,7 @@ class TestAtan2OriginGuard:
 
         return spy
 
-    def test_a_collapsed_prediction_never_hands_atan2_the_origin(self, monkeypatch) -> None:
+    def test_collapsed_prediction_never_hands_atan2_origin(self, monkeypatch) -> None:
         """The pair the module's own doctest produces is substituted before the call."""
         seen: list[tuple[float, float]] = []
         monkeypatch.setattr(torch, "atan2", self._recording_atan2(seen))
@@ -242,7 +242,7 @@ class TestAtan2OriginGuard:
         assert seen, "atan2 was never called; the test no longer exercises the aspect term"
         assert (0.0, 0.0) not in seen
 
-    def test_a_zero_size_target_never_hands_atan2_the_origin(self, monkeypatch) -> None:
+    def test_zero_size_target_never_hands_atan2_origin(self, monkeypatch) -> None:
         """The target side is guarded too: a zero-area ground truth reaches the same term."""
         seen: list[tuple[float, float]] = []
         monkeypatch.setattr(torch, "atan2", self._recording_atan2(seen))
@@ -253,7 +253,7 @@ class TestAtan2OriginGuard:
         assert seen
         assert (0.0, 0.0) not in seen
 
-    def test_an_inverted_prediction_never_hands_atan2_the_origin(self, monkeypatch) -> None:
+    def test_inverted_prediction_never_hands_atan2_origin(self, monkeypatch) -> None:
         """Inverted extents clamp to zero, so they arrive at the aspect term as the origin."""
         seen: list[tuple[float, float]] = []
         monkeypatch.setattr(torch, "atan2", self._recording_atan2(seen))
@@ -264,7 +264,7 @@ class TestAtan2OriginGuard:
         assert seen
         assert (0.0, 0.0) not in seen
 
-    def test_the_guard_is_bit_identical_to_a_bare_atan2_away_from_the_origin(self) -> None:
+    def test_guard_bit_identical_to_bare_atan2_away_from_origin(self) -> None:
         """Value *and* gradient match the unguarded call exactly, not to a tolerance.
 
         This is what makes the guard safe to add to a landed loss: every pair that
@@ -285,7 +285,7 @@ class TestAtan2OriginGuard:
         assert guarded_input.grad is not None and bare_input.grad is not None
         assert torch.equal(guarded_input.grad, bare_input.grad)
 
-    def test_one_zero_side_is_not_the_origin_and_stays_unguarded(self) -> None:
+    def test_one_zero_side_not_origin_and_stays_unguarded(self) -> None:
         """``atan2(w, 0) = pi/2`` is exact and keeps its own gradient; only the pair is special."""
         sides = torch.tensor([[3.0, 0.0], [0.0, 3.0]], requires_grad=True)
 
@@ -296,7 +296,7 @@ class TestAtan2OriginGuard:
         assert sides.grad is not None
         assert float(sides.grad.abs().sum()) > 0.0
 
-    def test_the_origin_itself_stays_finite_in_value_and_gradient(self) -> None:
+    def test_origin_itself_stays_finite_in_value_and_gradient(self) -> None:
         """The behaviour the guard preserves: zero contribution, zero gradient."""
         sides = torch.zeros(1, 2, requires_grad=True)
 
@@ -312,14 +312,14 @@ class TestSafeguardParameterValidation:
     """``eps`` is rejected at the values that disable the guard it exists to be (M-23)."""
 
     @pytest.mark.parametrize("bad", [0.0, -1e-7, float("nan"), float("inf"), float("-inf")])
-    def test_a_disabling_eps_is_refused_by_name(self, bad: float) -> None:
+    def test_disabling_eps_refused_by_name(self, bad: float) -> None:
         """Zero, negative and non-finite epsilons all raise, and the message names the parameter."""
         boxes = torch.tensor([[0.0, 0.0, 2.0, 2.0]])
         for loss in (box_iou_aligned, complete_iou, ciou_loss):
             with pytest.raises(ValueError, match="eps must be finite and > 0"):
                 loss(boxes, boxes, eps=bad)
 
-    def test_a_usable_eps_is_accepted(self) -> None:
+    def test_usable_eps_accepted(self) -> None:
         """The check refuses only the disabling values; a smaller working eps still passes."""
         boxes = torch.tensor([[0.0, 0.0, 2.0, 2.0]])
         assert float(ciou_loss(boxes, boxes, eps=1e-12)) == 0.0
@@ -343,13 +343,13 @@ class TestCoordinateRange:
         return loss, pred.grad
 
     @pytest.mark.parametrize("coordinate", [1.0e5, 1.0e18, 1.0e19])
-    def test_inside_the_documented_range_the_loss_and_gradients_are_finite(self, coordinate: float) -> None:
+    def test_inside_documented_range_loss_and_gradients_finite(self, coordinate: float) -> None:
         """Pixel-frame coordinates and the two decades below the edge all behave."""
         loss, grad = self._loss_and_grad(coordinate)
         assert bool(torch.isfinite(loss).all())
         assert bool(torch.isfinite(grad).all())
 
-    def test_at_the_documented_edge_the_squared_terms_overflow(self) -> None:
+    def test_at_documented_edge_squared_terms_overflow(self) -> None:
         """1e20 is the measured failure the docstring names; it is pinned, not fixed.
 
         Squaring 1e20 gives 1e40 against float32's 3.4e38 ceiling, so the areas and

@@ -127,7 +127,7 @@ def test_known_object_lands_in_original_coordinates(image_file: Path, decoder: s
 
 
 @pytest.mark.parametrize("task", [pytest.param("segment", id="segment"), pytest.param("obb", id="obb")])
-def test_a_non_detect_checkpoint_fails_naming_its_task(image_file: Path, task: str) -> None:
+def test_non_detect_checkpoint_fails_naming_task(image_file: Path, task: str) -> None:
     """Segmentation and oriented checkpoints are refused by name, never run as detectors.
 
     Both build a head whose plain forward returns the same detection output a detector's
@@ -143,7 +143,7 @@ def test_a_non_detect_checkpoint_fails_naming_its_task(image_file: Path, task: s
         predict_image(module, image_file, img_size=IMG_SIZE)
 
 
-def test_the_report_is_written_into_a_directory_that_does_not_exist_yet(
+def test_report_written_into_directory_not_exist_yet(
     tmp_path: Path,
     image_file: Path,
     capsys: pytest.CaptureFixture[str],
@@ -188,7 +188,7 @@ class TestTaskRefusalMessages:
         "handled",
         [pytest.param(task, id=task) for task in ("detect", "segment", "obb", "keypoints")],
     )
-    def test_a_refusal_names_all_three_siblings(self, handled: str) -> None:
+    def test_refusal_names_all_three_siblings(self, handled: str) -> None:
         """Each task's refusal message names the other three entry points, not a subset.
 
         Three of the four messages were written by hand when only three tasks existed and
@@ -205,7 +205,7 @@ class TestTaskRefusalMessages:
         for sibling in siblings:
             assert _TASK_ENTRY_POINTS[sibling][0] in message, f"{sibling}'s entry point is unnamed"
 
-    def test_a_refusal_names_the_task_the_checkpoint_actually_carries(self) -> None:
+    def test_refusal_names_task_checkpoint_actually_carries(self) -> None:
         """The message reports the checkpoint's own task, which is what the caller has to act on.
 
         Naming the siblings is only half of a redirection: the caller also needs to know
@@ -225,7 +225,7 @@ class TestDecoderIndexDtype:
         "decoder",
         [pytest.param("e2e", id="e2e"), pytest.param("nms", id="nms")],
     )
-    def test_anchor_indices_are_long_on_both_paths(self, decoder: str) -> None:
+    def test_anchor_indices_long_on_both_paths(self, decoder: str) -> None:
         """``decode_with_indices`` returns a long tensor whichever path produced it.
 
         Both decoders document a *long* tensor, and both deliver one -- but only the

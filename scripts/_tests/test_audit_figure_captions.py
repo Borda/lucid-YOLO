@@ -7,7 +7,7 @@ the live tree is exercised instead by the pre-commit hook itself each time a
 figure or the reproduction report changes. This file is the functional-core
 check pytest owns; the hook is the lint gate that runs it.
 
-The one exception is ``test_drawn_captions_match_their_source_strings``, kept
+The one exception is ``test_drawn_captions_match_source_strings``, kept
 parametrized over the real committed figures: a regression here means the hook
 itself would fail on the next commit that touches a figure, not just a new one.
 """
@@ -50,7 +50,7 @@ def _load_audit() -> ModuleType:
 audit = _load_audit()
 
 
-def test_check_figures_present_flags_a_missing_figure(tmp_path: Path) -> None:
+def test_check_figures_present_flags_missing_figure(tmp_path: Path) -> None:
     """A figure the report links but that is absent from disk is named as missing."""
     figures = tmp_path / "docs" / "figures"
     figures.mkdir(parents=True)
@@ -64,7 +64,7 @@ def test_check_figures_present_flags_a_missing_figure(tmp_path: Path) -> None:
     assert violations == ["report links missing figures: figures/missing.svg"]
 
 
-def test_check_figures_present_is_empty_when_every_linked_figure_exists(tmp_path: Path) -> None:
+def test_check_figures_present_empty_when_every_linked_figure_exists(tmp_path: Path) -> None:
     """A report linking only figures that exist on disk reports no violation."""
     figures = tmp_path / "docs" / "figures"
     figures.mkdir(parents=True)
@@ -74,7 +74,7 @@ def test_check_figures_present_is_empty_when_every_linked_figure_exists(tmp_path
     assert audit.check_figures_present(tmp_path) == []
 
 
-def test_check_captions_match_flags_a_caption_edited_without_regenerating(tmp_path: Path) -> None:
+def test_check_captions_match_flags_caption_edited_without_regenerating(tmp_path: Path) -> None:
     """A comment claiming text the drawn glyphs don't back up is reported as mismatched."""
     figures = tmp_path / "docs" / "figures"
     figures.mkdir(parents=True)
@@ -90,7 +90,7 @@ def test_check_captions_match_flags_a_caption_edited_without_regenerating(tmp_pa
     assert violations[0].startswith("bad.svg: markup and drawing disagree for")
 
 
-def test_check_captions_match_is_empty_when_the_svg_matches_its_own_render(tmp_path: Path) -> None:
+def test_check_captions_match_empty_when_svg_matches_own_render(tmp_path: Path) -> None:
     """A freshly rendered SVG, saved as-is, agrees with itself on every label."""
     figures = tmp_path / "docs" / "figures"
     figures.mkdir(parents=True)
@@ -105,7 +105,7 @@ def test_check_captions_match_is_empty_when_the_svg_matches_its_own_render(tmp_p
 
 
 @pytest.mark.parametrize("figure", FIGURES, ids=lambda path: path.name)
-def test_drawn_captions_match_their_source_strings(figure: Path) -> None:
+def test_drawn_captions_match_source_strings(figure: Path) -> None:
     """Every label in a committed figure draws the string its own markup claims.
 
     Fails on a figure that was edited as text instead of regenerated, whatever
@@ -120,13 +120,3 @@ def test_drawn_captions_match_their_source_strings(figure: Path) -> None:
     reference = audit._render([label for label, _ in elements])
     mismatched = [label for label, drawn in elements if reference.get(label) != drawn]
     assert not mismatched, f"{figure.name}: markup and drawing disagree for {mismatched}"
-
-
-def test_the_live_report_links_no_missing_figure() -> None:
-    """The real reproduction report the pre-commit hook scans links no missing figure.
-
-    This is the one place ``check_figures_present`` touches the live tree rather
-    than a synthetic one: a regression here means the hook itself would fail on
-    the next commit that touches the report or a figure.
-    """
-    assert audit.check_figures_present(REPO_ROOT) == []

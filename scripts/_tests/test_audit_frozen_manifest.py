@@ -60,11 +60,11 @@ def sealed(tmp_path: Path) -> Path:
 class TestFindViolations:
     """Tests for ``audit_frozen_manifest.find_violations``."""
 
-    def test_is_clean_for_a_sealed_tree(self, sealed: Path) -> None:
+    def test_clean_for_sealed_tree(self, sealed: Path) -> None:
         """A manifest describing the tree exactly reports no violation."""
         assert audit.find_violations(sealed) == []
 
-    def test_flags_a_tampered_golden(self, sealed: Path) -> None:
+    def test_flags_tampered_golden(self, sealed: Path) -> None:
         """Editing a frozen golden's values and tolerances together is reported.
 
         The case the row exists for. ``check_goldens.py`` recomputes the producer and
@@ -80,7 +80,7 @@ class TestFindViolations:
         assert len(violations) == 1
         assert violations[0].startswith("0.7/optim_toy.json: digest ")
 
-    def test_flags_a_frozen_file_no_row_covers(self, sealed: Path) -> None:
+    def test_flags_frozen_file_no_row_covers(self, sealed: Path) -> None:
         """A frozen file added without sealing it is reported rather than admitted.
 
         Without this the manifest would be satisfiable by deleting rows: a new file
@@ -90,13 +90,13 @@ class TestFindViolations:
 
         assert audit.find_violations(sealed) == ["0.7/smuggled.json: frozen file covered by no manifest row"]
 
-    def test_flags_a_row_whose_file_is_gone(self, sealed: Path) -> None:
+    def test_flags_row_whose_file_gone(self, sealed: Path) -> None:
         """Deleting a frozen golden is reported: the release's snapshot is now incomplete."""
         (sealed / "0.6" / "optim_toy.json").unlink()
 
         assert audit.find_violations(sealed) == ["0.6/optim_toy.json: manifest row whose file is gone"]
 
-    def test_flags_a_missing_manifest(self, sealed: Path) -> None:
+    def test_flags_missing_manifest(self, sealed: Path) -> None:
         """A frozen tree with no manifest at all is reported, not treated as trivially sealed."""
         (sealed / writer.MANIFEST_NAME).unlink()
 
@@ -105,7 +105,7 @@ class TestFindViolations:
         assert len(violations) == 1
         assert violations[0].endswith("nothing pins the frozen goldens")
 
-    def test_the_manifest_is_excluded_from_its_own_digest_set(self, sealed: Path) -> None:
+    def test_manifest_excluded_from_own_digest_set(self, sealed: Path) -> None:
         """The manifest does not appear as a row in itself, which would be unsatisfiable."""
         assert writer.MANIFEST_NAME not in writer.read_manifest(sealed)
 
@@ -113,12 +113,12 @@ class TestFindViolations:
 class TestMain:
     """Tests for ``audit_frozen_manifest.main``."""
 
-    def test_exits_zero_on_a_sealed_tree(self, sealed: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_exits_zero_on_sealed_tree(self, sealed: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """A clean run exits 0 and reports how many files it covered."""
         assert audit.main(["--frozen-root", str(sealed)]) == 0
         assert "3 file(s) match their recorded digest" in capsys.readouterr().out
 
-    def test_exits_one_and_names_the_sanctioned_command(self, sealed: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_exits_one_and_names_sanctioned_command(self, sealed: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """A tampered tree exits 1 and the refusal says which command records a sanctioned move.
 
         A gate that only says no teaches the next reader to work around it; naming
@@ -154,7 +154,7 @@ class TestSeal:
         assert after["0.8/optim_toy.json"] == writer.digest(added)
         assert {k: v for k, v in after.items() if k != "0.8/optim_toy.json"} == before
 
-    def test_seal_does_not_launder_a_tampered_row(self, sealed: Path) -> None:
+    def test_seal_not_launder_tampered_row(self, sealed: Path) -> None:
         """Freezing a new minor over a tampered tree still leaves the tamper reported."""
         (sealed / "0.6" / "optim_toy.json").write_text('{"values": {"loss": 9.0}}\n', encoding="utf-8")
         (sealed / "0.8").mkdir()
@@ -169,7 +169,7 @@ class TestSeal:
             f"{writer.read_manifest(sealed)['0.6/optim_toy.json']}"
         ]
 
-    def test_reseal_accepts_a_sanctioned_move(self, sealed: Path) -> None:
+    def test_reseal_accepts_sanctioned_move(self, sealed: Path) -> None:
         """``--reseal`` is what records a principal-approved golden move, and it clears the finding."""
         (sealed / "0.7" / "optim_toy.json").write_text('{"values": {"loss": 4.0}}\n', encoding="utf-8")
         assert audit.find_violations(sealed) != []
@@ -190,7 +190,7 @@ class TestSeal:
 class TestFreeze:
     """Tests for ``freeze_goldens.freeze``'s manifest half."""
 
-    def test_freezing_a_minor_seals_what_it_copied(self, tmp_path: Path) -> None:
+    def test_freezing_minor_seals_what_it_copied(self, tmp_path: Path) -> None:
         """``make freeze-goldens MINOR=0.N`` stays one command: the copy and the seal are one act."""
         (tmp_path / "optim_toy.json").write_text('{"values": {"loss": 1.0}}\n', encoding="utf-8")
         (tmp_path / "generated.json").write_text('{"values": {"x": 1.0}, "freezable": false}\n', encoding="utf-8")

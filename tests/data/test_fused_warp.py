@@ -68,7 +68,7 @@ def _polygon_targets(canvas: int) -> Targets:
 class TestProtocol:
     """The fused transform conforms to the geometric-transform protocol."""
 
-    def test_is_geometric_transform(self) -> None:
+    def test_geometric_transform(self) -> None:
         """A letterboxing RandomAffine satisfies the runtime GeometricTransform protocol."""
         assert isinstance(RandomAffine(letterbox=32), GeometricTransform)
 

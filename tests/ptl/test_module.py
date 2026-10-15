@@ -248,7 +248,7 @@ def test_validation_step_logs_under_val_prefix(monkeypatch: pytest.MonkeyPatch) 
     assert "val/loss" in logged_keys
 
 
-def test_configure_optimizers_is_musgd_over_all_parameters() -> None:
+def test_configure_optimizers_musgd_over_all_parameters() -> None:
     """configure_optimizers returns a MuSGD covering every module parameter."""
     module = _tiny_module()
     optimizer = module.configure_optimizers()
@@ -286,7 +286,7 @@ class TestPadTargets:
         assert boxes.shape == (2, 1, 4)
         assert mask.tolist() == [[True], [False]]
 
-    def test_all_empty_batch_is_zero_width(self) -> None:
+    def test_all_empty_batch_zero_width(self) -> None:
         """A batch whose every image is empty yields N_max = 0 tensors."""
         boxes, labels, mask = pad_targets([Targets.empty(), Targets.empty()])
         assert boxes.shape == (2, 0, 4)
@@ -300,7 +300,7 @@ def test_invalid_task_raises() -> None:
         _tiny_module(task="pose")
 
 
-def test_task_extra_loss_is_inert_zero_for_detection() -> None:
+def test_task_extra_loss_inert_zero_for_detection() -> None:
     """The task extra-loss dispatch returns a zero scalar for the one task with no extra term.
 
     ``segment`` and ``obb`` are excluded: WP-087 and WP-088 made their contributions
@@ -415,7 +415,7 @@ def test_compile_step_leaves_state_dict_keys_unchanged() -> None:
         ),
     ],
 )
-def test_alpha_tensor_device_follows_what_can_hold_a_float64(device: str, expected: str) -> None:
+def test_alpha_tensor_device_follows_what_can_hold_float64(device: str, expected: str) -> None:
     """The 0-d ``float64`` branch weight lands on ``device``, except MPS, where it stays on the host.
 
     ``torch.tensor(..., dtype=float64, device="mps")`` raises ``TypeError`` -- the MPS
@@ -433,7 +433,7 @@ def test_alpha_tensor_device_follows_what_can_hold_a_float64(device: str, expect
     assert alpha.item() == module.alpha
 
 
-def test_compile_step_on_a_cpu_trainer_warns_once_and_stays_eager(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_compile_step_on_cpu_trainer_warns_once_and_stays_eager(monkeypatch: pytest.MonkeyPatch) -> None:
     """Off CUDA the flag warns at the first ``setup`` only, keeps the bare method and the same loss."""
     reference = _tiny_module()
     torch.manual_seed(0)  # same weights as ``reference``, the flag being the only difference
@@ -457,7 +457,7 @@ def test_compile_step_on_a_cpu_trainer_warns_once_and_stays_eager(monkeypatch: p
 class TestHostSplit:
     """Tests for ``_host_split``, WP-163's batched device-to-host target transfer."""
 
-    def test_returns_the_same_pieces_the_per_tensor_transfer_would(self) -> None:
+    def test_returns_same_pieces_per_tensor_transfer_would(self) -> None:
         """One concatenated transfer splits back into exactly the per-image tensors."""
         tensors = [torch.rand(3, 4), torch.rand(0, 4), torch.rand(5, 4)]
 
@@ -474,7 +474,7 @@ class TestHostSplit:
         assert [piece.dtype for piece in _host_split(labels)] == [torch.int64, torch.int64]
         assert [tuple(piece.shape) for piece in _host_split(keypoints)] == [(2, 7, 3), (1, 7, 3)]
 
-    def test_an_empty_batch_returns_no_pieces(self) -> None:
+    def test_empty_batch_returns_no_pieces(self) -> None:
         """No targets means no transfer to make, rather than a ``torch.cat`` on an empty list."""
         assert _host_split([]) == ()
 
@@ -485,7 +485,7 @@ class TestHostSplit:
         assert [tuple(piece.shape) for piece in split] == [(0, 4), (0, 4)]
 
 
-def test_validation_ground_truth_matches_the_per_target_transfer() -> None:
+def test_validation_ground_truth_matches_per_target_transfer() -> None:
     """WP-163's batched transfer feeds the mAP metric exactly what the per-target one did."""
     module = _tiny_module()
     images, targets = _synthetic_batch()
@@ -562,7 +562,7 @@ class TestDistributedValidationGuard:
         module.setup("fit")
 
     @pytest.mark.parametrize("task", [pytest.param("obb", id="obb"), pytest.param("keypoints", id="keypoints")])
-    def test_predict_stage_is_exempt(self, task: str) -> None:
+    def test_predict_stage_exempt(self, task: str) -> None:
         """Prediction runs no validation protocol, so it keeps the multi-process path open."""
         module = _guarded_module(task)
         module._trainer = MagicMock(spec=Trainer, world_size=2)

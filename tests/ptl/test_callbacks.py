@@ -114,7 +114,7 @@ class TestCheckpointFilename:
             pytest.param("obb", "m", "obb_m_{epoch}-{step}", id="obb-m"),
         ],
     )
-    def test_prefixes_task_and_variant_onto_the_default_suffix(self, task: str, variant: str, expected: str) -> None:
+    def test_prefixes_task_and_variant_onto_default_suffix(self, task: str, variant: str, expected: str) -> None:
         """The task and variant prefix ``{epoch}-{step}``, Lightning's own default suffix.
 
         The suffix stays a literal template (not pre-filled) so
@@ -169,14 +169,14 @@ class TestDetectionCLICheckpointInjection:
             args=list(args),
         )
 
-    def test_injects_a_checkpoint_naming_the_configs_task_and_variant(self) -> None:
+    def test_injects_checkpoint_naming_configs_task_and_variant(self) -> None:
         """The det-smoke config (``task: detect``, default ``variant: n``) gets a matching filename."""
         cli = self._build_cli("--config", str(packaged_config("det_nano_smoke")))
         checkpoints = [callback for callback in cli.trainer.callbacks if isinstance(callback, ModelCheckpoint)]
         assert len(checkpoints) == 1
         assert checkpoints[0].filename == _checkpoint_filename("detect", "n")
 
-    def test_a_user_supplied_checkpoint_callback_is_not_duplicated(self, tmp_path: Path) -> None:
+    def test_user_supplied_checkpoint_callback_not_duplicated(self, tmp_path: Path) -> None:
         """A config that already places a ``ModelCheckpoint`` wins; none is injected alongside it."""
         override = tmp_path / "checkpoint_override.yaml"
         override.write_text(

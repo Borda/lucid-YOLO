@@ -197,7 +197,7 @@ _SOURCES = [pytest.param(source, id=source.stem) for source in notebook_sources(
 
 
 @pytest.mark.parametrize("source", _SOURCES)
-def test_runs_under_the_fast_contract(source: Path, tmp_path: Path) -> None:
+def test_runs_under_fast_contract(source: Path, tmp_path: Path) -> None:
     """Each notebook runs end to end on CPU with ``LUCID_NOTEBOOK_FAST=1``, within the ceiling.
 
     This is the run ``make gate`` pays for: it proves the code path the notebook walks

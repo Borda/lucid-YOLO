@@ -53,7 +53,7 @@ def test_overfit_golden_excluded_from_offline_harness() -> None:
         pytest.param("keypoints", "kp", id="keypoints"),
     ],
 )
-def test_the_documented_task_names_resolve_to_a_wired_gate(documented: str, key: str) -> None:
+def test_documented_task_names_resolve_to_wired_gate(documented: str, key: str) -> None:
     """Every ``--task`` spelling TRAINING.md writes names a gate in ``TASK_SPECS``.
 
     Three of the four documented commands exited 1 with "unsupported task" before WP-190,
@@ -78,7 +78,7 @@ def test_overfit_recall_clears_floor(overfit_metrics: dict[str, float]) -> None:
 
 @pytest.mark.gpu
 @pytest.mark.data
-def test_overfit_integer_counts_are_exact(overfit_metrics: dict[str, float]) -> None:
+def test_overfit_integer_counts_exact(overfit_metrics: dict[str, float]) -> None:
     """The slice's integer metrics (images, instances, classes, epochs, size) are fixed."""
     counts = (
         overfit_metrics["num_images"],
@@ -134,7 +134,7 @@ def test_non_detection_score_clears_floor(non_detection_metrics: tuple[str, dict
         pytest.param("seg", 0.814623, 0.05, id="seg-keeps-nominal-band"),
     ],
 )
-def test_written_band_never_dips_below_the_floor(
+def test_written_band_never_dips_below_floor(
     tmp_path: Path, task: str, score: float, expected_tolerance: float
 ) -> None:
     """Freezing narrows the stored tolerance to the headroom above the floor.
@@ -156,9 +156,7 @@ def test_written_band_never_dips_below_the_floor(
     assert round(score - written["tolerances"][spec.metric], 6) >= spec.floor
 
 
-def test_main_prints_probe_for_a_capped_run(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_main_prints_probe_for_capped_run(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """``--epochs`` below the tuned budget exits 0 with a PROBE line and no PASS line.
 
     The CLI must not print PASS for a run the floor was never compared against.
@@ -209,7 +207,7 @@ class TestRunOverfit:
         assert excinfo.value.floor == spec.floor
         assert excinfo.value.score == pytest.approx(spec.floor - 0.01)
 
-    def test_reports_a_capped_run_without_the_floor(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_reports_capped_run_without_floor(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A probe budget below the tuned one returns its score instead of raising ``FloorNotMet``.
 
         The development-gates notebook walks every task at one epoch on a CPU; that run is
@@ -234,7 +232,7 @@ class TestRunOverfit:
         assert seen == {"epochs": 1, "mosaic": 1, "batches": 4}
 
     @pytest.mark.parametrize("epochs", [0, overfit_micro._EPOCHS + 1])
-    def test_rejects_a_budget_outside_the_tuned_range(self, epochs: int) -> None:
+    def test_rejects_budget_outside_tuned_range(self, epochs: int) -> None:
         """Zero epochs and more than the tuned budget are refused before any training starts.
 
         Above the budget would silently gate a stronger run against the same floor.

@@ -207,7 +207,7 @@ def test_each_detection_becomes_one_labelled_rectangle(picture: NDArray[np.uint8
         ),
     ],
 )
-def test_an_empty_prediction_draws_the_picture_and_nothing_over_it(
+def test_empty_prediction_draws_picture_and_nothing_over_it(
     picture: NDArray[np.uint8],
     draw_empty: Callable[[NDArray[np.uint8]], Axes],
 ) -> None:
@@ -226,7 +226,7 @@ def test_an_empty_prediction_draws_the_picture_and_nothing_over_it(
     assert len(axes.texts) == 0
 
 
-def test_the_confidence_threshold_drops_every_row_at_or_below_it(picture: NDArray[np.uint8]) -> None:
+def test_confidence_threshold_drops_every_row_at_or_below_it(picture: NDArray[np.uint8]) -> None:
     """Only rows scoring strictly above the threshold are drawn, boundary row included.
 
     Three rows straddling the cut, one of them exactly on it. The strict comparison is the
@@ -250,7 +250,7 @@ def test_the_confidence_threshold_drops_every_row_at_or_below_it(picture: NDArra
     assert [text.get_text() for text in axes.texts] == ["1 0.90"]
 
 
-def test_a_class_keeps_its_colour_whatever_else_is_in_the_picture(picture: NDArray[np.uint8]) -> None:
+def test_class_keeps_colour_whatever_else_in_picture(picture: NDArray[np.uint8]) -> None:
     """Class 2 is drawn in one colour in both figures, and never class 5's.
 
     A palette walked in encounter order would pass a single-figure test and fail here: it
@@ -269,7 +269,7 @@ def test_a_class_keeps_its_colour_whatever_else_is_in_the_picture(picture: NDArr
     assert accompanied.patches[0].get_edgecolor() != accompanied.patches[1].get_edgecolor()
 
 
-def test_an_oriented_box_is_drawn_as_the_rotated_rectangle_it_describes(picture: NDArray[np.uint8]) -> None:
+def test_oriented_box_drawn_as_rotated_rectangle_it_describes(picture: NDArray[np.uint8]) -> None:
     """The polygon's four vertices are the rotated box's corners, and are not axis-aligned.
 
     Both halves matter and only together. Matching the corners proves the drawing reads
@@ -296,7 +296,7 @@ def test_an_oriented_box_is_drawn_as_the_rotated_rectangle_it_describes(picture:
 
 
 @pytest.mark.parametrize(("instance", "label"), [pytest.param(0, 1, id="first"), pytest.param(1, 0, id="second")])
-def test_a_mask_overlay_is_opaque_over_its_own_instance_only(
+def test_mask_overlay_opaque_over_own_instance_only(
     picture: NDArray[np.uint8],
     instance: int,
     label: int,
@@ -320,7 +320,7 @@ def test_a_mask_overlay_is_opaque_over_its_own_instance_only(
     assert overlay[..., :3][opaque][0].tolist() == pytest.approx(list(class_color(label)))
 
 
-def test_the_threshold_drops_a_mask_together_with_its_own_box(picture: NDArray[np.uint8]) -> None:
+def test_threshold_drops_mask_together_with_own_box(picture: NDArray[np.uint8]) -> None:
     """A dropped detection takes its mask with it, and the survivor keeps the mask it came with.
 
     The row-alignment defect this path is most exposed to: two filters, or one filter
@@ -372,7 +372,7 @@ def test_the_threshold_drops_a_mask_together_with_its_own_box(picture: NDArray[n
         ),
     ],
 )
-def test_a_prediction_that_cannot_belong_to_this_picture_is_refused(
+def test_prediction_cannot_belong_to_this_picture_refused(
     picture: NDArray[np.uint8],
     draw_mismatched: Callable[[NDArray[np.uint8]], Axes],
 ) -> None:
@@ -439,7 +439,7 @@ class TestDrawGroundTruth:
         assert _dashed_unfilled(axes) == [True, True]
         assert [patch.get_width() for patch in axes.patches] == [16.0, 20.0]
 
-    def test_obb_outlines_every_rotated_box_as_a_dashed_quadrilateral(self, picture: NDArray[np.uint8]) -> None:
+    def test_obb_outlines_every_rotated_box_as_dashed_quadrilateral(self, picture: NDArray[np.uint8]) -> None:
         """A rotated label becomes a dashed four-cornered ring at the box's own corners.
 
         Through the same corner function the predicted rings use, so a predicted ring and
@@ -458,7 +458,7 @@ class TestDrawGroundTruth:
         ]
         assert distances == pytest.approx([0.0, 0.0, 0.0, 0.0], abs=CORNER_TOLERANCE)
 
-    def test_keypoints_draws_dashed_boxes_and_a_hollow_ring_per_visible_point(self, picture: NDArray[np.uint8]) -> None:
+    def test_keypoints_draws_dashed_boxes_and_hollow_ring_per_visible_point(self, picture: NDArray[np.uint8]) -> None:
         """Each labelled instance gets its dashed box and one unfilled ring per point with visibility > 0.
 
         Visibility ``0`` is COCO's "not labelled", written as ``(0, 0, 0)``: drawing it
@@ -482,7 +482,7 @@ class TestDrawGroundTruth:
         assert all(not ring.get_fill() for ring in rings)
         assert [ring.center for ring in rings] == [(8.0, 8.0), (16.0, 12.0), (44.0, 30.0)]
 
-    def test_a_task_with_no_drawer_is_refused_by_name(self, picture: NDArray[np.uint8]) -> None:
+    def test_task_with_no_drawer_refused_by_name(self, picture: NDArray[np.uint8]) -> None:
         """An unknown task raises, naming the four that are drawable, rather than drawing boxes.
 
         Falling back to boxes would be a plausible figure for a task whose geometry is
@@ -497,7 +497,7 @@ class TestDrawGroundTruth:
 class TestLoadGroundTruth:
     """``load_ground_truth`` keys the COCO reader's targets by image file name."""
 
-    def test_names_every_image_in_the_file(self, detseg_fixture_dir: Path) -> None:
+    def test_names_every_image_in_file(self, detseg_fixture_dir: Path) -> None:
         """Each image of the synthetic detection slice maps to targets with one label per box.
 
         The reader is the training path's, so the boxes drawn as labels are the boxes
@@ -510,7 +510,7 @@ class TestLoadGroundTruth:
         assert set(labels) == {path.name for path in train.glob("*.jpg")}
         assert all(len(targets.boxes) == len(targets.labels) for targets in labels.values())
 
-    def test_an_oriented_read_carries_rotated_boxes(self, obb_fixture_dir: Path) -> None:
+    def test_oriented_read_carries_rotated_boxes(self, obb_fixture_dir: Path) -> None:
         """Under ``obb`` every instance's ring is fitted to a rotated box, one per label.
 
         ``rboxes`` is what the oriented drawer outlines; a plain read would leave it
@@ -573,7 +573,7 @@ class TestShowPredictions:
         for image, axes in zip(images, figure.axes[:2], strict=True):
             assert sum(_dashed_unfilled(axes)) == len(labels[image.name].boxes)
 
-    def test_an_image_the_annotations_do_not_name_is_refused(
+    def test_image_annotations_do_not_name_refused(
         self, checkpoint: Path, detseg_fixture_dir: Path, options: RenderOptions, tmp_path: Path
     ) -> None:
         """An image absent from the file raises, naming it, rather than drawing a panel without labels.
@@ -592,7 +592,7 @@ class TestShowPredictions:
         ("columns", "images"),
         [pytest.param(0, 1, id="no-columns"), pytest.param(2, 0, id="no-images")],
     )
-    def test_a_grid_with_no_cells_is_refused(
+    def test_grid_with_no_cells_refused(
         self, checkpoint: Path, detseg_fixture_dir: Path, options: RenderOptions, columns: int, images: int
     ) -> None:
         """Zero columns or zero images raise before any checkpoint is read.
@@ -606,9 +606,7 @@ class TestShowPredictions:
             show_predictions(checkpoint, paths, options=options, columns=columns)
 
 
-def test_predict_and_draw_titles_the_axes_with_the_image_task_and_decoder(
-    tmp_path: Path, detseg_fixture_dir: Path
-) -> None:
+def test_predict_and_draw_titles_axes_with_image_task_and_decoder(tmp_path: Path, detseg_fixture_dir: Path) -> None:
     """A loaded module and an image give axes holding the picture, titled ``name (task, decoder)``.
 
     The half of the script's render that is not a write: one prediction, drawn into fresh
@@ -623,7 +621,7 @@ def test_predict_and_draw_titles_the_axes_with_the_image_task_and_decoder(
     assert axes.get_title() == f"{image.name} (detect, e2e)"
 
 
-def test_predict_and_draw_passes_the_skeleton_through_to_the_keypoints_renderer(
+def test_predict_and_draw_passes_skeleton_through_to_keypoints_renderer(
     tmp_path: Path, detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``RenderOptions.skeleton`` reaches ``draw_keypoints``: one edge in, one line drawn.

@@ -272,7 +272,7 @@ def test_shadow_update_uses_one_foreach_call_per_dtype(monkeypatch: pytest.Monke
     assert sorted(calls, key=lambda call: str(call[1])) == [(2, torch.float32), (1, torch.float64)]
 
 
-def test_shadow_update_tolerates_a_restored_dtype_mismatch() -> None:
+def test_shadow_update_tolerates_restored_dtype_mismatch() -> None:
     """A shadow whose dtype differs from the live parameter's still blends, cast to the shadow's dtype.
 
     :meth:`~lucid_yolo.ptl.callbacks.EMACallback.load_state_dict` keeps whatever dtype the
@@ -299,7 +299,7 @@ def test_shadow_update_tolerates_a_restored_dtype_mismatch() -> None:
         torch.testing.assert_close(shadow, expected[name])
 
 
-def test_shadow_update_blends_a_live_value_beyond_the_shadow_dtype_range() -> None:
+def test_shadow_update_blends_live_value_beyond_shadow_dtype_range() -> None:
     """A float32 live value outside the float16 range blends into a float16 shadow as a finite value.
 
     A shadow restored from a half-precision checkpoint meets a float32 live parameter holding
@@ -360,7 +360,7 @@ def test_foreach_shadow_trajectory_matches_scalar_recurrence(decay: float, tau: 
         torch.testing.assert_close(shadow, expected[name], rtol=2e-6, atol=2e-7)
 
 
-def test_zero_decay_copies_the_live_weights_into_the_shadow() -> None:
+def test_zero_decay_copies_live_weights_into_shadow() -> None:
     """With ``decay=0.0`` a single update leaves the shadow equal to the live weights.
 
     Zero is the lower bound of the documented ``[0, 1)`` range for ``decay``. The ramped decay is
@@ -467,7 +467,7 @@ def test_state_dict_round_trip_restores_shadow_and_counters() -> None:
     assert torch.allclose(callback._shadow["weight"], original_weight)
 
 
-def test_legacy_batches_seen_counter_is_read_as_steps_seen() -> None:
+def test_legacy_batches_seen_counter_read_as_steps_seen() -> None:
     """A checkpoint predating the optimizer-step cadence still resumes its ``update_every`` phase.
 
     Before WP-158 the ``update_every`` counter was written under ``batches_seen``. Resuming
@@ -595,7 +595,7 @@ class TestOptimizerStepCadence:
             expected = _ema_recursion(callback, initial[name], trajectory)
             assert torch.allclose(callback._shadow[name], expected), name
 
-    def test_resume_continues_the_same_average_under_accumulation(self, tmp_path: Path) -> None:
+    def test_resume_continues_same_average_under_accumulation(self, tmp_path: Path) -> None:
         """A save/resume round trip at accumulation 2 continues the update count, not restarts it.
 
         Resuming re-seeds the optimizer-step watermark from the restored
@@ -651,7 +651,7 @@ class TestRestoreOnFailure:
             assert torch.allclose(live.detach(), raw[name]), name
         assert not torch.allclose(callback._shadow["weight"], raw["weight"])
 
-    def test_restoration_is_idempotent(self) -> None:
+    def test_restoration_idempotent(self) -> None:
         """A second restore after the normal one does not re-install stale weights.
 
         ``on_exception`` can fire after ``on_validation_end`` already ran — a failure later
@@ -685,7 +685,7 @@ class TestSavedWeights:
     ``lucid_yolo.eval.checkpoint`` relies on when it overlays the shadow on request.
     """
 
-    def test_state_dict_is_raw_weights_with_the_shadow_kept_separately(self, tmp_path: Path) -> None:
+    def test_state_dict_raw_weights_with_shadow_kept_separately(self, tmp_path: Path) -> None:
         """The saved model ``state_dict`` matches the live weights and differs from the shadow."""
         module = _TinyEMAModule()
         callback = EMACallback(decay=0.9, tau=1)

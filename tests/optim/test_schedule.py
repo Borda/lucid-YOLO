@@ -56,7 +56,7 @@ class TestWarmupDecayFactor:
             pytest.param(3, 1, 0.2, id="three-step-run"),
         ],
     )
-    def test_reaches_lrf_on_the_runs_last_step(self, total: int, warmup: int, lrf: float) -> None:
+    def test_reaches_lrf_on_runs_last_step(self, total: int, warmup: int, lrf: float) -> None:
         """The floor is hit at ``total_steps - 1``, the last step a run of that length takes.
 
         ``LambdaLR`` is called with zero-based step indices, so a run of ``total``
@@ -78,7 +78,7 @@ class TestWarmupDecayFactor:
         """
         assert warmup_decay_factor(1, 2, 1, 0.2) == pytest.approx(1.0)
 
-    def test_is_monotonic_after_warmup(self) -> None:
+    def test_monotonic_after_warmup(self) -> None:
         """After the warmup peak the factor never increases and never dips below lrf."""
         values = [warmup_decay_factor(step, 200, 20, 0.05) for step in range(20, 220)]
         deltas = [after - before for before, after in pairwise(values)]
@@ -129,7 +129,7 @@ class TestConfigureOptimizers:
         optimizer = module.configure_optimizers()
         assert isinstance(optimizer, MuSGD)
 
-    def test_warmup_longer_than_the_run_is_clamped_below_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_warmup_longer_than_run_clamped_below_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A warmup budget exceeding the run is clamped to ``total_steps - 1``, with a warning.
 
         ``warmup_epochs`` is a fraction of the run, so the 3-epoch default against a
@@ -155,7 +155,7 @@ class TestConfigureOptimizers:
         assert factor(49) == pytest.approx(1.0)  # unclamped this would still be mid-ramp at 0.4
         assert factor(0) == pytest.approx(1 / 49)  # the ramp is 49 steps long, not the requested 125
 
-    def test_warmup_fitting_the_run_is_left_alone(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_warmup_fitting_run_left_alone(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A warmup budget that fits the run is untouched and warns nothing.
 
         The guard against over-clamping: the common case (3 warmup epochs of a

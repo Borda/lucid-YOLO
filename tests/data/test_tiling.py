@@ -163,7 +163,7 @@ def test_window_placement_remainder_pulls_last_window_flush() -> None:
     assert starts == [0, 4, 5]  # nominal stride 4, then a 1 px step to sit flush at 11 - 6
 
 
-def test_window_smaller_than_patch_is_the_image() -> None:
+def test_window_smaller_than_patch_image() -> None:
     """An axis shorter than the patch yields a single window of the axis's own length."""
     assert tile_windows((3, 5), patch=8, overlap=2).tolist() == [[0, 0, 5, 3]]
     assert tile_windows((3, 20), patch=8, overlap=2).tolist() == [[0, 0, 8, 3], [6, 0, 14, 3], [12, 0, 20, 3]]
@@ -179,13 +179,13 @@ def test_window_placement_rejects_impossible_parameters(size: tuple[int, int], p
         tile_windows(size, patch=patch, overlap=overlap)
 
 
-def test_defaults_are_the_paper_patch_and_the_a21_overlap() -> None:
+def test_defaults_paper_patch_and_a21_overlap() -> None:
     """The published 1024 px patch and A21's 200 px overlap are the defaults."""
     assert (PATCH_SIZE, CROP_OVERLAP, DIFFICULT_AREA_FRACTION) == (1024, 200, 0.7)
     assert tile_windows((2048, 2048)).shape[0] == 9  # starts 0, 824, 1024 on each axis
 
 
-def test_instance_wholly_inside_keeps_its_annotation_translated() -> None:
+def test_instance_wholly_inside_keeps_annotation_translated() -> None:
     """An object fully inside a window is translated, fully visible and not difficult."""
     rboxes = _rbox(60.0, 40.0, 20.0, 10.0, 0.4)  # envelope x in [48.8, 71.2], y in [31.5, 48.5]
     targets = _targets(rboxes, [3])
@@ -222,7 +222,7 @@ def test_straddling_instance_appears_in_both_windows_with_areas_summing_to_one()
 
 
 @pytest.mark.parametrize(("cut", "expect_difficult"), [(160.0, False), (140.0, True)])
-def test_difficult_flag_follows_the_seventy_percent_threshold(cut: float, expect_difficult: bool) -> None:
+def test_difficult_flag_follows_seventy_percent_threshold(cut: float, expect_difficult: bool) -> None:
     """A part is flagged iff its visible fraction is strictly below 0.7 (R18)."""
     targets = _targets(_rbox(150.0, 50.0, 40.0, 10.0, 0.0), [0])  # spans x in [130, 170]
     tiled = crop_targets(targets, torch.tensor([0, 0, int(cut), 100]), difficult=torch.tensor([False]))
@@ -238,7 +238,7 @@ def test_incoming_difficult_flag_survives_any_visible_fraction() -> None:
     assert tiled.difficult.tolist() == [True]
 
 
-def test_instance_outside_the_window_is_dropped() -> None:
+def test_instance_outside_window_dropped() -> None:
     """``U == 0`` drops the instance; the surviving axis stays 1:1 across every modality."""
     rboxes = torch.cat([_rbox(20.0, 20.0, 10.0, 6.0, 0.0), _rbox(300.0, 300.0, 10.0, 6.0, 0.0)])
     difficult = torch.zeros(2, dtype=torch.bool)
@@ -265,7 +265,7 @@ def test_empty_targets_and_empty_window_give_shaped_empties() -> None:
         assert tiled.targets.polygons == []
 
 
-def test_emitted_rboxes_are_canonical_long_edge_boxes() -> None:
+def test_emitted_rboxes_canonical_long_edge_boxes() -> None:
     """Re-fitted parts come back canonical: ``w >= h`` and ``theta`` in ``[-pi/4, 3*pi/4)``."""
     generator = torch.Generator().manual_seed(57)
     angles = torch.linspace(-math.pi, math.pi, 24)
@@ -296,7 +296,7 @@ def test_clipped_area_matches_shapely_oracle() -> None:
     assert torch.allclose(tiled.visible_fraction.double(), oracle[oracle > 0], atol=1e-6)
 
 
-def test_emitted_box_contains_its_clipped_region_and_never_grows() -> None:
+def test_emitted_box_contains_clipped_region_and_never_grows() -> None:
     """Each emitted box encloses the shapely-clipped region, with extents never above the whole's.
 
     The fitted rectangle of a cut corner may reach outside the window — it is a rotated
@@ -323,7 +323,7 @@ def test_emitted_box_contains_its_clipped_region_and_never_grows() -> None:
     assert bool((tiled.targets.rboxes[:, 3] <= rboxes[survivors][:, 3] + 1e-3).all())
 
 
-def test_axis_aligned_part_reduces_to_the_box_intersection() -> None:
+def test_axis_aligned_part_reduces_to_box_intersection() -> None:
     """For an axis-aligned object the re-fitted part is exactly the box/window intersection."""
     targets = _targets(_rbox(20.0, 20.0, 20.0, 8.0, 0.0), [5])  # x in [10, 30], y in [16, 24]
     tiled = crop_targets(targets, torch.tensor([0, 0, 23, 60]), difficult=torch.tensor([False]))
@@ -332,7 +332,7 @@ def test_axis_aligned_part_reduces_to_the_box_intersection() -> None:
     assert torch.allclose(tiled.targets.rboxes, torch.tensor([[16.5, 20.0, 13.0, 8.0, 0.0]]), atol=1e-4)
 
 
-def test_crop_image_matches_its_window() -> None:
+def test_crop_image_matches_window() -> None:
     """The image crop is the window's slice of the source, in window order."""
     image = torch.arange(3 * 12 * 16, dtype=torch.float32).reshape(3, 12, 16)
     window = tile_windows((12, 16), patch=10, overlap=4)[1]
@@ -373,7 +373,7 @@ class TestCropTargets:
         with pytest.raises((TypeError, ValueError), match=match):
             crop_targets(targets, torch.tensor([0, 0, 10, 10]), difficult=difficult)
 
-    def test_rejects_a_broken_input_instance_axis(self) -> None:
+    def test_rejects_broken_input_instance_axis(self) -> None:
         """A ``rboxes`` axis that does not match the instance axis is rejected, not zipped short."""
         targets = Targets(
             boxes=torch.zeros((1, 4)), labels=torch.zeros(1, dtype=torch.int64), rboxes=torch.zeros((2, 5))
@@ -381,7 +381,7 @@ class TestCropTargets:
         with pytest.raises(ValueError, match="must share the instance axis"):
             crop_targets(targets, torch.tensor([0, 0, 10, 10]), difficult=torch.tensor([False]))
 
-    def test_rejects_a_degenerate_window(self) -> None:
+    def test_rejects_degenerate_window(self) -> None:
         """A window with no extent, or the wrong shape, is a caller error rather than an empty crop."""
         targets = _targets(_rbox(5.0, 5.0, 4.0, 2.0, 0.0), [0])
         with pytest.raises(ValueError, match="positive extent"):
@@ -390,7 +390,7 @@ class TestCropTargets:
             crop_targets(targets, torch.tensor([0, 0, 10]), difficult=torch.tensor([False]))
 
 
-def test_zero_area_annotation_is_dropped() -> None:
+def test_zero_area_annotation_dropped() -> None:
     """A degenerate zero-extent annotation has no ``U`` to score and is dropped rather than emitted."""
     targets = _targets(_rbox(5.0, 5.0, 4.0, 0.0, 0.0), [0])
     tiled = crop_targets(targets, torch.tensor([0, 0, 10, 10]), difficult=torch.tensor([False]))
@@ -421,7 +421,7 @@ def test_zero_area_annotation_is_dropped() -> None:
         ),
     ],
 )
-def test_tiled_targets_rejects_companions_off_the_instance_axis(
+def test_tiled_targets_rejects_companions_off_instance_axis(
     difficult: torch.Tensor, fraction: torch.Tensor, error: type[Exception], match: str
 ) -> None:
     """The container validates its own per-instance companions against the instance axis."""
@@ -430,14 +430,14 @@ def test_tiled_targets_rejects_companions_off_the_instance_axis(
         TiledTargets(targets=targets, difficult=difficult, visible_fraction=fraction)
 
 
-def test_tiled_targets_rejects_a_broken_instance_axis() -> None:
+def test_tiled_targets_rejects_broken_instance_axis() -> None:
     """``boxes`` and ``rboxes`` must stay 1:1 in an emitted tile (WP-056's invariant)."""
     targets = Targets(boxes=torch.zeros((1, 4)), labels=torch.zeros(1, dtype=torch.int64), rboxes=torch.zeros((2, 5)))
     with pytest.raises(ValueError, match="boxes/rboxes length mismatch"):
         TiledTargets(targets=targets, difficult=torch.zeros(1, dtype=torch.bool), visible_fraction=torch.zeros(1))
 
 
-def test_image_shape_is_checked_before_any_cropping() -> None:
+def test_image_shape_checked_before_any_cropping() -> None:
     """Both image entry points reject anything that is not a CHW tensor."""
     targets = _targets(_rbox(5.0, 5.0, 4.0, 2.0, 0.0), [0])
     with pytest.raises(ValueError, match=r"image must be \(C, H, W\)"):
@@ -446,7 +446,7 @@ def test_image_shape_is_checked_before_any_cropping() -> None:
         list(tile_image_targets(torch.zeros(4, 4), targets, difficult=torch.tensor([False])))
 
 
-def test_tiles_of_a_synthetic_obb_image_account_for_every_instance(obb_fixture_dir: Path) -> None:
+def test_tiles_of_synthetic_obb_image_account_for_every_instance(obb_fixture_dir: Path) -> None:
     """On the A26 synthetic OBB fixtures, the tiles of an image account for all of every instance.
 
     A dataset-shaped pass over real rotated annotations — DOTA itself is not on this

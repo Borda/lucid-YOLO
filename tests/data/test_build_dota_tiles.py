@@ -114,7 +114,7 @@ def _dataset_index(root: Path, file_name: str, split: str = "val") -> int:
     return names.index(file_name)
 
 
-def test_every_window_of_every_source_image_is_written(built_root: Path) -> None:
+def test_every_window_of_every_source_image_written(built_root: Path) -> None:
     """The build emits one tile per window of each source image, keeping empty ones (A52)."""
     per_image = len(tile_windows((SIDE, SIDE), patch=PATCH, overlap=OVERLAP))
 
@@ -137,7 +137,7 @@ def test_dropping_empty_tiles_keeps_only_annotated_windows(tmp_path: Path) -> No
     assert all(record["image_id"] in {r["id"] for r in payload["images"]} for record in payload["annotations"])
 
 
-def test_the_reader_recovers_the_source_geometry(built_root: Path) -> None:
+def test_reader_recovers_source_geometry(built_root: Path) -> None:
     """An object wholly inside a window reads back as the same rectangle, window-local.
 
     The source rectangle spans (2, 2)-(6, 4) of ``P0001``, so in the window at the origin
@@ -153,7 +153,7 @@ def test_the_reader_recovers_the_source_geometry(built_root: Path) -> None:
     assert torch.equal(targets.boxes[0], torch.tensor([2.0, 2.0, 6.0, 4.0]))
 
 
-def test_the_difficult_flag_survives_the_round_trip(built_root: Path) -> None:
+def test_difficult_flag_survives_round_trip(built_root: Path) -> None:
     """R18's flag reaches ``Targets.difficult`` through the layout (A51, A53).
 
     ``P0002``'s object is flagged difficult in its label file, so every tile that carries
@@ -169,7 +169,7 @@ def test_the_difficult_flag_survives_the_round_trip(built_root: Path) -> None:
     assert all(flags)
 
 
-def test_tiling_flags_a_clipped_part_difficult(tmp_path: Path) -> None:
+def test_tiling_flags_clipped_part_difficult(tmp_path: Path) -> None:
     """A part below R18's 0.7 area fraction is flagged, though its source object is not."""
     _write_split(tmp_path / "dota", "val", {"P0003": [_axis_aligned_line(6.0, 6.0, 14.0, 14.0, "plane", 0)]})
 
@@ -180,7 +180,7 @@ def test_tiling_flags_a_clipped_part_difficult(tmp_path: Path) -> None:
     assert any(float(record["visible_fraction"]) < 1.0 for record in annotations)
 
 
-def test_category_ids_preserve_the_published_class_order(built_root: Path) -> None:
+def test_category_ids_preserve_published_class_order(built_root: Path) -> None:
     """The reader's contiguous label equals the DOTA index, for every class (R18)."""
     dataset = CocoDetectionDataset(built_root / "val", built_root / "annotations" / "instances_val.json", oriented=True)
 
@@ -189,7 +189,7 @@ def test_category_ids_preserve_the_published_class_order(built_root: Path) -> No
     assert labels == {name: index for index, name in enumerate(DOTA_CLASSES)}
 
 
-def test_image_records_carry_their_window_provenance(built_root: Path) -> None:
+def test_image_records_carry_window_provenance(built_root: Path) -> None:
     """Each tile names the source image and the window it came from (A53, WP-064's input)."""
     records = _payload(built_root)["images"]
 
@@ -199,7 +199,7 @@ def test_image_records_carry_their_window_provenance(built_root: Path) -> None:
     assert all(name.startswith(str(source).split(".")[0]) for name, (source, _) in windows.items())
 
 
-def test_a_directory_that_is_not_a_dota_split_is_named_not_guessed(tmp_path: Path) -> None:
+def test_directory_not_dota_split_named_not_guessed(tmp_path: Path) -> None:
     """A missing ``labelTxt/`` fails with the path in the message rather than tiling nothing."""
     (tmp_path / "dota" / "val" / "images").mkdir(parents=True)
 
@@ -207,7 +207,7 @@ def test_a_directory_that_is_not_a_dota_split_is_named_not_guessed(tmp_path: Pat
         build.convert_split(tmp_path / "dota" / "val", tmp_path / "tiles", "val")
 
 
-def test_the_report_counts_what_was_written(tmp_path: Path) -> None:
+def test_report_counts_what_was_written(tmp_path: Path) -> None:
     """The printed report's counts agree with the JSON it wrote."""
     _write_split(
         tmp_path / "dota",
@@ -250,7 +250,7 @@ def _multi_image_split(root: Path) -> Path:
     )
 
 
-def test_a_pooled_build_writes_the_same_bytes_as_a_serial_one(tmp_path: Path) -> None:
+def test_pooled_build_writes_same_bytes_as_serial_one(tmp_path: Path) -> None:
     """Workers change the schedule, never the file: ids are assigned by the parent in source order.
 
     This is the whole risk of the pool. A worker cannot know how many tiles preceded it,
@@ -266,7 +266,7 @@ def test_a_pooled_build_writes_the_same_bytes_as_a_serial_one(tmp_path: Path) ->
     assert serial == (tmp_path / "pooled" / "annotations" / "instances_val.json").read_bytes()
 
 
-def test_a_pooled_build_writes_every_tile_image(tmp_path: Path) -> None:
+def test_pooled_build_writes_every_tile_image(tmp_path: Path) -> None:
     """The workers do the writing, so the images must be on disk and not only in the JSON."""
     split_dir = _multi_image_split(tmp_path)
 
@@ -279,7 +279,7 @@ def test_a_pooled_build_writes_every_tile_image(tmp_path: Path) -> None:
     assert all((tmp_path / "tiles" / "val" / str(record["file_name"])).is_file() for record in payload["images"])
 
 
-def test_no_record_keeps_a_worker_placeholder_id(tmp_path: Path) -> None:
+def test_no_record_keeps_worker_placeholder_id(tmp_path: Path) -> None:
     """Every id a worker left unnumbered is overwritten; the placeholder is out of COCO's range."""
     split_dir = _multi_image_split(tmp_path)
 
@@ -290,7 +290,7 @@ def test_no_record_keeps_a_worker_placeholder_id(tmp_path: Path) -> None:
     assert all(int(record["id"]) > 0 and int(record["image_id"]) > 0 for record in payload["annotations"])
 
 
-def test_the_worker_count_reaches_the_split_builder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worker_count_reaches_split_builder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``--workers`` is forwarded rather than accepted and dropped, and defaults to one per CPU."""
     seen: list[int] = []
 
@@ -306,7 +306,7 @@ def test_the_worker_count_reaches_the_split_builder(tmp_path: Path, monkeypatch:
     assert seen == [3, 7]
 
 
-def test_jpeg_tiles_are_written_and_read_back(tmp_path: Path) -> None:
+def test_jpeg_tiles_written_and_read_back(tmp_path: Path) -> None:
     """``--suffix .jpg`` writes JPEG tiles that the reader loads through the same layout."""
     split_dir = _multi_image_split(tmp_path)
 
@@ -324,7 +324,7 @@ def test_jpeg_tiles_are_written_and_read_back(tmp_path: Path) -> None:
     assert len(dataset) == len(names)
 
 
-def test_the_geometry_survives_a_lossy_encoder(tmp_path: Path) -> None:
+def test_geometry_survives_lossy_encoder(tmp_path: Path) -> None:
     """JPEG changes pixels, never annotations: the records are identical to the PNG build's.
 
     Worth pinning rather than assuming. The encoder sits between the crop and the disk,
@@ -339,7 +339,7 @@ def test_the_geometry_survives_a_lossy_encoder(tmp_path: Path) -> None:
     assert _payload(tmp_path / "png")["annotations"] == _payload(tmp_path / "jpg")["annotations"]
 
 
-def test_an_unknown_tile_suffix_is_rejected(tmp_path: Path) -> None:
+def test_unknown_tile_suffix_rejected(tmp_path: Path) -> None:
     """A format the encoder cannot write fails at the flag, not after the first image."""
     with pytest.raises(ValueError, match="unknown tile suffix"):
         build.build_tiles(tmp_path, tmp_path / "out", splits="val", suffix=".gif")

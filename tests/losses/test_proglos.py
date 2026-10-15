@@ -70,7 +70,7 @@ def test_schedule_delegates_to_pure_function() -> None:
 @pytest.mark.parametrize(
     "total_epochs", [pytest.param(2, id="E2"), pytest.param(10, id="E10"), pytest.param(101, id="E101")]
 )
-def test_alpha_is_monotone_non_increasing(total_epochs: int) -> None:
+def test_alpha_monotone_non_increasing(total_epochs: int) -> None:
     """The per-epoch weight never increases from one epoch to the next."""
     values = [progressive_alpha(epoch, total_epochs) for epoch in range(total_epochs)]
     assert all(later <= earlier for earlier, later in pairwise(values))
@@ -155,11 +155,11 @@ class TestRampDomain:
     """
 
     @pytest.mark.parametrize("epoch", [-1, -10, -1000])
-    def test_a_negative_epoch_does_not_extrapolate_past_alpha_init(self, epoch: int) -> None:
+    def test_negative_epoch_not_extrapolate_past_alpha_init(self, epoch: int) -> None:
         """Clamped below only, ``progressive_alpha(-10, 100)`` measured ``0.8707`` against ``0.8``."""
         assert progressive_alpha(epoch, 100) == pytest.approx(0.8)
 
-    def test_alpha_stays_inside_its_endpoints_across_the_whole_integer_domain(self) -> None:
+    def test_alpha_stays_inside_endpoints_across_whole_integer_domain(self) -> None:
         """The returned weight is bounded by the two endpoints for any epoch index."""
         values = [progressive_alpha(epoch, 10) for epoch in range(-50, 50)]
 
@@ -167,7 +167,7 @@ class TestRampDomain:
         assert max(values) == pytest.approx(0.8)
 
     @pytest.mark.parametrize("total_epochs", [0, -1, -100])
-    def test_a_schedule_with_no_epochs_is_refused_by_name(self, total_epochs: int) -> None:
+    def test_schedule_with_no_epochs_refused_by_name(self, total_epochs: int) -> None:
         """``max(E - 1, 1)`` used to swallow these, returning ``alpha_init`` for every epoch."""
         with pytest.raises(ValueError, match="total_epochs must be >= 1"):
             progressive_alpha(0, total_epochs)
@@ -175,6 +175,6 @@ class TestRampDomain:
         with pytest.raises(ValueError, match="total_epochs must be >= 1"):
             ProgressiveLossSchedule().alpha_at(0, total_epochs)
 
-    def test_the_single_epoch_run_still_works(self) -> None:
+    def test_single_epoch_run_still_works(self) -> None:
         """``E == 1`` is the case the ``max(E - 1, 1)`` guard exists for and must survive."""
         assert progressive_alpha(0, 1) == pytest.approx(0.8)

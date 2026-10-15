@@ -75,7 +75,7 @@ def test_golden_file_current() -> None:
     assert result.passed, harness.format_result(result, harness.DEFAULT_GOLDENS_DIR)
 
 
-def test_golden_bands_cannot_swallow_the_claim() -> None:
+def test_golden_bands_cannot_swallow_claim() -> None:
     """The stored values carry the MuSGD-beats-SGD claim, by a margin wider than their own bands.
 
     Every other test here re-runs the producer, so together they can only establish that

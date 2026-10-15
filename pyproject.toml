@@ -227,6 +227,7 @@ select = [
   "PL",        # pylint
   "C90",       # mccabe complexity
   "RUF",       # ruff-specific
+  "TID251",    # banned-api: import boundaries below
 ]
 ignore = [
   "PLR2004",   # magic values in tests / tensor shapes are idiomatic
@@ -241,15 +242,25 @@ max-branches = 12
 max-statements = 50
 max-returns = 6
 
+# The shipped package never reaches for the private figure package, and only that
+# package imports matplotlib (WP-189). Function-local imports are caught too, which a
+# runtime `sys.modules` probe would miss. Scripts, tests and notebooks draw figures and
+# are exempt below, as is `_viz` itself.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"matplotlib".msg = "only lucid_yolo._viz may import matplotlib"
+"lucid_yolo._viz".msg = "the shipped package never imports the private figure package"
+
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["PLR0913"]
+"tests/**" = ["PLR0913", "TID251"]
+"scripts/**" = ["TID251"]
+"src/lucid_yolo/_viz/**" = ["TID251"]
 # Notebook sources are jupytext percent-format scripts: a `# %% [markdown]` prose cell
 # sits between the title and the first import, and each later cell imports what it
 # needs where the reader meets it, so module-level imports are not at the top by
 # design (E402). Everything else applies -- a notebook is a `.py` file this project
 # lints, tests and publishes. Widen this list only from a real ruff finding on a real
 # notebook, one code at a time, each with its reason here.
-"notebooks/**" = ["E402"]
+"notebooks/**" = ["E402", "TID251"]
 
 [tool.mypy]
 python_version = "3.11"

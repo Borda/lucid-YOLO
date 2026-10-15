@@ -92,7 +92,7 @@ def _module_for(variant: str, task: str = "detect") -> DetectionLitModule:
     )
 
 
-def test_detection_state_dict_keys_are_unmoved() -> None:
+def test_detection_state_dict_keys_unmoved() -> None:
     """The detection module's state-dict keys are byte-identical to the pre-WP-087 snapshot.
 
     Catches the checkpoint-invalidating refactor: nesting the three stages under a
@@ -109,7 +109,7 @@ def test_detection_state_dict_keys_are_unmoved() -> None:
     assert len(keys) == 714
 
 
-def test_detection_parameter_count_is_unchanged() -> None:
+def test_detection_parameter_count_unchanged() -> None:
     """The detection module's parameter count is exactly the pre-WP-087 total.
 
     Key equality alone would not catch a stage rebuilt at different multipliers or
@@ -120,7 +120,7 @@ def test_detection_parameter_count_is_unchanged() -> None:
 
 
 @pytest.mark.parametrize("variant", _VARIANT_PARAMS)
-def test_module_detection_stages_match_the_detector(variant: str) -> None:
+def test_module_detection_stages_match_detector(variant: str) -> None:
     """At every scale the module's backbone/neck/head match the Detector's, stage by stage.
 
     This is the anti-drift gate the R1 Table 7 fidelity tests rely on: those
@@ -141,7 +141,7 @@ def test_module_detection_stages_match_the_detector(variant: str) -> None:
 
 
 @pytest.mark.parametrize("variant", _VARIANT_PARAMS)
-def test_segment_module_branches_match_the_segmenter(variant: str) -> None:
+def test_segment_module_branches_match_segmenter(variant: str) -> None:
     """A segment module's three mask branches match the Segmenter's, at every scale.
 
     The mask-side half of the same anti-drift gate. The segmentation fidelity work

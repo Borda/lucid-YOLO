@@ -4,7 +4,8 @@
 Private on purpose: the notebooks are this package's only callers, so its signatures
 move with them and nothing outside ``lucid_yolo._viz`` imports it — ``import lucid_yolo``
 and the shipped surface beneath it never load this package, which
-``tests/viz/test_import_surface.py`` pins in a subprocess and by reading the source.
+``tests/viz/test_import_surface.py`` pins in a subprocess and ruff's ``TID251``
+banned-api rule pins statically.
 ``matplotlib`` is a declared runtime dependency (WP-189; ``pytorch-lightning[extra]``
 already required it), and this package is the one place under ``lucid_yolo`` allowed
 to import it. The package exists so that the four demo notebooks and the two figure

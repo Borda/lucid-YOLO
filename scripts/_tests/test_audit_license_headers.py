@@ -38,13 +38,13 @@ def _load_audit() -> ModuleType:
 audit = _load_audit()
 
 
-def test_license_is_apache2_accepts_the_real_header(tmp_path: Path) -> None:
+def test_license_apache2_accepts_real_header(tmp_path: Path) -> None:
     """An Apache License, Version 2.0 header passes without a violation."""
     (tmp_path / "LICENSE").write_text("Apache License\nVersion 2.0, January 2004\n", encoding="utf-8")
     assert audit.check_license_is_apache2(tmp_path) == []
 
 
-def test_license_is_apache2_rejects_other_licenses(tmp_path: Path) -> None:
+def test_license_apache2_rejects_other_licenses(tmp_path: Path) -> None:
     """A non-Apache LICENSE file is flagged by name."""
     (tmp_path / "LICENSE").write_text("MIT License\n", encoding="utf-8")
     assert audit.check_license_is_apache2(tmp_path) == ["LICENSE is not the Apache License, Version 2.0"]
@@ -53,7 +53,7 @@ def test_license_is_apache2_rejects_other_licenses(tmp_path: Path) -> None:
 class TestLicenseAppendixPlaceholder:
     """The appendix's copyright line says whether the licence was applied or only copied."""
 
-    def test_an_unfilled_placeholder_is_rejected(self, tmp_path: Path) -> None:
+    def test_unfilled_placeholder_rejected(self, tmp_path: Path) -> None:
         """`Copyright [yyyy] [name of copyright owner]` fails, wherever in the file it sits.
 
         It sits about 5 kB into the Apache template, past any head-read window, so a
@@ -69,7 +69,7 @@ class TestLicenseAppendixPlaceholder:
 
         assert violations == [f"LICENSE still carries the Apache appendix placeholder: {audit.COPYRIGHT_PLACEHOLDER}"]
 
-    def test_a_filled_appendix_passes(self, tmp_path: Path) -> None:
+    def test_filled_appendix_passes(self, tmp_path: Path) -> None:
         """A named holder and year in the appendix is what the placeholder is replaced by."""
         (tmp_path / "LICENSE").write_text(
             "Apache License\nVersion 2.0, January 2004\n" + "filler\n" * 200 + "Copyright 2026 Jirka Borovec\n",
@@ -77,10 +77,6 @@ class TestLicenseAppendixPlaceholder:
         )
 
         assert audit.check_license_is_apache2(tmp_path) == []
-
-    def test_the_real_license_is_filled(self) -> None:
-        """The repository's own LICENSE carries a holder, not the template's brackets."""
-        assert audit.COPYRIGHT_PLACEHOLDER not in (REPO_ROOT / "LICENSE").read_text(encoding="utf-8")
 
 
 class TestNoticeAttribution:
@@ -90,7 +86,7 @@ class TestNoticeAttribution:
     and the flat-group audit refuses a third sibling at module level.
     """
 
-    def test_accepts_a_complete_notice(self, tmp_path: Path) -> None:
+    def test_accepts_complete_notice(self, tmp_path: Path) -> None:
         """A NOTICE carrying every required fragment passes without a violation.
 
         The fixture is the shape the live file has after WP-175 corrected it: the four
@@ -120,7 +116,7 @@ class TestNoticeAttribution:
             f"NOTICE missing: {audit.PAPER_PHRASE}",
         ]
 
-    def test_rejects_the_vendor_bound_paper_phrase(self, tmp_path: Path) -> None:
+    def test_rejects_vendor_bound_paper_phrase(self, tmp_path: Path) -> None:
         """A NOTICE naming *the Ultralytics YOLO26 paper* is refused for lacking the nominative form.
 
         This is the drift WP-161 corrected in the README and explicitly left in ``NOTICE``
@@ -162,7 +158,7 @@ class TestReadmeDisclaimer:
         violations = audit.check_readme_disclaimer(tmp_path)
         assert len(violations) == len(audit.DISCLAIMER_FRAGMENTS)
 
-    def test_rejects_the_vendor_bound_paper_phrase(self, tmp_path: Path) -> None:
+    def test_rejects_vendor_bound_paper_phrase(self, tmp_path: Path) -> None:
         """A README with every disclaimer fragment but the vendor-bound paper phrase is refused.
 
         The same guard on the other file the audit pins: a README whose banner regressed
@@ -180,7 +176,7 @@ class TestReadmeDisclaimer:
         ]
 
 
-def test_spdx_header_accepts_a_headered_file(tmp_path: Path) -> None:
+def test_spdx_header_accepts_headered_file(tmp_path: Path) -> None:
     """A src/**/*.py file starting with the SPDX line passes without a violation."""
     src = tmp_path / "src"
     src.mkdir()
@@ -188,7 +184,7 @@ def test_spdx_header_accepts_a_headered_file(tmp_path: Path) -> None:
     assert audit.check_source_files_carry_spdx_header(tmp_path) == []
 
 
-def test_spdx_header_names_the_offending_file(tmp_path: Path) -> None:
+def test_spdx_header_names_offending_file(tmp_path: Path) -> None:
     """A src/**/*.py file missing the SPDX line is named, relative to the repo root."""
     src = tmp_path / "src"
     src.mkdir()
@@ -200,7 +196,7 @@ def test_spdx_header_names_the_offending_file(tmp_path: Path) -> None:
 class TestSpdxHeaderScope:
     """The header scope is the three trees this repository writes Python into."""
 
-    def test_a_shebang_may_precede_the_header(self, tmp_path: Path) -> None:
+    def test_shebang_may_precede_header(self, tmp_path: Path) -> None:
         """An executable script carries the header on line two and is not unlicensed.
 
         A shebang has to be first to work at all, so a first-line-only read calls
@@ -213,7 +209,7 @@ class TestSpdxHeaderScope:
 
         assert audit.check_source_files_carry_spdx_header(tmp_path) == []
 
-    def test_a_scripts_file_without_the_header_is_named(self, tmp_path: Path) -> None:
+    def test_scripts_file_without_header_named(self, tmp_path: Path) -> None:
         """`scripts/` is in scope, so a missing header there fails rather than passing unseen."""
         scripts = tmp_path / "scripts"
         scripts.mkdir()
@@ -223,7 +219,7 @@ class TestSpdxHeaderScope:
             "files missing SPDX header: ['scripts/bare.py']"
         ]
 
-    def test_a_tests_file_without_the_header_is_named(self, tmp_path: Path) -> None:
+    def test_tests_file_without_header_named(self, tmp_path: Path) -> None:
         """`tests/` is in scope too; a file that travels carries its marker or does not."""
         tests = tmp_path / "tests"
         tests.mkdir()
@@ -233,7 +229,7 @@ class TestSpdxHeaderScope:
 
         assert violations == ["files missing SPDX header: ['tests/test_bare.py']"]
 
-    def test_a_notebook_source_without_the_header_is_named(self, tmp_path: Path) -> None:
+    def test_notebook_source_without_header_named(self, tmp_path: Path) -> None:
         """`notebooks/` is in scope (WP-188): the jupytext source is the file Colab hands a reader."""
         notebooks = tmp_path / "notebooks"
         notebooks.mkdir()
@@ -243,7 +239,7 @@ class TestSpdxHeaderScope:
 
         assert violations == ["files missing SPDX header: ['notebooks/bare.py']"]
 
-    def test_an_absent_tree_is_not_a_failure(self, tmp_path: Path) -> None:
+    def test_absent_tree_not_failure(self, tmp_path: Path) -> None:
         """A scoped tree that does not exist yet yields no files rather than an error.
 
         `notebooks/` joined the scope before any source landed in it, so the walk has to
@@ -251,16 +247,6 @@ class TestSpdxHeaderScope:
         """
         assert audit.check_source_files_carry_spdx_header(tmp_path) == []
 
-    def test_the_scope_is_stated_rather_than_implied_by_a_glob(self) -> None:
+    def test_scope_stated_rather_than_implied_by_glob(self) -> None:
         """The trees are a named constant, so widening or narrowing is a visible decision."""
         assert audit.HEADER_DIRS == ("src", "scripts", "tests", "notebooks")
-
-
-def test_the_live_repo_tree_is_currently_clean() -> None:
-    """The real repo tree the pre-commit hook scans has no license/attribution violations.
-
-    This is the one place this file touches the live tree rather than a synthetic
-    one: a regression here means the hook itself would fail on the next commit
-    that touches a guarded file, not just a new one.
-    """
-    assert audit.find_violations(REPO_ROOT) == []

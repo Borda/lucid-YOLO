@@ -105,7 +105,7 @@ def test_fusion_uses_x1_target_size(
     assert fused.shape[-2:] == features[0].shape[-2:]
 
 
-def test_coarse_level_projections_are_disjoint() -> None:
+def test_coarse_level_projections_disjoint() -> None:
     """P4 and P5 own independent learnable 1x1 projection parameters."""
     fusion = ProtoFusion(_CHANNELS)
     p4_parameter_ids = {id(parameter) for parameter in fusion.projections[0].parameters()}
@@ -150,7 +150,7 @@ def test_proto_count_matches_coefficient_width() -> None:
     assert output.shape[1] == 8
 
 
-def test_proto_output_is_unactivated() -> None:
+def test_proto_output_unactivated() -> None:
     """Raw prototype logits retain values outside the range of tanh or sigmoid."""
     prototypes = ProtoNet(_CHANNELS[0], num_prototypes=1).eval()
     output_conv = prototypes.layers[-1]
@@ -175,7 +175,7 @@ def test_proto_upsample_precedes_final_spatial_conv() -> None:
     assert isinstance(prototypes.layers[5], nn.Conv2d)
 
 
-def test_proto_grid_is_refined_after_upsampling() -> None:
+def test_proto_grid_refined_after_upsampling() -> None:
     """A spatial unit runs at proto resolution, so output is not a bare 2x upsample.
 
     Complements the structural order check with an observable consequence: if the
@@ -241,7 +241,7 @@ class TestAssembleMasks:
             expected = sum(coefficients[0, instance, k] * prototypes[0, k] for k in range(prototypes.shape[1]))
             assert torch.allclose(masks[0, instance], expected, atol=1e-6)
 
-    def test_one_hot_selects_a_single_prototype(self) -> None:
+    def test_one_hot_selects_single_prototype(self) -> None:
         """A one-hot coefficient vector reproduces exactly the prototype it selects.
 
         Catches a contraction that averages over K or that indexes the wrong axis:

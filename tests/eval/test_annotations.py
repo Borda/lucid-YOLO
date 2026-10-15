@@ -56,7 +56,7 @@ def _payload() -> dict[str, object]:
     }
 
 
-def test_empty_target_has_the_torchmetrics_dtypes() -> None:
+def test_empty_target_has_torchmetrics_dtypes() -> None:
     """The no-annotation target carries every key with the dtypes torchmetrics expects."""
     target = empty_target()
     assert set(target) == _TARGET_KEYS
@@ -91,7 +91,7 @@ def test_annotations_default_iscrowd_and_area() -> None:
         pytest.param("not-a-list", id="not-a-list"),
     ],
 )
-def test_degenerate_annotations_are_dropped(bbox: object) -> None:
+def test_degenerate_annotations_dropped(bbox: object) -> None:
     """Degenerate boxes are skipped, not emitted as unmatchable zero-area targets."""
     target = annotations_to_target([{"bbox": bbox, "category_id": 1}])
     assert target["boxes"].shape == (0, 4)
@@ -109,7 +109,7 @@ def test_valid_annotations_survive_alongside_degenerate_ones() -> None:
     assert target["labels"].tolist() == [9]
 
 
-def test_keypoint_load_carries_the_annotations_own_metadata(tmp_path: Path) -> None:
+def test_keypoint_load_carries_annotations_own_metadata(tmp_path: Path) -> None:
     """A ``with_keypoints`` load hands the OKS scorer the file's fields, not a recount of them.
 
     Every one of the four is chosen here to disagree with what a reconstruction from
@@ -143,7 +143,7 @@ def test_keypoint_load_carries_the_annotations_own_metadata(tmp_path: Path) -> N
     assert target["iscrowd"].tolist() == [1]
 
 
-def test_keypoint_load_gives_an_unannotated_image_empty_point_tensors(tmp_path: Path) -> None:
+def test_keypoint_load_gives_unannotated_image_empty_point_tensors(tmp_path: Path) -> None:
     """An image with no annotation still carries the three keypoint keys, all empty.
 
     Every image the evaluator scores must produce a target dict of one shape: the
@@ -172,7 +172,7 @@ def test_keypoint_load_gives_an_unannotated_image_empty_point_tensors(tmp_path: 
     assert unannotated["num_keypoints"].shape == (0,)
 
 
-def test_keypoint_load_refuses_an_annotation_file_with_no_points(tmp_path: Path) -> None:
+def test_keypoint_load_refuses_annotation_file_with_no_points(tmp_path: Path) -> None:
     """A plain ``instances`` file loaded for the pose protocol fails, naming the field.
 
     The two COCO files differ only in which annotations they carry, so pointing the
@@ -187,7 +187,7 @@ def test_keypoint_load_refuses_an_annotation_file_with_no_points(tmp_path: Path)
         load_eval_annotations(ann_file, with_keypoints=True)
 
 
-def test_masks_and_keypoints_requested_together_reach_the_same_target(tmp_path: Path) -> None:
+def test_masks_and_keypoints_requested_together_reach_same_target(tmp_path: Path) -> None:
     """Both opt-ins compose: one load with both flags carries the mask *and* the points.
 
     The two options are documented as independent, and asking for both selects the
@@ -247,9 +247,7 @@ def test_masks_and_keypoints_requested_together_reach_the_same_target(tmp_path: 
         ),
     ],
 )
-def test_malformed_numeric_metadata_is_refused_naming_the_annotation(
-    annotation: dict[str, object], message: str
-) -> None:
+def test_malformed_numeric_metadata_refused_naming_annotation(annotation: dict[str, object], message: str) -> None:
     """Each out-of-domain numeric field is refused on its own, naming image, annotation and value.
 
     Carried through instead, every one of these makes both scorers report ``-1`` for
@@ -278,7 +276,7 @@ def test_legal_but_unusual_metadata_still_loads() -> None:
     assert target["iscrowd"].tolist() == [1]
 
 
-def test_the_lazy_path_refuses_malformed_metadata_at_load_not_mid_run(tmp_path: Path) -> None:
+def test_lazy_path_refuses_malformed_metadata_at_load_not_mid_run(tmp_path: Path) -> None:
     """A masked load validates the whole file up front rather than at first lookup.
 
     :class:`~lucid_yolo.eval.annotations.LazyTargets` builds nothing until the
@@ -304,7 +302,7 @@ def test_load_sorts_images_by_id(tmp_path: Path) -> None:
     assert images[0] == EvalImage(image_id=1, file_name="a.png", height=6, width=10)
 
 
-def test_load_gives_unannotated_images_an_empty_target(tmp_path: Path) -> None:
+def test_load_gives_unannotated_images_empty_target(tmp_path: Path) -> None:
     """Every image gets a target entry, so the evaluator sees the whole split."""
     ann_file = tmp_path / "instances.json"
     ann_file.write_text(json.dumps(_payload()))
@@ -314,7 +312,7 @@ def test_load_gives_unannotated_images_an_empty_target(tmp_path: Path) -> None:
     assert targets[2]["boxes"].shape == (0, 4)
 
 
-def test_masked_load_matches_an_eager_decode(tmp_path: Path) -> None:
+def test_masked_load_matches_eager_decode(tmp_path: Path) -> None:
     """The lazy mapping returns exactly what decoding every annotation up front would.
 
     Laziness is a memory strategy, not a different ground truth: every key, every
@@ -366,7 +364,7 @@ def test_masked_load_decodes_on_lookup_not_up_front(tmp_path: Path) -> None:
         assert len(decoded) == 1
 
 
-def test_load_builds_the_sorted_label_map(tmp_path: Path) -> None:
+def test_load_builds_sorted_label_map(tmp_path: Path) -> None:
     """The label map is contiguous-label to category id in sorted-category-id order."""
     ann_file = tmp_path / "instances.json"
     ann_file.write_text(json.dumps(_payload()))

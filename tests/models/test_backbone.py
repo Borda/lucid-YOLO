@@ -85,7 +85,7 @@ def test_repeats_scale_with_depth(depth: float, expected_repeats: int) -> None:
         pytest.param(1.75, 4, id="3.5-ties-to-even-4"),
     ],
 )
-def test_a_half_integer_repeat_count_ties_to_even(depth: float, expected_repeats: int) -> None:
+def test_half_integer_repeat_count_ties_to_even(depth: float, expected_repeats: int) -> None:
     """Depth scaling rounds half-integers to the nearer even count, not upward.
 
     ``_scale_repeats`` uses Python's built-in ``round``, which is banker's rounding, and

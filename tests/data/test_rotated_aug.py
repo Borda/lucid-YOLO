@@ -234,7 +234,7 @@ class TestCanonicalOutput:
     """Every transform emits canonical long-edge boxes, for any incoming angle."""
 
     @pytest.mark.parametrize("theta", _THETA_CASES)
-    def test_flip_output_is_canonical(self, theta: float) -> None:
+    def test_flip_output_canonical(self, theta: float) -> None:
         """The horizontal flip re-canonicalizes the mirrored angle."""
         flip = HorizontalFlip(p=1.0, generator=_generator())
 
@@ -243,7 +243,7 @@ class TestCanonicalOutput:
         _assert_canonical(out.rboxes)
 
     @pytest.mark.parametrize("theta", _THETA_CASES)
-    def test_affine_output_is_canonical(self, theta: float) -> None:
+    def test_affine_output_canonical(self, theta: float) -> None:
         """A rotating, scaling, shearing affine re-fits to a canonical box."""
         affine = RandomAffine(degrees=25.0, translate=0.05, scale=0.2, shear=10.0, generator=_generator())
 
@@ -252,7 +252,7 @@ class TestCanonicalOutput:
         _assert_canonical(out.rboxes)
 
     @pytest.mark.parametrize("theta", _THETA_CASES)
-    def test_mosaic_output_is_canonical(self, theta: float) -> None:
+    def test_mosaic_output_canonical(self, theta: float) -> None:
         """Mosaic placement leaves every surviving rotated box canonical."""
         mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=_generator())
         carried = _paired(_rboxes(theta, cx=30.0, cy=30.0, w=4.0, h=2.0))
@@ -263,7 +263,7 @@ class TestCanonicalOutput:
         _assert_canonical(out.rboxes)
 
     @pytest.mark.parametrize("theta", _THETA_CASES)
-    def test_mixup_output_is_canonical(self, theta: float) -> None:
+    def test_mixup_output_canonical(self, theta: float) -> None:
         """Mixup carries rotated boxes through the blend still canonical."""
         mixup = Mixup(p=1.0, generator=_generator())
         first = _paired(canonicalize(_rboxes(theta)))
@@ -289,7 +289,7 @@ class TestHorizontalFlipRotated:
 
         assert float(_ring_distance(rboxes_to_polygons(out.rboxes), expected).max()) < 1e-3
 
-    def test_double_flip_restores_the_original_geometry(self) -> None:
+    def test_double_flip_restores_original_geometry(self) -> None:
         """Flipping twice returns every swept angle's rectangle to its starting place."""
         flip = HorizontalFlip(p=1.0, generator=_generator())
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
@@ -299,7 +299,7 @@ class TestHorizontalFlipRotated:
 
         assert float(_box_distance(twice.rboxes, canonicalize(targets.rboxes)).max()) < 1e-4
 
-    def test_nothing_is_dropped_by_the_mirror(self) -> None:
+    def test_nothing_dropped_by_mirror(self) -> None:
         """An isometry keeps every instance, so all three modalities keep their length."""
         flip = HorizontalFlip(p=1.0, generator=_generator())
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
@@ -313,7 +313,7 @@ class TestHorizontalFlipRotated:
 class TestAffineRotated:
     """The affine warps corners and re-fits: exact under a similarity, a fit under shear."""
 
-    def test_identity_affine_returns_the_input_boxes(self) -> None:
+    def test_identity_affine_returns_input_boxes(self) -> None:
         """A zero-parameter affine is the identity on every swept rotated box."""
         affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=_generator())
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
@@ -322,7 +322,7 @@ class TestAffineRotated:
 
         assert float(_box_distance(out.rboxes, canonicalize(targets.rboxes)).max()) < 1e-4
 
-    def test_similarity_warp_is_exact(self) -> None:
+    def test_similarity_warp_exact(self) -> None:
         """With no shear the warped corners are reproduced exactly, not approximated."""
         affine = RandomAffine(degrees=20.0, translate=0.05, scale=0.3, shear=0.0, generator=_generator())
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
@@ -333,7 +333,7 @@ class TestAffineRotated:
         warped = apply_affine_to_points(corners.reshape(-1, 2).double(), affine.last_matrix).reshape(-1, 4, 2)
         assert float(_ring_distance(rboxes_to_polygons(out.rboxes), warped.float()).max()) < 1e-3
 
-    def test_sheared_warp_matches_the_derived_fit_residual(self) -> None:
+    def test_sheared_warp_matches_derived_fit_residual(self) -> None:
         """Under shear every corner misses by exactly ``2 |q| sin(s / 2)`` (module docstring)."""
         affine = RandomAffine(degrees=10.0, translate=0.0, scale=0.1, shear=15.0, generator=_generator(5))
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
@@ -349,7 +349,7 @@ class TestAffineRotated:
         assert float(expected.max()) > 0.5
         assert torch.allclose(residual, expected, atol=1e-3)
 
-    def test_envelope_tracks_the_rotated_geometry(self) -> None:
+    def test_envelope_tracks_rotated_geometry(self) -> None:
         """An unclipped instance's box is exactly the envelope of its rotated box (A40)."""
         affine = RandomAffine(degrees=20.0, translate=0.05, scale=0.2, shear=5.0, generator=_generator())
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
@@ -358,7 +358,7 @@ class TestAffineRotated:
 
         assert torch.allclose(out.boxes, _envelopes(out.rboxes), atol=1e-4)
 
-    def test_offcanvas_instance_is_dropped_from_every_modality(self) -> None:
+    def test_offcanvas_instance_dropped_from_every_modality(self) -> None:
         """An instance outside the canvas leaves, taking its box and label with it."""
         affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=_generator())
         inside = _rboxes(0.4)
@@ -370,7 +370,7 @@ class TestAffineRotated:
         _assert_one_instance_axis(out)
         assert out.labels.tolist() == [0]
 
-    def test_clipped_instance_keeps_its_envelope_inside_the_canvas(self) -> None:
+    def test_clipped_instance_keeps_envelope_inside_canvas(self) -> None:
         """A straddling instance survives with an envelope cut to the canvas edge."""
         affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=_generator())
         targets = _paired(_rboxes(0.0, cx=float(_CANVAS) - 4.0, cy=60.0))
@@ -380,7 +380,7 @@ class TestAffineRotated:
         assert out.boxes[0, 2].item() == pytest.approx(float(_CANVAS))
         assert out.boxes[0, 0].item() == pytest.approx(float(_CANVAS) - 14.0)
 
-    def test_clipped_rotated_box_keeps_its_orientation_and_covers_the_survivor(self) -> None:
+    def test_clipped_rotated_box_keeps_orientation_and_covers_survivor(self) -> None:
         """The re-fit invents no angle: it keeps theta and contains the region that survived."""
         affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=_generator())
         targets = _paired(_rboxes(0.6, cx=float(_CANVAS) - 4.0, cy=60.0))
@@ -392,7 +392,7 @@ class TestAffineRotated:
         assert bool((fitted[:, :2] <= out.boxes[:, :2] + 1e-4).all())
         assert bool((fitted[:, 2:] >= out.boxes[:, 2:] - 1e-4).all())
 
-    def test_zero_angle_box_agrees_with_the_axis_aligned_path(self) -> None:
+    def test_zero_angle_box_agrees_with_axis_aligned_path(self) -> None:
         """A theta=0 instance gets the same box whether or not the rotated path runs."""
         rotated = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=_generator())
         plain = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=_generator())
@@ -403,7 +403,7 @@ class TestAffineRotated:
 
         assert torch.allclose(with_rboxes.boxes, without.boxes, atol=1e-5)
 
-    def test_polygons_alongside_rboxes_are_rejected(self) -> None:
+    def test_polygons_alongside_rboxes_rejected(self) -> None:
         """The oriented path carries no polygons, so a mixed input raises (WP-056)."""
         affine = RandomAffine(degrees=10.0, generator=_generator())
         targets = _paired(_rboxes(0.3))
@@ -421,7 +421,7 @@ class TestAffineRotated:
 class TestMosaicRotated:
     """Placement is a pure translation; the canvas edge is what drops instances."""
 
-    def test_placed_box_follows_the_quadrant_offset(self) -> None:
+    def test_placed_box_follows_quadrant_offset(self) -> None:
         """The surviving box sits at its image-local position plus the sampled offset."""
         mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=_generator())
         carried = _paired(_rboxes(0.4, cx=30.0, cy=30.0, w=4.0, h=2.0))
@@ -446,7 +446,7 @@ class TestMosaicRotated:
         _assert_one_instance_axis(out)
         assert out.labels.tolist() == [0]
 
-    def test_envelope_tracks_the_rotated_geometry(self) -> None:
+    def test_envelope_tracks_rotated_geometry(self) -> None:
         """The merged box is the envelope of the merged rotated box (A40)."""
         mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=_generator())
         carried = _paired(_rboxes(0.4, cx=30.0, cy=30.0, w=4.0, h=2.0))
@@ -460,7 +460,7 @@ class TestMosaicRotated:
 class TestMixupRotated:
     """Mixup moves no geometry; copy-paste has no rotated instance to move."""
 
-    def test_rboxes_are_concatenated_untouched(self) -> None:
+    def test_rboxes_concatenated_untouched(self) -> None:
         """Both inputs' rotated boxes survive the blend bit for bit, in input order."""
         mixup = Mixup(p=1.0, generator=_generator())
         first = _paired(canonicalize(_rboxes(0.3)))
@@ -483,7 +483,7 @@ class TestMixupRotated:
 class TestClipRboxesToCanvas:
     """The clip helper: untouched inside, re-fitted across an edge, zeroed outside."""
 
-    def test_inside_box_is_returned_bit_for_bit(self) -> None:
+    def test_inside_box_returned_bit_for_bit(self) -> None:
         """A box wholly inside the canvas takes no clip and no re-fit."""
         rboxes = canonicalize(_rboxes(*_SWEEP_ANGLES))
 
@@ -501,7 +501,7 @@ class TestClipRboxesToCanvas:
         assert torch.equal(clipped, torch.zeros_like(clipped))
         assert torch.equal(envelopes, torch.zeros_like(envelopes))
 
-    def test_partial_box_is_refitted_at_its_own_orientation(self) -> None:
+    def test_partial_box_refitted_at_own_orientation(self) -> None:
         """An axis-aligned box across the right edge keeps theta and loses only the overhang."""
         rboxes = _rboxes(0.0, cx=float(_CANVAS) - 4.0, cy=60.0)
 

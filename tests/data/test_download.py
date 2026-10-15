@@ -441,7 +441,7 @@ class TestDownloadCoco:
         dl.download_coco(root, ["val"], annotations=False, force=True, progress=False)
         assert (root / "val2017" / "000000000000.jpg").is_file()
 
-    def test_resumes_a_partial_its_sidecar_vouches_for(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_resumes_partial_sidecar_vouches_for(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A ``.part`` whose sidecar names this same URL is resumed, not restarted.
 
         A large COCO archive over a flaky connection is exactly the case this exists
@@ -463,7 +463,7 @@ class TestDownloadCoco:
         assert not (root / "val2017.zip.part").exists()
         assert not (root / f"val2017.zip{dl._PART_META_SUFFIX}").exists()
 
-    def test_discards_a_partial_with_no_sidecar(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_discards_partial_with_no_sidecar(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A partial nothing vouches for is thrown away and the transfer restarts (L-33).
 
         The bytes here are not a prefix of the archive at all -- an interrupted run
@@ -484,7 +484,7 @@ class TestDownloadCoco:
         assert (root / "val2017.zip").read_bytes() == payload
         assert (root / "val2017" / "000000000000.jpg").is_file()
 
-    def test_discards_a_partial_left_by_another_url(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_discards_partial_left_by_another_url(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A sidecar naming a different URL invalidates the partial instead of vouching for it.
 
         The sidecar has to be *checked*, not merely written: a run interrupted while
@@ -503,7 +503,7 @@ class TestDownloadCoco:
         assert ranges == [None]
         assert (root / "val2017.zip").read_bytes() == payload
 
-    def test_reports_a_checksum_it_cannot_verify_on_a_skipped_split(
+    def test_reports_checksum_it_cannot_verify_on_skipped_split(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """A digest supplied for an already-extracted split says so instead of passing silently (M-40).
@@ -818,7 +818,7 @@ class TestCliVerify:
         expected = f"lucid-data download --data_root {tmp_path / 'coco'} --splits '[val]' --force true"
         assert expected in err  # repair hint
 
-    def test_the_repair_hint_names_a_command_that_still_parses(
+    def test_repair_hint_names_command_still_parses(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """The printed repair hint is a command a caller can paste back into a shell.

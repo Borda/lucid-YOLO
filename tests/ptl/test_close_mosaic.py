@@ -160,7 +160,7 @@ def test_flip_epoch(detseg_fixture_dir: Path, close_mosaic: int, expected: list[
     assert trace == expected
 
 
-def test_repeated_flip_is_idempotent() -> None:
+def test_repeated_flip_idempotent() -> None:
     """Once the window is entered the seam is set once; later epochs are no-ops."""
     callback = CloseMosaicCallback(close_mosaic=2)
     datamodule = _StubDataModule()

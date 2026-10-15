@@ -196,7 +196,7 @@ def test_mask_matches_box(image_file: Path, decoder: str) -> None:
 
 
 @pytest.mark.parametrize("decoder", [pytest.param(path, id=path) for path in _EXPECTED_MASK_EXTENT])
-def test_nothing_above_the_threshold_returns_an_empty_row_aligned_pair(image_file: Path, decoder: str) -> None:
+def test_nothing_above_threshold_returns_empty_row_aligned_pair(image_file: Path, decoder: str) -> None:
     """An image with no surviving detection yields empty boxes and empty masks, not an error.
 
     The planted anchor scores ``sigmoid(8) = 0.9997``, so a threshold above that empties
@@ -216,7 +216,7 @@ def test_nothing_above_the_threshold_returns_an_empty_row_aligned_pair(image_fil
     assert prediction.masks.dtype == torch.bool
 
 
-def test_an_oriented_checkpoint_is_still_refused_by_name(image_file: Path) -> None:
+def test_oriented_checkpoint_still_refused_by_name(image_file: Path) -> None:
     """An ``obb`` checkpoint is refused by both of these entry points, naming its task.
 
     The oriented head's plain forward returns the same detection output a detector's
@@ -234,7 +234,7 @@ def test_an_oriented_checkpoint_is_still_refused_by_name(image_file: Path) -> No
         predict_image(module, image_file, img_size=IMG_SIZE)
 
 
-def test_the_report_carries_each_detections_mask_as_coco_rle(
+def test_report_carries_each_detections_mask_as_coco_rle(
     tmp_path: Path,
     image_file: Path,
 ) -> None:

@@ -75,7 +75,7 @@ def _rle_masks(count: int) -> list[tuple[list[int], bytes]]:
 class TestHoistedScoreBackend:
     """The override must produce the stock backend's document, field for field."""
 
-    def test_a_box_document_matches_the_stock_backend(self) -> None:
+    def test_box_document_matches_stock_backend(self) -> None:
         """Detections converted with hoisted scores equal the per-annotation conversion.
 
         The detection path, at the shape validation actually feeds it: several
@@ -92,7 +92,7 @@ class TestHoistedScoreBackend:
 
         assert hoisted == stock
 
-    def test_a_mask_document_with_an_empty_image_matches_the_stock_backend(self) -> None:
+    def test_mask_document_with_empty_image_matches_stock_backend(self) -> None:
         """Upstream's skip of a maskless image is reproduced, so scores stay aligned.
 
         A segmentation document carries no boxes, and upstream then contributes no
@@ -117,7 +117,7 @@ class TestHoistedScoreBackend:
         # The skipped image contributes nothing, so image three's score follows image one's.
         assert [annotation["score"] for annotation in hoisted["annotations"]] == pytest.approx([0.8, 0.4, 0.6])
 
-    def test_a_ground_truth_document_carries_no_scores(self) -> None:
+    def test_ground_truth_document_carries_no_scores(self) -> None:
         """With ``scores=None`` the override returns upstream's document untouched.
 
         Ground truth is converted by the same method with no scores at all, so the
@@ -133,7 +133,7 @@ class TestHoistedScoreBackend:
         assert all("score" not in annotation for annotation in hoisted["annotations"])
 
 
-def test_the_metric_reports_the_value_the_stock_metric_reports() -> None:
+def test_metric_reports_value_stock_metric_reports() -> None:
     """End to end, the swapped backend leaves every mAP figure unchanged.
 
     The document comparisons above are the precise guard; this one closes the gap
@@ -156,7 +156,7 @@ def test_the_metric_reports_the_value_the_stock_metric_reports() -> None:
 class TestScoreTypeValidation:
     """The hoist must refuse exactly the scores upstream refuses (audit L-38)."""
 
-    def test_an_integral_score_raises_upstream_s_message(self) -> None:
+    def test_integral_score_raises_upstream_s_message(self) -> None:
         """A non-float score tensor is rejected with the stock backend's own wording.
 
         Upstream reads each score individually and raises when the converted value
@@ -202,7 +202,7 @@ class TestScoreTypeValidation:
 class TestPrivateSurfaceCanary:
     """The factory refuses a ``torchmetrics`` whose private surface has moved (audit M-07)."""
 
-    def test_a_missing_get_coco_format_fails_at_construction(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_missing_get_coco_format_fails_at_construction(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Losing upstream's ``_get_coco_format`` raises here instead of silently unhooking.
 
         The override defines the method itself, so a rename upstream leaves the
@@ -220,7 +220,7 @@ class TestPrivateSurfaceCanary:
 class TestEpochMetricRecallGrid:
     """The training loop's epoch metrics integrate on the report path's grid (audit M-03)."""
 
-    def test_the_factory_forwards_rec_thresholds(self) -> None:
+    def test_factory_forwards_rec_thresholds(self) -> None:
         """``rec_thresholds`` passes through the factory to the metric unchanged.
 
         The factory takes ``**kwargs``, so nothing structurally guarantees a
@@ -231,7 +231,7 @@ class TestEpochMetricRecallGrid:
 
         assert tuple(metric.rec_thresholds) == COCO_RECALL_GRID
 
-    def test_the_box_metric_uses_the_exact_hundredths_grid(self) -> None:
+    def test_box_metric_uses_exact_hundredths_grid(self) -> None:
         """``val/mAP`` integrates over :data:`COCO_RECALL_GRID`, not torchmetrics' float32 default.
 
         The acceptance path pins that grid (``coco_eval._new_metric``) precisely to
@@ -243,7 +243,7 @@ class TestEpochMetricRecallGrid:
 
         assert tuple(module._val_map.rec_thresholds) == COCO_RECALL_GRID
 
-    def test_the_mask_metric_uses_the_exact_hundredths_grid(self) -> None:
+    def test_mask_metric_uses_exact_hundredths_grid(self) -> None:
         """``val/segm_mAP`` is built on the same grid as the box metric.
 
         The mask metric is constructed separately -- different ``iou_type``, its own

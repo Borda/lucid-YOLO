@@ -85,7 +85,7 @@ def test_unknown_producer_fails(tmp_path: Path) -> None:
     assert result.error is not None
 
 
-def test_frozen_golden_is_discovered_and_compared(tmp_path: Path) -> None:
+def test_frozen_golden_discovered_and_compared(tmp_path: Path) -> None:
     """A file under ``frozen/`` is discovered and passes the same comparison (DoD e)."""
     frozen_dir = tmp_path / "frozen" / "0.1"
     frozen_dir.mkdir(parents=True)
@@ -149,7 +149,7 @@ def _golden_minus_one_metric(source: Path, dest: Path) -> str:
     return dropped
 
 
-def test_live_golden_missing_a_produced_metric_fails(tmp_path: Path) -> None:
+def test_live_golden_missing_produced_metric_fails(tmp_path: Path) -> None:
     """A metric the producer emits but the live golden does not pin fails the check (M-44).
 
     The gate's purpose is to pin a producer's output. Comparing only the stored keys
@@ -166,7 +166,7 @@ def test_live_golden_missing_a_produced_metric_fails(tmp_path: Path) -> None:
     assert any(c.metric == dropped and not c.passed for c in result.comparisons)
 
 
-def test_frozen_golden_may_pin_a_subset_of_produced_metrics(tmp_path: Path) -> None:
+def test_frozen_golden_may_pin_subset_of_produced_metrics(tmp_path: Path) -> None:
     """A frozen snapshot pinning fewer metrics than the producer now emits still passes (M-44).
 
     A past release legitimately froze the metrics that existed then. Holding frozen
@@ -233,9 +233,7 @@ def _copy_tree_with_frozen(tmp_path: Path, frozen_bytes: bytes | None) -> Path:
     return tmp_path
 
 
-def test_byte_identical_frozen_golden_reuses_the_live_producer_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_byte_identical_frozen_golden_reuses_live_producer_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A frozen file byte-identical to its live sibling is not recomputed (M-41).
 
     41 of the repository's 50 offline goldens are byte-identical copies of a live
@@ -260,7 +258,7 @@ def test_byte_identical_frozen_golden_reuses_the_live_producer_run(
         pytest.param(False, id="frozen-has-no-live-sibling"),
     ],
 )
-def test_frozen_golden_without_an_identical_live_sibling_is_recomputed(
+def test_frozen_golden_without_identical_live_sibling_recomputed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, differing: bool
 ) -> None:
     """A frozen file that is not byte-identical to a live sibling gets the full recompute (M-41).
@@ -302,7 +300,7 @@ def test_resolve_producer_contract(spec_valid: bool) -> None:
             harness.resolve_producer("not-a-valid-spec")
 
 
-def test_main_exit_code_zero_on_a_passing_golden(tmp_path: Path) -> None:
+def test_main_exit_code_zero_on_passing_golden(tmp_path: Path) -> None:
     """The CLI returns 0 when every golden it finds passes."""
     shutil.copy(REAL_GOLDEN, tmp_path / REAL_GOLDEN.name)
     assert harness.main(["--goldens-dir", str(tmp_path)]) == 0

@@ -76,7 +76,7 @@ def _saturated_prototypes(grid: int, region: slice) -> torch.Tensor:
     return prototypes
 
 
-def test_o2o_topk_ranking_is_bit_identical_to_the_pre_split_body() -> None:
+def test_o2o_topk_ranking_bit_identical_to_pre_split_body() -> None:
     """The wrapper reproduces the old selection exactly, not merely closely.
 
     Catches a rewrite of the reduction smuggled in with the index return — a
@@ -92,7 +92,7 @@ def test_o2o_topk_ranking_is_bit_identical_to_the_pre_split_body() -> None:
     assert torch.equal(detections, _legacy_o2o_topk(scores, boxes, 7))
 
 
-def test_anchor_index_reproduces_the_detection_corners() -> None:
+def test_anchor_index_reproduces_detection_corners() -> None:
     """Gathering ``boxes`` by the returned indices yields the tuple's own corners.
 
     This is the contract every per-anchor quantity relies on: if the reported
@@ -108,7 +108,7 @@ def test_anchor_index_reproduces_the_detection_corners() -> None:
     assert torch.equal(gathered, detections[..., :_BOX_CORNERS])
 
 
-def test_coefficients_gathered_by_anchor_index_belong_to_the_kept_anchors() -> None:
+def test_coefficients_gathered_by_anchor_index_belong_to_kept_anchors() -> None:
     """Coefficient rows selected by the returned indices are the kept anchors' own rows.
 
     The defect this catches is a second selection path: with a known score order
@@ -128,7 +128,7 @@ def test_coefficients_gathered_by_anchor_index_belong_to_the_kept_anchors() -> N
     assert torch.equal(gathered, torch.tensor([[1.0, -1.0], [3.0, -3.0], [4.0, -4.0]]))
 
 
-def test_one_hot_coefficient_reproduces_its_prototype_rectangle() -> None:
+def test_one_hot_coefficient_reproduces_prototype_rectangle() -> None:
     """A one-hot coefficient recovers exactly the rectangle its prototype encodes.
 
     Catches an assembly that mixes the wrong prototypes (a transposed einsum
@@ -154,7 +154,7 @@ def test_one_hot_coefficient_reproduces_its_prototype_rectangle() -> None:
     assert torch.equal(masks[0, 0], expected)
 
 
-def test_mask_is_zero_outside_the_predicted_box() -> None:
+def test_mask_zero_outside_predicted_box() -> None:
     """A box covering part of the prototype rectangle keeps only the boxed part.
 
     This is the test that fails if the crop is dropped or applied with the
@@ -162,7 +162,7 @@ def test_mask_is_zero_outside_the_predicted_box() -> None:
     it the whole ``[8, 24)`` rectangle survives, since the prototype claims it.
     The single excluded pixel at ``(8, 8)`` is the prototype rectangle's own
     rounded corner (see
-    :func:`test_one_hot_coefficient_reproduces_its_prototype_rectangle`), not a
+    :func:`test_one_hot_coefficient_reproduces_prototype_rectangle`), not a
     property of the crop.
     """
     prototypes = torch.cat((_saturated_prototypes(8, slice(2, 6)), torch.full((1, 1, 8, 8), -_SATURATED)), dim=1)
@@ -203,7 +203,7 @@ def test_threshold_cuts_at_one_half(probability: float, foreground: bool) -> Non
     assert bool(masks.any()) is foreground
 
 
-def test_output_is_bool_over_batch_and_instance_axes() -> None:
+def test_output_bool_over_batch_and_instance_axes() -> None:
     """The decode returns ``(B, N, H, W)`` booleans, not floats or a flattened stack.
 
     Catches an output that keeps the probability dtype (an evaluator would then
@@ -220,7 +220,7 @@ def test_output_is_bool_over_batch_and_instance_axes() -> None:
     assert masks.dtype == torch.bool
 
 
-def test_no_kept_detections_returns_the_empty_stack() -> None:
+def test_no_kept_detections_returns_empty_stack() -> None:
     """An image with nothing to decode returns ``(B, 0, H, W)`` rather than raising.
 
     ``F.interpolate`` treats the instance axis as channels and rejects a zero-length
@@ -267,7 +267,7 @@ def test_boundary_lands_between_prototype_cells() -> None:
     assert torch.equal(masks[0, 0, 0], expected_row)
 
 
-def test_masks_to_original_round_trips_a_real_letterbox() -> None:
+def test_masks_to_original_round_trips_real_letterbox() -> None:
     """A mask letterboxed by the validation transform comes back on the original grid.
 
     Catches padding removed from the wrong side or the wrong axis, and a resize
@@ -292,7 +292,7 @@ def test_masks_to_original_round_trips_a_real_letterbox() -> None:
     assert abs(int(recovered.sum()) - int(original.sum())) <= 0.05 * int(original.sum())
 
 
-def test_recovered_mask_and_box_agree_on_the_original_grid() -> None:
+def test_recovered_mask_and_box_agree_on_original_grid() -> None:
     """A mask filling its box still fills it after both inverse transforms.
 
     The gate against the silent failure mode: if ``masks_to_original`` derived

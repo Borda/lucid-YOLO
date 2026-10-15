@@ -157,7 +157,7 @@ class TestKeypoints:
                 keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
             )
 
-    def test_clone_is_independent(self) -> None:
+    def test_clone_independent(self) -> None:
         """Mutating cloned keypoint tensors leaves their source tensors unchanged."""
         original = Targets(
             boxes=_boxes(1),
@@ -240,7 +240,7 @@ class TestKeypoints:
 class TestClone:
     """Deep-copy independence."""
 
-    def test_clone_is_independent(self) -> None:
+    def test_clone_independent(self) -> None:
         """Mutating a clone's tensors leaves the original unchanged."""
         original = Targets(
             boxes=_boxes(2), labels=_labels(2), polygons=[torch.zeros((3, 2)), torch.zeros((3, 2))], rboxes=_rboxes(1)
@@ -344,7 +344,7 @@ class TestEmpty:
         kept = Targets.empty().filter(torch.zeros(0, dtype=torch.bool))
         assert kept.boxes.shape == (0, 4)
 
-    def test_empty_is_concat_identity(self) -> None:
+    def test_empty_concat_identity(self) -> None:
         """Concatenating empty targets with a populated set changes nothing."""
         populated = Targets(boxes=_boxes(2), labels=_labels(2))
         merged = Targets.concat([Targets.empty(), populated, Targets.empty()])

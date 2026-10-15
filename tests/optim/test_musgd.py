@@ -43,7 +43,7 @@ def batching_on_every_device(monkeypatch: pytest.MonkeyPatch) -> None:
     the per-parameter path through every one of the batching tests and prove
     nothing about batching. Widening the gate keeps those tests exercising the
     mapped path wherever they run; the narrow default is what
-    ``test_a_non_batching_device_keeps_the_per_parameter_path`` pins.
+    ``test_non_batching_device_keeps_per_parameter_path`` pins.
     """
     monkeypatch.setattr("lucid_yolo.optim.musgd._BATCHED_DEVICE_TYPES", frozenset({"cpu", "cuda", "mps"}))
 
@@ -350,7 +350,7 @@ class TestExactShapeBatching:
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
 
     @pytest.mark.usefixtures("batching_on_every_device")
-    def test_parameter_groups_never_share_a_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_parameter_groups_never_share_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Equal matrices with different group options keep separate update calls and separate values."""
         lr, momentum, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 5e-4, 5
         left = _param_with_grad(6, 4)
@@ -380,7 +380,7 @@ class TestExactShapeBatching:
 
     @pytest.mark.gpu
     @pytest.mark.usefixtures("batching_on_every_device")
-    def test_device_boundary_forms_a_separate_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_device_boundary_forms_separate_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Equal shape and dtype on different devices never share a batch."""
         lr, momentum, w_muon, w_sgd, weight_decay, ns_steps = 0.05, 0.95, 0.5, 0.5, 5e-4, 5
         cpu_param = _param_with_grad(6, 4)
@@ -407,7 +407,7 @@ class TestExactShapeBatching:
 
     @pytest.mark.skipif(not _GRAD_DTYPE_SUPPORTED, reason="torch.Tensor.grad_dtype postdates the torch>=2.4 floor")
     @pytest.mark.usefixtures("batching_on_every_device")
-    def test_a_gradient_dtype_of_its_own_forms_a_separate_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_gradient_dtype_of_own_forms_separate_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Two float32 matrices whose gradients differ in dtype are stacked apart.
 
         ``_nesterov_grad`` returns ``grad.add(buffer)``, which promotes, so a
@@ -446,10 +446,10 @@ class TestExactShapeBatching:
             expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
             torch.testing.assert_close(param.detach(), (start - lr * expected_update).to(param.dtype))
 
-    def test_device_boundary_forms_a_separate_batch_on_cpu_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_device_boundary_forms_separate_batch_on_cpu_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Two equal-shape, equal-dtype params on different ``.device`` values never share a batch.
 
-        ``test_device_boundary_forms_a_separate_batch`` above is the only test of
+        ``test_device_boundary_forms_separate_batch`` above is the only test of
         this invariant and is ``@pytest.mark.gpu``-only, so it never runs in the
         default CPU-only CI matrix. A real second CPU tensor cannot carry a
         genuinely different device value -- ``torch.randn(..., device=("cpu", 1))``
@@ -500,7 +500,7 @@ class TestExactShapeBatching:
             pytest.param(2, 1, id="two-equal-matrices-take-one-batch"),
         ],
     )
-    def test_a_bucket_of_one_is_called_rather_than_batched(
+    def test_bucket_of_one_called_rather_than_batched(
         self, monkeypatch: pytest.MonkeyPatch, matrix_count: int, expected_batches: int
     ) -> None:
         """A bucket holding one parameter reaches the update directly; two take one batch.
@@ -530,7 +530,7 @@ class TestExactShapeBatching:
 
     @pytest.mark.gpu
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="the production batching gate is CUDA-only")
-    def test_native_batch_runs_through_the_production_cuda_gate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_native_batch_runs_through_production_cuda_gate(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Two equal CUDA matrices take one native batch without widening the device gate."""
         matrices = [torch.nn.Parameter(torch.randn(6, 4, device="cuda")) for _ in range(2)]
         starts = [matrix.detach().clone() for matrix in matrices]
@@ -549,7 +549,7 @@ class TestExactShapeBatching:
             expected.mul_(0.5).add_(nesterov, alpha=0.5).add_(start, alpha=5e-4)
             torch.testing.assert_close(matrix.detach(), start - 0.05 * expected, rtol=2e-5, atol=2e-6)
 
-    def test_a_non_batching_device_keeps_the_per_parameter_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_non_batching_device_keeps_per_parameter_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Three equal CPU kernels take three separate orthogonalizations, at the same values.
 
         Batching is not free and not uniformly profitable: it buys one large kernel
@@ -779,7 +779,7 @@ class TestZeroMuonGain:
             pytest.param(0.5, 1, id="nonzero-gain-still-iterates"),
         ],
     )
-    def test_newton_schulz_runs_only_for_a_nonzero_gain(
+    def test_newton_schulz_runs_only_for_nonzero_gain(
         self, monkeypatch: pytest.MonkeyPatch, w_muon: float, expected_calls: int
     ) -> None:
         """One matrix parameter triggers one orthogonalization at ``w_muon > 0`` and none at zero.
@@ -796,7 +796,7 @@ class TestZeroMuonGain:
 
         assert tally[0] == expected_calls
 
-    def test_zero_gain_update_is_the_pure_sgd_step_with_weight_decay(self) -> None:
+    def test_zero_gain_update_pure_sgd_step_with_weight_decay(self) -> None:
         """At ``w_muon = 0`` a matrix parameter moves by exactly ``-lr*(w_sgd*nesterov + wd*w)``.
 
         The skipped branch must be worth exactly zero, which is what makes
@@ -840,7 +840,7 @@ class TestZeroMuonGain:
             expected = start - lr * (w_sgd * nesterov + weight_decay * start)
             torch.testing.assert_close(param.detach(), expected)
 
-    def test_zero_gain_leaves_a_vector_parameter_on_its_own_path(self) -> None:
+    def test_zero_gain_leaves_vector_parameter_on_own_path(self) -> None:
         """A 1D parameter takes the same pure Nesterov SGD step whatever ``w_muon`` says.
 
         The short-circuit sits in the matrix branch, and the rank split above it

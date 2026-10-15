@@ -110,7 +110,7 @@ def _posed_polygon_source(label: int, x0: float, points: list[list[float]], visi
 class TestMixupKeypoints:
     """Mixup moves no geometry, so both inputs' points concatenate untouched."""
 
-    def test_both_point_sets_survive_the_blend(self) -> None:
+    def test_both_point_sets_survive_blend(self) -> None:
         """Blending concatenates both images' keypoints at their original coordinates.
 
         Mixup blends pixels and merges label sets; it displaces nothing, so a point must
@@ -126,7 +126,7 @@ class TestMixupKeypoints:
         assert out.keypoints.tolist() == [[[2.0, 2.0]], [[3.0, 4.0]]]
         assert out.keypoint_vis.tolist() == [[2], [1]]
 
-    def test_keypoint_free_blend_keeps_the_canonical_empty(self) -> None:
+    def test_keypoint_free_blend_keeps_canonical_empty(self) -> None:
         """A detection-only blend returns the canonical empty keypoint pair.
 
         Mixup fires on the train path of every task at the scale-aware probability, so the
@@ -144,7 +144,7 @@ class TestMixupKeypoints:
 class TestCopyPasteKeypoints:
     """A pasted instance brings its points across with its box, selected by the same index."""
 
-    def test_pasted_instance_carries_its_points(self) -> None:
+    def test_pasted_instance_carries_points(self) -> None:
         """The pasted source instance's keypoints and visibility are appended to the destination.
 
         A paste transplants an instance between images without moving it inside one — the
@@ -162,7 +162,7 @@ class TestCopyPasteKeypoints:
         assert out.keypoints.tolist() == [[[2.0, 2.0]], [[3.0, 3.0]]]
         assert out.keypoint_vis.tolist() == [[2], [1]]
 
-    def test_points_follow_the_selection_not_the_source_order(self) -> None:
+    def test_points_follow_selection_not_source_order(self) -> None:
         """Only the selected instances' point rows are appended, aligned with their boxes.
 
         The paste draw runs per candidate, so the pasted subset is generally not the whole
@@ -185,7 +185,7 @@ class TestCopyPasteKeypoints:
         assert out.labels.tolist() == [5]
         assert out.keypoints.tolist() == [[[2.0, 2.0]]]
 
-    def test_keypoint_free_paste_keeps_the_canonical_empty(self) -> None:
+    def test_keypoint_free_paste_keeps_canonical_empty(self) -> None:
         """A segmentation paste with no points returns the canonical empty keypoint pair.
 
         Copy-paste needs polygon rings, which is the segmentation path — the one that
@@ -200,7 +200,7 @@ class TestCopyPasteKeypoints:
         assert out.keypoints.shape == (0, 0, 2)
         assert out.keypoint_vis.shape == (0, 0)
 
-    def test_mixed_point_presence_is_rejected(self) -> None:
+    def test_mixed_point_presence_rejected(self) -> None:
         """Pasting a point-carrying instance onto point-free targets raises rather than merging.
 
         The merged set would claim landmarks for some instances and none for others, which
@@ -244,7 +244,7 @@ class TestMixupBlend:
 class TestMixupPassThrough:
     """An untriggered mixup returns the first pair untouched."""
 
-    def test_p_zero_is_identity_on_first_pair(self) -> None:
+    def test_p_zero_identity_on_first_pair(self) -> None:
         """p=0 never blends: the first image and targets return unchanged, lam is None."""
         mixup = Mixup(p=0.0, generator=_generator())
         a_image = torch.ones(3, _SIDE, _SIDE)
@@ -324,7 +324,7 @@ class TestCopyPasteSkips:
         assert out_targets.boxes.shape[0] == 0
         assert torch.equal(out_image, dest_image)
 
-    def test_p_zero_is_identity(self) -> None:
+    def test_p_zero_identity(self) -> None:
         """p=0 pastes nothing: the destination image and targets return unchanged."""
         copy_paste = CopyPaste(p=0.0, generator=_generator())
         dest_image = torch.zeros(3, _SIDE, _SIDE)
@@ -369,7 +369,7 @@ class TestCopyPasteModalitiesThroughApply:
     has to hold on that path too, not merely on the sampling wrapper.
     """
 
-    def test_apply_refuses_a_rotated_destination(self) -> None:
+    def test_apply_refuses_rotated_destination(self) -> None:
         """A rotated destination is refused by ``apply``, not only by ``__call__``.
 
         The oriented path carries no polygons, so a rotated instance has nothing to
@@ -383,7 +383,7 @@ class TestCopyPasteModalitiesThroughApply:
         with pytest.raises(NotImplementedError, match="polygon"):
             CopyPaste(p=1.0).apply(items, CopyPasteParams(selected=(0,)))
 
-    def test_apply_refuses_a_rotated_source(self) -> None:
+    def test_apply_refuses_rotated_source(self) -> None:
         """A rotated source is refused by ``apply`` on the same grounds as a rotated destination.
 
         ``_reject_rboxes`` inspects both inputs, so the seam must consult it rather
@@ -396,7 +396,7 @@ class TestCopyPasteModalitiesThroughApply:
         with pytest.raises(NotImplementedError, match="polygon"):
             CopyPaste(p=1.0).apply(items, CopyPasteParams(selected=()))
 
-    def test_difficult_flags_survive_the_paste(self) -> None:
+    def test_difficult_flags_survive_paste(self) -> None:
         """Both sides' R18 ``difficult`` flags reach the merged instance axis (A48, A51).
 
         A merge that rebuilds ``Targets`` without the channel does not raise — the
@@ -422,7 +422,7 @@ class TestCopyPasteModalitiesThroughApply:
 
         assert out.difficult.tolist() == [True, True]
 
-    def test_the_pasted_flag_follows_the_selection(self) -> None:
+    def test_pasted_flag_follows_selection(self) -> None:
         """A pasted flag is indexed by the same selection its box is, not by source order.
 
         Selecting the source's easy instance must yield an easy pasted instance; taking

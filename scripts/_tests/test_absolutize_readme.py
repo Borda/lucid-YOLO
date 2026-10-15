@@ -50,14 +50,14 @@ def test_images_and_documents_resolve_through_different_hosts() -> None:
     assert "https://github.com/Borda/lucid-YOLO/blob/v0.4.0/docs/ASSUMPTIONS.md" in rewritten
 
 
-def test_a_fragment_survives_the_rewrite() -> None:
+def test_fragment_survives_rewrite() -> None:
     """``docs/ROADMAP.md#phase-9`` keeps its fragment, which is the half a reader wanted."""
     rewritten = absolutize(SAMPLE, "Borda/lucid-YOLO", "v0.4.0")
 
     assert "https://github.com/Borda/lucid-YOLO/blob/v0.4.0/docs/ROADMAP.md#phase-9" in rewritten
 
 
-def test_absolute_anchor_and_mail_targets_are_left_alone() -> None:
+def test_absolute_anchor_and_mail_targets_left_alone() -> None:
     """Anything already resolvable from anywhere is not touched.
 
     An in-page anchor is the interesting case: it looks relative and is not. Prefixing it
@@ -71,7 +71,7 @@ def test_absolute_anchor_and_mail_targets_are_left_alone() -> None:
     assert not is_relative("#quickstart")
 
 
-def test_the_rewrite_is_idempotent() -> None:
+def test_rewrite_idempotent() -> None:
     """A second pass changes nothing, so a rerun cannot double-prefix a URL."""
     once = absolutize(SAMPLE, "Borda/lucid-YOLO", "v0.4.0")
 
@@ -79,9 +79,7 @@ def test_the_rewrite_is_idempotent() -> None:
 
 
 @pytest.mark.parametrize("ref", ["main", "HEAD", "0.4.0", "abc1234", "v0.4", ""])
-def test_a_ref_that_is_not_a_tag_or_sha_is_refused(
-    ref: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_ref_not_tag_or_sha_refused(ref: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Only a tag or a full sha may be pinned; a branch names a tree that keeps moving.
 
     A released wheel's README is a snapshot. Pinned to ``main``, its links describe
@@ -113,7 +111,7 @@ def test_no_ref_means_no_rewrite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert readme.read_text(encoding="utf-8") == SAMPLE
 
 
-def test_the_environment_variable_supplies_the_ref(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_environment_variable_supplies_ref(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``LUCID_YOLO_RELEASE_REF`` is the flagless way a release runner opts in."""
     monkeypatch.setenv("LUCID_YOLO_RELEASE_REF", "v0.4.0")
     readme = tmp_path / "README.md"
@@ -125,7 +123,7 @@ def test_the_environment_variable_supplies_the_ref(tmp_path: Path, monkeypatch: 
     assert count_relative(readme.read_text(encoding="utf-8")) == 0
 
 
-def test_revert_restores_the_committed_bytes(tmp_path: Path) -> None:
+def test_revert_restores_committed_bytes(tmp_path: Path) -> None:
     """The tree a build ran in is left byte-identical to the one it started from."""
     readme, backup = tmp_path / "README.md", tmp_path / "b.orig"
     readme.write_text(SAMPLE, encoding="utf-8")
@@ -137,7 +135,7 @@ def test_revert_restores_the_committed_bytes(tmp_path: Path) -> None:
     assert not backup.exists()
 
 
-def test_a_second_rewrite_refuses_rather_than_overwriting_the_backup(tmp_path: Path) -> None:
+def test_second_rewrite_refuses_rather_than_overwriting_backup(tmp_path: Path) -> None:
     """The backup is the only copy of the committed file; overwriting it destroys it.
 
     A backup already on disk means an earlier build never reverted. Rewriting over it
@@ -152,7 +150,7 @@ def test_a_second_rewrite_refuses_rather_than_overwriting_the_backup(tmp_path: P
         rewrite(readme, backup, "Borda/lucid-YOLO", "v0.4.0")
 
 
-def test_revert_without_a_backup_refuses(tmp_path: Path) -> None:
+def test_revert_without_backup_refuses(tmp_path: Path) -> None:
     """Nothing to restore is an error, not a silent success on a rewritten file."""
     readme = tmp_path / "README.md"
     readme.write_text(SAMPLE, encoding="utf-8")
@@ -161,7 +159,7 @@ def test_revert_without_a_backup_refuses(tmp_path: Path) -> None:
         revert(readme, tmp_path / "missing.orig")
 
 
-def test_the_slug_comes_from_the_declared_homepage() -> None:
+def test_slug_comes_from_declared_homepage() -> None:
     """The repository's own metadata is what the URLs are built from.
 
     Read live rather than pinned to a literal: a renamed repository redirects on
@@ -174,7 +172,7 @@ def test_the_slug_comes_from_the_declared_homepage() -> None:
     assert not slug.endswith(".git")
 
 
-def test_a_homepage_that_is_not_a_github_url_is_refused(tmp_path: Path) -> None:
+def test_homepage_not_github_url_refused(tmp_path: Path) -> None:
     """No silent fallback: an undeclared homepage has no correct URL to guess."""
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project.urls]\nHomepage = "https://example.com/thing"\n', encoding="utf-8")
@@ -183,7 +181,7 @@ def test_a_homepage_that_is_not_a_github_url_is_refused(tmp_path: Path) -> None:
         repository_slug(pyproject)
 
 
-def test_the_release_workflow_rewrites_before_it_builds() -> None:
+def test_release_workflow_rewrites_before_it_builds() -> None:
     """``release.yml`` runs the rewrite ahead of ``uv build``, and reverts nothing after.
 
     The workflow's checkout is disposable, so the rewrite is never undone there — but the

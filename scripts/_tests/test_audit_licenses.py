@@ -132,7 +132,7 @@ def test_copyleft_pattern_spares_permissive(audit: ModuleType) -> None:
         assert not audit.COPYLEFT_PATTERN.search(sample), f"should not match permissive: {sample!r}"
 
 
-def test_agpl_classifier_is_flagged(audit: ModuleType) -> None:
+def test_agpl_classifier_flagged(audit: ModuleType) -> None:
     """A distribution carrying an AGPL OSI classifier is reported as a violation."""
     stub = _StubDist(
         _StubMetadata(
@@ -147,7 +147,7 @@ def test_agpl_classifier_is_flagged(audit: ModuleType) -> None:
     assert "Affero" in field
 
 
-def test_clean_stub_set_is_empty(audit: ModuleType) -> None:
+def test_clean_stub_set_empty(audit: ModuleType) -> None:
     """A set of permissively licensed distributions yields no violation."""
     clean = [
         _StubDist(_StubMetadata("alpha", classifiers=("License :: OSI Approved :: MIT License",))),
@@ -157,7 +157,7 @@ def test_clean_stub_set_is_empty(audit: ModuleType) -> None:
     assert audit.find_copyleft_violations(clean) == []
 
 
-def test_long_prose_license_field_is_not_an_identifier(audit: ModuleType) -> None:
+def test_long_prose_license_field_not_identifier(audit: ModuleType) -> None:
     """A License field holding full license prose (mentioning GPL) is not flagged when classifiers are permissive.
 
     Regression case: matplotlib embeds third-party license texts (FreeType,
@@ -175,7 +175,7 @@ def test_long_prose_license_field_is_not_an_identifier(audit: ModuleType) -> Non
     assert audit.find_copyleft_violations([stub]) == []
 
 
-def test_short_gpl_license_field_is_flagged(audit: ModuleType) -> None:
+def test_short_gpl_license_field_flagged(audit: ModuleType) -> None:
     """A short identifier-style License field naming GPL is still caught."""
     stub = _StubDist(_StubMetadata("short-gpl", license_text="GPL-3.0-only"))
     violations = audit.find_copyleft_violations([stub])
@@ -196,7 +196,7 @@ NON_PERMISSIVE_SAMPLES = (
 
 
 @pytest.mark.parametrize("sample", NON_PERMISSIVE_SAMPLES)
-def test_non_permissive_pattern_matches_the_named_classes(audit: ModuleType, sample: str) -> None:
+def test_non_permissive_pattern_matches_named_classes(audit: ModuleType, sample: str) -> None:
     """Every source-available and non-commercial class D13 and D18d name is recognized.
 
     The GPL pattern matched none of these: SSPL, BUSL, Elastic, PolyForm, Prosperity,
@@ -217,7 +217,7 @@ def test_non_permissive_pattern_spares_permissive(audit: ModuleType, sample: str
     assert audit.inadmissible_license(sample) is None
 
 
-def test_an_sspl_distribution_is_rejected(audit: ModuleType) -> None:
+def test_sspl_distribution_rejected(audit: ModuleType) -> None:
     """A distribution declaring SSPL is a violation, and the finding names the class.
 
     The DoD case for WP-168. SSPL is what a formerly-permissive dependency relicenses
@@ -234,7 +234,7 @@ def test_an_sspl_distribution_is_rejected(audit: ModuleType) -> None:
     assert "non-permissive" in field
 
 
-def test_a_bundled_non_permissive_declaration_is_rejected(audit: ModuleType) -> None:
+def test_bundled_non_permissive_declaration_rejected(audit: ModuleType) -> None:
     """A wheel declaring Apache for itself and vendoring a BUSL library is a violation."""
     stub = _bundling_dist("vendors-busl", "Name: some-engine\nLicense: BUSL-1.1\n")
 
@@ -243,7 +243,7 @@ def test_a_bundled_non_permissive_declaration_is_rejected(audit: ModuleType) -> 
     assert [name for name, _ in violations] == ["vendors-busl"]
 
 
-def test_a_distribution_declaring_no_license_is_rejected(audit: ModuleType, tmp_path: Path) -> None:
+def test_distribution_declaring_no_license_rejected(audit: ModuleType, tmp_path: Path) -> None:
     """A shipped distribution declaring no licence at all fails the audit.
 
     The DoD's second licence case. It is the fourth surface (WP-115) rather than a
@@ -281,7 +281,7 @@ def _bundling_dist(name: str, body: str, filename: str = "LICENSE.txt") -> _Stub
     )
 
 
-def test_bundled_copyleft_is_flagged_though_the_metadata_is_permissive(audit: ModuleType) -> None:
+def test_bundled_copyleft_flagged_though_metadata_permissive(audit: ModuleType) -> None:
     """A wheel declaring BSD while vendoring an LGPL binary is reported.
 
     The shapely case that motivated the check: every metadata field says BSD, so
@@ -294,7 +294,7 @@ def test_bundled_copyleft_is_flagged_though_the_metadata_is_permissive(audit: Mo
     assert violations == [("vendors-lgpl", "LICENSE.txt: LGPL-2.1-or-later")]
 
 
-def test_bundled_license_prose_is_not_scanned(audit: ModuleType) -> None:
+def test_bundled_license_prose_not_scanned(audit: ModuleType) -> None:
     """A vendored copy of the LGPL text itself is not a declaration.
 
     A full GPL text names "GPL" on dozens of lines. Scanning the body would flag
@@ -306,7 +306,7 @@ def test_bundled_license_prose_is_not_scanned(audit: ModuleType) -> None:
     assert audit.find_bundled_violations([stub]) == []
 
 
-def test_gcc_runtime_exception_is_permissive_for_any_package(audit: ModuleType) -> None:
+def test_gcc_runtime_exception_permissive_for_any_package(audit: ModuleType) -> None:
     """GPL-3 under the GCC Runtime Library Exception is not a finding, allowlist or not.
 
     The exception exists precisely to let GPL-3 runtime objects be linked into
@@ -322,7 +322,7 @@ def test_gcc_runtime_exception_is_permissive_for_any_package(audit: ModuleType) 
     assert audit.find_bundled_violations([stub]) == []
 
 
-def test_allowlisted_package_is_excused_only_for_bundled_findings(audit: ModuleType) -> None:
+def test_allowlisted_package_excused_only_for_bundled_findings(audit: ModuleType) -> None:
     """An allowlisted distribution's vendored copyleft passes; an unlisted one's does not."""
     body = "Name: libthing\nFiles: libthing.so\nLicense: LGPL-2.1-or-later\n"
     listed = next(iter(audit.BUNDLED_ALLOWLIST))
@@ -389,7 +389,7 @@ def av_lookalike(synthetic_dist: Callable[[str, Sequence[str]], metadata.Distrib
     return synthetic_dist("av", ("av/__init__.py", "av/.dylibs/libx264.165.dylib", "av/.dylibs/libmp3lame.0.dylib"))
 
 
-def test_shipped_x264_is_flagged_though_nothing_declares_it(
+def test_shipped_x264_flagged_though_nothing_declares_it(
     audit: ModuleType, av_lookalike: metadata.Distribution
 ) -> None:
     """A wheel shipping a GPL x264 binary is reported from its file list alone.
@@ -403,7 +403,7 @@ def test_shipped_x264_is_flagged_though_nothing_declares_it(
     assert violations == [("av", "av/.dylibs/libx264.165.dylib: x264 (GPL-2.0-or-later)")]
 
 
-def test_the_older_two_checks_pass_the_same_wheel_clean(audit: ModuleType, av_lookalike: metadata.Distribution) -> None:
+def test_older_two_checks_pass_same_wheel_clean(audit: ModuleType, av_lookalike: metadata.Distribution) -> None:
     """Neither the declared-license nor the license-file check sees the x264 binary.
 
     Pinned as a test rather than left as a claim in a docstring: this is the exact gap
@@ -414,7 +414,7 @@ def test_the_older_two_checks_pass_the_same_wheel_clean(audit: ModuleType, av_lo
     assert audit.find_bundled_violations([av_lookalike]) == []
 
 
-def test_shipped_x264_is_flagged_through_the_manylinux_spelling(
+def test_shipped_x264_flagged_through_manylinux_spelling(
     audit: ModuleType,
     synthetic_dist: Callable[[str, Sequence[str]], metadata.Distribution],
 ) -> None:
@@ -432,7 +432,7 @@ def test_shipped_x264_is_flagged_through_the_manylinux_spelling(
     assert violations == [("av", "av.libs/libx264-94059858.so.164: x264 (GPL-2.0-or-later)")]
 
 
-def test_unrecognized_binaries_are_not_findings(
+def test_unrecognized_binaries_not_findings(
     audit: ModuleType,
     synthetic_dist: Callable[[str, Sequence[str]], metadata.Distribution],
 ) -> None:
@@ -496,7 +496,7 @@ def test_library_stem_normalizes_every_platform_spelling(
     assert audit.library_stem(filename) == expected
 
 
-def test_binary_allowlist_excuses_the_named_library_only(
+def test_binary_allowlist_excuses_named_library_only(
     audit: ModuleType,
     synthetic_dist: Callable[[str, Sequence[str]], metadata.Distribution],
 ) -> None:
@@ -514,7 +514,7 @@ def test_binary_allowlist_excuses_the_named_library_only(
     assert audit.find_binary_violations([unrelated]) != []
 
 
-def test_every_binary_allowlist_entry_names_a_listed_library(audit: ModuleType) -> None:
+def test_every_binary_allowlist_entry_names_listed_library(audit: ModuleType) -> None:
     """No allowlist entry excuses a library the table does not name.
 
     An entry whose stem has drifted out of ``COPYLEFT_BINARIES`` — renamed, or removed
@@ -602,7 +602,7 @@ def _tiered_pyproject(tmp_path: Path, base: Sequence[str], dev: Sequence[str], d
     return path
 
 
-def test_a_distribution_declaring_nothing_at_all_is_a_finding(audit: ModuleType) -> None:
+def test_distribution_declaring_nothing_at_all_finding(audit: ModuleType) -> None:
     """No license field and no license document is the case the copyleft checks cannot see.
 
     Each of the three older surfaces matches a forbidden pattern against a declaration,
@@ -616,7 +616,7 @@ def test_a_distribution_declaring_nothing_at_all_is_a_finding(audit: ModuleType)
     assert "ships no License-File" in reason
 
 
-def test_an_apache_document_with_no_license_field_is_read_and_cleared(audit: ModuleType) -> None:
+def test_apache_document_with_no_license_field_read_and_cleared(audit: ModuleType) -> None:
     """A shipped Apache-2.0 text resolves a distribution whose metadata declares nothing.
 
     The live shape this check had to accommodate: PEP 639 metadata may carry the license
@@ -628,7 +628,7 @@ def test_an_apache_document_with_no_license_field_is_read_and_cleared(audit: Mod
     assert audit.unreadable_license_reason(dist) is None
 
 
-def test_an_unrecognized_license_document_stays_a_finding(audit: ModuleType) -> None:
+def test_unrecognized_license_document_stays_finding(audit: ModuleType) -> None:
     """A document matching no known permissive text is not given the benefit of the doubt.
 
     The direction that makes the check worth having: bespoke terms are exactly what a
@@ -643,7 +643,7 @@ def test_an_unrecognized_license_document_stays_a_finding(audit: ModuleType) -> 
 
 
 @pytest.mark.parametrize("header", COPYLEFT_HEADERS)
-def test_the_recognizer_declines_every_copyleft_header(audit: ModuleType, header: str) -> None:
+def test_recognizer_declines_every_copyleft_header(audit: ModuleType, header: str) -> None:
     """No GPL-family text is recognizable, so each one falls through to a finding.
 
     The table lists permissive texts only, which means the recognizer never has to
@@ -653,7 +653,7 @@ def test_the_recognizer_declines_every_copyleft_header(audit: ModuleType, header
     assert audit.recognize_license_text(header) is None
 
 
-def test_mpl_prose_is_identified_rather_than_self_flagged(audit: ModuleType) -> None:
+def test_mpl_prose_identified_rather_than_self_flagged(audit: ModuleType) -> None:
     """MPL-2.0 names the GPL in its own Secondary-License clause and is still recognized.
 
     The reason the copyleft pattern is deliberately not run over a recognized text as a
@@ -664,7 +664,7 @@ def test_mpl_prose_is_identified_rather_than_self_flagged(audit: ModuleType) -> 
     assert audit.recognize_license_text(MPL_DOCUMENT) == "MPL-2.0"
 
 
-def test_a_group_only_package_is_flagged_rather_than_failed(audit: ModuleType, tmp_path: Path) -> None:
+def test_group_only_package_flagged_rather_than_failed(audit: ModuleType, tmp_path: Path) -> None:
     """A dev- or docs-only package with no readable license is reported, and the run passes.
 
     PEP 735 groups appear in no wheel metadata, so nothing a consumer installs is
@@ -680,7 +680,7 @@ def test_a_group_only_package_is_flagged_rather_than_failed(audit: ModuleType, t
     assert [name for name, _ in flags] == ["beta"]
 
 
-def test_a_package_both_tiers_reach_takes_the_shipped_tier(audit: ModuleType, tmp_path: Path) -> None:
+def test_package_both_tiers_reach_takes_shipped_tier(audit: ModuleType, tmp_path: Path) -> None:
     """Reachable from base and from a group means base: the stricter attribution wins.
 
     A shared transitive is republished in the wheel regardless of what else also pulls
@@ -695,7 +695,7 @@ def test_a_package_both_tiers_reach_takes_the_shipped_tier(audit: ModuleType, tm
     assert flags == []
 
 
-def test_an_unattributed_package_is_treated_as_shipped(audit: ModuleType, tmp_path: Path) -> None:
+def test_unattributed_package_treated_as_shipped(audit: ModuleType, tmp_path: Path) -> None:
     """A distribution no tier reaches fails rather than passing quietly.
 
     The resolver walks installed metadata, so a gap in it — an unparsed marker, a
@@ -710,7 +710,7 @@ def test_an_unattributed_package_is_treated_as_shipped(audit: ModuleType, tmp_pa
     assert [name for name, _ in failures] == ["orphan"]
 
 
-def test_copyleft_prose_fails_even_in_a_group_tier(audit: ModuleType, tmp_path: Path) -> None:
+def test_copyleft_prose_fails_even_in_group_tier(audit: ModuleType, tmp_path: Path) -> None:
     """A group-only package whose only license document is LGPL text is a failure, not a flag.
 
     The tier grades unreadability, not copyleft. "No AGPL at any cost" is tier-blind, so a
@@ -725,7 +725,7 @@ def test_copyleft_prose_fails_even_in_a_group_tier(audit: ModuleType, tmp_path: 
     assert flags == []
 
 
-def test_an_include_group_entry_is_refused(audit: ModuleType, tmp_path: Path) -> None:
+def test_include_group_entry_refused(audit: ModuleType, tmp_path: Path) -> None:
     """A ``{include-group = ...}`` entry raises instead of being walked past.
 
     The walk follows requirement strings; a group reference it silently dropped would
@@ -743,7 +743,7 @@ def test_an_include_group_entry_is_refused(audit: ModuleType, tmp_path: Path) ->
         audit.dependency_tiers([], path)
 
 
-def test_an_allowlisted_distribution_is_not_a_finding(audit: ModuleType, tmp_path: Path) -> None:
+def test_allowlisted_distribution_not_finding(audit: ModuleType, tmp_path: Path) -> None:
     """A name in ``UNREADABLE_ALLOWLIST`` is skipped even in the shipped tier.
 
     The fourth allowlist and the fourth exposure: this one excuses metadata that says
@@ -761,7 +761,7 @@ def test_an_allowlisted_distribution_is_not_a_finding(audit: ModuleType, tmp_pat
     assert flags == []
 
 
-def test_every_unreadable_allowlist_entry_cites_a_decision(audit: ModuleType) -> None:
+def test_every_unreadable_allowlist_entry_cites_decision(audit: ModuleType) -> None:
     """Each entry names the DECISIONS.md row that admitted it.
 
     The convention the three older allowlists follow, pinned here so the fourth cannot
@@ -771,7 +771,7 @@ def test_every_unreadable_allowlist_entry_cites_a_decision(audit: ModuleType) ->
         assert reason.startswith("D"), f"{name}: allowlist reason does not open with a decision id: {reason[:40]!r}"
 
 
-def test_an_unattributed_package_says_so_rather_than_reading_as_base(audit: ModuleType, tmp_path: Path) -> None:
+def test_unattributed_package_says_so_rather_than_reading_as_base(audit: ModuleType, tmp_path: Path) -> None:
     """The reported tier distinguishes "the wheel ships this" from "the walk never found it".
 
     Both are failures and for opposite reasons, so printing them identically would send a

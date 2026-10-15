@@ -69,7 +69,7 @@ def image_file(tmp_path: Path) -> Path:
     return path
 
 
-def test_the_drawing_functions_stay_importable_from_the_script() -> None:
+def test_drawing_functions_stay_importable_from_script() -> None:
     """The names the script published before the move are still attributes of the module.
 
     A caller who imported ``draw_detections`` or ``RenderOptions`` from the script keeps
@@ -82,7 +82,7 @@ def test_the_drawing_functions_stay_importable_from_the_script() -> None:
     )
 
 
-def test_the_command_renders_a_checkpoint_it_loaded_to_a_file(
+def test_command_renders_checkpoint_it_loaded_to_file(
     tmp_path: Path,
     image_file: Path,
     capsys: pytest.CaptureFixture[str],
@@ -116,7 +116,7 @@ def test_the_command_renders_a_checkpoint_it_loaded_to_a_file(
     assert f"figure -> {output}" in capsys.readouterr().out
 
 
-def test_a_task_the_checkpoint_contradicts_is_refused_by_name(tmp_path: Path, image_file: Path) -> None:
+def test_task_checkpoint_contradicts_refused_by_name(tmp_path: Path, image_file: Path) -> None:
     """``--task obb`` on a detection checkpoint raises, naming the task the checkpoint carries.
 
     What makes the flag safe to default from the checkpoint and to accept from a caller:
@@ -143,7 +143,7 @@ def test_a_task_the_checkpoint_contradicts_is_refused_by_name(tmp_path: Path, im
         )
 
 
-def test_a_missing_input_file_reports_it_and_returns_one(
+def test_missing_input_file_reports_it_and_returns_one(
     tmp_path: Path,
     image_file: Path,
     capsys: pytest.CaptureFixture[str],

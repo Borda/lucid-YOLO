@@ -100,7 +100,7 @@ class TestClosedFormValue:
     8 with the flow term removed, and only that.
     """
 
-    def test_matches_a_hand_computed_laplace_negative_log_likelihood(self) -> None:
+    def test_matches_hand_computed_laplace_negative_log_likelihood(self) -> None:
         """The loss equals ``-log Laplace(0, 1)(x_bar) + log sigma_hat``, summed over both axes.
 
         A fixed, hand-chosen batch scored against an independent recomputation
@@ -119,7 +119,7 @@ class TestClosedFormValue:
         expected = _reference_loss(mu_hat, sigma_raw, mu_gt).mean()
         assert torch.allclose(loss, expected, atol=_LAPLACE_ATOL)
 
-    def test_is_the_rle_loss_with_exactly_the_flow_term_removed(self) -> None:
+    def test_rle_loss_with_exactly_flow_term_removed(self) -> None:
         """On shared inputs, ``RLELoss`` minus this loss is precisely the flow's log-density.
 
         The claim the whole ablation rests on, stated as an equation rather than
@@ -142,7 +142,7 @@ class TestClosedFormValue:
         flow_term = -rle.flow.log_density(residual.reshape(-1, 2)).mean()
         assert torch.allclose(difference, flow_term, atol=_LAPLACE_ATOL)
 
-    def test_a_far_out_residual_stays_finite_rather_than_overflowing(self) -> None:
+    def test_far_out_residual_stays_finite_rather_than_overflowing(self) -> None:
         """A residual two orders outside the ``O(1)`` range gives a large finite loss and gradient.
 
         The module docstring claims this ablation degrades more gently than RLE
@@ -168,7 +168,7 @@ class TestClosedFormValue:
 class TestVisibilityMasking:
     """A66 behaves exactly as it does for RLE -- the control must mask identically."""
 
-    def test_unlabeled_points_are_excluded(self) -> None:
+    def test_unlabeled_points_excluded(self) -> None:
         """An instance whose only point is ``v == 0`` contributes nothing to the loss.
 
         Compares a batch carrying one visible and one unlabeled point against the
@@ -191,7 +191,7 @@ class TestVisibilityMasking:
 
         assert torch.equal(baseline, corrupted)
 
-    def test_occluded_but_labeled_points_are_included(self) -> None:
+    def test_occluded_but_labeled_points_included(self) -> None:
         """A ``v == 1`` (occluded) point changes the loss exactly like ``v == 2`` does.
 
         A66 reads COCO's ``v in {1, 2}`` as equally valid supervision; this asserts
@@ -208,7 +208,7 @@ class TestVisibilityMasking:
 
         assert torch.equal(loss_occluded, loss_visible)
 
-    def test_no_visible_points_gives_a_finite_zero_still_attached_to_the_graph(self) -> None:
+    def test_no_visible_points_gives_finite_zero_still_attached_to_graph(self) -> None:
         """All-``v=0`` input returns a finite zero, not ``NaN``, still connected to gradients.
 
         Mirrors :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s
@@ -231,7 +231,7 @@ class TestVisibilityMasking:
         assert torch.equal(mu_hat.grad, torch.zeros_like(mu_hat))
 
 
-def test_gradient_reaches_both_the_location_and_the_learned_scale() -> None:
+def test_gradient_reaches_both_location_and_learned_scale() -> None:
     """Both ``mu_hat`` and ``sigma_raw`` receive non-zero gradient from one backward pass.
 
     "Learnable variance" is half of what R14 Table 7 names this row, and the
@@ -334,7 +334,7 @@ class TestUnlabeledPointsReachNoGradient:
         return float(loss.detach()), [mu_hat.grad, sigma_raw.grad]
 
     @pytest.mark.parametrize("corrupt", CORRUPTIONS)
-    def test_gradients_are_identical_to_the_clean_run(self, corrupt: float) -> None:
+    def test_gradients_identical_to_clean_run(self, corrupt: float) -> None:
         """Corrupting the unlabeled target changes no gradient anywhere, bit for bit."""
         clean_value, clean_grads = self._grads(None)
         value, grads = self._grads(corrupt)
@@ -351,7 +351,7 @@ class TestUnlabeledPointsReachNoGradient:
         assert all(bool(torch.isfinite(grad).all()) for grad in grads)
 
     @pytest.mark.parametrize("corrupt", CORRUPTIONS)
-    def test_a_masked_point_does_not_raise_from_argument_validation(self, corrupt: float) -> None:
+    def test_masked_point_not_raise_from_argument_validation(self, corrupt: float) -> None:
         """A non-finite unlabeled target is not rejected by the Laplace base density."""
         mu_gt = torch.tensor([[[0.1, 0.1], [corrupt, corrupt]]])
 

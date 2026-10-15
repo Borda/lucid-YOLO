@@ -156,7 +156,7 @@ def _datamodule(root: Path) -> object:
     return datamodule
 
 
-def test_the_eval_package_does_not_reach_up_into_the_training_layer() -> None:
+def test_eval_package_not_reach_up_into_training_layer() -> None:
     """Importing ``lucid_yolo.eval`` must not drag in ``lucid_yolo.ptl``.
 
     ``eval.checkpoint`` needs :class:`DetectionLitModule`, and that module imports
@@ -172,7 +172,7 @@ def test_the_eval_package_does_not_reach_up_into_the_training_layer() -> None:
     assert result.stdout.strip() == "False"
 
 
-def test_a_detection_checkpoint_is_refused_rather_than_scored(tiled_root: Path) -> None:
+def test_detection_checkpoint_refused_rather_than_scored(tiled_root: Path) -> None:
     """A module with no angle stem has no oriented number, so it raises instead of reporting one."""
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15).eval()
 
@@ -180,7 +180,7 @@ def test_a_detection_checkpoint_is_refused_rather_than_scored(tiled_root: Path) 
         evaluate.score_split(module, _datamodule(tiled_root), torch.device("cpu"), img_size=IMG_SIZE)
 
 
-def test_the_split_is_scored_tile_by_tile(tiled_root: Path) -> None:
+def test_split_scored_tile_by_tile(tiled_root: Path) -> None:
     """Every tile of the split is scored, and the report counts the instances it saw."""
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
 
@@ -195,7 +195,7 @@ def test_the_split_is_scored_tile_by_tile(tiled_root: Path) -> None:
     ("limit", "tiles"),
     [pytest.param(2, 2, id="a-prefix"), pytest.param(9, 4, id="past-the-end-of-the-split")],
 )
-def test_the_limit_stops_early_without_changing_the_frame(tiled_root: Path, limit: int, tiles: int) -> None:
+def test_limit_stops_early_without_changing_frame(tiled_root: Path, limit: int, tiles: int) -> None:
     """``--limit`` scores a prefix of the split rather than a resampled subset.
 
     A limit past the end of the four-tile split is not an error: the pass runs out of tiles
@@ -209,7 +209,7 @@ def test_the_limit_stops_early_without_changing_the_frame(tiled_root: Path, limi
 
 
 @pytest.mark.usefixtures("worker_host")
-def test_complete_and_limited_runs_request_their_chosen_worker_routes(
+def test_complete_and_limited_runs_request_chosen_worker_routes(
     tiled_root: Path, tmp_path: Path, requested_worker_counts: list[int | None]
 ) -> None:
     """Full scoring uses the shared auto policy while a short diagnostic avoids its startup cost.
@@ -302,7 +302,7 @@ def test_parallel_validation_preserves_images_targets_and_order(tiled_root: Path
 
 
 @pytest.mark.usefixtures("worker_host")
-def test_a_tiny_complete_run_keeps_the_low_startup_route(tiled_root: Path, tmp_path: Path) -> None:
+def test_tiny_complete_run_keeps_low_startup_route(tiled_root: Path, tmp_path: Path) -> None:
     """A complete custom split does not start a pool with at most one batch per worker."""
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
     output = tmp_path / "tiny-complete.json"
@@ -333,7 +333,7 @@ def test_a_tiny_complete_run_keeps_the_low_startup_route(tiled_root: Path, tmp_p
         pytest.param(4, [None], 2, id="a-second-batch-for-a-worker-keeps-the-pool"),
     ],
 )
-def test_a_complete_run_rebuilds_in_process_only_when_no_worker_gets_a_second_batch(
+def test_complete_run_rebuilds_in_process_only_when_no_worker_gets_second_batch(
     parallel_tiled_root: Path,
     tmp_path: Path,
     requested_worker_counts: list[int | None],
@@ -383,7 +383,7 @@ def test_a_complete_run_rebuilds_in_process_only_when_no_worker_gets_a_second_ba
         pytest.param(5, 0, False, id="already-in-process"),
     ],
 )
-def test_a_complete_run_sets_the_pool_aside_until_batches_outnumber_workers(
+def test_complete_run_sets_pool_aside_until_batches_outnumber_workers(
     batches: int, workers: int, expected: bool
 ) -> None:
     """The tiny-split fallback fires for any nonzero pool with no more batches than workers.
@@ -398,7 +398,7 @@ def test_a_complete_run_sets_the_pool_aside_until_batches_outnumber_workers(
 
 
 @pytest.mark.usefixtures("worker_host")
-def test_run_through_real_workers_matches_run_through_the_low_startup_route(
+def test_run_through_real_workers_matches_run_through_low_startup_route(
     parallel_tiled_root: Path, tmp_path: Path
 ) -> None:
     """The public complete run keeps its report under a reused real worker pool.
@@ -435,7 +435,7 @@ def test_run_through_real_workers_matches_run_through_the_low_startup_route(
 
 
 @pytest.mark.usefixtures("worker_host")
-def test_a_mispaired_index_fails_the_run_under_a_real_worker_pool(
+def test_mispaired_index_fails_run_under_real_worker_pool(
     parallel_tiled_root: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -478,7 +478,7 @@ def test_a_mispaired_index_fails_the_run_under_a_real_worker_pool(
     assert not output.exists()
 
 
-def test_the_report_is_written_into_a_directory_that_does_not_exist_yet(tiled_root: Path, tmp_path: Path) -> None:
+def test_report_written_into_directory_not_exist_yet(tiled_root: Path, tmp_path: Path) -> None:
     """``--output`` creates its parent rather than raising after the scoring pass (WP-105).
 
     The failure this pins is expensive and silent in the worst way: the evaluation
@@ -539,7 +539,7 @@ def _run_report(module: DetectionLitModule, root: Path, output: Path) -> dict[st
     return json.loads(output.read_text())
 
 
-def test_the_report_names_both_figures_rather_than_quoting_one(tiled_root: Path, tmp_path: Path) -> None:
+def test_report_names_both_figures_rather_than_quoting_one(tiled_root: Path, tmp_path: Path) -> None:
     """WP-107: the per-tile and whole-image numbers are separate, labelled report entries.
 
     The confusion this package exists to end is a report that quotes an oriented mAP
@@ -586,7 +586,7 @@ class TestMergePairing:
         """An oriented module; what it detects is irrelevant to the pairing."""
         return DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=15, task="obb").eval()
 
-    def test_the_loader_in_index_order_is_accepted(self, tiled_root: Path) -> None:
+    def test_loader_in_index_order_accepted(self, tiled_root: Path) -> None:
         """The ordinary unshuffled val loader satisfies the check and scores the whole split.
 
         The refusals below are only worth having if the real path passes them, so the
@@ -606,7 +606,7 @@ class TestMergePairing:
         assert scoring.tiles == 4
         assert len(scoring.source_predictions) == 4
 
-    def test_a_reordered_loader_is_refused_rather_than_merged_by_position(
+    def test_reordered_loader_refused_rather_than_merged_by_position(
         self, tiled_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A loader yielding the split back-to-front is refused, naming the position and tile.
@@ -636,7 +636,7 @@ class TestMergePairing:
                 expected_ground_truth=index.ground_truth,
             )
 
-    def test_two_tiles_with_identical_annotations_swapped_are_refused(self, tiled_root: Path) -> None:
+    def test_two_tiles_with_identical_annotations_swapped_refused(self, tiled_root: Path) -> None:
         """Windows swapped between two tiles carrying the same annotation set are refused by id.
 
         This is the pairing failure the annotation-set comparison cannot see. Three of this
@@ -661,7 +661,7 @@ class TestMergePairing:
                 expected_ground_truth=index.ground_truth,
             )
 
-    def test_a_reader_publishing_no_image_ids_still_scores_the_split(
+    def test_reader_publishing_no_image_ids_still_scores_split(
         self, tiled_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A dataset with no COCO ids keeps the annotation-set check and skips the id one.
@@ -695,9 +695,7 @@ class TestMergePairing:
 
         assert scoring.tiles == 4
 
-    def test_a_loader_that_drops_its_last_batch_is_refused(
-        self, tiled_root: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_loader_drops_last_batch_refused(self, tiled_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A short pass over a full split is refused, because the merge needs every tile.
 
         A dropped last batch disturbs no pairing before it, so the per-tile check cannot
@@ -721,7 +719,7 @@ class TestMergePairing:
             )
 
 
-def test_a_layout_without_window_provenance_reports_no_whole_image_figure(tiled_root: Path, tmp_path: Path) -> None:
+def test_layout_without_window_provenance_reports_no_whole_image_figure(tiled_root: Path, tmp_path: Path) -> None:
     """A53's keys are non-schema, so a plain COCO layout has nothing to merge on.
 
     The alternative — inventing an offset from the tile file names — would make the naming

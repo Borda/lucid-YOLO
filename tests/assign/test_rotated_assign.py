@@ -137,7 +137,7 @@ def test_rotation_excludes_envelope_corners() -> None:
     assert bool(axis_aligned.fg_mask[0, 0])
 
 
-def test_rotated_candidates_are_per_image_and_per_gt() -> None:
+def test_rotated_candidates_per_image_and_per_gt() -> None:
     """Two images with two differently turned GTs each keep their own candidate sets."""
     points, _ = make_anchor_points([(4, 4)], [8])  # (16, 2)
     rboxes = torch.tensor(
@@ -299,7 +299,7 @@ _FROZEN_UNIQUE = [
         pytest.param(UniqueAssigner(topk=3), _FROZEN_UNIQUE, id="unique"),
     ],
 )
-def test_axis_aligned_assignment_is_bit_identical(
+def test_axis_aligned_assignment_bit_identical(
     assigner: TaskAlignedAssigner,
     frozen: list[tuple[int, int, int, int, list[float], float]],
 ) -> None:

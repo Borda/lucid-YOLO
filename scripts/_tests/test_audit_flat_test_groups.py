@@ -41,7 +41,7 @@ audit = _load_audit()
 class TestFindFlatGroups:
     """Tests for ``audit.find_flat_groups``."""
 
-    def test_confirms_a_group_by_its_call_target(self, tmp_path: Path) -> None:
+    def test_confirms_group_by_call_target(self, tmp_path: Path) -> None:
         """Three tests sharing a prefix that is also called in the file are grouped."""
         sample = tmp_path / "test_sample.py"
         sample.write_text(
@@ -55,18 +55,18 @@ class TestFindFlatGroups:
             "check_data": ["test_check_data_a", "test_check_data_b", "test_check_data_c"]
         }
 
-    def test_ignores_a_shared_prefix_with_no_matching_call(self, tmp_path: Path) -> None:
+    def test_ignores_shared_prefix_with_no_matching_call(self, tmp_path: Path) -> None:
         """House-style sentences sharing a topic noun, with no matching callable, are not flagged."""
         sample = tmp_path / "test_sample.py"
         sample.write_text(
-            "def test_a_named_worker_count_reaches_the_val_loader(): ...\n"
+            "def test_named_worker_count_reaches_val_loader(): ...\n"
             "def test_an_auto_chosen_worker_count_is_still_capped(): ...\n"
             "def test_the_val_worker_cap_scales_with_the_side(): ...\n",
             encoding="utf-8",
         )
         assert audit.find_flat_groups(sample) == {}
 
-    def test_ignores_a_group_below_the_minimum_size(self, tmp_path: Path) -> None:
+    def test_ignores_group_below_minimum_size(self, tmp_path: Path) -> None:
         """Two confirmed members are not enough to enforce, however clean the match."""
         sample = tmp_path / "test_sample.py"
         sample.write_text(
@@ -77,7 +77,7 @@ class TestFindFlatGroups:
         )
         assert audit.find_flat_groups(sample) == {}
 
-    def test_confirms_via_a_contiguous_token_subsequence(self, tmp_path: Path) -> None:
+    def test_confirms_via_contiguous_token_subsequence(self, tmp_path: Path) -> None:
         """A candidate prefix confirms against a call target it sits inside of, not just prefixes."""
         sample = tmp_path / "test_sample.py"
         sample.write_text(
@@ -89,7 +89,7 @@ class TestFindFlatGroups:
         )
         assert "rotated_topk" in audit.find_flat_groups(sample)
 
-    def test_skips_tests_already_inside_a_class(self, tmp_path: Path) -> None:
+    def test_skips_tests_already_inside_class(self, tmp_path: Path) -> None:
         """A group already grouped under a class is not module-level and is not reported."""
         sample = tmp_path / "test_sample.py"
         sample.write_text(
@@ -106,7 +106,7 @@ class TestFindFlatGroups:
 class TestCaseFoldingAndPrefixLength:
     """The grouping key is case-folded, and its length is a choice rather than a constant."""
 
-    def test_a_class_named_subject_confirms_its_own_group(self, tmp_path: Path) -> None:
+    def test_class_named_subject_confirms_own_group(self, tmp_path: Path) -> None:
         """`test_c3k2_*` confirms against the `C3k2` it calls, which case-sensitivity blocked.
 
         The two sides are spelled by different conventions -- pytest forces the test
@@ -126,7 +126,7 @@ class TestCaseFoldingAndPrefixLength:
 
         assert groups == {"c3k2": ["test_c3k2_shapes", "test_c3k2_depth", "test_c3k2_width"]}
 
-    def test_a_one_token_prefix_must_name_the_whole_callee(self, tmp_path: Path) -> None:
+    def test_one_token_prefix_must_name_whole_callee(self, tmp_path: Path) -> None:
         """A single token merely contained in a callee confirms nothing.
 
         Containment is a usable signal at two tokens and noise at one: over the live
@@ -145,7 +145,7 @@ class TestCaseFoldingAndPrefixLength:
 
         assert audit.find_flat_groups(sample, prefix_tokens=1) == {}
 
-    def test_a_one_token_subject_is_unreachable_at_the_default_length(self, tmp_path: Path) -> None:
+    def test_one_token_subject_unreachable_at_default_length(self, tmp_path: Path) -> None:
         """The default of two is what makes the length worth exposing at all.
 
         The same file that groups at length one returns nothing at length two,
@@ -163,7 +163,7 @@ class TestCaseFoldingAndPrefixLength:
         assert audit.find_flat_groups(sample, prefix_tokens=1) != {}
         assert audit.find_flat_groups(sample) == {}
 
-    def test_the_cli_carries_the_prefix_length_through(self, tmp_path: Path) -> None:
+    def test_cli_carries_prefix_length_through(self, tmp_path: Path) -> None:
         """`--prefix-tokens` reaches the walk, so the option is not decorative."""
         (tmp_path / "test_sample.py").write_text(
             "from mod import fusion\n"
@@ -177,7 +177,7 @@ class TestCaseFoldingAndPrefixLength:
         assert audit.main(["--tests-dir", str(tmp_path), "--prefix-tokens", "1"]) == 1
 
 
-def test_main_returns_nonzero_when_a_flat_group_survives(tmp_path: Path) -> None:
+def test_main_returns_nonzero_when_flat_group_survives(tmp_path: Path) -> None:
     """The CLI exit code is 1 when a confirmed flat group is still outside a class."""
     (tmp_path / "test_sample.py").write_text(
         "from mod import check_data\n"
@@ -189,26 +189,7 @@ def test_main_returns_nonzero_when_a_flat_group_survives(tmp_path: Path) -> None
     assert audit.main(["--tests-dir", str(tmp_path)]) == 1
 
 
-def test_main_returns_zero_on_a_clean_tree(tmp_path: Path) -> None:
+def test_main_returns_zero_on_clean_tree(tmp_path: Path) -> None:
     """The CLI exit code is 0 when no confirmed flat group survives outside a class."""
     (tmp_path / "test_sample.py").write_text("def test_only_one(): ...\n", encoding="utf-8")
     assert audit.main(["--tests-dir", str(tmp_path)]) == 0
-
-
-def test_the_live_tests_tree_is_currently_clean() -> None:
-    """The real ``tests/`` tree the pre-commit hook scans has no flat group left unclassed.
-
-    This is the one place this file touches the live tree rather than a synthetic
-    one: a regression here means the hook itself would fail on the next commit
-    that touches any test file, not just a new one.
-    """
-    assert audit.find_all_flat_groups(REPO_ROOT / "tests") == []
-
-
-def test_the_live_scripts_tests_tree_is_currently_clean() -> None:
-    """The real ``scripts/_tests/`` tree the pre-commit hook scans has no flat group left.
-
-    ``scripts/_tests/`` carries the functional-core tests for ``scripts/`` modules
-    (WP-130) and is the hook's second default root, alongside ``tests/`` above.
-    """
-    assert audit.find_all_flat_groups(REPO_ROOT / "scripts" / "_tests") == []

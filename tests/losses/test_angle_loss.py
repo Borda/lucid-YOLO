@@ -150,7 +150,7 @@ def test_wrap_range(delta: float) -> None:
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-def test_wrap_ties_take_the_low_end(dtype: torch.dtype) -> None:
+def test_wrap_ties_take_low_end(dtype: torch.dtype) -> None:
     """Both ``+-pi/2`` ties wrap to ``-pi/2``, in either working precision.
 
     This is the "no overlap" half of the range guarantee, and where the module parts
@@ -174,7 +174,7 @@ def test_wrap_ties_take_the_low_end(dtype: torch.dtype) -> None:
     )
 
 
-def test_wrap_is_invariant_to_whole_half_turns() -> None:
+def test_wrap_invariant_to_whole_half_turns() -> None:
     """Adding ``pi`` to a residual does not change where it wraps to (Equation 14's premise)."""
     base = torch.tensor([0.0, 0.3, -0.3, 1.4, -1.4, 1.5])
 
@@ -198,7 +198,7 @@ def test_omega_profile(ratio: float, expected: float) -> None:
     assert omega.item() == pytest.approx(expected, abs=5e-5)
 
 
-def test_omega_is_symmetric_under_swapping_the_sides() -> None:
+def test_omega_symmetric_under_swapping_sides() -> None:
     """A box and its transpose share one ``omega``: only the log-ratio's sign changes.
 
     Load-bearing because :func:`~lucid_yolo.data.rotated_geom.canonicalize` may have
@@ -211,7 +211,7 @@ def test_omega_is_symmetric_under_swapping_the_sides() -> None:
     assert torch.allclose(aspect_ratio_weight(height, width), omega, rtol=1e-6)
 
 
-def test_omega_decays_strictly_as_the_target_elongates() -> None:
+def test_omega_decays_strictly_as_target_elongates() -> None:
     """Elongated targets are down-weighted, squares are not — R1's stated intent.
 
     "Elongated boxes receive smaller ``omega_i`` and remain primarily constrained by the
@@ -239,7 +239,7 @@ def test_omega_widens_with_lambda() -> None:
     assert wide.item() > aspect_ratio_weight(sides, torch.ones(1)).item()
 
 
-def test_omega_rejects_a_non_positive_lambda() -> None:
+def test_omega_rejects_non_positive_lambda() -> None:
     """``lambda <= 0`` divides by zero and would return ``NaN`` for a square, not raise."""
     with pytest.raises(ValueError, match="lam must be"):
         aspect_ratio_weight(torch.ones(1), torch.ones(1), lam=0.0)
@@ -279,7 +279,7 @@ def test_boundary_continuity() -> None:
     assert float(curve.max()) > 0.999
 
 
-def test_boundary_ulps_agree_with_the_boundary_itself() -> None:
+def test_boundary_ulps_agree_with_boundary_itself() -> None:
     """One ulp either side of the wrap boundary scores what the boundary scores.
 
     The residual is exactly ``pi/2`` there, which wraps to ``-pi/2`` and folds to an exact
@@ -293,7 +293,7 @@ def test_boundary_ulps_agree_with_the_boundary_itself() -> None:
     assert _single(pred=_step_ulps(_HALF_PI, 1), target=0.0).item() < 1e-12
 
 
-def test_both_representatives_of_a_square_target_score_identically() -> None:
+def test_both_representatives_of_square_target_score_identically() -> None:
     """A square's two canonical representatives give a bit-identical loss.
 
     :func:`~lucid_yolo.data.rotated_geom.canonicalize` folds an exact square towards zero,
@@ -313,7 +313,7 @@ def test_both_representatives_of_a_square_target_score_identically() -> None:
     assert torch.equal(square_angle_loss(torch.tensor([0.5]), high, square, square, torch.ones(1)), loss)
 
 
-def test_square_representative_invariance_holds_across_a_random_sweep() -> None:
+def test_square_representative_invariance_holds_across_random_sweep() -> None:
     """The same invariance at arbitrary angles, where the shift by ``pi/2`` itself rounds.
 
     Bit-equality is a property of exactly representable inputs; away from those, the two
@@ -332,7 +332,7 @@ def test_square_representative_invariance_holds_across_a_random_sweep() -> None:
     )
 
 
-def test_loss_is_invariant_to_half_turns_of_either_angle() -> None:
+def test_loss_invariant_to_half_turns_of_either_angle() -> None:
     """``theta`` and ``theta + pi`` are one rectangle, so they are one loss (Equation 14).
 
     The premise the whole term is built on, checked on the loss rather than on the wrap:
@@ -347,7 +347,7 @@ def test_loss_is_invariant_to_half_turns_of_either_angle() -> None:
     assert square_angle_loss(pred, target - _PI, width, height, weights).item() == pytest.approx(loss.item(), rel=1e-5)
 
 
-def test_normalizer_is_the_weight_sum_floored_at_one() -> None:
+def test_normalizer_weight_sum_floored_at_one() -> None:
     """``S = max(sum q_i, 1)``: the floor binds below one, the sum divides above it."""
     quarter = _single(pred=_QUARTER_PI, target=0.0, weight=0.25)
     doubled = square_angle_loss(
@@ -376,7 +376,7 @@ def test_background_anchors_of_zero_weight_change_nothing() -> None:
     )
 
 
-def test_no_foreground_gives_an_exact_zero_that_still_carries_gradient() -> None:
+def test_no_foreground_gives_exact_zero_still_carries_gradient() -> None:
     """An empty assignment is a zero loss with a zero gradient, not a special case."""
     pred = torch.zeros(0, requires_grad=True)
     empty = torch.zeros(0)
@@ -388,7 +388,7 @@ def test_no_foreground_gives_an_exact_zero_that_still_carries_gradient() -> None
     assert pred.grad is not None and pred.grad.shape == (0,)
 
 
-def test_gradient_reaches_the_prediction_and_stays_finite() -> None:
+def test_gradient_reaches_prediction_and_stays_finite() -> None:
     """Every predicted angle receives a finite, non-zero gradient; the targets take none."""
     pred = torch.tensor([0.3, -0.9, 2.2], requires_grad=True)
     target, width, height = (
@@ -430,7 +430,7 @@ def test_degenerate_targets_stay_finite_forwards_and_backwards(width: float, hei
     assert pred.grad is not None and torch.isfinite(pred.grad).all()
 
 
-def test_loss_is_bounded_by_one_over_a_random_sweep() -> None:
+def test_loss_bounded_by_one_over_random_sweep() -> None:
     """The term stays in ``[0, 1]``: ``omega <= 1``, ``sin^2 <= 1``, and ``S`` is the weight sum."""
     pred, target = torch.rand(4096) * 20 - 10, torch.rand(4096) * 20 - 10
     width, height = torch.rand(4096) * 100 + 0.5, torch.rand(4096) * 100 + 0.5
@@ -451,7 +451,7 @@ class TestSideFloorValidation:
     """
 
     @pytest.mark.parametrize("bad", [0.0, -1e-4, math.nan, math.inf, -math.inf])
-    def test_a_disabling_min_side_is_refused_by_name(self, bad: float) -> None:
+    def test_disabling_min_side_refused_by_name(self, bad: float) -> None:
         """Zero, negative and non-finite floors all raise, naming the parameter."""
         sides = torch.ones(2)
 
@@ -462,12 +462,12 @@ class TestSideFloorValidation:
             square_angle_loss(sides, sides, sides, sides, sides, min_side=bad)
 
     @pytest.mark.parametrize("bad", [math.nan, math.inf])
-    def test_a_non_finite_lam_is_refused(self, bad: float) -> None:
+    def test_non_finite_lam_refused(self, bad: float) -> None:
         """``lam`` was checked for sign only; a non-finite bandwidth flattens omega to 1."""
         with pytest.raises(ValueError, match="lam must be finite and > 0"):
             aspect_ratio_weight(torch.ones(2), torch.ones(2), lam=bad)
 
-    def test_the_defaults_and_a_smaller_working_floor_are_accepted(self) -> None:
+    def test_defaults_and_smaller_working_floor_accepted(self) -> None:
         """The check refuses only disabling values; a tighter floor still passes."""
         collapsed = torch.zeros(1)
 
@@ -486,7 +486,7 @@ class TestWrapAngleDeltaRange:
     of the wrapping rule, which is why it is documented rather than repaired.
     """
 
-    def test_inside_the_documented_bound_the_residual_survives_to_the_inputs_own_spacing(self) -> None:
+    def test_inside_documented_bound_residual_survives_to_inputs_own_spacing(self) -> None:
         """Offsetting by whole multiples of pi returns the same residual, to within ulp.
 
         The tolerance is the input's own float32 spacing rather than a constant:
@@ -501,7 +501,7 @@ class TestWrapAngleDeltaRange:
             assert torch.allclose(shifted, wrap_angle_delta(base), atol=tolerance)
 
     @pytest.mark.parametrize(("magnitude", "expected"), [(1e8, 0.7307), (1e30, -1.2563)])
-    def test_past_the_documented_bound_the_angle_is_already_lost(self, magnitude: float, expected: float) -> None:
+    def test_past_documented_bound_angle_already_lost(self, magnitude: float, expected: float) -> None:
         """The measured values the narrowed docstring cites, pinned so the claim stays true.
 
         Neither answer is the residual of its argument — ``1e8`` is a multiple of
@@ -513,7 +513,7 @@ class TestWrapAngleDeltaRange:
         assert float(got) == pytest.approx(expected, abs=1e-4)
         assert -_HALF_PI <= float(got) < _HALF_PI
 
-    def test_the_returned_value_stays_in_range_at_any_magnitude(self) -> None:
+    def test_returned_value_stays_in_range_at_any_magnitude(self) -> None:
         """Whatever the input, the half-open range contract itself still holds."""
         extreme = torch.tensor([1e8, -1e8, 1e20, -1e20, 1e30, -1e30])
 
