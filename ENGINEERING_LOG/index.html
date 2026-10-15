@@ -2324,6 +2324,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#wp-193-post-backward-state-updates-use-fewer-cuda-launches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-193 — post-backward state updates use fewer CUDA launches
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4092,6 +4103,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#wp-193-post-backward-state-updates-use-fewer-cuda-launches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-193 — post-backward state updates use fewer CUDA launches
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5120,6 +5142,13 @@
 <p><strong>The report now says which count ran.</strong> A complete run's worker count is no longer the fixed <code>0</code> the report used to imply; it is whatever the datamodule's shared-memory- and image-size-aware policy picked on the host that ran it. <code>SplitScoring</code> and the JSON report's <code>info.workers</code> field now carry that count, read off the same loader <code>score_split</code> already builds, so a report is self-describing about which route scored it without reaching into the datamodule's private state. A failure of the policy route's worker pool itself, such as a worker that dies mid-pass and surfaces as the loader's <code>RuntimeError</code>, is not one of the pairing <code>ValueError</code>s <code>run</code> turns into a <code>FAIL:</code> line: it reaches the terminal as a traceback, <code>lucid-eval</code> exits with status 1, and no report is written.</p>
 <p><strong>That field is an additive schema change, and its consumers were checked.</strong> A repository-wide search over <code>tests/</code>, <code>notebooks/</code>, <code>docs/</code> and <code>src/</code> found no oriented-report golden and no consumer comparing the whole payload or the exact <code>info</code> key set. The tests and the other task reports read named keys, while <code>demo_obb.py</code> and the documentation only produce or name <code>obb_report.json</code>. The regression therefore pins the new field directly; downstream code that selects existing keys is unchanged, while a consumer enforcing an undocumented closed schema would need to accept the additive key.</p>
 <p><strong>The floor moved to its exact live count, not a one-row nudge.</strong> <code>_WP_FLOOR</code> only tracks additions correctly when it is raised to the roadmap's exact live count — the same ratchet rule WP-152b and WP-165b record, and the one <code>_ASSUMPTION_FLOOR</code> was caught violating at 47 rows of slack. This row found <code>_WP_FLOOR</code> at 177 against a live count already at 191 before it, 14 rows of slack that would have let most of Phase 17 be deleted without the ratchet firing; it is now 192, the exact count after this row, leaving zero slack for the next one to inherit.</p>
+<h3 id="wp-193-post-backward-state-updates-use-fewer-cuda-launches">WP-193 — post-backward state updates use fewer CUDA launches<a class="headerlink" href="#wp-193-post-backward-state-updates-use-fewer-cuda-launches" title="Permanent link">&para;</a></h3>
+<p><a id="wp-193"></a></p>
+<p><strong>The measured target is the complete interval, not either helper.</strong> A public COCO val2017 training harness measured from one completed batch to the next, including loader wait, host-to-device transfer, forward and loss, backward, clipping, MuSGD, EMA and synchronization. On an isolated <code>g2-standard-8</code> NVIDIA L4 (driver 580.178.04, torch 2.9.1+cu129), variant <code>n</code>, batch 4, 640 px and BF16, five warm ABBA pairs moved from a 256.8 ms baseline median to 222.5 ms with this row. The paired reductions were 13.28%, 13.13%, 14.90%, 12.94% and 6.38%: median 13.13%, range 6.38–14.90%. The fifth candidate arm was the run's one timing outlier at 246.4 ms, but remained faster than the fastest baseline arm at 254.9 ms. Each arm discarded 15 warm-up intervals and measured the next 44. Peak allocated memory was 822.1 MiB in both arms. The paid VM was deleted after the run and an independent cleanup found no archbench instance alive.</p>
+<p><strong>Two launch-bound stages make one post-backward change.</strong> The existing optimizer already groups exact-shape CUDA matrices, but the <code>torch.vmap</code> layer around the scalar Newton--Schulz expression remains; it already lowered each product to one batched multiply, so the change drops that layer and folds the scale-and-add into the product epilogue. <code>_orthogonalize_batched</code> uses <code>baddbmm</code> for the same <code>b*A + c*A@A</code> and <code>a*X + polynomial@X</code> expressions, preserving each slice's normalization, coefficient triple, requested step count, gains, scaling and decay. EMA previously launched one multiply and one add for every floating parameter or buffer; grouping by <code>(device, dtype)</code> and calling <code>torch._foreach_lerp_</code> once per bucket evaluates the same <code>shadow + (1 - decay) * (live - shadow)</code> recurrence. Singletons and non-CUDA optimizer paths remain scalar. Both transformations are scheduling changes derived from this tree's buckets and profiler counts; no training constant or imported implementation enters the diff.</p>
+<p><strong>Floating-point schedules are equivalent, not bit-identical.</strong> Native batching and interpolation reassociate operations, so the regression contract is a bounded trajectory against the prior scalar formulas rather than byte identity. The repository's multi-step trajectory tests run on CPU, over three (6, 4) float32 matrices for the optimizer and float32 parameters for the EMA. The 40-step fixed-gradient CUDA run on an L4 is a one-off measurement, not a repository test, and no multi-step trajectory test covers square, wide or tall shapes or a float64 bucket. A finite one-step public-COCO run starts from the same loss and checks model and momentum differences directly. This row does not claim an unchanged long-run stochastic trajectory: tiny per-step differences can change later discrete assignments, as the repository already records for the exact-shape batching it replaces.</p>
+<p><strong>The rejected queue was judged end to end.</strong> MuSGD's native batch alone reached only 7.48% median on its final five-pair L4 rerun and was rejected despite a larger exploratory result. EMA foreach was retained only after the combined five-pair run; no isolated repeat-level EMA claim is made. Five segmentation mask-loss compilation repeats had a 4.44% median but ranged from -10.88% to 6.05%, crossing zero. Packed host metadata was rejected from its structural stage bound, while loss logging and scaled-dot-product attention had only inconclusive single local A/B screens; none carries a quantified claim here. cuDNN benchmarking was slower in its exploratory complete-path run and also carries no repeat-level claim. None became a dossier. Combining the two adjacent post-backward launch reductions is the first candidate whose complete-pipeline median clears the requested 8% threshold.</p>
+<p><strong>The accelerator golden check is outstanding, not run clean.</strong> <code>_orthogonalize_batched</code> reassociates the same CUDA Newton--Schulz buckets the WP-177 entry (ESCALATION.md, 2026-09-15) already measured moving <code>goldens/gpu/overfit_micro_kp.json</code>'s <code>train_oks_ap</code> 0.117 outside its stored band from float-scheduling alone, on a question that entry leaves unresolved. This row's own correctness evidence is the 40-step fixed-gradient CUDA trajectory and the one-step public-COCO check (both bounded-agreement, not golden-harness), plus the offline <code>make gate</code> (50/50, CPU-only). <code>make gate-gpu</code> / <code>check_goldens.py --include-gpu</code> was not run against this diff, so whether the additional reassociation here moves <code>overfit_micro_kp</code> or <code>overfit_micro_obb</code> further is unmeasured — the roadmap row stays <code>🔄</code> until it is.</p>
 
 
 
