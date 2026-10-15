@@ -3803,6 +3803,14 @@
 <td>✅</td>
 </tr>
 <tr>
+<td>192b</td>
+<td><code>perf(data): cache decoded training images</code> [DATA][GPU]</td>
+<td>COCO and YOLO readers can retain one RGB <code>uint8</code> tensor per distinct training file before worker startup; every draw still creates fresh float storage and runs the unchanged random pipeline. Opt-in as <code>cache_train_images</code> because host RAM grows with the uncompressed split (D27); validation stays uncached · <a href="../ENGINEERING_LOG/#wp-192b">log</a></td>
+<td>cache decode-count/deduplication/immutability tests; COCO/YOLO train-only routing tests; 100-draw bit-level public DOTA parity; focused data/datamodule/docs suite plus ruff, mypy and repository audits green; <code>make gate</code> green; non-gated [DATA][GPU] benchmark evidence in <a href="../ENGINEERING_LOG/#wp-192b">ENGINEERING_LOG.md#wp-192b</a>: five paired isolated-CPU reader runs and five paired L4 <code>Trainer.fit</code> runs</td>
+<td>192</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>193</td>
 <td><code>perf(train): fuse post-backward state updates</code> [DATA][GPU]</td>
 <td>MuSGD's exact-shape CUDA buckets evaluate the existing quintic with native batched products, and EMA groups floating tensors by device and dtype for one foreach interpolation per group. No coefficient, iteration count, branch or decay changes · <a href="../ENGINEERING_LOG/#wp-193">log</a></td>

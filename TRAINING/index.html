@@ -471,6 +471,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#decoded-training-image-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🗃️ Decoded training-image cache
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#torchcompile-is-opt-in-cuda-detect" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1461,6 +1472,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#decoded-training-image-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🗃️ Decoded training-image cache
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#torchcompile-is-opt-in-cuda-detect" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1611,6 +1633,10 @@
 <p><code>lucid-eval</code> picks the rotated protocol from the checkpoint's own task, and with it the 1024 px letterbox and batch 8; an explicit <code>--img_size</code> or <code>--batch_size</code> still wins.</p>
 <h2 id="oriented-and-keypoint-runs-are-single-device">🖥️ Oriented and keypoint runs are single-device<a class="headerlink" href="#oriented-and-keypoint-runs-are-single-device" title="Permanent link">&para;</a></h2>
 <p><code>lucid-yolo fit</code> refuses <code>task: obb</code> and <code>task: keypoints</code> on more than one process, and says so at setup rather than partway through the first validation. Their epoch metrics — <code>val/rotated_mAP</code> and <code>val/oks_mAP</code> — accumulate plain Python lists that nothing gathers, so each rank would score its own shard and log it as the split's number. Average precision ranks every detection of the split against every other by confidence, so per-rank values cannot be averaged back into the right one; a wrong number that looks plausible is worse than a refusal. Leave <code>trainer.devices</code> at <code>1</code> for these two tasks, or pick a bigger accelerator rather than more of them. Detection and segmentation are unaffected: their metrics are torchmetrics metrics and synchronise across ranks. Whatever the task, a CUDA run trains in <code>channels_last</code> memory format automatically — parameters and images both, no flag (D23) — while CPU and MPS keep the default layout.</p>
+<h2 id="decoded-training-image-cache">🗃️ Decoded training-image cache<a class="headerlink" href="#decoded-training-image-cache" title="Permanent link">&para;</a></h2>
+<p><code>--data.cache_train_images true</code> decodes each distinct training file name during datamodule setup and keeps the RGB <code>uint8</code> tensor in host RAM. Mosaic, affine, colour and flip augmentation still run on fresh float storage for every draw; only the repeated JPEG/PNG decode disappears. COCO and YOLO training readers support the flag, and validation is deliberately not cached.</p>
+<p>Budget the option from the uncompressed images, not their files: approximately <code>sum(3 * height * width)</code> bytes for 8-bit sources, before Python/tensor metadata — a 16-bit PNG decodes to <code>uint16</code> and costs two bytes per channel, so twice that — and once per device: a multi-GPU run spawns one process per rank, each building its own <code>DetectionDataModule</code> and therefore its own cache, so the single-process budget above multiplies by <code>trainer.devices</code>. The cache is keyed by file name (by path for the YOLO reader), so two records naming one file share an entry, while the same picture stored under two names is decoded and held twice. It defaults off.</p>
+<p>Whether DataLoader workers share the cache depends on the multiprocessing start method, not on the operating system, and the data module leaves the start method at the platform default. Under <code>fork</code> the workers read the parent's cache through copy-on-write pages, so it costs one copy of RAM however many workers there are. Under <code>spawn</code> and <code>forkserver</code> — the default on macOS and Windows, and on Linux from Python 3.14 — the cache is pickled to every worker, torch moves each cached tensor into shared memory to do it (one segment or file descriptor per image), and with <code>--data.persistent_workers false</code>, the default, the hand-over repeats every epoch. The values are identical either way; a non-fork start method does not promise the one-copy cost or the speedup, and a large split can meet file-descriptor or <code>/dev/shm</code> limits at a size nobody has measured. The pipeline never writes to the cache — every draw converts into fresh float storage. Leave it off when the split does not fit comfortably beside the loader queue, model, optimizer and operating-system cache.</p>
 <h2 id="torchcompile-is-opt-in-cuda-detect">⚡ torch.compile is opt-in (CUDA, detect)<a class="headerlink" href="#torchcompile-is-opt-in-cuda-detect" title="Permanent link">&para;</a></h2>
 <p><code>--model.compile_step true</code> (or <code>compile_step: true</code> under <code>model:</code>; <code>det_nano_smoke.yaml</code> carries it at <code>false</code>) compiles the detection objective with Inductor. What is compiled is one region, <code>DetectionLitModule._detect_objective</code>: the forward, both branch decodes, the task-aligned assignment and the dual loss, traced as a single graph with no breaks — <code>tests/ptl/test_compile.py</code> pins that on CPU for a batch with ground truths and for one with none. Compiling the model half alone was measured first and was not worth a flag: x1.09–1.16 on the step, because the assignment and the loss are where the small kernels and the launch overhead live. With WP-183's dense box terms (no data-dependent gather) and the label check skipped under tracing, the whole region compiles: on an RTX PRO 6000, variant <code>n</code>, COCO, batch 16, deterministic, the eager training step is 74.7 ms and the compiled one 60.9 ms, x1.23. A bf16 run was recorded at x1.46 on the same bench and is <strong>not</strong> enabled by this flag — precision is a separate decision the fidelity gate has not been asked about.</p>
 <p>What it costs: 110–140 s of compilation per process before the first step, and a handful of recompiles over a run: the training graph, the first <code>no_grad</code> evaluation step, and — because Dynamo specialises sizes 0 and 1 whatever is marked — one each for the first batch with no ground truths (<code>tal.py</code>'s own branch), the first with exactly one padded instance, and the first with one image, if the loader ever produces it. Measured on CPU with the <code>eager</code> backend over five batch shapes: four graphs. Batch size and padded instance count are marked dynamic on the images and the ground truths before every compiled call, so the last, smaller batch of an epoch and a batch with more instances than the one before share one graph; without the marks Dynamo would specialise until <code>cache_size_limit</code> (8) and then drop to eager without saying so, and with them the assigner's <code>F.one_hot(best_gt, num_gt)</code> — a concrete class count — had to become an <code>arange</code> comparison, since the enforcing marks refuse a pinned dim rather than silently recompiling. <code>TORCH_LOGS=recompiles</code> shows the count.</p>
