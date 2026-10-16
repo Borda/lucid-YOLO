@@ -52,7 +52,9 @@ if TYPE_CHECKING:
 _MUON_RMS_SCALE: float = 0.2
 
 #: Device types on which :meth:`MuSGD._step_group` batches compatible matrices and
-#: updates each stack with one native batched call instead of one call per parameter.
+#: updates each stack with one native batched call instead of one call per parameter,
+#: and on which :meth:`MuSGD._foreach_nesterov` advances the momentum buffers with
+#: foreach operations. Both read this one constant so a test can widen the gate to CPU.
 #: Batching trades many small kernel launches for one large one, so it pays exactly
 #: where launch overhead dominates. The gate was set on the production n-scale detector
 #: while the stack was updated through :func:`torch.vmap`: CUDA (L4) is where the win was
@@ -93,6 +95,31 @@ class _PendingUpdate(NamedTuple):
 
     param: Tensor
     nesterov_grad: Tensor
+
+
+def _memory_overlaps(tensors: list[Tensor]) -> bool:
+    """Whether any two non-empty tensors reach the same bytes, whatever storage wraps them.
+
+    Compares the address range each strided tensor can touch instead of its storage's
+    base pointer: ``torch.from_dlpack`` and similar imports wrap one buffer in distinct
+    storage objects whose base pointers differ while their ranges intersect.
+    """
+    spans = sorted(
+        (
+            tensor.data_ptr(),
+            tensor.data_ptr()
+            + (sum((size - 1) * stride for size, stride in zip(tensor.shape, tensor.stride(), strict=True)) + 1)
+            * tensor.element_size(),
+        )
+        for tensor in tensors
+        if tensor.numel() > 0
+    )
+    reach = 0
+    for start, stop in spans:
+        if start < reach:
+            return True
+        reach = max(reach, stop)
+    return False
 
 
 def _matrix_shape(gradient: Tensor) -> tuple[int, int]:
@@ -253,14 +280,15 @@ class MuSGD(Optimizer):
         momentum = group["momentum"]
         lr = group["lr"]
         matrix_buckets: dict[_BucketKey, list[_PendingUpdate]] = defaultdict(list)
-        storage_counts = Counter(
-            param.untyped_storage().data_ptr()
+        inspectable = [
+            param
             for param in group["params"]
             if type(param) in _STORAGE_TYPES
             and param.layout == torch.strided
             and param.device.type in _BATCHED_DEVICE_TYPES
-        )
-        independent_storage = len(storage_counts) == len(group["params"])
+        ]
+        storage_counts = Counter(param.untyped_storage().data_ptr() for param in inspectable)
+        independent_storage = len(storage_counts) == len(group["params"]) and not _memory_overlaps(inspectable)
         active = [param for param in group["params"] if param.grad is not None]
         adjusted = self._foreach_nesterov(active, momentum, storage_counts)
         for index, param in enumerate(active):
@@ -305,15 +333,15 @@ class MuSGD(Optimizer):
 
         ``buffer.mul_(momentum).add_(grad)`` stays two rounded operations, followed
         by ``grad.add(buffer, alpha=momentum)``. No interpolation or reassociation
-        enters the recurrence. CPU and unusual restored state keep the scalar
-        method; shared parameter, gradient or buffer storage does too, because
-        advancing one buffer could otherwise change another operation's input.
+        enters the recurrence. Devices outside ``_BATCHED_DEVICE_TYPES`` (CPU and
+        MPS by default) and unusual restored state keep the scalar method; shared
+        parameter, gradient or buffer storage does too, because advancing one
+        buffer could otherwise change another operation's input.
         """
-        if (
-            len(params) < 2
-            or any(type(param) not in _STORAGE_TYPES or not param.is_cuda for param in params)
-            or any(count > 1 for count in storage_counts.values())
-        ):
+        on_gated_device = all(
+            type(param) in _STORAGE_TYPES and param.device.type in _BATCHED_DEVICE_TYPES for param in params
+        )
+        if len(params) < 2 or not on_gated_device or any(count > 1 for count in storage_counts.values()):
             return None
         gradients: list[Tensor] = []
         buffers: list[Tensor] = []
@@ -370,6 +398,10 @@ class MuSGD(Optimizer):
         before its original ``0.2 * sqrt(max(rows, columns))`` scale, gains and decay
         are applied. Padding is zero work mathematically, but GEMM and reduction
         schedules can differ in floating point; the scalar path remains the oracle.
+
+        The scale, gains and decay here are the third copy of the Muon arm of
+        :meth:`_parameter_update`; :meth:`_batched_parameter_update` lists all three copies
+        and the tests that hold them together.
         """
         rows = _matrix_shape(bucket[0].nesterov_grad)[0]
         columns = max(_matrix_shape(pending.nesterov_grad)[1] for pending in bucket)
@@ -401,19 +433,24 @@ class MuSGD(Optimizer):
         each product is a native batched product rather than a scalar product inside
         ``vmap``.
 
-        This is a second copy of the Muon arm of :meth:`_parameter_update`, kept beside
-        it instead of factored out so that the scalar path stays the untouched reference.
+        This is the second of three copies of the Muon arm of :meth:`_parameter_update`, kept
+        beside it instead of factored out so that the scalar path stays the untouched reference.
         It mirrors :meth:`_muon_branch` (the 2D view and the ``0.2 * sqrt(max(rows, cols))``
         rescale) with :func:`~lucid_yolo.optim.newton_schulz._orthogonalize_batched` in place
         of :func:`~lucid_yolo.optim.newton_schulz.orthogonalize`, then repeats the
         ``w_muon``/``w_sgd`` weighting and the decoupled decay of :meth:`_parameter_update`.
-        A change to the formula made in one place has to be made in the other. Two tests hold
-        the copies together: the first compares this path with :meth:`_parameter_update` over
-        40 optimizer steps, the second compares the orthogonalization alone with the scalar loop.
+        The third copy is :meth:`_padded_parameter_updates`, which repeats the same scale,
+        gains and decay after cropping each padded result. A change to the formula made in one
+        place has to be made in all three. Three tests hold the copies together: the first
+        compares this path with :meth:`_parameter_update` over 40 optimizer steps, the second
+        compares the orthogonalization alone with the scalar loop, the third compares the padded
+        path with the scalar formula for mixed widths.
 
             ``tests/optim/test_musgd.py::TestExactShapeBatching::test_batched_trajectory_matches_unbatched_reference_over_many_steps``
 
             ``tests/optim/test_newton_schulz.py::TestNativeBatch::test_matches_per_matrix_loop``
+
+            ``tests/optim/test_padded_musgd.py::test_mixed_width_update_matches_scalar_oracle``
         """
         matrices = grads.reshape(grads.shape[0], grads.shape[1], -1)
         rows, cols = matrices.shape[-2:]

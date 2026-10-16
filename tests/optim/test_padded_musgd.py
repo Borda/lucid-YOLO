@@ -165,6 +165,35 @@ def test_shared_storage_keeps_exact_shape_updates(device: str, monkeypatch: pyte
     torch.testing.assert_close(storage, expected)
 
 
+def test_dlpack_overlap_keeps_scalar_order(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Views of one buffer under distinct storage objects keep the sequential decay order.
+
+    ``torch.from_dlpack`` wraps the same memory in another storage object with its own base pointer,
+    so a base-pointer comparison calls the two parameters independent while their bytes overlap.
+    Padding would then reorder their decoupled-decay updates and diverge from the scalar path.
+    """
+    base = torch.linspace(-1.0, 1.0, 40, device=device)
+
+    def run() -> torch.Tensor:
+        flat = base.clone()
+        params = [
+            torch.nn.Parameter(flat[:24].view(4, 6)),
+            torch.nn.Parameter(torch.from_dlpack(flat[2:22]).view(4, 5)),
+        ]
+        for param in params:
+            param.grad = torch.ones_like(param)
+        MuSGD(params, lr=0.1, weight_decay=0.2).step()
+        return flat
+
+    with monkeypatch.context() as scalar:
+        scalar.setattr(musgd, "_BATCHED_DEVICE_TYPES", frozenset())
+        expected = run()
+    monkeypatch.setattr(
+        musgd, "_orthogonalize_batched", lambda *args, **kwargs: pytest.fail("overlapping views batched")
+    )
+    assert torch.equal(run(), expected)
+
+
 @pytest.mark.parametrize("shape", [(3,), (4, 6)])
 def test_parameter_subclass_keeps_legacy_route(device: str, shape: tuple[int, ...]) -> None:
     """A valid parameter subclass need not expose storage to keep its old update."""
@@ -205,13 +234,35 @@ def test_mixed_subclass_group_keeps_alias_order(device: str, monkeypatch: pytest
     torch.testing.assert_close(storage, expected)
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32, torch.float64])
-def test_cuda_momentum_batches_without_reassociation(monkeypatch: pytest.MonkeyPatch, dtype: torch.dtype) -> None:
-    """The three foreach calls retain the scalar recurrence bit for bit across resume."""
-    params = [torch.nn.Parameter(torch.zeros(shape, device="cuda", dtype=dtype)) for shape in [(), (3,), (2, 3), (4,)]]
-    optimizer = MuSGD(params, lr=0.0)
+_CUDA_ONLY = [pytest.mark.gpu, pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")]
+
+
+@pytest.mark.parametrize(
+    ("device_name", "dtype"),
+    [
+        pytest.param("cpu", torch.float32, id="cpu-float32"),
+        pytest.param("cpu", torch.float64, id="cpu-float64"),
+        pytest.param("cuda", torch.float16, marks=_CUDA_ONLY, id="cuda-float16"),
+        pytest.param("cuda", torch.bfloat16, marks=_CUDA_ONLY, id="cuda-bfloat16"),
+        pytest.param("cuda", torch.float32, marks=_CUDA_ONLY, id="cuda-float32"),
+        pytest.param("cuda", torch.float64, marks=_CUDA_ONLY, id="cuda-float64"),
+    ],
+)
+def test_momentum_batches_without_reassociation(
+    device_name: str, dtype: torch.dtype, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The three foreach calls retain the scalar recurrence and its updates bit for bit across resume.
+
+    Zero Muon gain, unit SGD gain and no decay make every update the Nesterov gradient itself, so the
+    parameters expose that gradient after a nonzero-lr step instead of the buffers alone. The gate is
+    widened to CPU unconditionally: half precision stays on CUDA, where the recurrence was measured.
+    """
+    monkeypatch.setattr(musgd, "_BATCHED_DEVICE_TYPES", frozenset({"cpu", "cuda"}))
+    shapes = [(), (3,), (2, 3), (4,)]
+    params = [torch.nn.Parameter(torch.zeros(shape, device=device_name, dtype=dtype)) for shape in shapes]
+    settings = {"lr": 0.01, "w_muon": 0.0, "w_sgd": 1.0, "weight_decay": 0.0}
+    optimizer = MuSGD(params, **settings)
+    buffers = [torch.zeros_like(param) for param in params]
     expected = [torch.zeros_like(param) for param in params]
     calls: list[int] = []
     original = torch._foreach_mul_
@@ -224,23 +275,32 @@ def test_cuda_momentum_batches_without_reassociation(monkeypatch: pytest.MonkeyP
     for step in range(20):
         for index, param in enumerate(params):
             param.grad = torch.full_like(param, (index + 1) / (step + 3))
-            expected[index].mul_(0.95).add_(param.grad)
+            buffers[index].mul_(0.95).add_(param.grad)
+            expected[index].add_(param.grad.add(buffers[index], alpha=0.95), alpha=-0.01)
         optimizer.step()
         if step == 7:
             saved = copy.deepcopy(optimizer.state_dict())
-            optimizer = MuSGD(params, lr=0.3)
+            optimizer = MuSGD(params, **{**settings, "lr": 0.5})
             optimizer.load_state_dict(saved)
-        for param, buffer in zip(params, expected, strict=True):
+        for param, buffer, value in zip(params, buffers, expected, strict=True):
             actual = optimizer.state[param]["momentum_buffer"]
             assert torch.equal(actual.reshape(-1).view(torch.uint8), buffer.reshape(-1).view(torch.uint8))
+            assert torch.equal(param.detach().reshape(-1).view(torch.uint8), value.reshape(-1).view(torch.uint8))
     assert calls == [4] * 20
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")
-def test_gradient_parameter_alias_preserves_sequential_updates(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_gate_keeps_scalar_momentum_on_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CPU stays outside the foreach gate, so the narrow default never calls a foreach kernel."""
+    params = [torch.nn.Parameter(torch.ones(3)) for _ in range(2)]
+    for param in params:
+        param.grad = torch.ones_like(param)
+    monkeypatch.setattr(torch, "_foreach_mul_", lambda *args: pytest.fail("cpu momentum batched"))
+    MuSGD(params, lr=0.1).step()
+
+
+def test_gradient_parameter_alias_preserves_sequential_updates(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """A vector update that changes another gradient retains the original ordering."""
-    params = [torch.nn.Parameter(torch.tensor([1.0, 2.0], device="cuda")) for _ in range(2)]
+    params = [torch.nn.Parameter(torch.tensor([1.0, 2.0], device=device)) for _ in range(2)]
     params[0].grad = params[1].detach()
     params[1].grad = params[0].detach()
     expected = [param.detach().clone() for param in params]
@@ -252,16 +312,14 @@ def test_gradient_parameter_alias_preserves_sequential_updates(monkeypatch: pyte
         torch.testing.assert_close(param, value)
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")
-def test_restored_mixed_buffer_dtype_keeps_scalar_route(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_restored_mixed_buffer_dtype_keeps_scalar_route(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """A wider saved buffer keeps the scalar promotion instead of joining a foreach batch."""
-    param = torch.nn.Parameter(torch.ones(3, device="cuda"))
+    param = torch.nn.Parameter(torch.ones(3, device=device))
     param.grad = torch.full_like(param, 0.3)
-    other = torch.nn.Parameter(torch.ones(3, device="cuda"))
+    other = torch.nn.Parameter(torch.ones(3, device=device))
     other.grad = torch.ones_like(other)
     optimizer = MuSGD([param, other], lr=0.1)
-    buffer = torch.ones(3, device="cuda", dtype=torch.float64)
+    buffer = torch.ones(3, device=device, dtype=torch.float64)
     optimizer.state[param]["momentum_buffer"] = buffer
     expected_buffer = buffer * 0.95 + param.grad
     expected = param.detach() - 0.1 * param.grad.add(expected_buffer, alpha=0.95)
@@ -271,13 +329,11 @@ def test_restored_mixed_buffer_dtype_keeps_scalar_route(monkeypatch: pytest.Monk
     torch.testing.assert_close(buffer, expected_buffer, rtol=0, atol=0)
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")
-def test_shared_momentum_buffer_preserves_sequential_recurrence(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_shared_momentum_buffer_preserves_sequential_recurrence(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """A shared restored buffer advances once per parameter in the original order."""
-    params = [torch.nn.Parameter(torch.ones(3, device="cuda")) for _ in range(2)]
+    params = [torch.nn.Parameter(torch.ones(3, device=device)) for _ in range(2)]
     optimizer = MuSGD(params, lr=0.1)
-    shared = torch.ones(3, device="cuda")
+    shared = torch.ones(3, device=device)
     reference = shared.clone()
     expected = []
     for index, param in enumerate(params):
@@ -292,18 +348,16 @@ def test_shared_momentum_buffer_preserves_sequential_recurrence(monkeypatch: pyt
     torch.testing.assert_close(shared, reference, rtol=0, atol=0)
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")
 @pytest.mark.skipif(not hasattr(torch.Tensor, "grad_dtype"), reason="grad_dtype postdates torch>=2.4")
-def test_wider_cuda_gradient_keeps_scalar_promotion(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wider_gradient_keeps_scalar_promotion(device: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """The optional wider gradient does not inherit the parameter's precision."""
-    param = torch.nn.Parameter(torch.ones(3, device="cuda"))
+    param = torch.nn.Parameter(torch.ones(3, device=device))
     param.grad_dtype = None
-    param.grad = torch.full((3,), 0.3, device="cuda", dtype=torch.float64)
+    param.grad = torch.full((3,), 0.3, device=device, dtype=torch.float64)
     buffer = param.grad.float()
     expected = param.detach() - 0.1 * param.grad.add(buffer, alpha=0.95)
     monkeypatch.setattr(torch, "_foreach_mul_", lambda *args: pytest.fail("wider gradient batched"))
-    other = torch.nn.Parameter(torch.ones(3, device="cuda"))
+    other = torch.nn.Parameter(torch.ones(3, device=device))
     other.grad = torch.ones_like(other)
     MuSGD([param, other], lr=0.1).step()
     torch.testing.assert_close(param, expected.float())
