@@ -18,8 +18,8 @@
 {% endblock %}
 
 {% block extrahead %}
-  {% set title = page.meta.title if page.meta and page.meta.title else config.site_name %}
-  {% set description = page.meta.description if page.meta and page.meta.description else config.site_description %}
+  {% set title = (page.meta.title if page.meta and page.meta.title else config.site_name) | e %}
+  {% set description = (page.meta.description if page.meta and page.meta.description else config.site_description) | e %}
   <meta property="og:type" content="{{ 'website' if page.meta and page.meta.home else 'article' }}">
   <meta property="og:site_name" content="{{ config.site_name }}">
   <meta property="og:title" content="{{ title }}">

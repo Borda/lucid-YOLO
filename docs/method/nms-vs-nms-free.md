@@ -36,7 +36,7 @@ The source paper reports a gap of 0.6 to 0.8 AP. This reproduction measures a wi
 ## ❔ What this project has not measured
 
 - **Speed.** Nothing in this repository times the two decode paths against each other, so no latency or throughput claim is made here.
-- **Oriented detection.** The oriented tier reports per-tile scores and has never run the NMS comparison. It also has an open policy question on the NMS-free side: two overlapping tiles that detect the same object have nothing to suppress the duplicate, so merging them is a decision still to be made.
+- **Oriented detection.** The oriented tier reports both per-tile scores and [whole-image scores](../report/oriented-detection.md) using the core-ownership merge (A59, A60), but has not measured the accuracy gap between the NMS and NMS-free paths.
 - **Longer schedules.** Every figure above is from a smoke-tier run at the smallest scale.
 
 ## 🧠 Why bother removing it

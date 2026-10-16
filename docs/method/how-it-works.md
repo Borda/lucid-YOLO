@@ -11,7 +11,7 @@ One pass through the network turns an image into a fixed list of boxes. This pag
 1. **Image.** A letterboxed square, 640 px for detection, segmentation and keypoints, 1024 px for oriented detection tiles.
 2. **Backbone and neck.** One trunk, shared by all four tasks, turns the image into feature grids at strides 8, 16 and 32. A stride-8 cell sees a small patch and decides about small objects; a stride-32 cell sees a large patch and decides about large ones.
 3. **Two heads on the same grids.** Every grid cell is an *anchor point*. Each head predicts, for each anchor, class scores and four distances (left, top, right, bottom) from the anchor to the box edges. There are no distribution bins to decode: the distances are the box (`models/heads/detect.py`).
-4. **Top-k.** The deployed head's class scores are ranked and the best 300 are kept (`decode/topk_e2e.py`). Rows past the real detections carry score 0, so the output shape is always `(batch, 300, 6)`: `[x1, y1, x2, y2, score, class]`.
+4. **Top-k.** The deployed head's class scores are ranked and the best 300 anchor predictions are kept (`decode/topk_e2e.py`), regardless of how many real objects are present. The output shape is always `(batch, 300, 6)`: `[x1, y1, x2, y2, score, class]`. Zero padding is needed only when fewer than 300 anchors exist; callers can filter predictions by confidence.
 5. **Boxes.** That tensor is the answer. Nothing after it merges or filters boxes.
 
 ## 🪞 Why two heads
