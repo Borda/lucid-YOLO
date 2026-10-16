@@ -2,6 +2,13 @@
 
 > lucid-yolo is an independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance segmentation, and oriented detection methods described in the YOLO26 paper (arXiv:2606.03748), plus a keypoint task composed onto the same trunk whose loss and evaluation protocol are taken from RLE (arXiv:2107.11291) rather than from that paper. "YOLO" refers to the family of real-time detectors originated by Redmon et al. (2016). This project is not affiliated with, endorsed by, or derived from Ultralytics or its codebase. No Ultralytics source code, configurations, or model weights were consulted or used. See docs/PROVENANCE.md.
 
+## ⚡ In short
+
+- **What it is:** four real-time vision models (detection, instance segmentation, oriented detection, keypoints) that share one trunk and one NMS-free output path, written from the papers alone.
+- **What was shown:** each model trains end to end on its real dataset and clears its acceptance criteria, at the smallest scale and a short schedule. The numbers are in the table below.
+- **What is not claimed:** the papers' exact numbers, a leaderboard result, or any published weights.
+- **New here?** Start with [how the detector works](method/how-it-works.md), then see [what dropping NMS costs](method/nms-vs-nms-free.md).
+
 ## 🧭 What this is
 
 A paper describes three real-time vision models, and a second paper the keypoint loss a fourth task is built on. This repository implements all four from those descriptions — the equations, the tables, the figures — and from the primary literature the paper cites, and from nothing else. The reference implementation was never opened, and neither was any mirror, package copy, or documentation site generated from it. That constraint is the point of the exercise rather than an obstacle to it: an implementation that shares no lineage with the original is the only kind that can independently test whether the published claims follow from the published method.
@@ -60,13 +67,15 @@ Four readings the report insists on, and this page repeats rather than smooths o
 
 ## 🗂️ Reading the rest of this site
 
-The documents fall into three registers, and which one you want depends on what you came for.
+The top bar has four tabs: **Home** (this page, the method, running a model, the clean-room record), **Results** (the reproduction report), **Models** (model cards and notebooks) and **Project** (roadmap, logs, each roadmap phase with its research and engineering pages, contributing). Which one you want depends on what you came for.
 
 | If you want to | Read | It answers |
 | -- | -- | -- |
+| see how the detector turns an image into boxes | [How the detector works](method/how-it-works.md) | an animated walk through backbone, two heads and top-k |
+| compare NMS with the NMS-free path | [NMS versus NMS-free](method/nms-vs-nms-free.md) | what each path does, and what removing NMS cost in measured AP |
 | run a model yourself | [Launching a training run](TRAINING.md) | the launch command for each of the four tiers, and what to override |
 | get the data first | [Provisioning the datasets](DATASETS.md) | where COCO 2017 and DOTA-v1.0 come from, what has to be on disk, how each layout is read |
-| know what was measured | [Reproduction report](REPRODUCTION_REPORT.md) | one section per release: what was reproduced, what was assumed, what diverged |
+| know what was measured | [Reproduction report](REPRODUCTION_REPORT.md) | one page per release: what was reproduced, what was assumed, what diverged |
 | judge one model before using it | [Model cards](model_cards/detection.md) | intended and out-of-scope use, limitations, licensing, per task family |
 | check the clean-room claim | [Provenance log](PROVENANCE.md) | the source allowlist and the audit trail behind every commit trailer |
 | find where the papers ran out | [Assumption register](ASSUMPTIONS.md) | every gap, the choice made, its public basis, and how it was validated |

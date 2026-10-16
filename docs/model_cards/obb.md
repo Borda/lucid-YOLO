@@ -1,6 +1,32 @@
-# 🔄 Model card — lucid-yolo oriented detector (n scale)
+# 🔄 Oriented detection — lucid-yolo `n`
 
-Covers the oriented detection model produced by the OBB-smoke tier run, released as `0.3.0`. That tier was accepted at its principal gate (roadmap 064) on 2026-08-14, on the evidence recorded in `REPRODUCTION_REPORT.md`. One card per task family; detection and instance segmentation have their own.
+![Animated sketch: a loose axis-aligned box around each aerial object is replaced by a tight rotated box with its angle](../assets/card_obb.svg)
+
+> Finds objects in aerial imagery and returns a rotated box per object — centre, size and heading — instead of an axis-aligned one.
+
+## ⚡ At a glance
+
+|  |  |
+| -- | -- |
+| Task | oriented detection: a rotated box `(cx, cy, w, h, θ)`, a class and a score per object |
+| Data | DOTA-v1.0, 15 aerial categories, 1024 px tiles |
+| Size | `n` scale, 2.56M parameters, 14.68 GFLOPs at 1024 px |
+| Result | rotated mAP50-95 on DOTA-v1.0 val, scored per tile and not comparable to published whole-image results — see [Evaluation](#evaluation) |
+| Release | v0.3.0, OBB-smoke tier, accepted at its principal gate (roadmap 064) on 2026-08-14 on the evidence in the [reproduction report](../report/oriented-detection.md) |
+| Try it | [oriented-detection demo notebook](../notebooks/demo_obb.ipynb) |
+| Weights | not published (D14), and DOTA's academic-use-only terms would forbid publishing them under Apache-2.0 |
+
+## 💡 Motivation
+
+Seen from above, ships, vehicles and aircraft lie at any angle. An axis-aligned box around a long object at 45° is mostly background, and the boxes of neighbours parked side by side overlap each other. A rotated box adds the heading and fits the object. Here that is the detector's own dual head with a per-branch angle stem; the rotated ProbIoU and an L1 on the rotated box replace two of the detector's box terms, and an angle term is added. The deploy path stays NMS-free.
+
+## 🧭 Use cases
+
+**Intended.** Reproduction research: verifying the paper's oriented-detection claims, ablating the A44 composition and the A49/A50 term choices, and serving as a readable from-scratch implementation of NMS-free oriented detection. As with the detector, the `e2e` path is the interesting artifact — oriented boxes come out of a forward containing no suppression op.
+
+**Walk-through.** The pipeline this card describes — data, a short fit, `lucid-eval`, predictions drawn over the ground truth — runs end to end in [the oriented-detection demo notebook](../notebooks/demo_obb.ipynb), short enough for a Colab session and not a reproduction of the numbers here.
+
+**Not intended.** Any operational use, and this is a stronger statement than for the COCO models. DOTA is aerial imagery; the categories are vehicles, ships, aircraft, storage tanks, harbours and sports facilities. DOTA's own terms permit academic use only. Beyond that: production use of any kind, safety-critical or rights-affecting decisions, measurement of real-world object dimensions from predicted boxes, or any setting where a per-tile rotated mAP50 of 0.52 on 15 aerial categories would be read as a reliable perception system.
 
 ## 📇 Model details
 
@@ -22,19 +48,11 @@ Parameter and FLOP fidelity is gated rather than asserted, and against [R1]'s ow
 
 **The tolerance is wider than detection's ±2% and segmentation's ±3%, and that is the finding rather than slack.** The angle-stem width is inferred, not published: `// 3` undershoots the implied angle-branch increment at m/l/x, `// 2` lands there but overshoots `s`, and Table S11 rounds params to 0.1 M, so `n` and `s` cannot discriminate between the two rules at all while `x` does so decisively and selects `// 2`. The gate therefore admits a rule chosen where the evidence is sharp, at the cost of the scales where it is not. **A20 stays open, and this is not a claim of Table S11 parity.** The FLOP side has less room than the number suggests: `n` sits 0.16 points from failing at +4.84%.
 
-## 🧭 Intended use
-
-**Intended.** Reproduction research: verifying the paper's oriented-detection claims, ablating the A44 composition and the A49/A50 term choices, and serving as a readable from-scratch implementation of NMS-free oriented detection. As with the detector, the `e2e` path is the interesting artifact — oriented boxes come out of a forward containing no suppression op.
-
-**Walk-through.** The pipeline this card describes — data, a short fit, `lucid-eval`, predictions drawn over the ground truth — runs end to end in [the oriented-detection demo notebook](../notebooks/demo_obb.ipynb), short enough for a Colab session and not a reproduction of the numbers here.
-
-**Not intended.** Any operational use, and this is a stronger statement than for the COCO models. DOTA is aerial imagery; the categories are vehicles, ships, aircraft, storage tanks, harbours and sports facilities. Applications of aerial object detection include surveillance and targeting, and nothing about this model's licence, provenance or quality supports deployment for them. DOTA's own terms permit academic use only. Beyond that: production use of any kind, safety-critical or rights-affecting decisions, measurement of real-world object dimensions from predicted boxes, or any setting where a per-tile rotated mAP50 of 0.52 on 15 aerial categories would be read as a reliable perception system.
-
 ## 🗂️ Training data
 
 DOTA-v1.0 (R18) `train` split — 1,411 images, 98,990 instances across 15 categories, oriented four-point annotations. No other data; no pretraining (D2). The `test` split's ground truth is withheld by the authors and was neither downloaded nor used.
 
-Training does not read the original images. They run to several thousand pixels a side, and PNG has no random-access region decode, so each sample would decode a whole image to yield one 1024 px window; the tier trains on a 1024 px tiled layout built by `lucid-data build-tiles` (WP-094), with **512 px overlap** — R18's own protocol figure rather than A21's 200 px default.
+Training does not read the original images. They run to several thousand pixels a side, and PNG has no random-access region decode, so each sample would decode a whole image to yield one 1024 px window; the tier trains on a 1024 px tiled layout built by `lucid-data build-tiles` ([WP-094](../work_packages/wp-094.md)), with **512 px overlap** — R18's own protocol figure rather than A21's 200 px default.
 
 DOTA's composition limits apply directly. It is satellite and aerial imagery of a particular set of places, with category frequencies that are severely long-tailed (`small-vehicle` dominates; `helicopter` and `ground-track-field` are rare), and object scale distributions unlike anything in ground-level photography. Nothing here corrects for it, and no evaluation across geographies has been run.
 
@@ -45,7 +63,7 @@ DOTA's composition limits apply directly. It is satellite and aerial imagery of 
 |  |  |
 | -- | -- |
 | Recipe | batch 64 at 1024 px, 50 epochs (23,050 steps), MuSGD (`w_muon 0.5 / w_sgd 0.5`), lr 0.01 with 3-epoch warmup then linear decay to `lr0 × 0.01`, weight decay 5e-4, momentum 0.95, gradient clip 10.0 |
-| Loss | classification 0.5 unchanged; rotated ProbIoU 7.5 in the IoU slot (A49, Hellinger form); rotated L1 6.0 in the L1 slot, stride-normalized (A50); angle 0.25 (A22, lowered from 1.0 by WP-093). Progressive branch weight `0.8 → 0.1` |
+| Loss | classification 0.5 unchanged; rotated ProbIoU 7.5 in the IoU slot (A49, Hellinger form); rotated L1 6.0 in the L1 slot, stride-normalized (A50); angle 0.25 (A22, lowered from 1.0 by [WP-093](../work_packages/wp-093.md)). Progressive branch weight `0.8 → 0.1` |
 | Assignment | TAL (`alpha 1, beta 6`) with STAL small-target surrogates, one assignment shared by every term, with rotated **candidacy** only (A25) |
 | Augmentation | mosaic `p=1.0` (disabled for the final 10 epochs), fused affine+letterbox, size-aware mixup and copy-paste, HSV jitter, horizontal flip `p=0.5` |
 | Precision / seed | bf16-mixed, seed 0, `deterministic: true` |
@@ -54,18 +72,23 @@ DOTA's composition limits apply directly. It is satellite and aerial imagery of 
 
 The wiring gate that precedes any DOTA launch is `scripts/overfit_micro.py --task obb`: 100 images, 592 instances, 4 classes, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train rotated mAP50 **0.9390** against a 0.9 floor (`goldens/gpu/overfit_micro_obb.json`).
 
+## 📈 Training curves
+
+![OBB-smoke training curves](../figures/obb_smoke_training.svg)
+
+*Run v10, four panels. The per-tile rotated mAP (both mAP50 and mAP50-95) logged at each epoch end; epoch-mean totals; the one-to-one branch's pre-gain components; and the oriented terms that replace two of them.*
+
+How the run went, and what the curves show, is discussed in the [reproduction report](../report/oriented-detection.md).
+
 ## 📊 Evaluation
 
 Scored by `lucid-eval` on the DOTA-v1.0 **val** split tiled the same way training data was: 10,132 tiles, 101,209 instances, of which 16,528 are flagged difficult. Rotated mAP under the A24 protocol — exact polygon-intersection IoU, ten thresholds, 101-point interpolated recall, 300 detections per tile, R18's difficult rule.
 
-| weights | rotated mAP50-95 | rotated mAP50 | rotated mAP75 | rotated mAR_300 |
-| -- | -- | -- | -- | -- |
-| EMA | **0.2914** | 0.5242 | 0.2770 | 0.5075 |
-| raw | 0.2867 | 0.5140 | 0.2734 | 0.5013 |
+--8<-- "report/oriented-detection.md:eval"
 
 EMA is worth `+0.0047` mAP50-95 and `+0.0102` mAP50 here — small, positive, and the opposite sign to Det-smoke, where raw weights scored marginally higher.
 
-**Every number here is per tile.** Detections from overlapping tiles are not merged back onto whole images, because on an NMS-free path two tiles that both detect one object have nothing to suppress the duplicate, so the merge needs a policy decided rather than inherited (WP-064). A per-tile score never pays the duplicate-detection cost whole-image evaluation charges, so **these figures are not comparable to published DOTA results**, which are whole-image. That is a property of the measurement, not a caveat about its precision.
+**Every number here is per tile.** Detections from overlapping tiles are not merged back onto whole images, because on an NMS-free path two tiles that both detect one object have nothing to suppress the duplicate, so the merge needs a policy decided rather than inherited ([WP-064](../work_packages/wp-064.md)). A per-tile score never pays the duplicate-detection cost whole-image evaluation charges, so **these figures are not comparable to published DOTA results**, which are whole-image. That is a property of the measurement, not a caveat about its precision.
 
 The same checkpoint scores 0.2914 / 0.5242 on Apple MPS and 0.2914 / 0.5243 on CUDA — agreement to four decimals across two accelerators and two operators, which is stronger evidence about the evaluator than about the model. **This is the only two-device measurement anywhere in the project, and it is an evaluation.** Training has run on one device every time; nothing here says a training run ports across accelerators. For this task that is enforced rather than merely untried: `lucid-yolo fit` **refuses `task: obb` on more than one process** at setup, because `val/rotated_mAP` accumulates plain Python lists nothing gathers across ranks and a per-rank average precision cannot be averaged back into the split's.
 
@@ -73,7 +96,7 @@ The same checkpoint scores 0.2914 / 0.5242 on Apple MPS and 0.2914 / 0.5243 on C
 
 **The A44 composition is the model's defining constraint.** An oriented box is produced by rotating an axis-aligned rectangle about its own centre, so the centre and extents are predicted in the unrotated frame and the heading is a separate scalar. Objects whose rotated extent is poorly described by that construction are systematically harder for it than a formulation predicting the rotated box directly.
 
-**Angle failure is invisible in axis-aligned terms.** This is why the run logs no `val/mAP` at all (WP-102): that figure reads the composition's pre-rotation rectangle, so a run with correct orientations and one with random orientations produce the identical curve.
+**Angle failure is invisible in axis-aligned terms.** This is why the run logs no `val/mAP` at all ([WP-102](../work_packages/wp-102.md)): that figure reads the composition's pre-rotation rectangle, so a run with correct orientations and one with random orientations produce the identical curve.
 
 **Per-tile, as above.** Objects spanning a tile boundary are seen as two clipped parts; parts below 70% of their original area are flagged difficult by the tiler and scored under R18's discard rule rather than counted.
 
@@ -83,10 +106,28 @@ The same checkpoint scores 0.2914 / 0.5242 on Apple MPS and 0.2914 / 0.5243 on C
 
 **ProbIoU's exposure is aspect ratio, and it is a conditioning property of the formula rather than a precision detail of this implementation.** Written literally, ProbIoU's summed-covariance determinant is a difference of nearly equal products, and that cancellation gets worse as a box gets thinner: evaluated in float32 the literal form holds 1.5e-5 relative at 1:1, 2.2e-5 at 10:1, 1.6e-3 at 100:1, and at 1000:1 returns `NaN` for part of a randomized sweep, its determinant having gone negative before the logarithm. Scale is *not* the axis — the quantity is exactly scale-invariant. `losses/probiou.py` evaluates a cancellation-free algebraic rearrangement instead and holds 1.7e-6 to 2.9e-6 at every ratio from 1:1 to 1000:1, so this model does not pay that cost. Anyone re-deriving ProbIoU from the published equations, porting it, or comparing against a literal implementation inherits it in full, and DOTA's bridges and harbours are exactly the boxes that reach those ratios.
 
-**Determinism and seeding are narrower than the recipe row reads.** `deterministic: true` is what the run requests; `default_determinism` (`cli/train.py`) resolves it to `"warn_only"` under MPS, which ships no deterministic kernel for some backwards this model hits. And the seed reproduces a run only at the same `--data.num_workers`: 0 workers replays one stream byte for byte, `N` workers replays a different one re-seeded per worker and per epoch (WP-079). Both are determined by `seed`; they are not the same stream, and 32 workers does not reproduce 0.
+**Determinism and seeding are narrower than the recipe row reads.** `deterministic: true` is what the run requests; `default_determinism` (`cli/train.py`) resolves it to `"warn_only"` under MPS, which ships no deterministic kernel for some backwards this model hits. And the seed reproduces a run only at the same `--data.num_workers`: 0 workers replays one stream byte for byte, `N` workers replays a different one re-seeded per worker and per epoch ([WP-079](../work_packages/wp-079.md)). Both are determined by `seed`; they are not the same stream, and 32 workers does not reproduce 0.
 
-## 📜 Licensing
+## 🤝 Ethical considerations
+
+DOTA is aerial imagery of vehicles, ships, aircraft, storage tanks, harbours and sports facilities. Applications of aerial object detection include surveillance and targeting, and nothing about this model's licence, provenance or quality supports deployment for them. No evaluation across geographies has been run, so how the model behaves on places unlike DOTA's is unknown.
+
+## 📜 Licensing and provenance
 
 Code and report: Apache-2.0.
 
 **Weights are not released** (D14: releases ship no trained weights), and for this task family that policy does more work than for the others. A model trained on DOTA inherits DOTA's academic-use-only restriction, which is incompatible with the Apache-2.0 terms the code carries; publishing weights under this repository's licence would be misstating what a user is permitted to do with them.
+
+**Clean-room statement.** No file, configuration, weight, or code fragment from any Ultralytics repository, package, documentation site, or released checkpoint was opened, downloaded, imported, or consulted at any point in this project's history. Every design input traces to a paper, its cited primary literature, a registered assumption, or — for diagnosis only, never copying — a permissively licensed independent implementation registered under D13/ADR-004. The audit trail is `PROVENANCE.md`; the standing prohibitions are `AGENTS.md` sec. 7.
+
+## 🔖 Citation
+
+This reproduction has no publication. Cite the paper it reproduces:
+
+```bibtex
+@article{yolo26,
+  title  = {YOLO26},
+  note   = {arXiv:2606.03748},
+  year   = {2026}
+}
+```

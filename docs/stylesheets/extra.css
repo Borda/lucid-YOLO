@@ -1,0 +1,73 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/*
+ * Wide layout with a slide-in table of contents (WP-196).
+ *
+ * On screens wide enough for Material to show the right sidebar, the sidebar leaves
+ * the page flow: it is fixed to the right edge and parked off-screen behind a narrow
+ * "Contents" tab, and slides in on hover or on keyboard focus. The content column
+ * takes the width it gave up, and the grid widens so table-heavy registers use it.
+ * Pages whose TOC would list fewer than two headings have no sidebar at all
+ * (scripts/docs_site_hooks.py), so no tab shows there.
+ */
+@media screen and (min-width: 76.25em) {
+  .md-grid {
+    max-width: 90rem;
+  }
+
+  .md-sidebar--secondary:not([hidden]) {
+    position: fixed;
+    top: 4.8rem;
+    right: 0;
+    bottom: 0;
+    z-index: 4;
+    width: 13.3rem;
+    height: calc(100vh - 4.8rem) !important; /* Material zeroes a sidebar's height on wide screens */
+    padding: 0;
+    background-color: var(--md-default-bg-color);
+    border-left: 0.05rem solid var(--md-default-fg-color--lightest);
+    transform: translateX(12.1rem);
+    transition:
+      transform 150ms ease,
+      box-shadow 150ms ease;
+  }
+
+  .md-sidebar--secondary:not([hidden]):hover,
+  .md-sidebar--secondary:not([hidden]):focus-within {
+    transform: none;
+    box-shadow: var(--md-shadow-z2);
+  }
+
+  /* The tab that stays on screen while the panel is parked. */
+  .md-sidebar--secondary:not([hidden])::before {
+    content: "Contents";
+    position: absolute;
+    top: 1.2rem;
+    left: 0.25rem;
+    writing-mode: vertical-rl;
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--md-default-fg-color--light);
+  }
+
+  .md-sidebar--secondary:not([hidden]) .md-sidebar__scrollwrap {
+    position: absolute;
+    top: 1.2rem;
+    right: 0;
+    bottom: 0;
+    left: 1.2rem;
+    height: auto !important; /* Material's script sizes it for a sticky sidebar */
+    overflow-y: auto;
+  }
+
+  [dir="ltr"] .md-sidebar--secondary:not([hidden]) ~ .md-content > .md-content__inner {
+    margin-right: 2.4rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-sidebar--secondary {
+    transition: none;
+  }
+}

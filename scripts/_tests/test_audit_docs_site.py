@@ -62,6 +62,38 @@ def test_every_docs_page_listed_in_nav_passes_when_covered(tmp_path: Path) -> No
     assert audit.check_every_docs_page_is_listed_in_the_nav(docs, mkdocs_yml) == []
 
 
+class TestPagesDeclaredNotInNav:
+    """``not_in_nav`` patterns exempt pages from the nav-coverage check, and only those."""
+
+    def test_skips_pages_matching_a_pattern(self, tmp_path: Path) -> None:
+        """A work-package page matched by ``not_in_nav`` is not reported as an orphan.
+
+        The ~160 per-WP pages are reached from roadmap rows and from the phase pages that
+        include them; listing each in the sidebar is what the pattern exists to avoid.
+        """
+        docs = tmp_path / "docs"
+        (docs / "work_packages").mkdir(parents=True)
+        (docs / "work_packages" / "wp-001.md").write_text("x", encoding="utf-8")
+        (docs / "index.md").write_text("x", encoding="utf-8")
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text("not_in_nav: |\n  /work_packages/*.md\nnav:\n  - index.md\n", encoding="utf-8")
+
+        assert audit.check_every_docs_page_is_listed_in_the_nav(docs, mkdocs_yml) == []
+
+    def test_still_flags_pages_outside_the_pattern(self, tmp_path: Path) -> None:
+        """A page the pattern does not match is still reported when the nav omits it."""
+        docs = tmp_path / "docs"
+        (docs / "work_packages").mkdir(parents=True)
+        (docs / "work_packages" / "wp-001.md").write_text("x", encoding="utf-8")
+        (docs / "orphan.md").write_text("x", encoding="utf-8")
+        mkdocs_yml = tmp_path / "mkdocs.yml"
+        mkdocs_yml.write_text("not_in_nav: |\n  /work_packages/*.md\nnav:\n  - index.md\n", encoding="utf-8")
+
+        assert audit.check_every_docs_page_is_listed_in_the_nav(docs, mkdocs_yml) == [
+            "docs pages absent from the nav: ['orphan.md']"
+        ]
+
+
 def test_every_nav_entry_points_at_file_exists_flags_dead_entry(tmp_path: Path) -> None:
     """A nav entry naming a file absent from disk is reported by name."""
     docs = tmp_path / "docs"

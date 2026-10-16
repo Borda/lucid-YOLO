@@ -50,28 +50,49 @@ def _load_audit() -> ModuleType:
 audit = _load_audit()
 
 
-def test_check_figures_present_flags_missing_figure(tmp_path: Path) -> None:
-    """A figure the report links but that is absent from disk is named as missing."""
-    figures = tmp_path / "docs" / "figures"
-    figures.mkdir(parents=True)
-    (figures / "present.svg").write_text("<svg/>", encoding="utf-8")
-    (tmp_path / "docs" / "REPRODUCTION_REPORT.md").write_text(
-        "![a](figures/present.svg)\n![b](figures/missing.svg)\n", encoding="utf-8"
-    )
+class TestCheckFiguresPresent:
+    """Tests for ``audit.check_figures_present``."""
 
-    violations = audit.check_figures_present(tmp_path)
+    def test_flags_missing_figure(self, tmp_path: Path) -> None:
+        """A figure the report links but that is absent from disk is named as missing."""
+        figures = tmp_path / "docs" / "figures"
+        figures.mkdir(parents=True)
+        (figures / "present.svg").write_text("<svg/>", encoding="utf-8")
+        (tmp_path / "docs" / "REPRODUCTION_REPORT.md").write_text(
+            "![a](figures/present.svg)\n![b](figures/missing.svg)\n", encoding="utf-8"
+        )
 
-    assert violations == ["report links missing figures: figures/missing.svg"]
+        violations = audit.check_figures_present(tmp_path)
 
+        assert violations == ["report links missing figures: figures/missing.svg"]
 
-def test_check_figures_present_empty_when_every_linked_figure_exists(tmp_path: Path) -> None:
-    """A report linking only figures that exist on disk reports no violation."""
-    figures = tmp_path / "docs" / "figures"
-    figures.mkdir(parents=True)
-    (figures / "present.svg").write_text("<svg/>", encoding="utf-8")
-    (tmp_path / "docs" / "REPRODUCTION_REPORT.md").write_text("![a](figures/present.svg)\n", encoding="utf-8")
+    def test_empty_when_every_linked_figure_exists(self, tmp_path: Path) -> None:
+        """A report linking only figures that exist on disk reports no violation."""
+        figures = tmp_path / "docs" / "figures"
+        figures.mkdir(parents=True)
+        (figures / "present.svg").write_text("<svg/>", encoding="utf-8")
+        (tmp_path / "docs" / "REPRODUCTION_REPORT.md").write_text("![a](figures/present.svg)\n", encoding="utf-8")
 
-    assert audit.check_figures_present(tmp_path) == []
+        assert audit.check_figures_present(tmp_path) == []
+
+    def test_reads_split_report_pages(self, tmp_path: Path) -> None:
+        """A figure linked as ``../figures/`` from a ``docs/report/`` page is checked like a root link.
+
+        The report is one page per release section, one level below ``docs/``, so its figure links
+        climb a directory; a check reading only the landing page would see no figure and go vacuous.
+        """
+        figures = tmp_path / "docs" / "figures"
+        figures.mkdir(parents=True)
+        (figures / "present.svg").write_text("<svg/>", encoding="utf-8")
+        (tmp_path / "docs" / "REPRODUCTION_REPORT.md").write_text("landing\n", encoding="utf-8")
+        (tmp_path / "docs" / "report").mkdir()
+        (tmp_path / "docs" / "report" / "detection.md").write_text(
+            "![a](../figures/present.svg)\n![b](../figures/missing.svg)\n", encoding="utf-8"
+        )
+
+        violations = audit.check_figures_present(tmp_path)
+
+        assert violations == ["report links missing figures: figures/missing.svg"]
 
 
 def test_check_captions_match_flags_caption_edited_without_regenerating(tmp_path: Path) -> None:

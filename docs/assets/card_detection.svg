@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 260" width="640" height="260" role="img" aria-labelledby="t d">
+  <title id="t">Object detection</title>
+  <desc id="d">Three objects in a scene, a person, a car and a dog. One box with a class label and a score is drawn around each, one after the other.</desc>
+  <style>
+    :root { --bg:#f7f8fb; --scene:#e7eaf4; --ink:#1c2333; --obj:#9aa3b8; --a:#3f51b5; --b:#1f9e89; --c:#d08a1e; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#1b2030; --scene:#252c42; --ink:#e6e9f2; --obj:#56607a; --a:#8c9eff; --b:#4fd1b5; --c:#f2b55a; } }
+    text { font: 600 12px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #fff; }
+    .obj { fill: var(--obj); }
+    .box { fill: none; stroke-width: 2.6; stroke-dasharray: 100; animation: draw 9s infinite backwards; }
+    .tag { animation: tag 9s infinite backwards; }
+    .k1 { animation-delay: 0s; } .k2 { animation-delay: .9s; } .k3 { animation-delay: 1.8s; }
+    @keyframes draw { 0% { stroke-dashoffset:100; opacity:1 } 12% { stroke-dashoffset:0 } 82% { stroke-dashoffset:0; opacity:1 } 92%,100% { stroke-dashoffset:0; opacity:0 } }
+    @keyframes tag { 0%,11% { opacity:0 } 15%,82% { opacity:1 } 92%,100% { opacity:0 } }
+    @media (prefers-reduced-motion: reduce) { .box, .tag { animation: none; stroke-dashoffset: 0; opacity: 1; } }
+  </style>
+  <rect width="640" height="260" rx="10" fill="var(--bg)"/>
+  <rect x="20" y="20" width="600" height="220" rx="8" fill="var(--scene)"/>
+
+  <circle class="obj" cx="150" cy="72" r="15"/>
+  <rect class="obj" x="132" y="90" width="36" height="92" rx="10"/>
+  <rect class="obj" x="300" y="140" width="150" height="56" rx="16"/>
+  <rect class="obj" x="330" y="116" width="84" height="34" rx="10"/>
+  <circle class="obj" cx="335" cy="200" r="12"/>
+  <circle class="obj" cx="415" cy="200" r="12"/>
+  <ellipse class="obj" cx="515" cy="178" rx="40" ry="22"/>
+  <circle class="obj" cx="556" cy="156" r="15"/>
+
+  <rect class="box k1" x="124" y="52" width="52" height="136" pathLength="100" stroke="var(--a)"/>
+  <rect class="box k2" x="292" y="108" width="166" height="108" pathLength="100" stroke="var(--b)"/>
+  <rect class="box k3" x="470" y="136" width="106" height="70" pathLength="100" stroke="var(--c)"/>
+
+  <g class="tag k1"><rect x="124" y="32" width="86" height="20" fill="var(--a)"/><text x="130" y="46">person 0.91</text></g>
+  <g class="tag k2"><rect x="292" y="88" width="64" height="20" fill="var(--b)"/><text x="298" y="102">car 0.84</text></g>
+  <g class="tag k3"><rect x="470" y="116" width="68" height="20" fill="var(--c)"/><text x="476" y="130">dog 0.77</text></g>
+</svg>

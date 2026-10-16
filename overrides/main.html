@@ -1,0 +1,43 @@
+{#- SPDX-License-Identifier: Apache-2.0 -#}
+{#-
+  Page metadata for search engines, link previews and agents (WP-196).
+  `scripts/docs_site_hooks.py` sets page.meta.title, .description, .markdown_url and,
+  on the home page, .json_ld; this template only renders them. The home page's title
+  stands alone (it sits under the Home nav section, so MkDocs' page.is_homepage is false and the hook flags it as page.meta.home); every other page's is suffixed with the site name, as Material does.
+-#}
+{% extends "base.html" %}
+
+{% block htmltitle %}
+  {% if page.meta and page.meta.title and page.meta.home %}
+    <title>{{ page.meta.title }}</title>
+  {% elif page.meta and page.meta.title %}
+    <title>{{ page.meta.title }} - {{ config.site_name }}</title>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}
+
+{% block extrahead %}
+  {% set title = page.meta.title if page.meta and page.meta.title else config.site_name %}
+  {% set description = page.meta.description if page.meta and page.meta.description else config.site_description %}
+  <meta property="og:type" content="{{ 'website' if page.meta and page.meta.home else 'article' }}">
+  <meta property="og:site_name" content="{{ config.site_name }}">
+  <meta property="og:title" content="{{ title }}">
+  <meta property="og:description" content="{{ description }}">
+  {% if page.canonical_url %}<meta property="og:url" content="{{ page.canonical_url }}">{% endif %}
+  {#- Static 1200 x 630 card (docs/assets/social_card.svg is its source): preview renderers take one frame. -#}
+  <meta property="og:image" content="{{ config.site_url }}assets/social_card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="lucid-yolo: clean-room, NMS-free YOLO in PyTorch Lightning">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="{{ config.site_url }}assets/social_card.png">
+  <meta name="twitter:title" content="{{ title }}">
+  <meta name="twitter:description" content="{{ description }}">
+  {% if page.meta and page.meta.markdown_url %}
+    <link rel="alternate" type="text/markdown" href="{{ page.meta.markdown_url }}" title="Markdown copy of this page">
+  {% endif %}
+  {% if page.meta and page.meta.json_ld %}
+    <script type="application/ld+json">{{ page.meta.json_ld }}</script>
+  {% endif %}
+{% endblock %}

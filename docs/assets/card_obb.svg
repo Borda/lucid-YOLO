@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 260" width="640" height="260" role="img" aria-labelledby="t d">
+  <title id="t">Oriented object detection</title>
+  <desc id="d">An aerial view of three long objects at different headings. An axis-aligned box around each is mostly background; it is replaced by a rotated box that fits the object and carries its angle.</desc>
+  <style>
+    :root { --bg:#f7f8fb; --scene:#dfe6e2; --obj:#8a96a8; --mute:#7d869a; --a:#3f51b5; --b:#1f9e89; --c:#d08a1e; --ink:#1c2333; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#1b2030; --scene:#22302c; --obj:#5b6680; --mute:#7d869a; --a:#8c9eff; --b:#4fd1b5; --c:#f2b55a; --ink:#e6e9f2; } }
+    text { font: 600 12px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--ink); }
+    .obj { fill: var(--obj); }
+    .aabb { fill: none; stroke: var(--mute); stroke-width: 1.6; stroke-dasharray: 6 4; animation: aabb 9s infinite backwards; }
+    .rbox { fill: none; stroke-width: 2.6; stroke-dasharray: 100; animation: rbox 9s infinite backwards; }
+    .theta { animation: theta 9s infinite backwards; }
+    @keyframes aabb { 0% { opacity:0 } 6%,34% { opacity:1 } 44%,100% { opacity:0 } }
+    @keyframes rbox { 0%,36% { stroke-dashoffset:100; opacity:1 } 50% { stroke-dashoffset:0 } 86% { stroke-dashoffset:0; opacity:1 } 94%,100% { stroke-dashoffset:0; opacity:0 } }
+    @keyframes theta { 0%,48% { opacity:0 } 54%,86% { opacity:1 } 94%,100% { opacity:0 } }
+    @media (prefers-reduced-motion: reduce) { .aabb { animation: none; opacity: .5; } .rbox, .theta { animation: none; stroke-dashoffset: 0; opacity: 1; } }
+  </style>
+  <rect width="640" height="260" rx="10" fill="var(--bg)"/>
+  <rect x="20" y="20" width="600" height="220" rx="8" fill="var(--scene)"/>
+
+  <rect class="obj" x="100" y="113" width="140" height="34" rx="14" transform="rotate(-30 170 130)"/>
+  <rect class="obj" x="305" y="95" width="110" height="30" rx="12" transform="rotate(20 360 110)"/>
+  <rect class="obj" x="435" y="142" width="150" height="36" rx="14" transform="rotate(65 510 160)"/>
+
+  <rect class="aabb" x="101" y="80" width="138" height="100"/>
+  <rect class="aabb" x="303" y="77" width="114" height="66"/>
+  <rect class="aabb" x="462" y="84" width="96" height="152"/>
+
+  <rect class="rbox" x="94" y="107" width="152" height="46" pathLength="100" stroke="var(--a)" transform="rotate(-30 170 130)"/>
+  <rect class="rbox" x="299" y="89" width="122" height="42" pathLength="100" stroke="var(--b)" transform="rotate(20 360 110)"/>
+  <rect class="rbox" x="429" y="136" width="162" height="48" pathLength="100" stroke="var(--c)" transform="rotate(65 510 160)"/>
+
+  <text class="theta" x="70" y="218">θ = −30°</text>
+  <text class="theta" x="330" y="168">θ = 20°</text>
+  <text class="theta" x="560" y="80">θ = 65°</text>
+</svg>
