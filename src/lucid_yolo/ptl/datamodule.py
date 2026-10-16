@@ -79,7 +79,7 @@ Batch contract:
       ``(B, C, img_size, img_size)`` **uint8** tensor — each post-augmentation float
       pixel in ``[0, 1]`` rounded to a ``1/255`` step (:data:`_PIXEL_QUANT_MAX`) —
       paired with a :class:`PackedTargets`, the batch's ragged per-image
-      :class:`~lucid_yolo.data.targets.Targets` flattened into a fixed set of eight
+      :class:`~lucid_yolo.data.targets.Targets` flattened into a fixed set of
       dense tensors. A worker ships each distinct tensor as its own shared-memory
       segment: the natural ``list[Targets]`` (with its per-image *list* of polygon
       rings) would explode into hundreds of tiny segments and exhaust the consumer's
@@ -89,6 +89,10 @@ Batch contract:
       letterbox-only val path go through this collate, so both transport uint8 (val
       images already start from a JPEG-decoded uint8 source, so their letterbox
       interpolation loses no more than the same bounded half-step).
+      With ``device_hsv=True`` on CUDA, training instead transports float32 pixels
+      and one ``(B, 3)`` gain tensor; the consumer applies HSV before the same
+      quantization. This spends four times the image transport bytes to remove
+      colour conversion from the workers. The worker cap already budgets float32.
     * **Consumer form** (what every downstream step sees): the pair
       ``(images, list[Targets])`` with float32 ``[0, 1]`` images unchanged.
       :meth:`DetectionDataModule.on_after_batch_transfer` restores the images
@@ -102,18 +106,21 @@ from __future__ import annotations
 
 import os
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from typing import cast
 
 import torch
 from pytorch_lightning import LightningDataModule
+from pytorch_lightning.accelerators import CUDAAccelerator
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, get_worker_info
 
 from lucid_yolo.assign.grid import require_grid_side
 from lucid_yolo.data.affine import RandomAffine
-from lucid_yolo.data.augment import HorizontalFlip, HSVJitter
+from lucid_yolo.data.augment import HorizontalFlip, HSVJitter, HSVParams, _jitter_hsv_batch
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.layout import DatasetLayout, detect_layout, resolve_split
 from lucid_yolo.data.letterbox import Letterbox
@@ -310,8 +317,8 @@ class PackedTargets:
     image also carries a *list* of per-instance polygon rings — explodes into
     hundreds of tiny segments and exhausts the consumer's mmap budget
     (``vm.max_map_count``) at realistic worker counts. This container collapses the
-    whole ragged batch into a **fixed set of dense tensors** (eleven, plus the
-    optional mask stack a segmentation loader adds): the modality
+    whole ragged batch into a **fixed set of dense tensors**, plus optional mask
+    stacks and deferred HSV gains: the modality
     rows are concatenated along their instance/ring/point axes and paired with the
     per-image (and per-ring) counts needed to split them back apart. The tensor
     count is constant regardless of how many instances the batch holds, so the
@@ -366,6 +373,10 @@ class PackedTargets:
             :func:`~lucid_yolo.ptl.seg_targets.instance_mask_targets` returns: the
             values are ``{0, 1}``, so the cast back is exact and the transport is a
             quarter of the size.
+        hsv_gains: Optional ``(B, 3)`` float64 colour gains in sample order. When
+            present, the accompanying images remain float32 until the consumer
+            applies these gains and the usual uint8 quantization. ``None`` retains
+            the default transport and is always used by validation.
 
     Examples:
         ```pycon
@@ -392,6 +403,7 @@ class PackedTargets:
     points_per_ring: Tensor
     rings_per_image: Tensor
     masks_cat: Tensor | None = None
+    hsv_gains: Tensor | None = None
 
 
 def _concat_keypoints(targets: list[Targets]) -> tuple[Tensor, Tensor]:
@@ -591,9 +603,51 @@ def unpack_masks(packed: PackedTargets) -> list[Tensor] | None:
     return [chunk.to(torch.float32) for chunk in torch.split(packed.masks_cat, counts)]
 
 
-def collate_detection(
-    batch: list[tuple[Tensor, Targets]], *, mask_targets: bool = False
-) -> tuple[Tensor, PackedTargets]:
+@dataclass(frozen=True)
+class _DeferredHSVSample:
+    """Keep a sample's stated colour gains beside its flipped image and targets.
+
+    Only the worker-side pipeline and collate consume this record; the packed
+    batch transports one gain tensor rather than one Python object per sample.
+
+    Attributes:
+        image: Floating-point image after the geometric transforms and flip.
+        targets: Geometry transformed with that image.
+        params: The HSV draw made before the flip draw, as in the host pipeline.
+    """
+
+    image: Tensor
+    targets: Targets
+    params: HSVParams
+
+
+_TrainingSample = tuple[Tensor, Targets] | _DeferredHSVSample
+
+
+def _host_sample(sample: _TrainingSample) -> tuple[Tensor, Targets]:
+    """Complete a deferred sample for host-side diagnostics without quantizing it.
+
+    The debug grid and augmentation golden read unquantized dataset samples rather
+    than collated batches. Resolving their colour here retains that convention when
+    the pipeline defers HSV; ordinary samples pass through unchanged.
+
+    Args:
+        sample: One ordinary or deferred training sample.
+
+    Returns:
+        The fully augmented image and its original targets.
+
+    Examples:
+        >>> sample = (torch.zeros(3, 2, 2), Targets.empty())
+        >>> _host_sample(sample) is sample
+        True
+    """
+    if isinstance(sample, _DeferredHSVSample):
+        return HSVJitter().apply(sample.image, sample.targets, sample.params)
+    return sample
+
+
+def collate_detection(batch: Sequence[_TrainingSample], *, mask_targets: bool = False) -> tuple[Tensor, PackedTargets]:
     """Collate ``(image, Targets)`` samples into ``(images, PackedTargets)``.
 
     All images are letterboxed to a common ``img_size`` upstream, so they stack
@@ -618,7 +672,8 @@ def collate_detection(
     transported grid against the prototypes it actually got.
 
     Args:
-        batch: The per-sample ``(image, Targets)`` pairs from the dataset.
+        batch: The per-sample ``(image, Targets)`` pairs, or deferred colour samples
+            whose image, geometry and stated gains share one record.
         mask_targets: Rasterise each image's instance masks onto the prototype grid
             and ship them in ``packed.masks_cat``. Requires one polygon ring per box
             (:func:`~lucid_yolo.ptl.seg_targets.instance_mask_targets` raises
@@ -630,7 +685,9 @@ def collate_detection(
         ``1/255`` steps — :data:`_PIXEL_QUANT_MAX` — for a 4x-smaller IPC hop) and
         ``packed`` is the batch's targets as a :class:`PackedTargets`. The transfer
         hook (or :func:`unpack_batch`) restores float32 ``[0, 1]`` images on the
-        destination device.
+        destination device. Deferred training samples instead keep float32 images
+        and attach ``packed.hsv_gains``; colour conversion and the same quantization
+        then run at that restore boundary.
 
     Examples:
         ```pycon
@@ -643,16 +700,39 @@ def collate_detection(
 
         ```
     """
-    images = torch.stack([image for image, _ in batch], dim=0)
+    deferred = bool(batch) and isinstance(batch[0], _DeferredHSVSample)
+    if any(isinstance(sample, _DeferredHSVSample) != deferred for sample in batch):
+        raise ValueError("cannot collate deferred and already-jittered HSV samples together")
+    images = torch.stack(
+        [sample.image if isinstance(sample, _DeferredHSVSample) else sample[0] for sample in batch], dim=0
+    )
     image_size = (int(images.shape[-2]), int(images.shape[-1]))
-    images = images.mul(_PIXEL_QUANT_MAX).round().clamp_(0, _PIXEL_QUANT_MAX).to(torch.uint8)
-    targets = [target for _, target in batch]
+    if not deferred:
+        images = _quantize_images(images)
+    targets = [sample.targets if isinstance(sample, _DeferredHSVSample) else sample[1] for sample in batch]
     packed = pack_targets(targets)
+    if deferred:
+        packed.hsv_gains = torch.tensor(
+            [sample.params.as_tuple() for sample in batch if isinstance(sample, _DeferredHSVSample)],
+            dtype=torch.float64,
+        )
     if mask_targets:
         grid = (image_size[0] // _PROTO_STRIDE, image_size[1] // _PROTO_STRIDE)
         rasterised = [instance_mask_targets(target, image_size, grid).to(torch.bool) for target in targets]
         packed.masks_cat = torch.cat(rasterised) if rasterised else torch.zeros((0, *grid), dtype=torch.bool)
     return images, packed
+
+
+def _quantize_images(images: Tensor) -> Tensor:
+    """Round augmented float pixels to the existing uint8 transport codes."""
+    return images.mul(_PIXEL_QUANT_MAX).round().clamp_(0, _PIXEL_QUANT_MAX).to(torch.uint8)
+
+
+def _restore_images(images: Tensor, packed: PackedTargets, dtype: torch.dtype) -> Tensor:
+    """Finish a deferred colour transform before restoring the consumer's image dtype."""
+    if packed.hsv_gains is not None:
+        images = _quantize_images(_jitter_hsv_batch(images, packed.hsv_gains))
+    return _dequantize_images(images, dtype)
 
 
 def _dequantize_images(images: Tensor, dtype: torch.dtype = torch.float32) -> Tensor:
@@ -716,10 +796,10 @@ def unpack_batch(
         ```
     """
     images, packed = batch
-    return _dequantize_images(images, dtype), unpack_targets(packed)
+    return _restore_images(images, packed, dtype), unpack_targets(packed)
 
 
-class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
+class _TrainPipeline(Dataset[_TrainingSample]):
     """Train-time wrapper composing mosaic/mixup/copy-paste over a base dataset.
 
     For each index the pipeline draws whatever extra source indices it needs from
@@ -752,6 +832,8 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
             unlike the oriented case copy-paste would not raise on it — it would find no
             paste candidates and quietly do nothing, having already decoded a whole extra
             source sample to discover that. Suppressing it says so and stops paying for it.
+        defer_hsv: Sample the same colour gains but apply them after transfer. The
+            pointwise colour transform commutes with the following horizontal flip.
     """
 
     def __init__(
@@ -762,8 +844,10 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
         seed: int,
         oriented: bool = False,
         polygon_free: bool = False,
+        defer_hsv: bool = False,
     ) -> None:
         self._base = base
+        self._defer_hsv = defer_hsv
         self._img_size = int(img_size)
         self.mosaic_p = float(_MOSAIC_PROB)
         self._mixup_prob = policy["mixup"]
@@ -806,11 +890,16 @@ class _TrainPipeline(Dataset[tuple[Tensor, Targets]]):
         """Return the number of base images."""
         return len(self._base)
 
-    def __getitem__(self, index: int) -> tuple[Tensor, Targets]:
-        """Assemble the fully-augmented ``(image, Targets)`` sample for ``index``."""
+    def __getitem__(self, index: int) -> _TrainingSample:
+        """Assemble a sample, keeping deferred colour gains beside it when requested."""
         image, targets = self._geometric(index)
         image, targets = self._maybe_mixup(image, targets)
         image, targets = self._maybe_copy_paste(image, targets)
+        if self._defer_hsv:
+            params = self._hsv.sample()
+            self._hsv.last_gains = params.as_tuple()
+            image, targets = self._flip(image, targets)
+            return _DeferredHSVSample(image, targets, params)
         image, targets = self._hsv(image, targets)
         return self._flip(image, targets)
 
@@ -972,6 +1061,12 @@ class DetectionDataModule(LightningDataModule):
             the annotation file's image sizes, and after it on a YOLO root, which
             states none — so an undersized host sees the figure rather than a silent
             stall ending in an out-of-memory kill.
+        device_hsv: Apply training HSV and quantization on CUDA, in batches, under
+            float32 or mixed precision. Off by default; other backends and precisions
+            retain worker-side colour augmentation. The workers
+            keep their RNG draws and transport float32 images plus the stated gains,
+            using four times the default image IPC and transfer bytes. The existing
+            worker cap already budgets float32 images. Validation stays uint8.
         rotated_targets: Read every annotation's four-point ring as a rotated box
             (:class:`~lucid_yolo.data.coco.CocoDetectionDataset`'s ``oriented`` mode,
             WP-088), so both loaders emit ``Targets`` whose ``rboxes`` pair 1:1 with
@@ -1048,9 +1143,12 @@ class DetectionDataModule(LightningDataModule):
         rotated_targets: bool = False,
         keypoint_targets: bool = False,
         layout: str | None = None,
+        device_hsv: bool = False,
     ) -> None:
         super().__init__()
         self._mask_targets = bool(mask_targets)
+        self._device_hsv = bool(device_hsv)
+        self._warned_device_hsv = False
         self._rotated_targets = bool(rotated_targets)
         self._keypoint_targets = bool(keypoint_targets)
         self._batch_size = int(batch_size)
@@ -1306,8 +1404,37 @@ class DetectionDataModule(LightningDataModule):
             self._seed,
             oriented=self._rotated_targets,
             polygon_free=yolo,
+            defer_hsv=self._defer_hsv(stage),
         )
         self._cached_train_base = base if cache_train_images else None
+
+    def _defer_hsv(self, stage: str | None) -> bool:
+        """Select CUDA colour augmentation when input precision preserves the transport.
+
+        The worker still samples HSV before sampling the flip. A pointwise colour
+        transform commutes with that pixel permutation, so applying the colour
+        operations after transfer keeps both the geometry and the RNG sequence.
+        The shared-memory worker cap already budgets four bytes per image element.
+        True-half and double plugins convert floating inputs before this hook, so
+        they keep worker-side HSV rather than rounding images or stated gains first.
+        """
+        if not self._device_hsv or stage not in {None, "fit"}:
+            return False
+        trainer = self.trainer
+        if trainer is not None and isinstance(trainer.accelerator, CUDAAccelerator):
+            if trainer.precision in {"32-true", "16-mixed", "bf16-mixed"}:
+                return True
+            reason = f"for precision={trainer.precision!r}"
+        else:
+            reason = "off CUDA"
+        if not self._warned_device_hsv:
+            warnings.warn(
+                f"device_hsv=True is ignored {reason}; HSV stays in the data workers",
+                UserWarning,
+                stacklevel=3,
+            )
+            self._warned_device_hsv = True
+        return False
 
     def _build_coco_splits(
         self, cache_train_images: bool, kept_train: _DetectionSource | None
@@ -1404,7 +1531,9 @@ class DetectionDataModule(LightningDataModule):
         on-device: the images are dequantized to the attached module's dtype
         (:meth:`_consumer_dtype` — ``code / 255`` at that precision,
         :func:`_dequantize_images`) and the packed targets are unpacked, all on the
-        same device the module trains on, with no extra host-to-device hop. Matching
+        same device the module trains on, with no extra host-to-device hop.
+        A deferred training batch first applies its stated HSV gains and quantizes
+        the result, then reaches this same dequantization. Matching
         the module dtype keeps a ``"16-true"``/``"bf16-true"`` run's half weights and
         inputs aligned; ``"16-mixed"`` leaves the module float32 and lets autocast
         cast. Already-float images and already-list targets (a non-packed direct
@@ -1435,7 +1564,12 @@ class DetectionDataModule(LightningDataModule):
         """
         del dataloader_idx
         images, targets = batch
-        images = _dequantize_images(images, self._consumer_dtype())
+        dtype = self._consumer_dtype()
+        images = (
+            _restore_images(images, targets, dtype)
+            if isinstance(targets, PackedTargets)
+            else _dequantize_images(images, dtype)
+        )
         if images.is_cuda:
             images = images.contiguous(memory_format=torch.channels_last)
         if isinstance(targets, PackedTargets):
@@ -1489,17 +1623,23 @@ class DetectionDataModule(LightningDataModule):
             "worker_init_fn": _init_worker if workers else None,
         }
 
-    def train_dataloader(self) -> DataLoader[tuple[Tensor, Targets]]:
-        """Return the shuffled training loader over the augmentation pipeline."""
+    def train_dataloader(self) -> DataLoader[tuple[Tensor, PackedTargets]]:
+        """Return the shuffled training loader with the packed batch transport.
+
+        DataLoader's type parameter describes dataset items, while this collate
+        returns a different form. The cast records the collated boundary rather
+        than exposing the pipeline's private deferred-sample union to consumers.
+        """
         if self._train is None:
             raise RuntimeError("setup() must be called before train_dataloader()")
         shuffle_generator = torch.Generator().manual_seed(self._seed)
-        return DataLoader(
+        loader = DataLoader(
             self._train,
             shuffle=True,
             generator=shuffle_generator,
             **self._loader_kwargs(),  # type: ignore[arg-type]
         )
+        return cast("DataLoader[tuple[Tensor, PackedTargets]]", loader)
 
     def val_dataloader(self) -> DataLoader[tuple[Tensor, Targets]]:
         """Return the unshuffled validation loader (letterbox-only samples).

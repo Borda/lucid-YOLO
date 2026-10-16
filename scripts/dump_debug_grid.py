@@ -34,7 +34,7 @@ from torchvision.utils import draw_bounding_boxes, make_grid
 
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.targets import Targets
-from lucid_yolo.ptl.datamodule import _TrainPipeline
+from lucid_yolo.ptl.datamodule import _host_sample, _TrainPipeline
 
 #: Per-split COCO annotation filename emitted by the fixture generator's CocoWriter.
 _COCO_ANNOTATION = "_annotations.coco.json"
@@ -189,7 +189,7 @@ def render_grid(pipeline: _TrainPipeline, num_samples: int) -> Tensor:
     if num_samples <= 0:
         raise ValueError(f"num_samples must be positive; got {num_samples}")
     count = min(num_samples, len(pipeline))
-    tiles = [render_sample(*pipeline[index]) for index in range(count)]
+    tiles = [render_sample(*_host_sample(pipeline[index])) for index in range(count)]
     grid = make_grid(tiles, nrow=math.ceil(math.sqrt(count)), padding=2, pad_value=255)
     return cast(Tensor, grid.to(torch.uint8))
 
