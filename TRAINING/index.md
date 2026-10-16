@@ -8,6 +8,12 @@ What the configs carry is run-level configuration only: schedule, optimizer and 
 
 Provisioning the datasets these recipes read: docs/DATASETS.md. What the accepted runs actually measured, with the exact commands as they were run at the time: docs/REPRODUCTION_REPORT.md.
 
+## CUDA colour augmentation
+
+`--data.device_hsv true` moves training HSV and quantization to CUDA with `32-true`, `16-mixed` or `bf16-mixed` precision. The workers still sample the same gains and horizontal flips, and validation keeps its existing path. The default is `false`; other backends and precisions warn once and keep worker-side HSV. Any precision plugin whose input conversion casts the float32 images or float64 gains before the data hook (true-half and double, and the FSDP and DeepSpeed plugins under every accepted precision) keeps the original path as well, with the same one-time warning.
+
+This can help a CPU-limited training run, including one with decoded images cached by `--data.cache_train_images true`. It transports float32 images until the colour transform finishes, so image IPC and host-to-device bytes are four times the default uint8 transport. The shared-memory worker cap budgets float32 images only when the module chooses the worker count (`--data.num_workers` unset) in one process; segmentation masks still need their own memory allowance. A named `--data.num_workers` is neither capped nor warned: batch 64 at 640 px with 8 workers and `prefetch_factor` 2 queues about 5.0 GB of `/dev/shm` in float32, against 1.26 GB in uint8. Each DDP rank budgets the free `/dev/shm` on its own, so ranks sharing one host can jointly overcommit it — a known limit. The cap cannot shrink a batch: with a small `/dev/shm`, enlarge it or use `--data.num_workers 0`. Measure the complete run on the intended host.
+
 ## 💾 Always: point `default_root_dir` at storage that outlives the runtime
 
 `--trainer.default_root_dir` is the `save_dir` of both default loggers (TensorBoard and CSV, pinned to a single `lightning_logs/version_N` directory) and the directory checkpoints land in. On a hosted runtime it is the whole of what survives a disconnect.

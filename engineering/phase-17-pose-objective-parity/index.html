@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-194, WP-195, one…">
+        <meta name="description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-194, WP-195…">
       
       
         <meta name="author" content="Jirka Borovec">
@@ -68,7 +68,7 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="lucid-yolo">
   <meta property="og:title" content="Phase 17 — R1 pose-objective parity — engineering log">
-  <meta property="og:description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-194, WP-195, one…">
+  <meta property="og:description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-194, WP-195…">
   <meta property="og:url" content="https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/"><meta property="og:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -76,7 +76,7 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta name="twitter:title" content="Phase 17 — R1 pose-objective parity — engineering log">
-  <meta name="twitter:description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-194, WP-195, one…">
+  <meta name="twitter:description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-194, WP-195…">
   
     <link rel="alternate" type="text/markdown" href="index.md" title="Markdown copy of this page">
   
@@ -3889,6 +3889,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#wp-197-the-input-workers-sample-colour-and-cuda-applies-it-in-a-batch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-197 — the input workers sample colour and CUDA applies it in a batch
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4085,6 +4096,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#wp-197-the-input-workers-sample-colour-and-cuda-applies-it-in-a-batch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-197 — the input workers sample colour and CUDA applies it in a batch
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4185,6 +4207,15 @@
 <p><strong>The new test follows the ordinary staging path.</strong> The notebook dataset ignore is anchored to <code>/data/</code>, matching its documented root-directory scope. The unanchored <code>data/</code> also ignored new files below <code>tests/data/</code> and <code>src/lucid_yolo/data/</code>, so <code>git add -A</code> skipped them. The root notebook-download exclusion remains; already tracked files keep their behaviour.</p>
 <p><strong>The complete CPU input path confirms the mechanism.</strong> Five paired input epochs on an isolated n2-standard-8 (8 vCPUs, Intel Xeon at 2.80 GHz, torch 2.9.1+cpu, one thread) traversed all 117 distinct public DOTA tiles and 2,691 annotations, including image-cache construction. Median wall time moved from 22.758 s (21.629–23.423) to 20.870 s (20.783–21.168); paired median reduction 8.27%, range 3.51–9.91%. Clipping/refitting accounted for 17.98% of the baseline input interval and its median cost fell from 6362.72 to 2856.17 microseconds per real-data call. Input images and every packed-target field matched at byte precision in all pairs. The instrumented input epoch includes checksum work; the separate complete CUDA fit carries the training claim.</p>
 <p><strong>The training result is measured after the merged cache and state updates.</strong> Five counterbalanced complete 20-epoch fits on an isolated g2-standard-8 with an NVIDIA L4 (driver 580.178.04, torch 2.9.1+cu129, Python 3.12.3, Lightning 2.6.6) used nano OBB, 640 pixels, batch 16, BF16, six persistent workers, cached images, mosaic and EMA. The first 20 sorted official DOTA validation images supplied 117 distinct lossless tiles and 2691 annotations; they are training-throughput inputs, with no held-out accuracy claim. Every fit traversed 2340 augmented samples and 160 optimizer steps; validation, logging and checkpointing were disabled. Baseline median 165.056s (164.518–169.835) became 149.772s (146.751–152.531); paired median reduction 10.19%, range 8.68–12.25%. Timing synchronizes CUDA around the whole fit and includes cache construction, worker startup, data and augmentation, transfer, forward/loss/backward, optimizer, EMA and Trainer teardown. Final model, EMA, optimizer and scheduler storage hashes, first input and sampled losses match in every pair. Peak CUDA allocation is unchanged at 3,583,640,576 bytes. One discarded two-epoch warmup precedes the five fresh-process pairs. No comparable 1024-pixel, larger-scale, MPS, DDP or convergence benefit is claimed. The paid VMs were deleted and independently verified.</p>
+<h2 id="wp-197-the-input-workers-sample-colour-and-cuda-applies-it-in-a-batch">WP-197 — the input workers sample colour and CUDA applies it in a batch<a class="headerlink" href="#wp-197-the-input-workers-sample-colour-and-cuda-applies-it-in-a-batch" title="Permanent link">&para;</a></h2>
+<p><a id="wp-197"></a></p>
+<p>An isolated CPU profile attributed 5.476 of 12.668 seconds to the colour transform over 128 public COCO augmentation draws. That selects an enclosing input stage rather than a small helper.</p>
+<p><code>device_hsv</code> is opt-in for CUDA with float32 or mixed precision. Workers keep the existing HSV draw before the flip draw and carry the stated gains with the flipped image. A pointwise colour transform commutes with that pixel permutation. The consumer batches the existing RGB/HSV expressions with <code>vmap</code>, applies the same gains, then quantizes and restores the consumer dtype at the existing boundary. Float32 images cost four times the default uint8 image IPC and transfer bytes; the worker cap already budgets float32. Masks, validation and the default route keep their existing behavior. Precision plugins that cast floating inputs before the data hook retain worker-side HSV.</p>
+<p>CUDA's host-scalar division lowered the hue divisor to a reciprocal multiply and changed 72 of 314,572,800 real augmentation pixel codes by one. R40 explains that boundary. A device-tensor six keeps the CPU division convention; the captured pixel is a regression test, and changing the divisor back to a host scalar makes it fail. No gain, recipe, target geometry or model arithmetic changes.</p>
+<p>Five paired complete six-epoch detection-n fits on 256 public COCO images (640 px, batch 8, BF16, four workers, cached decoding) reduced the median from 102.053 s (99.831–103.663) to 79.468 s (78.859–81.501). The median paired reduction was 22.22%, range 18.72–22.79%, on an isolated four-vCPU NVIDIA L4 host, driver 580.178.04 and torch 2.9.1+cu129. Loss, model, optimizer, EMA, scheduler and metric byte hashes matched in each pair and across repeated baselines. Peak allocated CUDA memory was 1,595,021,312 versus 1,596,232,192 bytes.</p>
+<p>With the batched MuSGD change, merged as 01b4d4c, applied to both arms (the measured row ran on that change's pre-merge revision, not on the squashed commit), five batch-4 fits (384 updates each) reduced the median from 115.651 s (115.136–116.204) to 95.898 s (95.501–96.696). The additional median paired reduction was 16.93%, range 16.38–17.82%, with the same six state/loss hashes equal. This is a separate workload row, not a percentage to add to the batch-8 result.</p>
+<p>The final real-input replay compared 1,258,291,200 consumer image bytes over all 256 COCO images: zero differences, with equal packed geometry and a stable repeated baseline. The L4 passed 172 focused regressions, 28 changed-code doctests and one targeted augmentation-producer doctest; ten pre-existing doctest examples were explicitly skipped. A scalar-divisor mutation fails the captured CUDA pixel and the CPU-only divisor contract; restored code passes. Float32 and FP16 mixed precision each completed a finite one-batch real-data compatibility smoke with deferred mode active. Full pre-commit passed on CPU torch 2.14 with 149 focused tests and three CUDA skips.</p>
+<p>Focused tests cover RNG order, ordinary and deferred transport, masks, consumer precision, the CPU fallback, validation and CUDA rounding. <code>_host_sample</code> lets the grid and golden helpers accept a deferred sample without quantizing it (unit-tested); both scripts build the default pipeline, so their outputs are unchanged. The complete-fit evidence uses public COCO, includes loading, augmentation, forward/backward, optimization, EMA, validation and checkpoints, and compares loss and final-state bytes. Full <code>make gate</code> was not run; this work package remains open.</p>
 
 
 

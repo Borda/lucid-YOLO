@@ -709,6 +709,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#cuda-colour-augmentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CUDA colour augmentation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#always-point-default_root_dir-at-storage-that-outlives-the-runtime" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3999,6 +4010,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#cuda-colour-augmentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CUDA colour augmentation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#always-point-default_root_dir-at-storage-that-outlives-the-runtime" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4160,6 +4182,9 @@
 <p>What the configs carry is run-level configuration only: schedule, optimizer and loss gains, and placeholder data paths. Topology is named by <code>variant</code> and lives in the registry, never in a config file (ADR-001). Every value below that overrides a config is an override <em>of a placeholder or of a batch-size-dependent value</em>, not a correction.</p>
 <p><code>--data.data_root</code> is the only path any tier needs. The split directories and their annotation files are resolved from it by convention — COCO 2017's <code>train2017</code> spelling, the plain <code>train</code> the tiler writes, an <code>images/&lt;split&gt;</code> tree, or a per-split <code>_annotations.coco.json</code> export (<code>lucid_yolo.data.layout</code>). A layout none of those names still takes the four explicit overrides.</p>
 <p>Provisioning the datasets these recipes read: docs/DATASETS.md. What the accepted runs actually measured, with the exact commands as they were run at the time: docs/REPRODUCTION_REPORT.md.</p>
+<h2 id="cuda-colour-augmentation">CUDA colour augmentation<a class="headerlink" href="#cuda-colour-augmentation" title="Permanent link">&para;</a></h2>
+<p><code>--data.device_hsv true</code> moves training HSV and quantization to CUDA with <code>32-true</code>, <code>16-mixed</code> or <code>bf16-mixed</code> precision. The workers still sample the same gains and horizontal flips, and validation keeps its existing path. The default is <code>false</code>; other backends and precisions warn once and keep worker-side HSV. Any precision plugin whose input conversion casts the float32 images or float64 gains before the data hook (true-half and double, and the FSDP and DeepSpeed plugins under every accepted precision) keeps the original path as well, with the same one-time warning.</p>
+<p>This can help a CPU-limited training run, including one with decoded images cached by <code>--data.cache_train_images true</code>. It transports float32 images until the colour transform finishes, so image IPC and host-to-device bytes are four times the default uint8 transport. The shared-memory worker cap budgets float32 images only when the module chooses the worker count (<code>--data.num_workers</code> unset) in one process; segmentation masks still need their own memory allowance. A named <code>--data.num_workers</code> is neither capped nor warned: batch 64 at 640 px with 8 workers and <code>prefetch_factor</code> 2 queues about 5.0 GB of <code>/dev/shm</code> in float32, against 1.26 GB in uint8. Each DDP rank budgets the free <code>/dev/shm</code> on its own, so ranks sharing one host can jointly overcommit it — a known limit. The cap cannot shrink a batch: with a small <code>/dev/shm</code>, enlarge it or use <code>--data.num_workers 0</code>. Measure the complete run on the intended host.</p>
 <h2 id="always-point-default_root_dir-at-storage-that-outlives-the-runtime">💾 Always: point <code>default_root_dir</code> at storage that outlives the runtime<a class="headerlink" href="#always-point-default_root_dir-at-storage-that-outlives-the-runtime" title="Permanent link">&para;</a></h2>
 <p><code>--trainer.default_root_dir</code> is the <code>save_dir</code> of both default loggers (TensorBoard and CSV, pinned to a single <code>lightning_logs/version_N</code> directory) and the directory checkpoints land in. On a hosted runtime it is the whole of what survives a disconnect.</p>
 <p>This is not a precaution in the abstract. 0.2.0's Seg-smoke ran with <code>default_root_dir</code> under <code>/content/</code>, and its model card records the hardware line as unrecorded because the logs went with the runtime.</p>

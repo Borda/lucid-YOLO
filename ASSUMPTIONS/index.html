@@ -4193,9 +4193,9 @@
 <tr>
 <td>A33</td>
 <td>Batch transport precision unspecified (R1 silent; engineering-efficiency secondary goal)</td>
-<td>Collated image batches cross the DataLoader worker boundary quantized to <strong>uint8</strong> (<code>round(x*255)</code>; restored <code>code/255</code> on the destination device at the consumer's precision) — post-augmentation pixels rounded to <code>1/255</code> steps, worst-case round-trip error <code>1/510</code>. Images originate as 8-bit JPEGs, so only sub-8-bit interpolation residue is lost; 4x smaller IPC keeps the in-flight worker queue inside containerized shm budgets (observed Colab sandbox ceiling). Per-sample pipeline numerics (and the data goldens, measured pre-collate) unchanged</td>
+<td>Collated image batches cross the DataLoader worker boundary quantized to <strong>uint8</strong> (<code>round(x*255)</code>; restored <code>code/255</code> on the destination device at the consumer's precision) — post-augmentation pixels rounded to <code>1/255</code> steps, worst-case round-trip error <code>1/510</code>. Images originate as 8-bit JPEGs, so only sub-8-bit interpolation residue is lost; 4x smaller IPC keeps the in-flight worker queue inside containerized shm budgets (observed Colab sandbox ceiling). Per-sample pipeline numerics (and the data goldens, measured pre-collate) unchanged. <strong>Opt-in exception, <code>--data.device_hsv</code> (CUDA with float32 or mixed precision, <a href="../work_packages/wp-197/">WP-197</a>)</strong>: workers defer the HSV colour transform, so deferred batches cross the worker boundary as float32 images with the drawn gains, at four times the default image IPC; the consumer applies the batched HSV, then quantizes onto the same <code>1/255</code> grid and restores its dtype. Default route, masks and validation keep uint8 transport</td>
 <td>gap; 8-bit transport is standard CV-pipeline practice</td>
-<td><code>tests/data/test_coco.py</code> quantization round-trip bound; Det tier training criteria</td>
+<td><code>tests/data/test_coco.py</code> quantization round-trip bound; <code>tests/ptl/test_device_hsv.py</code> (deferred transport and consumer quantization); Det tier training criteria</td>
 <td>active</td>
 </tr>
 <tr>

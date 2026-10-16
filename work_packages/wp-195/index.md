@@ -4,7 +4,7 @@
 >
 > 🔗 Depends on [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/) · Needed by WP-196
 >
-> ⬅️ [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/)
+> ⬅️ [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-197](https://borda.github.io/lucid-YOLO/work_packages/wp-197/) ➡️
 
 
 ## WP-195 — rotated augmentation shares clipping and refitting dispatch

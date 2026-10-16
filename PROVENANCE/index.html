@@ -4332,6 +4332,16 @@
 <td>RF-DETR, Roboflow, github.com/roboflow/rf-detr, Apache-2.0</td>
 <td>Permissive reference implementation admitted under D13/ADR-004 for diagnostic reading only (never copied). Apache-2.0 verified 2026-09-04 from the local checkout's <code>LICENSE</code> ("Copyright 2025 Roboflow, Inc." in the filled appendix). Independent DETR lineage (arXiv:2304.08069 lineage, LW-DETR/Deformable-DETR family), no Ultralytics code. <strong>What was read:</strong> the commit range <code>1.9.0..develop</code> (tag <code>a700efc7</code>; 137 non-merge commits at the time of reading on 2026-09-04, the branch has advanced since), surveyed for training- and validation-throughput changes after <a href="../work_packages/wp-162/">WP-162</a>. Changelog and commit prose only — every mechanism this project acted on was restated in its own words from that prose, and the three candidates it produced were re-derived here and measured here before any of them landed (<a href="../work_packages/wp-163/">WP-163</a>, <a href="../work_packages/wp-164/">WP-164</a>, <a href="../work_packages/wp-165/">WP-165</a>). <strong>What was not read, and stays unread:</strong> <code>rfdetr_plus</code> and the RF-DETR XL/2XL models it gates, which <code>docs/reference/xlarge.md</code> licenses under the Platform Model License (PML-1.0) from a separate repository — non-permissive, so inadmissible at any cost. The sibling checkout at <code>~/Workspace/rf-detr-internal</code> was likewise never opened; it was set aside during the survey on the stated ground that its licence was unestablished, and that ground turns out to be wrong — it carries an Apache-2.0 <code>LICENSE</code> file. The record says so rather than keeping the tidier reason. It remains unread, and admitting it would be a fresh decision this row does not make</td>
 </tr>
+<tr>
+<td>R40</td>
+<td>PyTorch 2.9.1, github.com/pytorch/pytorch, BSD-3-Clause</td>
+<td>Existing runtime dependency, consulted diagnostically for the CPU and CUDA division kernels in <a href="../work_packages/wp-197/">WP-197</a>. The CUDA <a href="https://github.com/pytorch/pytorch/blob/v2.9.1/aten/src/ATen/native/cuda/BinaryDivTrueKernel.cu#L35-L53">host-scalar branch</a> uses a reciprocal multiply; a device-tensor divisor retains division. Licence verified from that revision’s <code>LICENSE</code>; no framework code copied.</td>
+</tr>
+<tr>
+<td>R41</td>
+<td>Lightning 2.6.6, github.com/Lightning-AI/pytorch-lightning, Apache-2.0</td>
+<td>Existing runtime dependency, consulted diagnostically for precision input conversion and batch transfer ordering in <a href="../work_packages/wp-197/">WP-197</a>. The precision guard follows that ordering. Apache-2.0 verified from the installed wheel’s <code>licenses/LICENSE</code>; no framework code copied.</td>
+</tr>
 </tbody>
 </table>
 <h3 id="project-internal-governing-documents">Project-internal governing documents<a class="headerlink" href="#project-internal-governing-documents" title="Permanent link">&para;</a></h3>
@@ -4521,6 +4531,16 @@
 <td>2026-09-17</td>
 <td>R1 sec. 3.4.2, Table 9, Table S10</td>
 <td><strong>First read</strong>, forty-seven days after the source was registered and inside its role the whole time. The pose objective, its weight ablation and its size table; read from the arXiv PDF after issue 2 on the tracker named them, and what they change is D22, A65–A68 and A75–A77 (<a href="../work_packages/wp-178/">WP-178</a>). The 2026-08-01 row above stands as written: the seeding pass registered R1 from the blueprint's reference list without reading every section, and this line is what that cost</td>
+</tr>
+<tr>
+<td>2026-10-16</td>
+<td>R40</td>
+<td>Division-kernel diagnosis for <a href="../work_packages/wp-197/">WP-197</a>: existing HSV expressions, own CUDA profiling and real-data byte comparisons determine the change; PyTorch source explains the rounding boundary. No detection implementation consulted.</td>
+</tr>
+<tr>
+<td>2026-10-16</td>
+<td>R41</td>
+<td>Training-loop precision conversion ordering for the deferred-colour eligibility guard in <a href="../work_packages/wp-197/">WP-197</a>.</td>
 </tr>
 </tbody>
 </table>
