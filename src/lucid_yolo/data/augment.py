@@ -155,6 +155,32 @@ def rgb_to_hsv(image: Tensor) -> Tensor:
     """
     if image.ndim != 3 or image.shape[0] != _RGB_CHANNELS:
         raise ValueError(f"image must be (3, H, W); got shape {tuple(image.shape)}")
+    return _rgb_to_hsv(image, 6.0)
+
+
+def _rgb_to_hsv(image: Tensor, hue_divisor: float | Tensor) -> Tensor:
+    """Convert RGB with the hue division owned by the caller's execution device.
+
+    ``rgb_to_hsv`` retains its scalar divisor. The deferred training batch supplies
+    a device tensor: CUDA lowers division by a host scalar to multiplication by its
+    reciprocal, whereas the CPU training transform divides. Keeping the divisor
+    on-device preserves that division when the existing operations move to CUDA.
+
+    Args:
+        image: A validated ``(3, H, W)`` RGB image.
+        hue_divisor: The existing six-sector divisor, as a scalar or device tensor.
+
+    Returns:
+        The image's HSV channels.
+
+    Examples:
+        ```pycon
+        >>> image = torch.zeros(3, 1, 1)
+        >>> _rgb_to_hsv(image, image.new_full((), 6.0)).flatten().tolist()
+        [0.0, 0.0, 0.0]
+
+        ```
+    """
     r, g, b = image[0], image[1], image[2]
     maxc = image.amax(dim=0)
     minc = image.amin(dim=0)
@@ -167,7 +193,7 @@ def rgb_to_hsv(image: Tensor) -> Tensor:
     hue = torch.full_like(maxc, 4.0) + gc - rc
     hue = torch.where(maxc == g, 2.0 + rc - bc, hue)
     hue = torch.where(maxc == r, bc - gc, hue)
-    hue = torch.where(delta > 0, (hue / 6.0) % 1.0, torch.zeros_like(hue))
+    hue = torch.where(delta > 0, (hue / hue_divisor) % 1.0, torch.zeros_like(hue))
     saturation = torch.where(
         maxc > 0, delta / torch.where(maxc > 0, maxc, torch.ones_like(maxc)), torch.zeros_like(maxc)
     )
@@ -229,6 +255,39 @@ def _select_sector(index: Tensor, choices: list[Tensor]) -> Tensor:
     result = choices[-1]
     for sector, value_map in enumerate(choices[:-1]):
         result = torch.where(index == sector, value_map, result)
+    return result
+
+
+def _jitter_hsv_batch(images: Tensor, gains: Tensor) -> Tensor:
+    """Apply the existing HSV operations to a batch with one stated gain row per image.
+
+    ``vmap`` batches the two converters without replacing their expressions. The
+    gains stay double until ``1 + gain`` has been formed, matching the Python
+    addition in ``HSVJitter.apply``, then take the image dtype. The caller quantizes
+    the result at the same boundary the worker-side transform previously reached.
+
+    Args:
+        images: ``(B, 3, H, W)`` floating-point images after geometry and flipping.
+        gains: ``(B, 3)`` float64 hue, saturation and value gains, on the image device.
+
+    Returns:
+        The colour-jittered batch, at the input dtype.
+
+    Examples:
+        ```pycon
+        >>> images = torch.zeros(2, 3, 2, 2)
+        >>> gains = torch.zeros(2, 3, dtype=torch.float64)
+        >>> _jitter_hsv_batch(images, gains).shape
+        torch.Size([2, 3, 2, 2])
+
+        ```
+    """
+    divisor = images.new_full((), 6.0)
+    hsv: Tensor = torch.vmap(lambda image: _rgb_to_hsv(image, divisor))(images)
+    hue = (hsv[:, 0] + gains[:, 0].to(images.dtype)[:, None, None]) % 1.0
+    saturation = (hsv[:, 1] * (1.0 + gains[:, 1]).to(images.dtype)[:, None, None]).clamp(0.0, 1.0)
+    value = (hsv[:, 2] * (1.0 + gains[:, 2]).to(images.dtype)[:, None, None]).clamp(0.0, 1.0)
+    result: Tensor = torch.vmap(hsv_to_rgb)(torch.stack([hue, saturation, value], dim=1))
     return result
 
 

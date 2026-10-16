@@ -69,7 +69,7 @@ from lucid_yolo.models.build import (
     count_params,
 )
 from lucid_yolo.optim import MuSGD
-from lucid_yolo.ptl.datamodule import _TrainPipeline
+from lucid_yolo.ptl.datamodule import _host_sample, _TrainPipeline
 
 #: Repository root (``scripts/`` is one level below it).
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -231,7 +231,7 @@ def _pipeline_metrics(pipeline: _TrainPipeline) -> dict[str, float]:
     bbox_coord_sum = 0.0
     channels = height = width = 0
     for index in _PIPELINE_SAMPLE_INDICES:
-        image, targets = pipeline[index]
+        image, targets = _host_sample(pipeline[index])
         channels, height, width = image.shape
         image_mean_sum += float(image.mean())
         image_std_sum += float(image.std())
