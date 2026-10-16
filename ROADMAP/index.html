@@ -1739,7 +1739,7 @@
 
 
 <h1 id="work-package-roadmap">🗺️ Work-Package Roadmap<a class="headerlink" href="#work-package-roadmap" title="Permanent link">&para;</a></h1>
-<p>The agent's work queue: 194 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording follow-up work that landed after its package had closed. Transcribed from the governing blueprint (sec. 15) with a live status column.</p>
+<p>The agent's work queue: 195 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording follow-up work that landed after its package had closed. Transcribed from the governing blueprint (sec. 15) with a live status column.</p>
 <p><strong>Scope says what a package does, not what executing it taught.</strong> Measurements, rejected approaches and negative results live in RESEARCH_LOG.md, linked per row as <code>· log</code>; choices the papers left open live in ASSUMPTIONS.md and are cited by id; release results live in REPRODUCTION_REPORT.md. A row that restates any of those is duplicating a record that has an owner.</p>
 <p><strong>Length is guidance, not a limit, and the guide is this table's own median</strong> — Scope about 285 characters, DoD about 80, subject about 50. Nothing enforces it and no test measures it: a row whose claims genuinely need more room takes it, and cutting substance to reach a number is the worse outcome. What the figure is for is the drift it makes visible. A cell running several times its column's median is usually not carrying more scope, it is carrying the reasoning behind the scope — which has an owner elsewhere, per the paragraph above. Compress the prose first, move what survives compression to the linked log, and leave the row stating what the package does.</p>
 <p>Legend: <strong>Dep</strong> = prerequisite WPs · <strong>[DATA]</strong> needs a real dataset (synthetic stand-in per A26 for offline development only) · <strong>[GPU]</strong> needs an accelerator (MPS first, D12c) · <strong>[PRINCIPAL]</strong> belongs to whoever drives the project rather than executes it (AGENTS.md sec. 1) — never started autonomously. DoD = the test id(s) that must pass; every WP additionally requires <code>make gate</code> green. Status icons: ⬜ todo · 🔄 in-progress · ✅ done · ⛔ blocked (see docs/ESCALATION.md) · ⏸ deferred, scope still wanted but the start is waiting on something outside this repository, named in the row · ⊘ closed without its DoD met, the row itself saying why. Only ✅, 🔄 and ⊘ appear below Phase 16: every WP written before Phase 17 has either landed or been closed, so ⛔ and ⏸ are defined for rows this queue has not yet needed rather than describing anything on it; Phase 17 is the first queue of ⬜ rows, each waiting on an accelerator or a principal. ⏸ is distinct from ⛔ on both sides: nothing here is stuck, and nothing outside is being escalated to. The status column is flipped to ✅ in the same commit that completes its WP.</p>
@@ -3825,6 +3825,14 @@
 <td><code>scripts/_tests/test_audit_content_pins.py</code>; collection count unchanged; <code>make gate</code> green</td>
 <td>193</td>
 <td>✅</td>
+</tr>
+<tr>
+<td>195</td>
+<td><code>perf(data): batch rotated-box clipping and refitting</code> [DATA][GPU]</td>
+<td>Finite float32 CPU augmentation boxes without gradients share the existing clip and orientation-preserving fit in equal-vertex-count groups. Ring order and instance order are preserved; other inputs keep the scalar route · <a href="../ENGINEERING_LOG/#wp-195">log</a></td>
+<td><code>tests/data/test_rotated_clip_batch.py</code>; unchanged public-DOTA training states and five paired isolated-L4 complete fits; focused data tests and full pre-commit; full <code>make gate</code> not run</td>
+<td>194</td>
+<td>🔄</td>
 </tr>
 </tbody>
 </table>
