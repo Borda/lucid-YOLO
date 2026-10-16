@@ -131,6 +131,7 @@ def _suppressible(best: Tensor, rest: Tensor, best_class: Tensor, rest_classes: 
         A ``(M,)`` bool mask, ``True`` where the pair's exact IoU has to be computed.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> best = torch.tensor([0.0, 0.0, 2.0, 2.0, 0.0])
         >>> rest = torch.tensor([[1.0, 0.0, 2.0, 2.0, 0.0], [90.0, 0.0, 2.0, 2.0, 0.0]])
@@ -139,6 +140,8 @@ def _suppressible(best: Tensor, rest: Tensor, best_class: Tensor, rest_classes: 
         tensor([ True, False])
         >>> _suppressible(best, rest, torch.tensor(0), torch.tensor([1, 0]))  # nor another class
         tensor([False, False])
+
+        ```
     """
     same_class = rest_classes == best_class
     reach = 0.5 * (torch.hypot(best[2], best[3]) + torch.hypot(rest[:, 2], rest[:, 3]))
@@ -172,6 +175,7 @@ class RotatedNMSDecoder(nn.Module):
             to ``300`` (R1 sec. 3.2.1, A9, A47).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.assign.grid import make_anchor_points
         >>> points, strides = make_anchor_points([(2, 2)], [8])
@@ -185,6 +189,8 @@ class RotatedNMSDecoder(nn.Module):
         torch.Size([1, 100, 7])
         >>> int(detections[0, 0, 6])  # class of the top detection
         2
+
+        ```
     """
 
     def __init__(
@@ -227,6 +233,7 @@ class RotatedNMSDecoder(nn.Module):
             filling any shortfall below ``max_det``.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> from lucid_yolo.assign.grid import make_anchor_points
             >>> points, strides = make_anchor_points([(1, 2)], [8])
@@ -244,6 +251,8 @@ class RotatedNMSDecoder(nn.Module):
             >>> zero = torch.zeros(0, 2, 1)
             >>> empty(zero, torch.zeros(0, 2, 4), zero, points, strides).shape
             torch.Size([0, 2, 7])
+
+            ```
         """
         rboxes = decode_rboxes(raw_ltrb, angles, anchor_points, strides)  # (B, A, 5), canonical
         confidence = cls_logits.sigmoid()

@@ -128,6 +128,7 @@ class OKSLoss(nn.Module):
             constant ``1`` everywhere but the exact optimum.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> loss_fn = OKSLoss(sigmas=(0.1, 0.2))
         >>> list(loss_fn.parameters()), loss_fn.state_dict()  # nothing to train, nothing to checkpoint
@@ -139,6 +140,8 @@ class OKSLoss(nn.Module):
         (0, True)
         >>> loss_fn(mu_gt, mu_gt, torch.tensor([100.0]), torch.tensor([[2, 1]]))  # a perfect prediction
         tensor(0.)
+
+        ```
     """
 
     k: Tensor

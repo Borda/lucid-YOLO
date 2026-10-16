@@ -93,6 +93,7 @@ def pad_detections(detections: Tensor, max_det: int) -> Tensor:
         Detections whose detection axis has length exactly ``max_det``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> dets = torch.ones(1, 2, 6)
         >>> pad_detections(dets, max_det=4).shape
@@ -102,6 +103,8 @@ def pad_detections(detections: Tensor, max_det: int) -> Tensor:
                 [0., 0., 0., 0., 0., 0.]])
         >>> pad_detections(torch.ones(1, 9, 6), max_det=4).shape  # over-length is cut
         torch.Size([1, 4, 6])
+
+        ```
     """
     kept = detections.shape[-2]
     if kept >= max_det:
@@ -139,6 +142,7 @@ def pad_anchor_indices(indices: Tensor, max_det: int) -> Tensor:
         filled with :data:`PAD_ANCHOR_INDEX`.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> pad_anchor_indices(torch.tensor([3, 7]), max_det=4)
         tensor([ 3,  7, -1, -1])
@@ -146,6 +150,8 @@ def pad_anchor_indices(indices: Tensor, max_det: int) -> Tensor:
         tensor([[3, 7]])
         >>> pad_anchor_indices(torch.tensor([[3, 7, 1]]), max_det=2)  # over-length is cut
         tensor([[3, 7]])
+
+        ```
     """
     kept = indices.shape[-1]
     if kept >= max_det:
@@ -187,6 +193,7 @@ def to_letterboxed_original(
         coordinates and score/class unchanged.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> # A 2x4 image letterboxed into a 4x4 canvas gains 1px top/bottom pads.
         >>> boxes = torch.tensor([[[0.0, 1.0, 4.0, 3.0, 0.9, 0.0]]])
@@ -195,6 +202,8 @@ def to_letterboxed_original(
         tensor([0., 0., 4., 2.])
         >>> mapped[0, 0, 4:]  # score and class survive the round trip
         tensor([0.9000, 0.0000])
+
+        ```
     """
     batch, num_det, _ = detections.shape
     letterbox = Letterbox(letterboxed_size, allow_upscale=allow_upscale)
@@ -245,6 +254,7 @@ def rboxes_to_letterboxed_original(
             :data:`RBOX_COLUMNS` trailing columns.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> # A 2x4 image letterboxed into a 4x4 canvas: ratio 1, 1px top/bottom pads.
         >>> dets = torch.tensor([[[2.0, 2.0, 4.0, 2.0, 0.3, 0.9, 1.0]]])
@@ -253,6 +263,8 @@ def rboxes_to_letterboxed_original(
         tensor([2.0000, 1.0000, 4.0000, 2.0000, 0.3000])
         >>> mapped[0, 0, 5:]  # score and class survive the round trip
         tensor([0.9000, 1.0000])
+
+        ```
     """
     if detections.ndim != 3 or detections.shape[-1] < RBOX_COLUMNS:
         raise ValueError(f"detections must be (B, N, >={RBOX_COLUMNS}); got shape {tuple(detections.shape)}")

@@ -99,12 +99,15 @@ def _check_eps(eps: float) -> None:
         ValueError: If ``eps`` is not finite and strictly positive.
 
     Examples:
+        ```pycon
         >>> _check_eps(1e-7)  # accepted: nothing returned
         >>> try:
         ...     _check_eps(0.0)
         ... except ValueError as error:
         ...     print(error)
         eps must be finite and > 0; got 0.0
+
+        ```
     """
     if not math.isfinite(eps) or eps <= 0.0:
         raise ValueError(f"eps must be finite and > 0; got {eps}")
@@ -139,6 +142,7 @@ def _aspect_angle(width: Tensor, height: Tensor) -> Tensor:
         ``atan2(width, height)``, with ``0`` (value and gradient) at the origin.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> sides = torch.tensor([3.0, 0.0, 1.0])
         >>> _aspect_angle(sides, torch.tensor([4.0, 0.0, 0.0])).round(decimals=4)
@@ -147,6 +151,8 @@ def _aspect_angle(width: Tensor, height: Tensor) -> Tensor:
         >>> _aspect_angle(collapsed, collapsed).sum().backward()
         >>> collapsed.grad
         tensor([0.])
+
+        ```
     """
     degenerate = (width == 0) & (height == 0)
     guarded_height = torch.where(degenerate, torch.ones_like(height), height)
@@ -174,11 +180,14 @@ def box_iou_aligned(pred: Tensor, target: Tensor, eps: float = 1e-7) -> Tensor:
         ValueError: If ``eps`` is not finite and strictly positive.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> pred = torch.tensor([[0.0, 0.0, 2.0, 2.0]])
         >>> target = torch.tensor([[1.0, 1.0, 3.0, 3.0]])
         >>> box_iou_aligned(pred, target).round(decimals=4)
         tensor([0.1429])
+
+        ```
     """
     _check_eps(eps)
     inter_x1 = torch.maximum(pred[:, 0], target[:, 0])
@@ -225,10 +234,13 @@ def complete_iou(pred: Tensor, target: Tensor, eps: float = 1e-7) -> Tensor:
         ValueError: If ``eps`` is not finite and strictly positive.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> boxes = torch.tensor([[0.0, 0.0, 2.0, 2.0]])
         >>> complete_iou(boxes, boxes).round(decimals=4)
         tensor([1.])
+
+        ```
     """
     _check_eps(eps)
     iou = box_iou_aligned(pred, target, eps=eps)
@@ -281,9 +293,12 @@ def ciou_loss(pred: Tensor, target: Tensor, eps: float = 1e-7) -> Tensor:
         ValueError: If ``eps`` is not finite and strictly positive.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> boxes = torch.tensor([[0.0, 0.0, 2.0, 2.0]])
         >>> ciou_loss(boxes, boxes).round(decimals=4)
         tensor([0.])
+
+        ```
     """
     return 1 - complete_iou(pred, target, eps=eps)

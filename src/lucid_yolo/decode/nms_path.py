@@ -92,6 +92,7 @@ class NMSDecoder(nn.Module):
             Defaults to ``300`` (R1 sec. 3.2.1).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.assign.grid import make_anchor_points
         >>> points, strides = make_anchor_points([(2, 2)], [8])
@@ -104,6 +105,8 @@ class NMSDecoder(nn.Module):
         torch.Size([1, 100, 6])
         >>> int(detections[0, 0, 5])  # class of the top detection
         2
+
+        ```
     """
 
     def __init__(
@@ -135,6 +138,7 @@ class NMSDecoder(nn.Module):
             with score-zero padding rows filling any shortfall below ``max_det``.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> from lucid_yolo.assign.grid import make_anchor_points
             >>> points, strides = make_anchor_points([(1, 2)], [8])
@@ -142,6 +146,8 @@ class NMSDecoder(nn.Module):
             >>> raw_ltrb = torch.zeros(1, 2, 4)
             >>> NMSDecoder(max_det=5)(cls_logits, raw_ltrb, points, strides).shape
             torch.Size([1, 5, 6])
+
+            ```
         """
         detections, _ = self.decode_with_indices(cls_logits, raw_ltrb, anchor_points, strides)
         return detections
@@ -182,6 +188,7 @@ class NMSDecoder(nn.Module):
             :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX` on the padding rows.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> from lucid_yolo.assign.grid import make_anchor_points
             >>> points, strides = make_anchor_points([(1, 2)], [8])
@@ -194,23 +201,31 @@ class NMSDecoder(nn.Module):
             >>> anchors  # anchor 1 survives; the remaining rows are padding
             tensor([[ 1, -1, -1]])
 
+            ```
+
             A box has to enclose an area to be a detection: zero ``ltrb`` distances put
             ``x2`` exactly on ``x1``, and such a row is dropped with the sub-threshold
             ones rather than spending one of the ``max_det`` slots.
 
+            ```pycon
             >>> flat = torch.zeros(1, 2, 4)
             >>> _, none_kept = decoder.decode_with_indices(cls_logits, flat, points, strides)
             >>> none_kept
             tensor([[-1, -1, -1]])
 
+            ```
+
             An empty batch decodes to empty outputs of the documented width rather
             than raising, matching :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder`:
 
+            ```pycon
             >>> empty, empty_anchors = decoder.decode_with_indices(
             ...     torch.zeros(0, 2, 1), torch.zeros(0, 2, 4), points, strides
             ... )
             >>> empty.shape, empty_anchors.shape
             (torch.Size([0, 3, 6]), torch.Size([0, 3]))
+
+            ```
         """
         boxes = decode_ltrb(raw_ltrb, anchor_points, strides)  # (B, A, 4)
         confidence = cls_logits.sigmoid()

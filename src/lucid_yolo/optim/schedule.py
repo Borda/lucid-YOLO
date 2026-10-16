@@ -53,6 +53,7 @@ def warmup_decay_factor(step: int, total_steps: int, warmup_steps: int, lrf: flo
         The factor in ``[min(lrf, 1/warmup_steps), 1.0]`` to multiply ``lr0`` by.
 
     Examples:
+        ```pycon
         >>> warmup_decay_factor(0, 100, 10, 0.01)  # first step: 1/10 of lr0
         0.1
         >>> warmup_decay_factor(9, 100, 10, 0.01)  # warmup peak
@@ -63,6 +64,8 @@ def warmup_decay_factor(step: int, total_steps: int, warmup_steps: int, lrf: flo
         0.01
         >>> warmup_decay_factor(0, 100, 0, 0.5)  # no warmup: decay starts at 1.0
         1.0
+
+        ```
     """
     total = max(1, total_steps)
     if step < warmup_steps:

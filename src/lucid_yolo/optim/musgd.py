@@ -188,6 +188,7 @@ class MuSGD(Optimizer):
             matrix parameter it touches into NaN on the first step (A7).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> weight = torch.nn.Parameter(torch.randn(8, 4))
         >>> bias = torch.nn.Parameter(torch.zeros(8))
@@ -195,6 +196,8 @@ class MuSGD(Optimizer):
         >>> (weight.sum() + bias.sum()).backward()
         >>> opt.step()
         >>> opt.zero_grad()
+
+        ```
     """
 
     def __init__(
@@ -248,11 +251,14 @@ class MuSGD(Optimizer):
             given.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> param = torch.nn.Parameter(torch.randn(4, 4))
             >>> opt = MuSGD([param], lr=0.1)
             >>> param.grad = torch.ones_like(param)
             >>> _ = opt.step()
+
+            ```
         """
         loss: float | None = None
         if closure is not None:

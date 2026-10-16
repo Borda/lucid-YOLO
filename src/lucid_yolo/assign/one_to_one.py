@@ -75,6 +75,7 @@ class UniqueAssigner(SmallTargetAssigner):
             constructor forwards both to unchanged.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.assign import make_anchor_points
         >>> assigner = UniqueAssigner(topk=7)
@@ -87,6 +88,8 @@ class UniqueAssigner(SmallTargetAssigner):
         >>> out = assigner(scores, boxes, points, gt, labels, mask)
         >>> int(out.fg_mask.sum())  # STAL(topk=7) would yield 7 here
         1
+
+        ```
     """
 
     def __init__(
@@ -120,12 +123,15 @@ class UniqueAssigner(SmallTargetAssigner):
             (the highest-``t`` anchor of its positives).
 
         Examples:
+            ```pycon
             >>> import torch
             >>> from lucid_yolo.assign.one_to_one import UniqueAssigner
             >>> mask = torch.tensor([[[True, True, False]]])  # one GT, two positives
             >>> align = torch.tensor([[[0.2, 0.9, 0.0]]])  # anchor 1 aligns best
             >>> UniqueAssigner()._finalize_mask(mask, align)
             tensor([[[False,  True, False]]])
+
+            ```
         """
         masked_align = align_metric.masked_fill(~mask_pos, -1.0)  # (B, N, A)
         best_anchor = masked_align.argmax(dim=-1, keepdim=True)  # (B, N, 1)

@@ -78,8 +78,11 @@ def _resolve_eval_backend(requested: str) -> tuple[str, str | None]:
         recorded in the report rather than only printed.
 
     Examples:
+        ```pycon
         >>> _resolve_eval_backend("faster_coco_eval")
         ('faster_coco_eval', None)
+
+        ```
     """
     if requested == "faster_coco_eval":
         return "faster_coco_eval", None
@@ -121,11 +124,14 @@ def _check_arguments(batch_size: int | None, img_size: int | None, limit: int) -
             ``img_size`` is not a positive multiple of every head stride.
 
     Examples:
+        ```pycon
         >>> _check_arguments(32, 640, 0)  # a usable trio: returns nothing
         >>> _check_arguments(0, None, 0)
         Traceback (most recent call last):
             ...
         ValueError: batch_size must be a number >= 1; got 0
+
+        ```
     """
     require_at_least("limit", limit, 0)
     if batch_size is not None:
@@ -182,17 +188,23 @@ def evaluate(
             command implements a protocol for.
 
     Examples:
+        ```pycon
         >>> evaluate(Path("/nonexistent.ckpt"), Path("/data"))  # doctest: +IGNORE_EXCEPTION_DETAIL
         Traceback (most recent call last):
         FileNotFoundError: ...
 
+        ```
+
         The arguments are checked before the checkpoint is opened, so a refused flag
         costs nothing and names itself rather than the file it never got to:
 
+        ```pycon
         >>> evaluate(Path("/nonexistent.ckpt"), Path("/data"), limit=-5)
         Traceback (most recent call last):
             ...
         ValueError: limit must be a number >= 0; got -5
+
+        ```
     """
     _check_arguments(batch_size, img_size, limit)
     module, info = load_eval_module(checkpoint, use_ema=ema)
@@ -261,8 +273,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         The protocol's exit code.
 
     Examples:
+        ```pycon
         >>> main(["--help"])  # argparse exits the process on --help  # doctest: +SKIP
         0
+
+        ```
     """
     return int(auto_cli(evaluate, args=None if argv is None else list(argv), as_positional=False))
 

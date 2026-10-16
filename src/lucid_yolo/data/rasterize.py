@@ -134,9 +134,12 @@ def _ring_window(ring: Tensor, height: int, width: int) -> tuple[int, int, int, 
         (``y1 <= y0`` or ``x1 <= x0``) when the ring lies entirely outside it.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _ring_window(torch.tensor([[1.2, 2.5], [4.0, 2.5], [4.0, 5.5]]), 8, 8)
         (2, 6, 1, 5)
+
+        ```
     """
     low_x, low_y = (float(value) for value in ring.amin(dim=0))
     high_x, high_y = (float(value) for value in ring.amax(dim=0))
@@ -171,12 +174,15 @@ def _fill_ring(mask: Tensor, ring: Tensor, height: int, width: int) -> None:
         width: Mask width in pixels.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> mask = torch.zeros((6, 6), dtype=torch.bool)
         >>> square = torch.tensor([[1.0, 1.0], [4.0, 1.0], [4.0, 4.0], [1.0, 4.0]])
         >>> _fill_ring(mask, square, 6, 6)
         >>> int(mask.sum())
         9
+
+        ```
     """
     if ring.shape[0] < _MIN_RING_POINTS:
         return  # no area to enclose, and `amin` on an empty ring would raise

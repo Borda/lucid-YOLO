@@ -405,10 +405,13 @@ def _refit_clipped_batch(parts: list[Tensor], indices: list[int], clipped: Tenso
         envelopes: Float32 envelopes, updated at the same rows.
 
     Examples:
+        ```pycon
         >>> boxes, envelopes = torch.ones(2, 5), torch.ones(2, 4)
         >>> _refit_clipped_batch([torch.empty(0, 2, dtype=torch.float64)], [1], boxes, envelopes)
         >>> boxes[1].tolist(), envelopes[1].tolist()
         ([0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0])
+
+        ```
     """
     source_boxes = clipped[indices].to(torch.float64)
     clipped[indices] = 0.0
@@ -447,11 +450,14 @@ def _clip_one(ring: Tensor, rbox: Tensor, height: float, width: float) -> tuple[
         float32; zeros when nothing of the box survives the clip.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> quad = torch.tensor([[2.0, 0.0], [6.0, 0.0], [6.0, 2.0], [2.0, 2.0]], dtype=torch.float64)
         >>> rb = torch.tensor([4.0, 1.0, 4.0, 2.0, 0.0], dtype=torch.float64)
         >>> _clip_one(quad, rb, height=4.0, width=5.0)[1].tolist()
         [2.0, 0.0, 5.0, 2.0]
+
+        ```
     """
     return _refit_clipped(_clip_to_window(ring, 0.0, 0.0, width, height), rbox)
 
@@ -467,9 +473,12 @@ def _refit_clipped(part: Tensor, rbox: Tensor) -> tuple[Tensor, Tensor]:
         The fitted rotated box and clipped envelope; zeros for an empty part.
 
     Examples:
+        ```pycon
         >>> fitted, envelope = _refit_clipped(torch.empty(0, 2, dtype=torch.float64), torch.zeros(5))
         >>> fitted.shape, envelope.shape
         (torch.Size([5]), torch.Size([4]))
+
+        ```
     """
     if part.shape[0] < _MIN_AREA_CORNERS or float(_polygon_area(part)) <= 0.0:
         return torch.zeros(_RBOX_DIM), torch.zeros(_BOX_DIM)
