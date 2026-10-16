@@ -596,6 +596,54 @@ def _clip_to_window(ring: Tensor, x0: float, y0: float, x1: float, y1: float) ->
     return ring
 
 
+def _clip_to_window_batch(rings: Tensor, x0: float, y0: float, x1: float, y1: float) -> list[Tensor]:
+    """Clip CPU rings in groups with the same current vertex count.
+
+    Each half-plane uses the scalar clipper's pointwise expression and vertex
+    order. Regrouping after each edge keeps the cyclic successor within each
+    ring, including when a clip creates or removes vertices. No padded vertices
+    enter the calculation. The caller retains the scalar path for gradients,
+    non-finite coordinates and other devices.
+
+    Args:
+        rings: Float64 ``(M, Q, 2)`` CPU rings, with no gradients.
+        x0: Window left bound.
+        y0: Window top bound.
+        x1: Window right bound.
+        y1: Window bottom bound.
+
+    Returns:
+        One clipped ring per input, in input order. Empty rings stay empty.
+
+    Examples:
+        >>> squares = torch.tensor([[[0., 0.], [4., 0.], [4., 4.], [0., 4.]]], dtype=torch.float64)
+        >>> _clip_to_window_batch(squares, 0., 0., 2., 4.)[0].tolist()
+        [[0.0, 0.0], [2.0, 0.0], [2.0, 4.0], [0.0, 4.0]]
+    """
+    parts = list(rings.unbind(0))
+    for axis, bound, keep_upper in ((0, x0, True), (0, x1, False), (1, y0, True), (1, y1, False)):
+        buckets: dict[int, list[int]] = {}
+        for index, part in enumerate(parts):
+            if part.shape[0]:
+                buckets.setdefault(part.shape[0], []).append(index)
+        for count, indices in buckets.items():
+            ring = torch.stack([parts[index] for index in indices])
+            coordinate = ring[:, :, axis]
+            inside = coordinate >= bound if keep_upper else coordinate <= bound
+            following = ring.roll(-1, dims=1)
+            crossing = inside != inside.roll(-1, dims=1)
+            delta = following[:, :, axis] - coordinate
+            safe = torch.where(delta == 0, torch.ones_like(delta), delta)
+            ratio = ((bound - coordinate) / safe).unsqueeze(-1)
+            intersections = ring + ratio * (following - ring)
+            candidates = torch.stack([ring, intersections], dim=2).reshape(len(indices), 2 * count, 2)
+            keep = torch.stack([inside, crossing], dim=2).reshape(len(indices), 2 * count)
+            sizes = [int(size) for size in keep.sum(dim=1).tolist()]
+            for index, part in zip(indices, torch.split(candidates[keep], sizes), strict=True):
+                parts[index] = part
+    return parts
+
+
 def _clip_halfplane(ring: Tensor, axis: int, bound: float, keep_upper: bool) -> Tensor:
     """Clip a ring to one half-plane, keeping vertex order.
 
