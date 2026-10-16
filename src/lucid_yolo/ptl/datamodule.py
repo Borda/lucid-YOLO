@@ -277,8 +277,11 @@ def _val_worker_target(img_size: int) -> int:
         :data:`_VAL_REFERENCE_SIDE`, at least 1.
 
     Examples:
+        ```pycon
         >>> _val_worker_target(640), _val_worker_target(1024)
         (4, 10)
+
+        ```
     """
     scale = (img_size / _VAL_REFERENCE_SIDE) ** 2
     return max(1, round(_VAL_MAX_WORKERS * scale))
@@ -657,9 +660,12 @@ def _host_sample(sample: _TrainingSample) -> tuple[Tensor, Targets]:
         The fully augmented image and its original targets.
 
     Examples:
+        ```pycon
         >>> sample = (torch.zeros(3, 2, 2), Targets.empty())
         >>> _host_sample(sample) is sample
         True
+
+        ```
     """
     if isinstance(sample, _DeferredHSVSample):
         return HSVJitter().apply(sample.image, sample.targets, sample.params)
@@ -819,9 +825,12 @@ def _transport_survives(plugin: Precision) -> bool:
         ``True`` when both probe tensors come back at their original dtypes.
 
     Examples:
+        ```pycon
         >>> from pytorch_lightning.plugins.precision import DoublePrecision
         >>> _transport_survives(Precision()), _transport_survives(DoublePrecision())
         (True, False)
+
+        ```
     """
     probe = (torch.zeros(1, dtype=_DEFERRED_IMAGE_DTYPE), torch.zeros(1, dtype=_DEFERRED_GAIN_DTYPE))
     images, gains = cast("tuple[Tensor, Tensor]", plugin.convert_input(probe))

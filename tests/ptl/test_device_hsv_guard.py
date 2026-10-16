@@ -98,7 +98,7 @@ def test_casting_plugin_keeps_worker_hsv(detseg_fixture_dir: Path, make_plugin: 
         pytest.param(partial(MixedPrecision, "bf16-mixed", "cuda"), id="amp-bf16-mixed"),
     ],
 )
-def test_preserving_plugin_still_defers(detseg_fixture_dir: Path, make_plugin: Callable[[], Precision]) -> None:
+def test_preserving_plugin_defers(detseg_fixture_dir: Path, make_plugin: Callable[[], Precision]) -> None:
     """A plugin whose input conversion is a no-op keeps the deferred transport, silently.
 
     Single-device float32 and native AMP are the configurations the flag exists for;

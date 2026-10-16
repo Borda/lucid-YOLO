@@ -174,7 +174,7 @@ def test_transport_matches_host_colour_and_flip(dtype: torch.dtype, mask_targets
 
 @pytest.mark.parametrize("shift", [0, 3, 7])
 @pytest.mark.parametrize("batch", [1, 2, 5])
-def test_degenerate_pixels_match_the_host_transform_at_every_gain_bound(batch: int, shift: int) -> None:
+def test_degenerate_pixels_match_host_transform_at_gain_bounds(batch: int, shift: int) -> None:
     """Greys, primaries, a wrapping hue and clamped channels stay bit-equal to the per-image transform.
 
     Each row of the batch rolls the pixel table and takes a different bound of the default
@@ -192,10 +192,8 @@ def test_degenerate_pixels_match_the_host_transform_at_every_gain_bound(batch: i
     assert torch.equal(actual, expected)
 
 
-@pytest.mark.parametrize(
-    "cache_images", [pytest.param(False, id="decoded-per-epoch"), pytest.param(True, id="cached-images")]
-)
-def test_partial_batches_over_two_epochs_match_the_host_pipeline(tmp_path: Path, cache_images: bool) -> None:
+@pytest.mark.parametrize("cache_images", [False, True])
+def test_partial_batches_over_two_epochs_match_host_pipeline(tmp_path: Path, cache_images: bool) -> None:
     """Three images at batch size two give a short final batch, and the second epoch keeps matching.
 
     The draw sequence continues across the epoch boundary, so a deferred loader that consumed
@@ -271,7 +269,7 @@ def test_cpu_fallback_warns_once_and_preserves_default(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("precision", ["16-true", "bf16-true", "64-true", "transformer-engine"])
-def test_casting_precision_keeps_the_original_transport(tmp_path: Path, precision: str) -> None:
+def test_casting_precision_keeps_original_transport(tmp_path: Path, precision: str) -> None:
     """Plugins that cast before the data hook retain worker-side HSV and its gain precision."""
     module = _module(_root(tmp_path), device_hsv=True)
     module.trainer = SimpleNamespace(accelerator=CUDAAccelerator(), precision=precision)
@@ -283,7 +281,7 @@ def test_casting_precision_keeps_the_original_transport(tmp_path: Path, precisio
 
 
 @pytest.mark.parametrize("precision", ["32-true", "16-mixed", "bf16-mixed"])
-def test_eligible_precision_defers_and_the_hook_restores_the_host_batch(tmp_path: Path, precision: str) -> None:
+def test_eligible_precision_defers_and_hook_restores_host_batch(tmp_path: Path, precision: str) -> None:
     """Every precision that keeps float inputs defers HSV, and the Lightning hook yields the host batch.
 
     The ``channels_last`` branch of the hook runs only for CUDA images, so it stays unexercised offline.
@@ -328,7 +326,7 @@ def test_host_diagnostics_resolve_colour_without_quantization() -> None:
     assert _host_sample(ordinary) is ordinary
 
 
-def test_consumer_keeps_the_hue_divisor_on_the_image_device() -> None:
+def test_consumer_keeps_hue_divisor_on_image_device() -> None:
     """Offline CI detects a scalar-divisor reversion before a CUDA runner is needed.
 
     This is the only CPU-run guard of that reversion: the CPU divides by a host scalar
@@ -381,7 +379,7 @@ def test_consumer_keeps_the_hue_divisor_on_the_image_device() -> None:
         ),
     ],
 )
-def test_near_tie_pixels_keep_the_division_codes(
+def test_near_tie_pixels_keep_division_codes(
     bits: list[int], gains: tuple[float, float, float], codes: list[int]
 ) -> None:
     """Pixels whose codes move under reciprocal hue division keep the per-image transform's codes.

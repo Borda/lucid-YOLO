@@ -37,7 +37,7 @@ def test_ordinary_pairs_collate_identically_through_either_entry() -> None:
     assert training_packed.hsv_gains is None
 
 
-def test_training_loader_routes_through_the_private_collate(tmp_path: Path) -> None:
+def test_training_loader_routes_through_private_collate(tmp_path: Path) -> None:
     """Only the training loader can see deferred samples, so only it uses the widened collate."""
     datamodule = DetectionDataModule(data_root=tmp_path, batch_size=2, num_workers=0, variant="n", img_size=64)
     # Stand-in one-item splits: building a loader reads only a split's length, never its
