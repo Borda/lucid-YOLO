@@ -129,13 +129,15 @@ def _matrix_shape(gradient: Tensor) -> tuple[int, int]:
 
 
 def _padding_batches(bucket: list[_PendingUpdate]) -> Iterator[list[_PendingUpdate]]:
-    """Group widths while keeping the padded gradient within the old two-stack budget.
+    """Group widths while keeping each padded gradient stack within its members' own bytes.
 
-    The existing exact-shape update stacks both parameters and gradients. Here only
-    the gradients are padded, so those two stacks supply the byte budget rather than
-    an arbitrary aspect-ratio limit. Sorting by width makes each extension pay for
-    the smallest remaining width; a width that exceeds the budget starts another
-    batch. No tensor value is read on the host.
+    A batch may hold padded gradients no larger than the parameter and gradient bytes
+    of the matrices in that batch, the amount an exact-shape stack of the same
+    matrices would hold. Only the gradients are padded, so that per-batch sum supplies
+    the byte budget rather than an arbitrary aspect-ratio limit; it does not compare
+    with any stack the exact-shape path builds for singletons or mixed shapes. Sorting
+    by width makes each extension pay for the smallest remaining width; a width that
+    exceeds the budget starts another batch. No tensor value is read on the host.
     """
     batch: list[_PendingUpdate] = []
     budget = 0
@@ -269,10 +271,13 @@ class MuSGD(Optimizer):
         each matrix's original dimensions. This reduces the n detector's 41 exact
         shapes to fewer launch groups without changing the iteration itself.
 
-        ``_padding_batches`` bounds the padded allocation by the parameter and
-        gradient stacks the old path builds. Singletons and equal-shape batches keep
-        their original implementation. Shared parameter storage keeps exact-shape
-        keys too: reordering overlapping updates could change decoupled decay.
+        ``_padding_batches`` bounds each padded gradient stack by the parameter and
+        gradient bytes of the matrices in its own batch. A singleton, or a batch whose
+        matrices all share one shape, keeps the original implementation; equal-shape
+        matrices that share a smaller dimension with a matrix of another width join
+        the padded batch. Parameters whose memory overlaps, shared storage included,
+        keep exact-shape keys too: reordering overlapping updates could change
+        decoupled decay.
         CPU and MPS retain their existing route. CUDA momentum uses three foreach
         operations when storage is independent; vectors and the zero-Muon arm keep
         their original SGD update formula.
