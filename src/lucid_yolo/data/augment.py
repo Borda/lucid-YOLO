@@ -174,9 +174,12 @@ def _rgb_to_hsv(image: Tensor, hue_divisor: float | Tensor) -> Tensor:
         The image's HSV channels.
 
     Examples:
+        ```pycon
         >>> image = torch.zeros(3, 1, 1)
         >>> _rgb_to_hsv(image, image.new_full((), 6.0)).flatten().tolist()
         [0.0, 0.0, 0.0]
+
+        ```
     """
     r, g, b = image[0], image[1], image[2]
     maxc = image.amax(dim=0)
@@ -271,10 +274,13 @@ def _jitter_hsv_batch(images: Tensor, gains: Tensor) -> Tensor:
         The colour-jittered batch, at the input dtype.
 
     Examples:
+        ```pycon
         >>> images = torch.zeros(2, 3, 2, 2)
         >>> gains = torch.zeros(2, 3, dtype=torch.float64)
         >>> _jitter_hsv_batch(images, gains).shape
         torch.Size([2, 3, 2, 2])
+
+        ```
     """
     divisor = images.new_full((), 6.0)
     hsv: Tensor = torch.vmap(lambda image: _rgb_to_hsv(image, divisor))(images)
