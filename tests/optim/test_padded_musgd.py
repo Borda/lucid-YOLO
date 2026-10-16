@@ -280,7 +280,7 @@ def test_momentum_batches_without_reassociation(
         optimizer.step()
         if step == 7:
             saved = copy.deepcopy(optimizer.state_dict())
-            optimizer = MuSGD(params, **{**settings, "lr": 0.5})
+            optimizer = MuSGD(params, **settings)
             optimizer.load_state_dict(saved)
         for param, buffer, value in zip(params, buffers, expected, strict=True):
             actual = optimizer.state[param]["momentum_buffer"]
