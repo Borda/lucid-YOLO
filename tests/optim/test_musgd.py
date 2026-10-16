@@ -314,8 +314,8 @@ class TestExactShapeBatching:
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
 
     @pytest.mark.usefixtures("batching_on_every_device")
-    def test_shape_and_dtype_boundaries_form_separate_batches(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Equal dimensions batch, an opposite orientation and float64 do not, and every value still matches unbatched.
+    def test_orientation_shares_batch_while_dtype_stays_separate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Opposite orientations share a wide batch; float64 stays separate and each value matches unbatched.
 
         Values are checked against the same `_expected_muon_update` construction the
         equal-shape test uses, so the boundary is proven on outcomes, not only on the
@@ -338,7 +338,6 @@ class TestExactShapeBatching:
         opt.step()
 
         assert calls == [
-            (torch.Size([6, 4]), torch.float32),
             (torch.Size([4, 6]), torch.float32),
             (torch.Size([6, 4]), torch.float64),
         ]
