@@ -2,9 +2,9 @@
 
 > Engineering log · [Phase 17 — R1 pose-objective parity](https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/)
 >
-> 🔗 Depends on [WP-192](https://borda.github.io/lucid-YOLO/work_packages/wp-192/) · Needed by [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/)
+> 🔗 Depends on [WP-192](https://borda.github.io/lucid-YOLO/work_packages/wp-192/) · Needed by [WP-193b](https://borda.github.io/lucid-YOLO/work_packages/wp-193b/), [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/)
 >
-> ⬅️ [WP-192b](https://borda.github.io/lucid-YOLO/work_packages/wp-192b/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/) ➡️
+> ⬅️ [WP-192b](https://borda.github.io/lucid-YOLO/work_packages/wp-192b/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-193b](https://borda.github.io/lucid-YOLO/work_packages/wp-193b/) ➡️
 
 
 ## WP-193 — post-backward state updates use fewer CUDA launches
