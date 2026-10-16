@@ -74,7 +74,7 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     )
     _write(
         docs_dir / "DECISIONS.md",
-        "".join(f"| D{i} | t |\n" for i in range(1, 29))
+        "".join(f"| D{i} | t |\n" for i in range(1, 30))
         + "".join(
             f"## Decision D{i} — {adr}\n"
             for i, adr in enumerate(("ADR-001", "ADR-002", "ADR-003", "ADR-004", "ADR-005"), 1)
@@ -83,7 +83,7 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     _write(docs_dir / "ESCALATION.md", "escalation\n")
     _write(
         docs_dir / "ROADMAP.md",
-        "196 numbered work packages.\n" + "".join(f"| {i:03d} | a | b | c | d | ✅ |\n" for i in range(1, 197)),
+        "197 numbered work packages.\n" + "".join(f"| {i:03d} | a | b | c | d | ✅ |\n" for i in range(1, 198)),
     )
     _write(docs_dir / "DATASETS.md", "datasets\n")
     _write(docs_dir / "TRAINING.md", "training\n")
@@ -309,7 +309,7 @@ class TestCheckRoadmapWpIdsUniqueAndComplete:
 
         violations = audit.check_roadmap_wp_ids_unique_and_complete(tmp_path / "docs", tmp_path)
 
-        assert any("shrank below 196" in violation for violation in violations)
+        assert any("shrank below 197" in violation for violation in violations)
 
     def test_clean_at_floor(self, tmp_path: Path) -> None:
         """A contiguous roadmap at the floor count reports no violation."""
@@ -365,12 +365,12 @@ class TestCheckRoadmapHeaderCount:
         _write_required_docs(tmp_path / "docs", tmp_path)
         text = (tmp_path / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
         _write(
-            tmp_path / "docs" / "ROADMAP.md", text.replace("196 numbered work packages.", "5 numbered work packages.")
+            tmp_path / "docs" / "ROADMAP.md", text.replace("197 numbered work packages.", "5 numbered work packages.")
         )
 
         violations = audit.check_roadmap_header_count(tmp_path / "docs", tmp_path)
 
-        assert violations == ["header states 5 numbered work packages but the table carries 196"]
+        assert violations == ["header states 5 numbered work packages but the table carries 197"]
 
     def test_clean_when_counts_agree(self, tmp_path: Path) -> None:
         """A stated package count matching the numbered rows reports no violation."""
@@ -435,7 +435,7 @@ class TestCheckDecisionsIds:
     def test_flags_missing_adr(self, tmp_path: Path) -> None:
         """A missing ADR section heading is reported even when ids are contiguous."""
         _write_required_docs(tmp_path / "docs", tmp_path)
-        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 29)))
+        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 30)))
 
         violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
 
@@ -455,7 +455,7 @@ class TestCheckDecisionsIds:
 
         violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
 
-        assert any("decisions shrank below 28 rows: 27" in violation for violation in violations)
+        assert any("decisions shrank below 29 rows: 28" in violation for violation in violations)
 
     def test_clean_for_full_register(self, tmp_path: Path) -> None:
         """A contiguous register at the floor with every ADR section reports no violation."""

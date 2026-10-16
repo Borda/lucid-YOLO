@@ -31,12 +31,12 @@ DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 #: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted. Raise it when adding
 #: a work package; never lower it.
-_WP_FLOOR = 196
+_WP_FLOOR = 197
 
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
 #: stays contiguous. Raise it when adding a decision; never lower it.
-_DECISION_FLOOR = 28
+_DECISION_FLOOR = 29
 
 #: Lowest assumption count ASSUMPTIONS.md is allowed to hold, for the same ratchet
 #: reason as the two floors above.
