@@ -34,7 +34,7 @@ sec. 6-7); no optimizer implementation is consulted.
 from __future__ import annotations
 
 import math
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from typing import TYPE_CHECKING, Any, NamedTuple, overload
 
 import torch
@@ -291,10 +291,10 @@ class MuSGD(Optimizer):
         independent_storage = len(storage_counts) == len(group["params"]) and not _memory_overlaps(inspectable)
         active = [param for param in group["params"] if param.grad is not None]
         adjusted = self._foreach_nesterov(active, momentum, storage_counts)
-        for index, param in enumerate(active):
+        for param in active:
             grad = param.grad
             assert grad is not None
-            nesterov_grad = self._nesterov_grad(param, grad, momentum) if adjusted is None else adjusted[index]
+            nesterov_grad = self._nesterov_grad(param, grad, momentum) if adjusted is None else adjusted.popleft()
             if self._is_batchable_matrix(param, group) and param.device.type in _BATCHED_DEVICE_TYPES:
                 rows, _ = _matrix_shape(nesterov_grad)
                 shape = param.shape
@@ -328,7 +328,7 @@ class MuSGD(Optimizer):
 
     def _foreach_nesterov(
         self, params: list[Tensor], momentum: float, storage_counts: Counter[int]
-    ) -> list[Tensor] | None:
+    ) -> deque[Tensor] | None:
         """Batch the same three momentum operations when their storage is independent.
 
         ``buffer.mul_(momentum).add_(grad)`` stays two rounded operations, followed
@@ -337,6 +337,10 @@ class MuSGD(Optimizer):
         MPS by default) and unusual restored state keep the scalar method; shared
         parameter, gradient or buffer storage does too, because advancing one
         buffer could otherwise change another operation's input.
+
+        The adjusted gradients come back in parameter order as a queue the caller
+        pops from, so each one is released once its update has consumed it instead
+        of living until the whole group is done.
         """
         on_gated_device = all(
             type(param) in _STORAGE_TYPES and param.device.type in _BATCHED_DEVICE_TYPES for param in params
@@ -388,7 +392,7 @@ class MuSGD(Optimizer):
             torch._foreach_add_(group_buffers, group_gradients)
             results = torch._foreach_add(group_gradients, group_buffers, alpha=momentum)
             adjusted.update(zip(indices, results, strict=True))
-        return [adjusted[index] for index in range(len(params))]
+        return deque(adjusted[index] for index in range(len(params)))
 
     @staticmethod
     def _padded_parameter_updates(bucket: list[_PendingUpdate], group: dict[str, Any]) -> Iterator[Tensor]:
