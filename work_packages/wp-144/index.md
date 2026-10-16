@@ -1,0 +1,25 @@
+# 📦 WP-144 — `ci: provenance trailers enforced on contributor commits`
+
+> Engineering log · [Phase 13 — Contributor admission, augmentation guard and keypoint parity, v0.6.0](https://borda.github.io/lucid-YOLO/engineering/phase-13-contributor-admission/)
+>
+> 🔗 Depends on [WP-141](https://borda.github.io/lucid-YOLO/work_packages/wp-141/) · Needed by none
+>
+> ⬅️ [WP-143](https://borda.github.io/lucid-YOLO/work_packages/wp-143/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-145](https://borda.github.io/lucid-YOLO/work_packages/wp-145/) ➡️
+
+
+## WP-144 — the layer that produces an artifact, and the contradiction it exposed
+
+<a id="wp-144"></a>
+
+A `trailers` job in `lint.yml` runs `check_commit_trailers.py --range` over a pull request's own commits. This is the only admission layer producing something reviewable rather than a promise: a contributor must name what an algorithmic change derives from, so an unnamed derivation on a loss or an assigner is visible at review instead of after release.
+
+**`ci-tests.yml`'s exemption was right and too wide.** Its comment said the trailer contract is a local pre-commit check "because a squash merge replaces the messages this workflow would have validated", which is true of the merge result and false of the submission. Checking the squashed commit validates a message nobody wrote; checking the contributor's own commits validates the ones review actually reads. The comment now says which half it covers rather than reading as a blanket exemption.
+
+**Wiring it up exposed a contradiction between the checker and the guide.** `WP_RE` required `WP: <digits>`, so every commit needed a roadmap row — while D18, and the guide [WP-141](https://borda.github.io/lucid-YOLO/work_packages/wp-141/) had just written, say a change altering no shipped behaviour, no public symbol, no golden and no documented assumption lands without one. Enforced as written, CI would have demanded a row id from exactly the contributors D18 exempts, and the first person to hit it would have been told to invent a number. `WP:` now also takes the literal `none`.
+
+`none` rather than an omitted trailer, and the distinction is the point: it matches how `Assumptions:` states its own absence, and it makes the message say *no row applies* instead of leaving a reader to decide whether one was forgotten. Omission is still refused, and so is free text — a test pins each. The other three trailers stay mandatory, because the derivation question does not go away because the tracking did.
+
+**The range path had no test at all** before this row, in either checker: `validate_message` was covered and the git walk under it was not. Both now assert that an empty range is clean — a pull request selecting no commit is not one that failed to cite — and the trailer checker additionally validates this repository's own last ten commits, so a regression that let a real message fail surfaces here rather than on a contributor's first pull request.
+
+With this row Phase 13's four-row tail closes. Every numbered row in the roadmap is now ✅; what is not done is not a row — the repository is still private, and O3 still stands between here and the relaxation these four layers were built for.
+

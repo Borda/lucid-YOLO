@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, oriented-detection, and keypoint-detection methods described in the YOLO26 paper (arXiv:2606.03748)">
+        <meta name="description" content="Finds each person and the location of each of their joints: a box, a score and K points per object — here COCO's 17 human-pose points.">
       
       
         <meta name="author" content="Jirka Borovec">
@@ -18,7 +18,7 @@
         <link rel="prev" href="../obb/">
       
       
-        <link rel="next" href="../../PROVENANCE/">
+        <link rel="next" href="../../notebooks/development_gates/">
       
       
         
@@ -28,10 +28,10 @@
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
-      
-        <title>Model card — keypoints - lucid-yolo</title>
-      
-    
+  
+    <title>Keypoints model card — lucid-yolo n - lucid-yolo</title>
+  
+
     
       <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
@@ -55,12 +55,33 @@
       
     
     
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
     <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
     
     
+  
+  
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="lucid-yolo">
+  <meta property="og:title" content="Keypoints model card — lucid-yolo n">
+  <meta property="og:description" content="Finds each person and the location of each of their joints: a box, a score and K points per object — here COCO&#39;s 17 human-pose points.">
+  <meta property="og:url" content="https://borda.github.io/lucid-YOLO/model_cards/keypoints/"><meta property="og:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="lucid-yolo: clean-room, NMS-free YOLO in PyTorch Lightning">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
+  <meta name="twitter:title" content="Keypoints model card — lucid-yolo n">
+  <meta name="twitter:description" content="Finds each person and the location of each of their joints: a box, a score and K points per object — here COCO&#39;s 17 human-pose points.">
+  
+    <link rel="alternate" type="text/markdown" href="index.md" title="Markdown copy of this page">
+  
+  
+
   </head>
   
   
@@ -80,7 +101,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#model-card-lucid-yolo-keypoint-detector-n-scale" class="md-skip">
+        <a href="#keypoints-lucid-yolo-n" class="md-skip">
           Skip to content
         </a>
       
@@ -94,7 +115,7 @@
 
   
 
-<header class="md-header md-header--shadow" data-md-component="header">
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
     <a href="../.." title="lucid-yolo" class="md-header__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
       
@@ -116,7 +137,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Model card — keypoints
+              Keypoints model card — lucid-yolo n
             
           </span>
         </div>
@@ -211,13 +232,116 @@
     
   </nav>
   
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../REPRODUCTION_REPORT/" class="md-tabs__link">
+          
+  
+  
+  Results
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../detection/" class="md-tabs__link">
+          
+  
+  
+  Models
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../ROADMAP/" class="md-tabs__link">
+          
+  
+  
+  Project
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
 </header>
     
     <div class="md-container" data-md-component="container">
       
       
-        
-          
         
       
       <main class="md-main" data-md-component="main">
@@ -231,8 +355,10 @@
                     
 
 
+  
 
-<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
     <a href="../.." title="lucid-yolo" class="md-nav__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
       
@@ -263,9 +389,25 @@
   
   
   
-    <li class="md-nav__item">
-      <a href="../.." class="md-nav__link">
+    
+    
+    
+    
+      
+      
         
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
   
   
   <span class="md-ellipsis">
@@ -279,13 +421,50 @@
   
   
 
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Home
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
       </a>
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
   
   
   
@@ -295,26 +474,26 @@
     
     
       
-        
+      
         
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_2" >
         
           
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+          <label class="md-nav__link" for="__nav_1_2" id="__nav_1_2_label" tabindex="0">
             
   
   
   <span class="md-ellipsis">
     
   
-    Running the models
+    Method
   
 
     
@@ -325,12 +504,128 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_2">
             <span class="md-nav__icon md-icon"></span>
             
   
-    Running the models
+    Method
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../method/how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How the detector works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../method/nms-vs-nms-free/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NMS versus NMS-free
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_1_3" id="__nav_1_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Run it
   
 
           </label>
@@ -398,33 +693,183 @@
     </li>
   
 
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
     
       
       
-  
-  
-    
-  
-  
-  
+        
+      
     
     
-    
-    
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-      
-    
-    
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_4" >
         
           
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+          <label class="md-nav__link" for="__nav_1_4" id="__nav_1_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clean-room
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Clean-room
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROVENANCE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ASSUMPTIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assumptions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DECISIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
             
   
   
@@ -442,8 +887,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_3">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -467,7 +912,87 @@
   <span class="md-ellipsis">
     
   
-    Reproduction report
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_2" id="__nav_2_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releases
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Releases
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.1.0: Detection
   
 
     
@@ -488,6 +1013,363 @@
   
   
     <li class="md-nav__item">
+      <a href="../../report/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.2.0: Instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/oriented-detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.3.0: Oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/consolidated-note/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.4.0: Consolidated note
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.5.0: Keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_2_6" id="__nav_2_2_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unreleased
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_2_2_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_2_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Unreleased
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/correction-scoring-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Correction, scoring engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/correction-keypoint-sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Correction, keypoint sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model cards
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Model cards
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../detection/" class="md-nav__link">
         
   
@@ -495,7 +1377,7 @@
   <span class="md-ellipsis">
     
   
-    Model card — detection
+    Detection
   
 
     
@@ -523,7 +1405,7 @@
   <span class="md-ellipsis">
     
   
-    Model card — instance segmentation
+    Instance segmentation
   
 
     
@@ -551,7 +1433,7 @@
   <span class="md-ellipsis">
     
   
-    Model card — oriented detection
+    Oriented detection
   
 
     
@@ -588,7 +1470,7 @@
   <span class="md-ellipsis">
     
   
-    Model card — keypoints
+    Keypoints
   
 
     
@@ -606,7 +1488,7 @@
   <span class="md-ellipsis">
     
   
-    Model card — keypoints
+    Keypoints
   
 
     
@@ -632,10 +1514,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#model-details" class="md-nav__link">
+  <a href="#at-a-glance" class="md-nav__link">
     <span class="md-ellipsis">
       
-        📇 Model details
+        ⚡ At a glance
       
     </span>
   </a>
@@ -643,10 +1525,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#intended-use" class="md-nav__link">
+  <a href="#motivation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        🧭 Intended use
+        💡 Motivation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#use-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧭 Use cases
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📇 Model details
       
     </span>
   </a>
@@ -669,6 +1573,17 @@
     <span class="md-ellipsis">
       
         🏋️ Training procedure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#training-curves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📈 Training curves
       
     </span>
   </a>
@@ -745,19 +1660,23 @@
     </li>
   
 
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
     
       
-      
-  
-  
-  
-  
-    
-    
-    
-    
       
         
+          
+          
         
       
     
@@ -766,411 +1685,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
         
           
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Clean-room record
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Clean-room record
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../PROVENANCE/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Provenance log
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../ASSUMPTIONS/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Assumption register
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../DECISIONS/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Decision record
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-    
-      
-        
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
-        
-          
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Execution
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Execution
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../ROADMAP/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Work-package roadmap
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../RESEARCH_LOG/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Research log
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../ENGINEERING_LOG/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Engineering log
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../ESCALATION/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Escalation log
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-    
-      
-        
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
-        
-          
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Contributing
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Contributing
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../CONTRIBUTING/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Contributor guide
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-    
-      
-        
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
-        
-          
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="">
             
   
   
@@ -1188,8 +1706,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_7">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1345,6 +1863,2113 @@
     </li>
   
 
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ROADMAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_2" id="__nav_4_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Logs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RESEARCH_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ENGINEERING_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/cross-cutting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-cutting engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ESCALATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Escalation log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3" id="__nav_4_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phases
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phases
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_1" id="__nav_4_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 0 — Foundation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 0 — Foundation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-00-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_2" id="__nav_4_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 1 — Data pipeline
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 1 — Data pipeline
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-01-data-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_3" id="__nav_4_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 2 — Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 2 — Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-02-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_4" id="__nav_4_3_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 3 — Assignment and losses
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 3 — Assignment and losses
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-03-assignment-and-losses/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_5" id="__nav_4_3_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 4 — MuSGD
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 4 — MuSGD
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-04-musgd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_6" id="__nav_4_3_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 5 — Lightning training loop
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 5 — Lightning training loop
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-05-training-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-05-training-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_7" id="__nav_4_3_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 6 — Evaluation, v0.1.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 6 — Evaluation, v0.1.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-06-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-06-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_8" id="__nav_4_3_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 7 — Instance segmentation, v0.2.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 7 — Instance segmentation, v0.2.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-07-instance-segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_9" id="__nav_4_3_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 8 — Oriented detection, v0.3.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 8 — Oriented detection, v0.3.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-08-oriented-detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-08-oriented-detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_10" id="__nav_4_3_10_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 9 — Inference and generalization
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 9 — Inference and generalization
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-09-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-09-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_11" id="__nav_4_3_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 10 — Consolidation, v0.4.0, then rolling
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 10 — Consolidation, v0.4.0, then rolling
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-10-consolidation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-10-consolidation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_12" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_12" id="__nav_4_3_12_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 11 — Rolling, toward v0.5.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_12">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 11 — Rolling, toward v0.5.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-11-rolling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_13" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_13" id="__nav_4_3_13_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 12 — Keypoint detection, v0.5.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 12 — Keypoint detection, v0.5.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-12-keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-12-keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_14" id="__nav_4_3_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 13 — Contributor admission, augmentation guard and keypoint parity, v0.6.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 13 — Contributor admission, augmentation guard and keypoint parity, v0.6.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-13-contributor-admission/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_15" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_15" id="__nav_4_3_15_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 14 — Augmentation upstreaming to fuse, v0.7.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_15">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 14 — Augmentation upstreaming to fuse, v0.7.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-14-augmentation-upstreaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_16" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_16" id="__nav_4_3_16_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 15 — Audit remediation, v0.8.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_16">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 15 — Audit remediation, v0.8.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-15-audit-remediation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_17" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_17" id="__nav_4_3_17_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 16 — Training throughput
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_17">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 16 — Training throughput
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-16-training-throughput/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_18" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_18" id="__nav_4_3_18_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 17 — R1 pose-objective parity
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_18">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 17 — R1 pose-objective parity
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-17-pose-objective-parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributor guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
     
   </ul>
 </nav>
@@ -1373,10 +3998,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#model-details" class="md-nav__link">
+  <a href="#at-a-glance" class="md-nav__link">
     <span class="md-ellipsis">
       
-        📇 Model details
+        ⚡ At a glance
       
     </span>
   </a>
@@ -1384,10 +4009,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#intended-use" class="md-nav__link">
+  <a href="#motivation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        🧭 Intended use
+        💡 Motivation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#use-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧭 Use cases
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📇 Model details
       
     </span>
   </a>
@@ -1410,6 +4057,17 @@
     <span class="md-ellipsis">
       
         🏋️ Training procedure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#training-curves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📈 Training curves
       
     </span>
   </a>
@@ -1496,10 +4154,58 @@
   
 
 
-<h1 id="model-card-lucid-yolo-keypoint-detector-n-scale">🕺 Model card — lucid-yolo keypoint detector (n scale)<a class="headerlink" href="#model-card-lucid-yolo-keypoint-detector-n-scale" title="Permanent link">&para;</a></h1>
-<p>Covers the keypoint model produced by the Pose-smoke tier run, released as <code>0.5.0</code>. That tier was accepted at roadmap 125 on 2026-08-25, on the mechanism-claim evidence recorded in <code>RESEARCH_LOG.md</code> and the acceptance table in <code>REPRODUCTION_REPORT.md</code>. One card per task family; detection, instance segmentation and oriented detection each have their own.</p>
+<h1 id="keypoints-lucid-yolo-n">🕺 Keypoints — lucid-yolo <code>n</code><a class="headerlink" href="#keypoints-lucid-yolo-n" title="Permanent link">&para;</a></h1>
+<p><img alt="Animated sketch: a person is boxed, seventeen points appear on the body and are joined into a skeleton" src="../../assets/card_keypoints.svg" /></p>
+<blockquote>
+<p>Finds each person and the location of each of their joints: a box, a score and <code>K</code> points per object — here COCO's 17 human-pose points.</p>
+</blockquote>
+<h2 id="at-a-glance">⚡ At a glance<a class="headerlink" href="#at-a-glance" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Task</td>
+<td>keypoint detection: a box, a score and <code>K</code> points per object; this checkpoint is <code>K = 17</code>, COCO's human-pose schema</td>
+</tr>
+<tr>
+<td>Data</td>
+<td>COCO 2017 <code>person_keypoints</code>, 640 px</td>
+</tr>
+<tr>
+<td>Size</td>
+<td><code>n</code> scale, 2.378M parameters, 5.514 GFLOPs</td>
+</tr>
+<tr>
+<td>Result</td>
+<td>OKS AP and box mAP50-95 on COCO val2017, both decode paths — see <a href="#evaluation">Evaluation</a></td>
+</tr>
+<tr>
+<td>Release</td>
+<td>v0.5.0, Pose-smoke tier, accepted at roadmap 125 on 2026-08-25 on the mechanism-claim evidence in <a href="../../RESEARCH_LOG/"><code>RESEARCH_LOG.md</code></a> and the acceptance table in the <a href="../../report/keypoints/">reproduction report</a></td>
+</tr>
+<tr>
+<td>Try it</td>
+<td><a href="../../notebooks/demo_keypoints/">keypoints demo notebook</a></td>
+</tr>
+<tr>
+<td>Weights</td>
+<td>not published (D14)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="motivation">💡 Motivation<a class="headerlink" href="#motivation" title="Permanent link">&para;</a></h2>
+<p>A box says where a person is; keypoints say where their nose, shoulders, elbows, wrists, hips, knees and ankles are. The task adds a third point-regression stem to the same detector and trains it with RLE — a normalizing-flow likelihood over the residual rather than a fixed distance loss — whose claim this run tests against a flow-free control.</p>
 <p><strong>The task is keypoints; human pose is one instantiation of it.</strong> <code>K</code> is a constructor argument the way the class count is — nothing in the head, the loss or the decode path knows what a point <em>means</em>, and the project's own wiring gate runs a 7-point synthetic symbol schema (R21) rather than a human one. This card describes the checkpoint that trained on COCO's 17-point <code>person</code> schema, so everything below is stated in pose terms because that is what this particular model learned — not because the architecture is pose-specific. That checkpoint is not distributed: <strong>releases publish no weights (D14)</strong>, so "this checkpoint" throughout this card names a run whose artifacts are the numbers and the recipe, never a file you can fetch.</p>
 <p><strong>Where the genericity stops.</strong> <code>K</code> generalizes the <em>model</em>; it does not generalize the <em>protocol</em>. Scoring a schema under OKS needs a per-point sigma vector and the left/right pairs a horizontal flip must swap, and <code>K</code> supplies neither. R12 publishes exactly one sigma table — the 17 human values, derived from measured annotator standard deviations — and this project adds a single uniform fallback at R12's median for schemas that have no annotator to derive variance from (A67), which is an honest default rather than a general derivation; an OKS quoted under it is not comparable to a published COCO pose OKS despite sharing a scale. The flip pairs are read off the annotation file's own keypoint <em>names</em> (<code>_build_keypoint_flip_pairs</code>, <code>data/coco.py</code>), which means a COCO file that names its points supplies them, a file that does not gets "mirror coordinates only", two categories declaring different name lists is a hard error, and a <strong>YOLO root never supplies them at all</strong>. The shipped scorer says as much by refusing: <code>lucid-eval</code>'s pose path checks the checkpoint's <code>num_keypoints</code> against 17 and <strong>rejects any other <code>K</code></strong> rather than scoring it against a schema it does not share (<code>eval/pose_eval.py</code>) — point <em>i</em> of a different schema's prediction is not point <em>i</em> of COCO's annotation, and R12's sigmas measure annotator variance on joints that are not the ones being predicted. Training a new <code>K</code> is a flag; scoring it is a modelling decision you own, and the tooling makes you own it explicitly.</p>
+<h2 id="use-cases">🧭 Use cases<a class="headerlink" href="#use-cases" title="Permanent link">&para;</a></h2>
+<p><strong>Intended.</strong> Reproduction research: verifying RLE's mechanism claim against a non-flow control, and serving as a readable from-scratch implementation of a normalizing-flow keypoint loss composed onto an NMS-free detector. The <code>e2e</code> path is the interesting artifact, as for the other three tasks — points come out of a forward containing no suppression op.</p>
+<p><strong>Walk-through.</strong> The pipeline this card describes — data, a short fit, <code>lucid-eval</code>, predictions drawn over the ground truth — runs end to end in <a href="../../notebooks/demo_keypoints/">the keypoints demo notebook</a>, short enough for a Colab session and not a reproduction of the numbers here.</p>
+<p><strong>Not intended.</strong> Any operational use, and this is a stronger statement than for the other three tasks — see Ethical considerations below. This is a smoke-tier reproduction at the smallest scale, one seed, evaluated on exactly one benchmark, with an e2e OKS AP of 0.27 on a single category. Production use of any kind, safety-critical or rights-affecting decisions, biometric identification, activity or gait recognition, surveillance of any kind, or any deployment where an OKS AP of 0.27 would be mistaken for a reliable perception system.</p>
 <h2 id="model-details">📇 Model details<a class="headerlink" href="#model-details" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -1543,16 +4249,12 @@
 </tr>
 <tr>
 <td>Paper</td>
-<td>Pose objective per the YOLO26 paper, arXiv:2606.03748 (R1) sec. 3.4.2 — reproduced <strong>in part</strong>: the RLE term (R1 Eq. 10–11), transcribed from its origin, Li et al., <em>Human Pose Regression with Residual Log-Likelihood Estimation</em>, arXiv:2107.11291 (R14), without the OKS term R1 composes it with (A75; available since WP-178 at <code>oks_gain = 0.0</code>, so this checkpoint's objective is unchanged); detection backbone/neck/head per R1. Independent implementation; not affiliated with, endorsed by, or derived from Ultralytics, the RLE authors, or their codebases</td>
+<td>Pose objective per the YOLO26 paper, arXiv:2606.03748 (R1) sec. 3.4.2 — reproduced <strong>in part</strong>: the RLE term (R1 Eq. 10–11), transcribed from its origin, Li et al., <em>Human Pose Regression with Residual Log-Likelihood Estimation</em>, arXiv:2107.11291 (R14), without the OKS term R1 composes it with (A75; available since <a href="../../work_packages/wp-178/">WP-178</a> at <code>oks_gain = 0.0</code>, so this checkpoint's objective is unchanged); detection backbone/neck/head per R1. Independent implementation; not affiliated with, endorsed by, or derived from Ultralytics, the RLE authors, or their codebases</td>
 </tr>
 </tbody>
 </table>
-<p>The keypoint objective replaces nothing — box and classification terms are unchanged, and the point term rides beside them at <code>keypoint_gain = 1.0</code> (A68). RLE's own trainable-weight loss, a 6-layer RealNVP flow over the standardized residual, is a submodule of the training module rather than a stateless function (WP-123): it is the only loss in this project carrying parameters. A Laplace-NLL control with the flow term removed (WP-135) exists as a <code>keypoint_loss</code> switch on the training module, defaulting to <code>rle</code>; the checkpoint this card describes trained under that default. That control is not this model — see WP-125's acceptance run in <code>RESEARCH_LOG.md#wp-125</code> for the paired comparison.</p>
-<p>Only a <code>task="keypoints"</code> module carries any of this. A <code>"detect"</code>/<code>"segment"</code>/<code>"obb"</code> checkpoint's state dict is untouched by the flow, the point stem, or the switch — the same "opt-in changes nothing else" property WP-087 established for the mask head.</p>
-<h2 id="intended-use">🧭 Intended use<a class="headerlink" href="#intended-use" title="Permanent link">&para;</a></h2>
-<p><strong>Intended.</strong> Reproduction research: verifying RLE's mechanism claim against a non-flow control, and serving as a readable from-scratch implementation of a normalizing-flow keypoint loss composed onto an NMS-free detector. The <code>e2e</code> path is the interesting artifact, as for the other three tasks — points come out of a forward containing no suppression op.</p>
-<p><strong>Walk-through.</strong> The pipeline this card describes — data, a short fit, <code>lucid-eval</code>, predictions drawn over the ground truth — runs end to end in <a href="../../notebooks/demo_keypoints/">the keypoints demo notebook</a>, short enough for a Colab session and not a reproduction of the numbers here.</p>
-<p><strong>Not intended.</strong> Any operational use, and this is a stronger statement than for the other three tasks — see Ethical considerations below. This is a smoke-tier reproduction at the smallest scale, one seed, evaluated on exactly one benchmark, with an e2e OKS AP of 0.25 on a single category. Production use of any kind, safety-critical or rights-affecting decisions, biometric identification, activity or gait recognition, surveillance of any kind, or any deployment where an OKS AP of 0.25 would be mistaken for a reliable perception system.</p>
+<p>The keypoint objective replaces nothing — box and classification terms are unchanged, and the point term rides beside them at <code>keypoint_gain = 1.0</code> (A68). RLE's own trainable-weight loss, a 6-layer RealNVP flow over the standardized residual, is a submodule of the training module rather than a stateless function (<a href="../../work_packages/wp-123/">WP-123</a>): it is the only loss in this project carrying parameters. A Laplace-NLL control with the flow term removed (<a href="../../work_packages/wp-135/">WP-135</a>) exists as a <code>keypoint_loss</code> switch on the training module, defaulting to <code>rle</code>; the checkpoint this card describes trained under that default. That control is not this model — see <a href="../../work_packages/wp-125/">WP-125</a>'s acceptance run in <code>../work_packages/wp-125.md#wp-125</code> for the paired comparison.</p>
+<p>Only a <code>task="keypoints"</code> module carries any of this. A <code>"detect"</code>/<code>"segment"</code>/<code>"obb"</code> checkpoint's state dict is untouched by the flow, the point stem, or the switch — the same "opt-in changes nothing else" property <a href="../../work_packages/wp-087/">WP-087</a> established for the mask head.</p>
 <h2 id="training-data">🗂️ Training data<a class="headerlink" href="#training-data" title="Permanent link">&para;</a></h2>
 <p>COCO 2017 <code>person_keypoints_train2017</code> — the <code>person</code> category only, 17-point human-pose annotations under CC-BY-4.0 with images under their original Flickr terms. No other data; no pretraining (D2: no Objects365 initialization).</p>
 <p>The same composition limits <code>detection.md</code>/<code>segmentation.md</code> record for COCO's <code>person</code> category apply here with more force, since this task's entire training signal is that category: web photography skewed toward particular geographies and contexts, no documented demographic balance, and no fairness evaluation across subgroups has been run. A point annotated <code>v=1</code> (labeled but occluded, R12) supervises the model to infer a location it cannot see (A66) — the model is trained, by design, to guess where an occluded body part is.</p>
@@ -1600,6 +4302,10 @@
 </tbody>
 </table>
 <p>The wiring gate that precedes any COCO launch is <code>scripts/overfit_micro.py --task keypoints</code>: 100 images, 548 instances, 1 class, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train OKS AP <strong>0.3357</strong> against a 0.30 floor (<code>goldens/gpu/overfit_micro_kp.json</code>) — a floor set low relative to the sibling gates' because OKS at A67's uniform sigma is a cliff on symbols a few dozen pixels across, not because the loop learns less.</p>
+<h2 id="training-curves">📈 Training curves<a class="headerlink" href="#training-curves" title="Permanent link">&para;</a></h2>
+<p><img alt="Pose-smoke training curves" src="../../figures/pose_smoke_training.svg" /></p>
+<p><em>Run v11, four panels. The validation box mAP50-95 (the same E2E proxy the other three tiers log); epoch-mean loss totals; the one-to-one branch's pre-gain box/classification/L1 components; and the RLE keypoint term, train and validation.</em></p>
+<p>How the run went, and what the curves show, is discussed in the <a href="../../report/keypoints/">reproduction report</a>.</p>
 <h2 id="evaluation">📊 Evaluation<a class="headerlink" href="#evaluation" title="Permanent link">&para;</a></h2>
 <p>COCO val2017, all 5000 images, <code>person_keypoints_val2017</code> ground truth, at 640 px through <code>lucid-eval</code>, one forward per batch decoding both paths. Boxes are scored by <code>faster_coco_eval</code>'s <code>COCOeval_faster</code>; points by the same engine's <code>iouType="keypoints"</code> protocol at R12's 17-value sigma table. EMA weights; raw weights were not evaluated for this run.</p>
 <table>
@@ -1635,15 +4341,15 @@
 </tr>
 </tbody>
 </table>
-<p>The <code>e2e</code> row is the one comparable to the training run's own <code>val/mAP</code> (box branch) and <code>val/oks_mAP</code> (point branch, WP-137) — the same convention <code>detection.md</code>/<code>segmentation.md</code> state for their own tables. Unlike box mAP, where <code>nms</code> scored marginally higher here, the point branch reverses: <code>e2e</code> OKS beats <code>nms</code> OKS on every threshold, though the gap (0.005 AP) is small enough that a second seed could plausibly move it either way.</p>
+<p>The <code>e2e</code> row is the one comparable to the training run's own <code>val/mAP</code> (box branch) and <code>val/oks_mAP</code> (point branch, <a href="../../work_packages/wp-137/">WP-137</a>) — the same convention <code>detection.md</code>/<code>segmentation.md</code> state for their own tables. Unlike box mAP, where <code>nms</code> scored marginally higher here, the point branch reverses: <code>e2e</code> OKS beats <code>nms</code> OKS on every threshold, though the gap (0.005 AP) is small enough that a second seed could plausibly move it either way.</p>
 <p><strong>Not comparable to R1 Table 9's mAP=63.0.</strong> That figure is the paper this project reproduces — not, as this card said until 2026-09-17, "a different paper" (D22) — but it is YOLO26s at full budget under the full objective, OKS + RLE at <code>(24, 1)</code>, and Table S10 puts the <code>n</code> scale this run trained at 57.2. This run is <code>n</code>, 50 epochs, RLE alone (<code>oks_gain = 0</code>, A75), on a point stem narrower than the paper's (A77); its acceptance criterion was never a pose figure — see Acceptance below.</p>
 <h2 id="limitations">⚠️ Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
-<p><strong>Smoke tier, one category.</strong> 50 epochs at the smallest scale, one seed, one benchmark, <code>person</code> only. An OKS AP of 0.27 is well below a well-trained pose model's range, and this run was never intended to close that gap — WP-125's acceptance is RLE's mechanism claim against a non-flow control, not an absolute pose figure.</p>
-<p><strong>Box branch and point branch are trained jointly but scored separately, and neither bounds the other.</strong> <code>val/mAP</code> (box) and <code>val/oks_mAP</code> (point) log beside each other, not one instead of the other (WP-137) — a checkpoint could in principle detect people well and localize their joints poorly, or the reverse, and the two curves would not say so to each other.</p>
+<p><strong>Smoke tier, one category.</strong> 50 epochs at the smallest scale, one seed, one benchmark, <code>person</code> only. An OKS AP of 0.27 is well below a well-trained pose model's range, and this run was never intended to close that gap — <a href="../../work_packages/wp-125/">WP-125</a>'s acceptance is RLE's mechanism claim against a non-flow control, not an absolute pose figure.</p>
+<p><strong>Box branch and point branch are trained jointly but scored separately, and neither bounds the other.</strong> <code>val/mAP</code> (box) and <code>val/oks_mAP</code> (point) log beside each other, not one instead of the other (<a href="../../work_packages/wp-137/">WP-137</a>) — a checkpoint could in principle detect people well and localize their joints poorly, or the reverse, and the two curves would not say so to each other.</p>
 <p><strong>Uniform-weight visibility policy is untested against the alternative.</strong> <code>v=1</code> (occluded) and <code>v=2</code> (visible) supervise identically (A66); no ablation here measures whether down-weighting occluded points would change the result.</p>
 <p><strong>The gain is un-tuned.</strong> <code>keypoint_gain = 1.0</code> is the deliberately unoptimized starting point (A68) — this run is evidence the value does not swamp or get swamped by the detection objective, not evidence it is well-balanced. No sweep has run.</p>
 <p><strong>One flow, not measured against two.</strong> The one-to-many and one-to-one branches share a single RLE flow (A69) rather than training one each; whether that matters is untested, and the overfit gate cannot tell, since a 100-image memorization run drives both branches to the same near-zero residual.</p>
-<p><strong>One device, and reproducibility narrower than <code>deterministic: true</code> reads.</strong> This tier trained on a single unrecorded Colab GPU; no run in this project has spanned more than one accelerator. For this task it could not have: <code>lucid-yolo fit</code> <strong>refuses <code>task: keypoints</code> on more than one process</strong> at setup, because <code>val/oks_mAP</code> accumulates plain Python lists nothing gathers across ranks and a per-rank average precision cannot be averaged back into the split's. <code>default_determinism</code> (<code>cli/train.py</code>) resolves <code>deterministic</code> to <code>"warn_only"</code> whenever MPS is the auto-picked accelerator — MPS ships no deterministic kernel for some backwards this model hits — so an Apple-silicon run is reproducible only up to those kernels while CPU and CUDA keep strict <code>True</code>. Separately, the seed reproduces a run only at the same <code>--data.num_workers</code>: 0 workers replays one augmentation stream byte for byte, <code>N</code> workers replays a different one re-seeded per worker and per epoch (WP-079). Both are determined by <code>seed</code>; 32 workers does not reproduce 0.</p>
+<p><strong>One device, and reproducibility narrower than <code>deterministic: true</code> reads.</strong> This tier trained on a single unrecorded Colab GPU; no run in this project has spanned more than one accelerator. For this task it could not have: <code>lucid-yolo fit</code> <strong>refuses <code>task: keypoints</code> on more than one process</strong> at setup, because <code>val/oks_mAP</code> accumulates plain Python lists nothing gathers across ranks and a per-rank average precision cannot be averaged back into the split's. <code>default_determinism</code> (<code>cli/train.py</code>) resolves <code>deterministic</code> to <code>"warn_only"</code> whenever MPS is the auto-picked accelerator — MPS ships no deterministic kernel for some backwards this model hits — so an Apple-silicon run is reproducible only up to those kernels while CPU and CUDA keep strict <code>True</code>. Separately, the seed reproduces a run only at the same <code>--data.num_workers</code>: 0 workers replays one augmentation stream byte for byte, <code>N</code> workers replays a different one re-seeded per worker and per epoch (<a href="../../work_packages/wp-079/">WP-079</a>). Both are determined by <code>seed</code>; 32 workers does not reproduce 0.</p>
 <h2 id="ethical-considerations">🤝 Ethical considerations<a class="headerlink" href="#ethical-considerations" title="Permanent link">&para;</a></h2>
 <p>This model predicts the full skeletal pose of every detected person in an image — not a box, not a silhouette, but the location of each joint. That is a materially more identifying and more sensitive readout than either the detector's box or the segmenter's mask: gait, posture and body configuration are usable for re-identification and activity inference in ways neither of those outputs directly supports. Any deployment reading pose from people carries surveillance, tracking and biometric-inference implications well beyond what this project has assessed, and none is planned. The intended-use section above is a boundary, not a disclaimer: the model has no evaluation supporting use on real people outside this benchmark, and an OKS AP of 0.27 means roughly three in four joints are not usefully localized at COCO's own strict thresholds.</p>
 <p>Failure modes are unbounded in the sense that matters — no calibration study exists, so per-point scores should not be read as confidence, an occluded joint is trained to be guessed rather than flagged as unknown (A66), and the model gives no signal when it is operating outside its training distribution or on a body configuration COCO's <code>person</code> category under-represents.</p>
@@ -1673,6 +4379,9 @@
 
 
 
+
+  
+  
 
 
 
@@ -1726,7 +4435,7 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
       <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>

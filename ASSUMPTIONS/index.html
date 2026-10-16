@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance-segmentation, oriented-detection, and keypoint-detection methods described in the YOLO26 paper (arXiv:2606.03748)">
+        <meta name="description" content="Anywhere the papers underdetermine the implementation, the chosen assumption, its public source, and its validation plan are recorded here before the…">
       
       
         <meta name="author" content="Jirka Borovec">
@@ -28,10 +28,10 @@
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
-      
-        <title>Assumption register - lucid-yolo</title>
-      
-    
+  
+    <title>Assumption Register - lucid-yolo</title>
+  
+
     
       <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
@@ -55,12 +55,33 @@
       
     
     
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
     <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
     
     
+  
+  
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="lucid-yolo">
+  <meta property="og:title" content="Assumption Register">
+  <meta property="og:description" content="Anywhere the papers underdetermine the implementation, the chosen assumption, its public source, and its validation plan are recorded here before the…">
+  <meta property="og:url" content="https://borda.github.io/lucid-YOLO/ASSUMPTIONS/"><meta property="og:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="lucid-yolo: clean-room, NMS-free YOLO in PyTorch Lightning">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
+  <meta name="twitter:title" content="Assumption Register">
+  <meta name="twitter:description" content="Anywhere the papers underdetermine the implementation, the chosen assumption, its public source, and its validation plan are recorded here before the…">
+  
+    <link rel="alternate" type="text/markdown" href="index.md" title="Markdown copy of this page">
+  
+  
+
   </head>
   
   
@@ -94,7 +115,7 @@
 
   
 
-<header class="md-header md-header--shadow" data-md-component="header">
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
     <a href=".." title="lucid-yolo" class="md-header__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
       
@@ -116,7 +137,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Assumption register
+              Assumption Register
             
           </span>
         </div>
@@ -211,13 +232,114 @@
     
   </nav>
   
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href=".." class="md-tabs__link">
+          
+  
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../REPRODUCTION_REPORT/" class="md-tabs__link">
+          
+  
+  
+  Results
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../model_cards/detection/" class="md-tabs__link">
+          
+  
+  
+  Models
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../ROADMAP/" class="md-tabs__link">
+          
+  
+  
+  Project
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
 </header>
     
     <div class="md-container" data-md-component="container">
       
       
-        
-          
         
       
       <main class="md-main" data-md-component="main">
@@ -225,14 +347,18 @@
           
             
               
+                
+              
               <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
                 <div class="md-sidebar__scrollwrap">
                   <div class="md-sidebar__inner">
                     
 
 
+  
 
-<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
     <a href=".." title="lucid-yolo" class="md-nav__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
       
@@ -261,11 +387,32 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
+  
+    
+    
+    
+    
+      
         
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+            
   
   
   <span class="md-ellipsis">
@@ -279,23 +426,63 @@
   
   
 
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Home
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
       </a>
     </li>
   
 
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
     
       
-      
-  
-  
-  
-  
-    
-    
-    
-    
       
         
+          
+          
         
       
     
@@ -304,17 +491,17 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_2" >
         
           
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+          <label class="md-nav__link" for="__nav_1_2" id="__nav_1_2_label" tabindex="">
             
   
   
   <span class="md-ellipsis">
     
   
-    Running the models
+    Method
   
 
     
@@ -325,12 +512,131 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_2">
             <span class="md-nav__icon md-icon"></span>
             
   
-    Running the models
+    Method
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../method/how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How the detector works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../method/nms-vs-nms-free/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NMS versus NMS-free
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_1_3" id="__nav_1_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Run it
   
 
           </label>
@@ -398,220 +704,25 @@
     </li>
   
 
+              
+            
+              
+                
+  
+  
     
-      
-      
   
   
   
-  
     
     
     
     
       
-        
-        
       
-    
-    
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
         
           
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Results
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Results
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../REPRODUCTION_REPORT/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reproduction report
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../model_cards/detection/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Model card — detection
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../model_cards/segmentation/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Model card — instance segmentation
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../model_cards/obb/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Model card — oriented detection
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../model_cards/keypoints/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Model card — keypoints
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-    
-  
-  
-  
-    
-    
-    
-    
-      
-        
+          
         
       
     
@@ -620,17 +731,17 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_4" checked>
         
           
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+          <label class="md-nav__link" for="__nav_1_4" id="__nav_1_4_label" tabindex="">
             
   
   
   <span class="md-ellipsis">
     
   
-    Clean-room record
+    Clean-room
   
 
     
@@ -641,12 +752,12 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_4">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_1_4">
             <span class="md-nav__icon md-icon"></span>
             
   
-    Clean-room record
+    Clean-room
   
 
           </label>
@@ -666,7 +777,7 @@
   <span class="md-ellipsis">
     
   
-    Provenance log
+    Provenance
   
 
     
@@ -703,7 +814,7 @@
   <span class="md-ellipsis">
     
   
-    Assumption register
+    Assumptions
   
 
     
@@ -721,7 +832,7 @@
   <span class="md-ellipsis">
     
   
-    Assumption register
+    Assumptions
   
 
     
@@ -780,7 +891,7 @@
   <span class="md-ellipsis">
     
   
-    Decision record
+    Decisions
   
 
     
@@ -789,6 +900,14 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -812,26 +931,26 @@
     
     
       
-        
+      
         
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
             
   
   
   <span class="md-ellipsis">
     
   
-    Execution
+    Results
   
 
     
@@ -842,12 +961,12 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
   
-    Execution
+    Results
   
 
           </label>
@@ -860,14 +979,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../ROADMAP/" class="md-nav__link">
+      <a href="../REPRODUCTION_REPORT/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Work-package roadmap
+    Overview
   
 
     
@@ -887,122 +1006,31 @@
   
   
   
-    <li class="md-nav__item">
-      <a href="../RESEARCH_LOG/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Research log
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../ENGINEERING_LOG/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Engineering log
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../ESCALATION/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Escalation log
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
     
     
     
     
       
-        
+      
         
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_2_2" id="__nav_2_2_label" tabindex="0">
             
   
   
   <span class="md-ellipsis">
     
   
-    Contributing
+    Releases
   
 
     
@@ -1013,12 +1041,12 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_2">
             <span class="md-nav__icon md-icon"></span>
             
   
-    Contributing
+    Releases
   
 
           </label>
@@ -1031,14 +1059,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../CONTRIBUTING/" class="md-nav__link">
+      <a href="../report/detection/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Contributor guide
+    v0.1.0: Detection
   
 
     
@@ -1047,6 +1075,242 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../report/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.2.0: Instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../report/oriented-detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.3.0: Oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../report/consolidated-note/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.4.0: Consolidated note
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../report/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.5.0: Keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_2_6" id="__nav_2_2_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unreleased
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_2_2_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_2_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Unreleased
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../report/correction-scoring-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Correction, scoring engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../report/correction-keypoint-sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Correction, keypoint sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -1070,19 +1334,243 @@
     
     
       
-        
+      
         
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
         
           
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model cards
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Model cards
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_cards/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
             
   
   
@@ -1100,8 +1588,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_7">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1257,6 +1745,2113 @@
     </li>
   
 
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ROADMAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_2" id="__nav_4_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Logs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../RESEARCH_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ENGINEERING_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/cross-cutting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-cutting engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ESCALATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Escalation log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3" id="__nav_4_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phases
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phases
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_1" id="__nav_4_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 0 — Foundation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 0 — Foundation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-00-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_2" id="__nav_4_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 1 — Data pipeline
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 1 — Data pipeline
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../research/phase-01-data-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_3" id="__nav_4_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 2 — Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 2 — Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../research/phase-02-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_4" id="__nav_4_3_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 3 — Assignment and losses
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 3 — Assignment and losses
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../research/phase-03-assignment-and-losses/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_5" id="__nav_4_3_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 4 — MuSGD
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 4 — MuSGD
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../research/phase-04-musgd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_6" id="__nav_4_3_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 5 — Lightning training loop
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 5 — Lightning training loop
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../research/phase-05-training-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-05-training-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_7" id="__nav_4_3_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 6 — Evaluation, v0.1.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 6 — Evaluation, v0.1.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../research/phase-06-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-06-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_8" id="__nav_4_3_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 7 — Instance segmentation, v0.2.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 7 — Instance segmentation, v0.2.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../research/phase-07-instance-segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_9" id="__nav_4_3_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 8 — Oriented detection, v0.3.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 8 — Oriented detection, v0.3.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../research/phase-08-oriented-detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-08-oriented-detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_10" id="__nav_4_3_10_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 9 — Inference and generalization
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 9 — Inference and generalization
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../research/phase-09-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-09-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_11" id="__nav_4_3_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 10 — Consolidation, v0.4.0, then rolling
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 10 — Consolidation, v0.4.0, then rolling
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../research/phase-10-consolidation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-10-consolidation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_12" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_12" id="__nav_4_3_12_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 11 — Rolling, toward v0.5.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_12">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 11 — Rolling, toward v0.5.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-11-rolling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_13" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_13" id="__nav_4_3_13_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 12 — Keypoint detection, v0.5.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 12 — Keypoint detection, v0.5.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../research/phase-12-keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-12-keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_14" id="__nav_4_3_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 13 — Contributor admission, augmentation guard and keypoint parity, v0.6.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 13 — Contributor admission, augmentation guard and keypoint parity, v0.6.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-13-contributor-admission/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_15" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_15" id="__nav_4_3_15_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 14 — Augmentation upstreaming to fuse, v0.7.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_15">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 14 — Augmentation upstreaming to fuse, v0.7.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-14-augmentation-upstreaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_16" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_16" id="__nav_4_3_16_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 15 — Audit remediation, v0.8.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_16">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 15 — Audit remediation, v0.8.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-15-audit-remediation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_17" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_17" id="__nav_4_3_17_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 16 — Training throughput
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_17">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 16 — Training throughput
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-16-training-throughput/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_18" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_18" id="__nav_4_3_18_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 17 — R1 pose-objective parity
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_18">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 17 — R1 pose-objective parity
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-17-pose-objective-parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributor guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
     
   </ul>
 </nav>
@@ -1266,7 +3861,9 @@
             
             
               
-              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" hidden>
                 <div class="md-sidebar__scrollwrap">
                   <div class="md-sidebar__inner">
                     
@@ -1309,6 +3906,8 @@
               <article class="md-content__inner md-typeset">
                 
                   
+  
+
 
 
   
@@ -1322,7 +3921,7 @@
 
 <h1 id="assumption-register">📋 Assumption Register<a class="headerlink" href="#assumption-register" title="Permanent link">&para;</a></h1>
 <p>Anywhere the papers underdetermine the implementation, the chosen assumption, its public source, and its validation plan are recorded here <strong>before</strong> the corresponding code lands. Rule: any new gap discovered during implementation gets an entry before the code merges. Assumption revisions after a release ship as PATCH (if within golden tolerances) or the next 0.MINOR (if results move).</p>
-<p><strong>Adding a row also raises the floor.</strong> <code>_ASSUMPTION_FLOOR</code> in <code>scripts/lint/audit_docs_present.py</code> counts the rows this register is allowed to hold and never fall below; the <code>docs-present</code> hook reports a shrink against it. It is a ratchet: raise it to the new row count in the same commit that adds the row, never lower it. <code>_DECISION_FLOOR</code> (<code>DECISIONS.md</code>) and <code>_WP_FLOOR</code> (<code>ROADMAP.md</code>) work the same way and want the same edit. The floor sat at 26 against 73 rows until WP-168, which is 47 rows of slack — a register can only be certified by a number somebody keeps current.</p>
+<p><strong>Adding a row also raises the floor.</strong> <code>_ASSUMPTION_FLOOR</code> in <code>scripts/lint/audit_docs_present.py</code> counts the rows this register is allowed to hold and never fall below; the <code>docs-present</code> hook reports a shrink against it. It is a ratchet: raise it to the new row count in the same commit that adds the row, never lower it. <code>_DECISION_FLOOR</code> (<code>DECISIONS.md</code>) and <code>_WP_FLOOR</code> (<code>ROADMAP.md</code>) work the same way and want the same edit. The floor sat at 26 against 73 rows until <a href="../work_packages/wp-168/">WP-168</a>, which is 47 rows of slack — a register can only be certified by a number somebody keeps current.</p>
 <p>Status legend, <strong>rewritten 2026-09-06 to describe what the column actually holds</strong> — the previous wording defined <code>revised</code> as "superseded" and <code>validated</code> as "validation plan executed and passed", and the register contradicts both:</p>
 <ul>
 <li><code>open</code> — the assumption governs, and the evidence that would settle it is not in yet: either the code has not landed, or the validation it names needs a run nobody has done. Not "unused": most <code>open</code> rows are shipping code.</li>
@@ -1362,7 +3961,7 @@
 <tr>
 <td>A3</td>
 <td>C3k2/C2PSA sub-block internals beyond Fig. S2</td>
-<td>Bottleneck/PSA internals per YOLO11 lineage; nested <code>C3k</code> inner-bottleneck count <strong>1</strong> (<code>_C3K_INNER_UNITS</code>, revised 2026-08-01 from 2 by WP-023 iteration 2 — at depth=1.0 the <code>l</code>/<code>x</code> variants carry two nested units per <code>c3k=True</code> stage and <code>n=2</code> overshot the R1 Table 7 FLOP budget; <code>n=1</code> lands all five scales within +/-5% FLOPs while keeping params within +/-2%)</td>
+<td>Bottleneck/PSA internals per YOLO11 lineage; nested <code>C3k</code> inner-bottleneck count <strong>1</strong> (<code>_C3K_INNER_UNITS</code>, revised 2026-08-01 from 2 by <a href="../work_packages/wp-023/">WP-023</a> iteration 2 — at depth=1.0 the <code>l</code>/<code>x</code> variants carry two nested units per <code>c3k=True</code> stage and <code>n=2</code> overshot the R1 Table 7 FLOP budget; <code>n=1</code> lands all five scales within +/-5% FLOPs while keeping params within +/-2%)</td>
 <td>R11, R1 Fig. S2</td>
 <td>Param/FLOP gate (Phase 2) — <code>tests/models/test_param_flops.py::test_det_vs_table7</code> passes all 5 scales</td>
 <td>active</td>
@@ -1418,7 +4017,7 @@
 <tr>
 <td>A10</td>
 <td>Resize semantics</td>
-<td>Letterbox, aspect-preserving. Since WP-155 the fit, the forward matrix and the resample are R21's — <code>letterbox_geometry</code>, <code>letterbox_matrix</code>, and a letterbox-only <code>Compose</code> segment that runs one <code>grid_sample</code> from the source canvas to the letterboxed one in place of an <code>F.interpolate</code> followed by an <code>F.pad</code>. What this row is actually about stays local: <code>Letterbox.forward_affine</code> and <code>Letterbox.inverse_map</code> keep their signatures and their semantics, and the inverse stays closed-form (<code>inv_r</code>, <code>-pad * inv_r</code>) rather than a numerical inversion of the forward matrix, because the round trip below has to be <strong>exact</strong> and a numerical inversion leaves a residual in it. Delegating moved pixels and not geometry, which is the whole content of the boundary here: <code>letterbox_image_mean</code> moved 0.5024 → 0.4994 and not one coordinate golden did (measured and re-frozen by WP-155b)</td>
+<td>Letterbox, aspect-preserving. Since <a href="../work_packages/wp-155/">WP-155</a> the fit, the forward matrix and the resample are R21's — <code>letterbox_geometry</code>, <code>letterbox_matrix</code>, and a letterbox-only <code>Compose</code> segment that runs one <code>grid_sample</code> from the source canvas to the letterboxed one in place of an <code>F.interpolate</code> followed by an <code>F.pad</code>. What this row is actually about stays local: <code>Letterbox.forward_affine</code> and <code>Letterbox.inverse_map</code> keep their signatures and their semantics, and the inverse stays closed-form (<code>inv_r</code>, <code>-pad * inv_r</code>) rather than a numerical inversion of the forward matrix, because the round trip below has to be <strong>exact</strong> and a numerical inversion leaves a residual in it. Delegating moved pixels and not geometry, which is the whole content of the boundary here: <code>letterbox_image_mean</code> moved 0.5024 → 0.4994 and not one coordinate golden did (measured and re-frozen by WP-155b)</td>
 <td>YOLO-lineage convention in third-party literature (e.g. R11); the letterbox segment itself is R21 (ADR-005)</td>
 <td>Bbox/mask round-trip test — <code>tests/data/test_letterbox.py</code></td>
 <td>open</td>
@@ -1498,7 +4097,7 @@
 <tr>
 <td>A20</td>
 <td>Angle branch structure <strong>and hidden width</strong> (R1 sec. 3.4.3 says only "separate branch ... to predict the orientation angle"; Fig. S2 draws one stem shape and no widths, and Table S11 reports whole-model sizes from which a branch width can only be inferred)</td>
-<td>A third per-level stem beside the box and class stems on <strong>each</strong> head branch, shaped like them — two depthwise-separable units then a 1x1 — and emitting <strong>one</strong> scalar per location. Widened 2026-08-11 by WP-062: the hidden width is <code>max(16, channels // 2)</code> (<code>_angle_stem_width</code>), <strong>not</strong> A28's shared <code>max(16, channels // 3)</code>, which the Table S11 gate rejected. Both divisors were measured on all five scales as the ratio of the isolated angle-branch cost to the increment Table S11 implies over Table 7 once the 80-to-15 class saving is credited back — <code>// 3</code>: n 0.76, s 0.98, m 0.66, l 0.66, x 0.63; <code>// 2</code>: n 1.22, s 1.62, m 1.09, l 1.09, x 1.04. Table S11 rounds params to 0.1 M, so that implied increment carries +/-59% at n and +/-21% at s and neither scale can discriminate; at m and l (+/-8%) and x (+/-3.5%) it can, and it selects <code>// 2</code>. <strong>Neither divisor is uniformly right</strong> — <code>// 3</code> undershoots the three large scales, <code>// 2</code> overshoots s at 1.62 — so the published angle cost is not one fixed fraction of the level width, and this row stays <code>open</code>: a rule chosen where the evidence is sharp, not a claim of Table S11 parity</td>
+<td>A third per-level stem beside the box and class stems on <strong>each</strong> head branch, shaped like them — two depthwise-separable units then a 1x1 — and emitting <strong>one</strong> scalar per location. Widened 2026-08-11 by <a href="../work_packages/wp-062/">WP-062</a>: the hidden width is <code>max(16, channels // 2)</code> (<code>_angle_stem_width</code>), <strong>not</strong> A28's shared <code>max(16, channels // 3)</code>, which the Table S11 gate rejected. Both divisors were measured on all five scales as the ratio of the isolated angle-branch cost to the increment Table S11 implies over Table 7 once the 80-to-15 class saving is credited back — <code>// 3</code>: n 0.76, s 0.98, m 0.66, l 0.66, x 0.63; <code>// 2</code>: n 1.22, s 1.62, m 1.09, l 1.09, x 1.04. Table S11 rounds params to 0.1 M, so that implied increment carries +/-59% at n and +/-21% at s and neither scale can discriminate; at m and l (+/-8%) and x (+/-3.5%) it can, and it selects <code>// 2</code>. <strong>Neither divisor is uniformly right</strong> — <code>// 3</code> undershoots the three large scales, <code>// 2</code> overshoots s at 1.62 — so the published angle cost is not one fixed fraction of the level width, and this row stays <code>open</code>: a rule chosen where the evidence is sharp, not a claim of Table S11 parity</td>
 <td>R1 sec. 3.4.3 ("separate branch"), R1 Fig. S2 (stem shape); the width itself: gap, inferred from R1 Table S11</td>
 <td><code>test_param_flops.py::test_obb_vs_tableS11</code> at the table's 1024 px and 15 classes (params +/-3.5%, FLOPs +/-5%); <code>test_obb_head.py::test_angle_stem_parameter_count_exact</code> pins each level term by term, <code>::test_angle_branch_uses_wider_stem_than_box_and_class_stems</code> pins the split against being tidied away</td>
 <td>open</td>
@@ -1506,15 +4105,15 @@
 <tr>
 <td>A21</td>
 <td>DOTA crop overlap (R1 sec. 4.5.3 says only "overlapping 1024x1024 crops")</td>
-<td>Overlap is a <strong>parameter</strong> of <code>tile_windows</code>, defaulting to the 200 px this row has recorded since the register was written, so the assumption still governs. Flagged 2026-08-11 by WP-057: 200 px is attested by <strong>neither</strong> cited source — R18 sec. 4 publishes its own protocol as 1024 px patches "with a stride set to 512", i.e. a 512 px overlap, and R13 (MMRotate, arXiv:2204.13317) fixes the long-edge-135 angle definition but names no crop overlap at all. The value is therefore a <strong>sensitivity item for the OBB tier</strong>: re-running the tier at overlap 512 against the default 200 is the check that settles it. Window placement is overlap-agnostic by construction — the last window of each axis sits flush against the far edge — so full coverage holds for any overlap in <code>[0, patch)</code> and the sweep costs only tiles, not code</td>
+<td>Overlap is a <strong>parameter</strong> of <code>tile_windows</code>, defaulting to the 200 px this row has recorded since the register was written, so the assumption still governs. Flagged 2026-08-11 by <a href="../work_packages/wp-057/">WP-057</a>: 200 px is attested by <strong>neither</strong> cited source — R18 sec. 4 publishes its own protocol as 1024 px patches "with a stride set to 512", i.e. a 512 px overlap, and R13 (MMRotate, arXiv:2204.13317) fixes the long-edge-135 angle definition but names no crop overlap at all. The value is therefore a <strong>sensitivity item for the OBB tier</strong>: re-running the tier at overlap 512 against the default 200 is the check that settles it. Window placement is overlap-agnostic by construction — the last window of each axis sits flush against the far edge — so full coverage holds for any overlap in <code>[0, patch)</code> and the sweep costs only tiles, not code</td>
 <td>R18 sec. 4 (1024 px patch, stride 512); R13 (angle definition only, no overlap); the 200 px value itself: gap</td>
-<td><code>tests/data/test_tiling.py::test_coverage_no_gaps</code> — no-gap coverage over sizes that divide evenly, leave a remainder or are shorter than the patch, including the A21 defaults on a DOTA-sized image; OBB-tier sensitivity run pending (WP-063/088)</td>
+<td><code>tests/data/test_tiling.py::test_coverage_no_gaps</code> — no-gap coverage over sizes that divide evenly, leave a remainder or are shorter than the patch, including the A21 defaults on a DOTA-sized image; OBB-tier sensitivity run pending (<a href="../work_packages/wp-063/">WP-063</a>/088)</td>
 <td>active</td>
 </tr>
 <tr>
 <td>A22</td>
 <td>Scalar weight of R1 Eq. 15's angle term in the total objective (R1 states the term and its internal <code>lambda</code>, but never its weight against the box and classification terms)</td>
-<td><strong>0.25</strong>, revised 2026-08-12 by WP-093 from the 1.0 this project assumed. The inherited value does not merely underperform, it <em>destabilises</em>: on the oriented overfit slice at 100 epochs across five seeds, <code>angle_gain = 1.0</code> cleared the 0.9 floor on 1 of 5 with a run-to-run spread of 0.667 and a worst seed of 0.3077, while <code>0.25</code> cleared 4 of 5 with spread 0.096. Mean angular error on elongated targets halves, 25.47 to 11.85 degrees. The failure is specific and mechanical: <code>sin^2(2 d_theta)</code> is zero at <strong>both</strong> 0 and 90 degrees, so for an elongated box the term scores a quarter turn as perfect and only the rotated IoU term objects, and its gradient <code>2 sin(4 d_theta)</code> reverses at 45 degrees. R1 intends this to be harmless — "elongated boxes receive smaller omega_i and remain primarily constrained by the rotated IoU loss" — but at the paper's own <code>lambda = 3</code> a 2:1 box still carries <code>omega = 0.948</code>, a five percent reduction, so the stated intent is not delivered by the stated formula in that band. The remedy is this gain and <strong>not</strong> <code>lambda</code>, which R1 does state and ablates (Table 11: <code>lambda = 5</code> scores worse than omitting the term entirely). Dose-response is not monotone per seed — seed 3 is best at 1.0 and worst at 0.5 — which is why a gain was chosen on aggregate behaviour rather than by picking the best-looking seed</td>
+<td><strong>0.25</strong>, revised 2026-08-12 by <a href="../work_packages/wp-093/">WP-093</a> from the 1.0 this project assumed. The inherited value does not merely underperform, it <em>destabilises</em>: on the oriented overfit slice at 100 epochs across five seeds, <code>angle_gain = 1.0</code> cleared the 0.9 floor on 1 of 5 with a run-to-run spread of 0.667 and a worst seed of 0.3077, while <code>0.25</code> cleared 4 of 5 with spread 0.096. Mean angular error on elongated targets halves, 25.47 to 11.85 degrees. The failure is specific and mechanical: <code>sin^2(2 d_theta)</code> is zero at <strong>both</strong> 0 and 90 degrees, so for an elongated box the term scores a quarter turn as perfect and only the rotated IoU term objects, and its gradient <code>2 sin(4 d_theta)</code> reverses at 45 degrees. R1 intends this to be harmless — "elongated boxes receive smaller omega_i and remain primarily constrained by the rotated IoU loss" — but at the paper's own <code>lambda = 3</code> a 2:1 box still carries <code>omega = 0.948</code>, a five percent reduction, so the stated intent is not delivered by the stated formula in that band. The remedy is this gain and <strong>not</strong> <code>lambda</code>, which R1 does state and ablates (Table 11: <code>lambda = 5</code> scores worse than omitting the term entirely). Dose-response is not monotone per seed — seed 3 is best at 1.0 and worst at 0.5 — which is why a gain was chosen on aggregate behaviour rather than by picking the best-looking seed</td>
 <td>R1 Eq. 15 (the term and <code>lambda</code>); the weight itself: gap</td>
 <td><code>test_obb_training.py::test_angle_gain_default_registered_a22_value</code> pins the value, since every other test passes gains explicitly and the default was previously unread. Measured lead-side, 35 training runs over four paired campaigns, five seeds each: gains 1.0 / 0.5 / 0.25 / 0.0 cleared 1 / 4 / 4 / 5 of 5 with mean elongated angular error 25.47 / 19.09 / 11.85 / 12.49 degrees. Still open at the OBB-smoke and DOTA tiers, where aspect ratios reach 5:1 and 10:1 and <code>omega</code> genuinely falls (0.750, 0.555) — the regime this fixture's 2:1 targets do not cover</td>
 <td>revised</td>
@@ -1522,7 +4121,7 @@
 <tr>
 <td>A23</td>
 <td>Rotated decode normalization (R1 Eq. 13 makes the predicted angle the raw pre-activation, so the head can emit any real number at any magnitude, and R1 never says where that number is brought back into a range)</td>
-<td>Normalization happens <strong>after</strong> the decode, not in the head: <code>decode_rboxes</code> ends in <code>rotated_geom.canonicalize</code>, returning the unique long-edge representative with <code>w &gt;= h</code> and theta on <code>[-pi/4, 3*pi/4)</code> (R13's long-edge-135 definition, WP-055's conventions). Two consequences are deliberate. The <strong>dense</strong> <code>(B, A, 5)</code> output is canonicalized rather than only the ranked detections, so a caller that decodes without ranking — a loss, an assigner, an export graph — cannot reach an un-normalized angle by a shorter path. And because theta and theta + pi describe the same rectangle, the decode is continuous across that identification: two raw values a half turn apart yield the same box rather than two boxes</td>
+<td>Normalization happens <strong>after</strong> the decode, not in the head: <code>decode_rboxes</code> ends in <code>rotated_geom.canonicalize</code>, returning the unique long-edge representative with <code>w &gt;= h</code> and theta on <code>[-pi/4, 3*pi/4)</code> (R13's long-edge-135 definition, <a href="../work_packages/wp-055/">WP-055</a>'s conventions). Two consequences are deliberate. The <strong>dense</strong> <code>(B, A, 5)</code> output is canonicalized rather than only the ranked detections, so a caller that decodes without ranking — a loss, an assigner, an export graph — cannot reach an un-normalized angle by a shorter path. And because theta and theta + pi describe the same rectangle, the decode is continuous across that identification: two raw values a half turn apart yield the same box rather than two boxes</td>
 <td>R13 (angle definition); the placement after the decode: gap</td>
 <td><code>test_obb_head.py::test_decode_canonicalizes_adversarial_raw_angles</code> over raw magnitudes far outside any range, <code>::test_decode_continuous_across_half_turn_identification</code>, <code>::test_angle_output_unsquashed_beyond_legacy_range</code> (100 radians out of the stem, evidence the Eq. 12 squashing is gone rather than merely unobserved)</td>
 <td>active</td>
@@ -1530,15 +4129,15 @@
 <tr>
 <td>A24</td>
 <td>Rotated evaluation IoU and its scoring protocol (R1 Tables 10-11 report rotated mAP50-95 on DOTA-v1.0 val and define neither the IoU, the matching rule, the recall interpolation, the detection cap nor the class-averaging convention)</td>
-<td>Exact polygon intersection: Sutherland-Hodgman clipping of one quadrilateral against the other plus the shoelace area, vectorized in torch on <code>rboxes_to_polygons</code> corners (<code>eval/dota_eval.py</code>, WP-063). Clipping is edge-inclusive, matching WP-055's <code>points_in_rboxes</code> (A25); a shared edge or corner bounds zero area and scores 0 either way. Working dtype follows the input — no float64, because evaluation runs on MPS, the constraint A41 records for ProbIoU. Conditioning is fixed structurally instead: IoU is translation-invariant, so each pair is re-centred on its own midpoint <strong>before</strong> its corners are expanded. The order is load-bearing and measured — worst error against a float64 shapely evaluation over 300 overlapping pairs is 1.4e-07 at every offset from 0 to 1e6 when re-centring precedes expansion, against 2.7e-05 at 1e4 and 1.4e-03 at 1e6 when it follows. Zero-area, negative-extent and reversed-winding boxes clamp to zero area and yield IoU 0 rather than NaN. Averaging follows R12's COCO conventions: ten thresholds 0.50 to 0.95 step 0.05, classes without ground truth excluded from the mean — refined to <strong>non-difficult</strong> ground truth, an all-difficult class having an empty recall denominator. Reported as <code>map</code>, <code>map_50</code>, <code>map_75</code>, <code>mar_300</code>, the first three sharing <code>coco_eval.py</code>'s names. The small/medium/large breakdown is deliberately absent: COCO's area ranges are an R12 constant with no oriented counterpart, and inventing one would be a threshold without a source</td>
+<td>Exact polygon intersection: Sutherland-Hodgman clipping of one quadrilateral against the other plus the shoelace area, vectorized in torch on <code>rboxes_to_polygons</code> corners (<code>eval/dota_eval.py</code>, <a href="../work_packages/wp-063/">WP-063</a>). Clipping is edge-inclusive, matching <a href="../work_packages/wp-055/">WP-055</a>'s <code>points_in_rboxes</code> (A25); a shared edge or corner bounds zero area and scores 0 either way. Working dtype follows the input — no float64, because evaluation runs on MPS, the constraint A41 records for ProbIoU. Conditioning is fixed structurally instead: IoU is translation-invariant, so each pair is re-centred on its own midpoint <strong>before</strong> its corners are expanded. The order is load-bearing and measured — worst error against a float64 shapely evaluation over 300 overlapping pairs is 1.4e-07 at every offset from 0 to 1e6 when re-centring precedes expansion, against 2.7e-05 at 1e4 and 1.4e-03 at 1e6 when it follows. Zero-area, negative-extent and reversed-winding boxes clamp to zero area and yield IoU 0 rather than NaN. Averaging follows R12's COCO conventions: ten thresholds 0.50 to 0.95 step 0.05, classes without ground truth excluded from the mean — refined to <strong>non-difficult</strong> ground truth, an all-difficult class having an empty recall denominator. Reported as <code>map</code>, <code>map_50</code>, <code>map_75</code>, <code>mar_300</code>, the first three sharing <code>coco_eval.py</code>'s names. The small/medium/large breakdown is deliberately absent: COCO's area ranges are an R12 constant with no oriented counterpart, and inventing one would be a threshold without a source</td>
 <td>R18 sec. 4 and its devkit (difficult convention); R12 (threshold grid, zero-GT exclusion); R13 (long-edge convention); R31 (the oracle); the polygon kernel and the re-centring order: gap</td>
-<td><code>tests/eval/test_dota_eval.py::TestRotatedIou::test_vs_oracle</code> — 600 random pairs across the canonical angle range against a shapely oracle at 1e-4, half near-coincident so the near-parallel regime is reached; <code>::test_vs_oracle_edge_cases</code> covers 15 named pairs including both range bounds of the square fold, zero-area and degenerate lines; lead-side re-measurement with the oracle reading back the same float32 values the kernel receives, holding 1.4e-07 to 2.3e-07 at offsets 0, 1e3, 1e4 and 1e6. OBB-tier confirmation pending WP-088</td>
+<td><code>tests/eval/test_dota_eval.py::TestRotatedIou::test_vs_oracle</code> — 600 random pairs across the canonical angle range against a shapely oracle at 1e-4, half near-coincident so the near-parallel regime is reached; <code>::test_vs_oracle_edge_cases</code> covers 15 named pairs including both range bounds of the square fold, zero-area and degenerate lines; lead-side re-measurement with the oracle reading back the same float32 values the kernel receives, holding 1.4e-07 to 2.3e-07 at offsets 0, 1e3, 1e4 and 1e6. OBB-tier confirmation pending <a href="../work_packages/wp-088/">WP-088</a></td>
 <td>active</td>
 </tr>
 <tr>
 <td>A25</td>
 <td>STAL/TAL containment for rotated GT (R1 sec. 3.3.3 states STAL generically over box dimensions and never restates it for oriented boxes)</td>
-<td>Point-in-rotated-rect containment, edge-inclusive, inherited from <code>points_in_rboxes</code>; the STAL clamp applied to the rotated <code>(w, h)</code> at the same <code>s_min = 8</code>, <code>s_ref = 16</code> the axis-aligned path uses, R1 giving no separate oriented thresholds. <strong>Revised 2026-08-11 (WP-061)</strong> with two scoping facts the original wording left implicit and that are now load-bearing: the rotated box decides <strong>candidacy only</strong> — the IoU, the alignment metric <code>t = s^alpha · u^beta</code>, <code>target_boxes</code> and <code>align_weights</code> all keep running on the axis-aligned <code>gt_boxes</code>, so entry <code>(b, n)</code> of the two must describe the same object and the oriented path is <strong>not</strong> end-to-end until rotated IoU lands in the metric (WP-062/088); and <code>gt_rboxes</code> is per call rather than per GT, so a batch is wholly oriented or wholly axis-aligned, an axis-aligned object inside an oriented batch encoding as <code>theta = 0</code></td>
+<td>Point-in-rotated-rect containment, edge-inclusive, inherited from <code>points_in_rboxes</code>; the STAL clamp applied to the rotated <code>(w, h)</code> at the same <code>s_min = 8</code>, <code>s_ref = 16</code> the axis-aligned path uses, R1 giving no separate oriented thresholds. <strong>Revised 2026-08-11 (<a href="../work_packages/wp-061/">WP-061</a>)</strong> with two scoping facts the original wording left implicit and that are now load-bearing: the rotated box decides <strong>candidacy only</strong> — the IoU, the alignment metric <code>t = s^alpha · u^beta</code>, <code>target_boxes</code> and <code>align_weights</code> all keep running on the axis-aligned <code>gt_boxes</code>, so entry <code>(b, n)</code> of the two must describe the same object and the oriented path is <strong>not</strong> end-to-end until rotated IoU lands in the metric (<a href="../work_packages/wp-062/">WP-062</a>/088); and <code>gt_rboxes</code> is per call rather than per GT, so a batch is wholly oriented or wholly axis-aligned, an axis-aligned object inside an oriented batch encoding as <code>theta = 0</code></td>
 <td>R1 sec. 3.3.3 (generic formulation); the oriented reading and the carried-over thresholds: gap</td>
 <td><code>test_rotated_assign.py::test_tiny_rotated_gt</code> (a 6x6 GT at 45 deg: vanilla TAL 0 candidates, STAL 4), <code>::test_rotation_excludes_envelope_corners</code> (a 16x16 GT at 45 deg drops the four envelope corners the axis-aligned test keeps), <code>::test_axis_aligned_assignment_bit_identical</code>. Lead-side check across the edit, on a scene with anchors exactly on GT boundaries: 20 assignment tensors, 6144 elements, bit-identical</td>
 <td>open</td>
@@ -1546,7 +4145,7 @@
 <tr>
 <td>A28</td>
 <td>Detection-head stem structure and hidden width (Fig. S2 shows the stem pair, not widths)</td>
-<td>Both box and class stems are <strong>depthwise-separable</strong> (two <code>DepthwiseConv+ConvBNAct</code> units + 1x1 output), shared hidden width <code>max(16, channels // 3)</code> (<code>_stem_width</code>); no <code>num_classes</code> floor (WP-023 iteration 1). Revised 2026-08-01 from the original full-conv box stem (<code>channels // 4</code>, two <code>3x3</code> convs) + class stem (<code>max(num_classes, channels // 2)</code>): the WP-023 param gate flagged the head as ~7-16x the reference budget (the box stem alone was ~3.7x the class stem despite emitting 4 vs <code>num_classes</code> channels, and the <code>num_classes</code> floor bloated the <code>n</code>/<code>s</code> head). The lightweight symmetric form lands all five scales within tolerance</td>
+<td>Both box and class stems are <strong>depthwise-separable</strong> (two <code>DepthwiseConv+ConvBNAct</code> units + 1x1 output), shared hidden width <code>max(16, channels // 3)</code> (<code>_stem_width</code>); no <code>num_classes</code> floor (<a href="../work_packages/wp-023/">WP-023</a> iteration 1). Revised 2026-08-01 from the original full-conv box stem (<code>channels // 4</code>, two <code>3x3</code> convs) + class stem (<code>max(num_classes, channels // 2)</code>): the <a href="../work_packages/wp-023/">WP-023</a> param gate flagged the head as ~7-16x the reference budget (the box stem alone was ~3.7x the class stem despite emitting 4 vs <code>num_classes</code> channels, and the <code>num_classes</code> floor bloated the <code>n</code>/<code>s</code> head). The lightweight symmetric form lands all five scales within tolerance</td>
 <td>R1 Fig. S2; YOLOv10/R6 lightweight-head lineage</td>
 <td>Param/FLOP gate (Phase 2) — <code>test_det_vs_table7</code></td>
 <td>active</td>
@@ -1554,7 +4153,7 @@
 <tr>
 <td>A29</td>
 <td>R1 Table 7 param/FLOP counting convention</td>
-<td>GFLOPs = <strong>2x</strong> fvcore MACs (conventional one-multiply-plus-one-add FLOPs; raw MACs land ~48% low). <strong>Params</strong> count the full trained checkpoint (both dual-head branches); <strong>FLOPs</strong> count the deployed NMS-free inference model only (backbone+neck+one-to-one head — the one-to-many branch is training-only and never executed at E2E inference). Determined empirically by the WP-023 gate (trying raw-MAC and both-branch FLOPs is measurement, not iteration)</td>
+<td>GFLOPs = <strong>2x</strong> fvcore MACs (conventional one-multiply-plus-one-add FLOPs; raw MACs land ~48% low). <strong>Params</strong> count the full trained checkpoint (both dual-head branches); <strong>FLOPs</strong> count the deployed NMS-free inference model only (backbone+neck+one-to-one head — the one-to-many branch is training-only and never executed at E2E inference). Determined empirically by the <a href="../work_packages/wp-023/">WP-023</a> gate (trying raw-MAC and both-branch FLOPs is measurement, not iteration)</td>
 <td>R6 (dual-assignment inference); R1 Table 7</td>
 <td>Param/FLOP gate (Phase 2) — <code>test_det_vs_table7</code></td>
 <td>active</td>
@@ -1562,7 +4161,7 @@
 <tr>
 <td>A26</td>
 <td>Blueprint prescribes hand-annotated permissive fixture images; none exist</td>
-<td>Test fixtures AND [DATA]-WP stand-ins are generated synthetically with fuse-augmentations (R21), seeded. Since WP-155–157 that package is also this project's augmentation engine (ADR-005), so this row no longer names a test-only dependency: one pin moves the fixtures and the training-time behaviour together, and a bump has to be read against both. The goldens keep the two apart by kind rather than by hope — the two generator-derived goldens, <code>fixture_checksums.json</code> and <code>data_checksums.json</code>, carry <code>freezable: false</code> and are never copied into a frozen set, while the pure-code goldens are (WP-154c). Fixtures are byte-identical per seed <strong>on a given platform</strong> (revised 2026-08-01: libm last-bit rounding differs across OS/architecture, so cross-platform reproducibility is asserted via structural metrics with tolerance in the golden harness, not byte hashes — observed macOS arm64 vs ubuntu x86_64 CI divergence); det/seg 16 scenes with boxes+polygons, OBB rotated scenes. Real COCO/DOTA remain required for tier runs (Phases 6–8); synthetic stand-ins never substitute for tier acceptance</td>
+<td>Test fixtures AND [DATA]-WP stand-ins are generated synthetically with fuse-augmentations (R21), seeded. Since WP-155–157 that package is also this project's augmentation engine (ADR-005), so this row no longer names a test-only dependency: one pin moves the fixtures and the training-time behaviour together, and a bump has to be read against both. The goldens keep the two apart by kind rather than by hope — the two generator-derived goldens, <code>fixture_checksums.json</code> and <code>data_checksums.json</code>, carry <code>freezable: false</code> and are never copied into a frozen set, while the pure-code goldens are (<a href="../work_packages/wp-154c/">WP-154c</a>). Fixtures are byte-identical per seed <strong>on a given platform</strong> (revised 2026-08-01: libm last-bit rounding differs across OS/architecture, so cross-platform reproducibility is asserted via structural metrics with tolerance in the golden harness, not byte hashes — observed macOS arm64 vs ubuntu x86_64 CI divergence); det/seg 16 scenes with boxes+polygons, OBB rotated scenes. Real COCO/DOTA remain required for tier runs (Phases 6–8); synthetic stand-ins never substitute for tier acceptance</td>
 <td>R21</td>
 <td><code>tests/fixtures/test_fixtures_load.py</code> (same-platform byte determinism); <code>goldens/fixture_checksums.json</code> (cross-platform structural)</td>
 <td>active</td>
@@ -1572,7 +4171,7 @@
 <td>MuSGD hybrid: momentum-state sharing and Nesterov placement unspecified</td>
 <td>one momentum buffer per param; both branch updates derived from Nesterov-adjusted g + mu*m; Muon branch per R7 Eq. 4 scaling</td>
 <td>R1 3.3.1; R7 Eq. 4; R8</td>
-<td>WP-033 toy convergence golden; Ablations-tier MuSGD-vs-SGD trend</td>
+<td><a href="../work_packages/wp-033/">WP-033</a> toy convergence golden; Ablations-tier MuSGD-vs-SGD trend</td>
 <td>active</td>
 </tr>
 <tr>
@@ -1618,7 +4217,7 @@
 <tr>
 <td>A32</td>
 <td>Train-time resampling filter unspecified (R1 silent on interpolation)</td>
-<td>The fused affine+letterbox warp (WP-070) resamples the training geometric base <strong>once</strong> with plain bilinear <code>grid_sample</code> — <strong>no antialiasing</strong> on the train-time downscale (<code>grid_sample</code> has no antialias mode; the prior two-step path antialiased its letterbox stage). Box/polygon arithmetic is unchanged (identical composed affine); only image pixels differ. Measured 4.4x geometric-path speedup (17.6 -&gt; 4.0 ms/sample, 1280-&gt;640, single thread). <strong>Revised 2026-09-03 by WP-155</strong>: the validation/eval letterbox no longer keeps <code>antialias=True</code> either. Delegating the resample to <code>fuse</code> replaced the antialiased <code>F.interpolate</code> plus <code>F.pad</code> with one <code>grid_sample</code> from the source canvas to the letterboxed one, whose antialias is off by default and whose opt-in prefilter is a Gaussian mipmap rather than torch's area-weighted kernel — measured not to engage at this producer's downscale, so enabling it recovers nothing. The assumption's <em>content</em> is unchanged and its <em>reach</em> widened: non-antialiased resampling is now the whole pipeline's filter rather than the train path's deviation from the eval path, and the two paths differ only in warp count. The eval-path cost is one measured number, <code>letterbox_image_mean</code> 0.5024 -&gt; 0.4994 against a 0.002 tolerance, geometry bit-unchanged</td>
+<td>The fused affine+letterbox warp (WP-070) resamples the training geometric base <strong>once</strong> with plain bilinear <code>grid_sample</code> — <strong>no antialiasing</strong> on the train-time downscale (<code>grid_sample</code> has no antialias mode; the prior two-step path antialiased its letterbox stage). Box/polygon arithmetic is unchanged (identical composed affine); only image pixels differ. Measured 4.4x geometric-path speedup (17.6 -&gt; 4.0 ms/sample, 1280-&gt;640, single thread). <strong>Revised 2026-09-03 by <a href="../work_packages/wp-155/">WP-155</a></strong>: the validation/eval letterbox no longer keeps <code>antialias=True</code> either. Delegating the resample to <code>fuse</code> replaced the antialiased <code>F.interpolate</code> plus <code>F.pad</code> with one <code>grid_sample</code> from the source canvas to the letterboxed one, whose antialias is off by default and whose opt-in prefilter is a Gaussian mipmap rather than torch's area-weighted kernel — measured not to engage at this producer's downscale, so enabling it recovers nothing. The assumption's <em>content</em> is unchanged and its <em>reach</em> widened: non-antialiased resampling is now the whole pipeline's filter rather than the train path's deviation from the eval path, and the two paths differ only in warp count. The eval-path cost is one measured number, <code>letterbox_image_mean</code> 0.5024 -&gt; 0.4994 against a 0.002 tolerance, geometry bit-unchanged</td>
 <td>gap; cv2-lineage resizes are conventionally non-antialiased</td>
 <td><code>goldens/data_checksums.json</code> (recomputed 2026-08-02); <code>goldens/aug_invariants.json</code> <code>letterbox_image_mean</code> (re-frozen 2026-09-03, WP-155b); Det-ablations trend vs Det-smoke</td>
 <td>active</td>
@@ -1650,33 +4249,33 @@
 <tr>
 <td>A39</td>
 <td>Fate of DOTA's per-object <code>difficult</code> flag (R18 defines the field — "1 for difficult, 0 for not difficult" — and neither it nor R1 says whether such instances are trained on or scored)</td>
-<td>Not decided at load: <code>keep_difficult</code> is a <strong>required</strong> keyword argument of <code>dota_targets</code> / <code>load_dota_targets</code>, so every call site states its choice and none inherits a silent default. The flag is parsed and carried on every <code>DotaObject</code> either way, so both policies stay available downstream, and <code>check_data.py</code> counts every object line regardless (the published 188,282 total does not break difficult instances out). The tier-level policy — what the training path feeds and what the val protocol ignores — lands with WP-088 and WP-063 respectively and revises this row then</td>
+<td>Not decided at load: <code>keep_difficult</code> is a <strong>required</strong> keyword argument of <code>dota_targets</code> / <code>load_dota_targets</code>, so every call site states its choice and none inherits a silent default. The flag is parsed and carried on every <code>DotaObject</code> either way, so both policies stay available downstream, and <code>check_data.py</code> counts every object line regardless (the published 188,282 total does not break difficult instances out). The tier-level policy — what the training path feeds and what the val protocol ignores — lands with <a href="../work_packages/wp-088/">WP-088</a> and <a href="../work_packages/wp-063/">WP-063</a> respectively and revises this row then</td>
 <td>R18 annotation format</td>
-<td><code>tests/data/test_dota_parse.py</code> (flag round-trips; both policies produce their expected instance counts with every modality still aligned); tier policy pending WP-063/088</td>
+<td><code>tests/data/test_dota_parse.py</code> (flag round-trips; both policies produce their expected instance counts with every modality still aligned); tier policy pending <a href="../work_packages/wp-063/">WP-063</a>/088</td>
 <td>open</td>
 </tr>
 <tr>
 <td>A40</td>
 <td>Training-time augmentation of rotated boxes (R1 lists the augmentations in Table S3 and R18 gives the <em>crop-time</em> rule for a partial object; neither says what a shear, a canvas edge or a mosaic quadrant does to an oriented annotation during training)</td>
-<td>Three choices, all in <code>rotated_aug.py</code> (WP-058). (i) <strong>Warp</strong>: a general affine sends a rectangle to a parallelogram, so a rotated box is expanded to its four corners, those corners go through the same matrix the image does, and a canonical long-edge box is re-fitted to them — R18's own prescription for its cropped parts ("described as an oriented bounding box with 4 vertices ... with a fitting method"). The fit is <strong>exact</strong> under a similarity (rotation, uniform scale, translation) and <strong>approximate</strong> under shear, with per-corner residual <code>h * sin(s/2)</code> for an edge-perpendicularity deviation <code>s</code>; flip and mosaic placement are isometries and stay exact. Every transform re-canonicalizes on the way out, which also closes the WP-013 defect where a mirrored <code>theta &gt; pi/4</code> left the long-edge range. (ii) <strong>Clipped instances are dropped, not flagged</strong>: WP-057 follows R18 in flagging a below-threshold part <em>difficult</em> and keeping it, but that is dataset preparation and <code>Targets</code> carries no <code>difficult</code> field at training time, so augmentation drops instead — by exactly the axis-aligned path's existing rule (<code>min_box_size</code> on the clipped envelope's sides, <code>min_visibility</code> on clipped-over-pre-clip envelope area), so one policy governs both modalities. The clipper and the orientation-preserving re-fit are WP-057's, not a second implementation. (iii) <strong><code>boxes</code> is recomputed as the envelope of the rotated geometry</strong> whenever <code>rboxes</code> are present, rather than warped independently: after a rotation the envelope of a warped envelope is the envelope of nothing real, and WP-061's assigner reads the two modalities as one instance. This narrows WP-056's load-time meaning (envelope of the hand-drawn quad) to "envelope of the fitted rectangle" from the first geometric transform onward</td>
+<td>Three choices, all in <code>rotated_aug.py</code> (<a href="../work_packages/wp-058/">WP-058</a>). (i) <strong>Warp</strong>: a general affine sends a rectangle to a parallelogram, so a rotated box is expanded to its four corners, those corners go through the same matrix the image does, and a canonical long-edge box is re-fitted to them — R18's own prescription for its cropped parts ("described as an oriented bounding box with 4 vertices ... with a fitting method"). The fit is <strong>exact</strong> under a similarity (rotation, uniform scale, translation) and <strong>approximate</strong> under shear, with per-corner residual <code>h * sin(s/2)</code> for an edge-perpendicularity deviation <code>s</code>; flip and mosaic placement are isometries and stay exact. Every transform re-canonicalizes on the way out, which also closes the <a href="../work_packages/wp-013/">WP-013</a> defect where a mirrored <code>theta &gt; pi/4</code> left the long-edge range. (ii) <strong>Clipped instances are dropped, not flagged</strong>: <a href="../work_packages/wp-057/">WP-057</a> follows R18 in flagging a below-threshold part <em>difficult</em> and keeping it, but that is dataset preparation and <code>Targets</code> carries no <code>difficult</code> field at training time, so augmentation drops instead — by exactly the axis-aligned path's existing rule (<code>min_box_size</code> on the clipped envelope's sides, <code>min_visibility</code> on clipped-over-pre-clip envelope area), so one policy governs both modalities. The clipper and the orientation-preserving re-fit are <a href="../work_packages/wp-057/">WP-057</a>'s, not a second implementation. (iii) <strong><code>boxes</code> is recomputed as the envelope of the rotated geometry</strong> whenever <code>rboxes</code> are present, rather than warped independently: after a rotation the envelope of a warped envelope is the envelope of nothing real, and <a href="../work_packages/wp-061/">WP-061</a>'s assigner reads the two modalities as one instance. This narrows <a href="../work_packages/wp-056/">WP-056</a>'s load-time meaning (envelope of the hand-drawn quad) to "envelope of the fitted rectangle" from the first geometric transform onward</td>
 <td>R18 sec. 4 (fitting method, and the 0.7 flag rule this diverges from); R1 Table S3 (the augmentation list); the drop/flag split itself: gap</td>
-<td><code>tests/data/test_rotated_aug.py</code> — <code>::test_roundtrip</code> (the DoD: a transform composed with its inverse returns the rotated boxes to tolerance), canonical output swept over the whole angle range through flip/affine/mosaic/mixup, similarity exact vs the derived shear bound, envelope/rotated-box consistency, and one-mask-drops-every-modality; OBB-tier confirmation pending WP-088</td>
+<td><code>tests/data/test_rotated_aug.py</code> — <code>::test_roundtrip</code> (the DoD: a transform composed with its inverse returns the rotated boxes to tolerance), canonical output swept over the whole angle range through flip/affine/mosaic/mixup, similarity exact vs the derived shear bound, envelope/rotated-box consistency, and one-mask-drops-every-modality; OBB-tier confirmation pending <a href="../work_packages/wp-088/">WP-088</a></td>
 <td>active</td>
 </tr>
 <tr>
 <td>A41</td>
 <td>ProbIoU's behaviour on a degenerate box (R17 derives <code>B_D</code> for non-singular Gaussians and never says what a zero-area box does; both of its denominators vanish there)</td>
-<td>Box sides are floored at <strong><code>min_side = 1e-4</code></strong> in whatever coordinate frame the caller works in, before <code>w</code>, <code>h</code> become the variances <code>w^2/12</code>, <code>h^2/12</code> (<code>probiou.py</code>, WP-059). The value is deliberately not load-bearing: <code>B_D</code> depends on the floor only <strong>logarithmically</strong>, one decade moving it by exactly <code>ln 10</code> (measured: 5.57, 7.87, 10.18, 12.48 for floors 1e-2 … 1e-5 against a fixed normal box), so the pair saturates at <code>L1 = 1</code> for any choice in the usable window and the choice is which order of magnitude, not which number. The window is bounded below at ~1e-10, where the product of four floored sides underflows float32 and a degenerate-against-degenerate pair returns <code>NaN</code> (measured: 1e-12 does), and above at ~1e-3, where the floor would start to move genuinely small boxes in a normalized frame; 1e-4 sits six decades above the first bound and one below the second, and is inert in a pixel frame either way. A clamped side takes <strong>zero gradient</strong>, so the loss abandons a collapsed box rather than chasing it. Two related numerical choices are documented in the module rather than here, being properties of the same equations rather than open gaps: the Hellinger loss's radicand is floored at 1e-20 inside its square root (whose derivative is infinite at zero, so a coincident pair would backpropagate <code>0 * inf = NaN</code>; the coincident case takes an exact-zero branch and never observes the floor), and the working precision follows the input dtype — float64 internals are unavailable because a regression loss runs on the training device and D12c puts training on MPS, which has no float64</td>
+<td>Box sides are floored at <strong><code>min_side = 1e-4</code></strong> in whatever coordinate frame the caller works in, before <code>w</code>, <code>h</code> become the variances <code>w^2/12</code>, <code>h^2/12</code> (<code>probiou.py</code>, <a href="../work_packages/wp-059/">WP-059</a>). The value is deliberately not load-bearing: <code>B_D</code> depends on the floor only <strong>logarithmically</strong>, one decade moving it by exactly <code>ln 10</code> (measured: 5.57, 7.87, 10.18, 12.48 for floors 1e-2 … 1e-5 against a fixed normal box), so the pair saturates at <code>L1 = 1</code> for any choice in the usable window and the choice is which order of magnitude, not which number. The window is bounded below at ~1e-10, where the product of four floored sides underflows float32 and a degenerate-against-degenerate pair returns <code>NaN</code> (measured: 1e-12 does), and above at ~1e-3, where the floor would start to move genuinely small boxes in a normalized frame; 1e-4 sits six decades above the first bound and one below the second, and is inert in a pixel frame either way. A clamped side takes <strong>zero gradient</strong>, so the loss abandons a collapsed box rather than chasing it. Two related numerical choices are documented in the module rather than here, being properties of the same equations rather than open gaps: the Hellinger loss's radicand is floored at 1e-20 inside its square root (whose derivative is infinite at zero, so a coincident pair would backpropagate <code>0 * inf = NaN</code>; the coincident case takes an exact-zero branch and never observes the floor), and the working precision follows the input dtype — float64 internals are unavailable because a regression loss runs on the training device and D12c puts training on MPS, which has no float64</td>
 <td>R17 (silent); the floor value itself: gap</td>
-<td><code>tests/losses/test_probiou.py</code> — zero-area, zero-width, zero-height, below-the-floor and negative-sided boxes stay finite forwards and backwards, against both a normal box and another degenerate one; <code>::test_clamped_sides_take_no_gradient</code>; the logarithmic floor dependence is what makes the value a non-item. OBB-tier confirmation pending WP-088</td>
+<td><code>tests/losses/test_probiou.py</code> — zero-area, zero-width, zero-height, below-the-floor and negative-sided boxes stay finite forwards and backwards, against both a normal box and another degenerate one; <code>::test_clamped_sides_take_no_gradient</code>; the logarithmic floor dependence is what makes the value a non-item. OBB-tier confirmation pending <a href="../work_packages/wp-088/">WP-088</a></td>
 <td>active</td>
 </tr>
 <tr>
 <td>A42</td>
 <td>The angle loss on a degenerate target (R1 Eq. 15 forms <code>omega</code> from <code>ln(w*/h*)</code>, which is undefined when either side is zero, and R1 never says what a collapsed target does)</td>
-<td>Both target sides are floored at <strong><code>min_side = 1e-4</code></strong> before the ratio is taken (<code>angle_loss.py</code>, WP-060) — numerically the same floor <code>probiou.py</code> uses, but <strong>not</strong> for A41's reason: A41 rests on <code>B_D</code> depending on the floor only logarithmically, and no part of that argument transfers to a log-ratio. The consequence is the honest reading of the formula rather than a choice R1 supports: a target collapsed in <em>one</em> dimension floors to an extreme ratio and its <code>omega</code> decays towards zero, so it is scored as elongated and left to the rotated IoU loss; a target collapsed in <em>both</em> dimensions floors to ratio 1 and receives <code>omega = 1</code>, i.e. <strong>full</strong> square-object weight, on a box with no orientation to supervise. That is the exposure this row records. It is bounded — such a target contributes at most <code>q_i / S</code> to a term whose own gain is A22's 1.0 — and it is unreachable through the shipped data path, where WP-057 drops or flags sub-pixel instances long before assignment. The floor is also what keeps the backward pass finite: unfloored, <code>ln(w/h)</code> goes to <code>inf</code> and its gradient to <code>NaN</code></td>
+<td>Both target sides are floored at <strong><code>min_side = 1e-4</code></strong> before the ratio is taken (<code>angle_loss.py</code>, <a href="../work_packages/wp-060/">WP-060</a>) — numerically the same floor <code>probiou.py</code> uses, but <strong>not</strong> for A41's reason: A41 rests on <code>B_D</code> depending on the floor only logarithmically, and no part of that argument transfers to a log-ratio. The consequence is the honest reading of the formula rather than a choice R1 supports: a target collapsed in <em>one</em> dimension floors to an extreme ratio and its <code>omega</code> decays towards zero, so it is scored as elongated and left to the rotated IoU loss; a target collapsed in <em>both</em> dimensions floors to ratio 1 and receives <code>omega = 1</code>, i.e. <strong>full</strong> square-object weight, on a box with no orientation to supervise. That is the exposure this row records. It is bounded — such a target contributes at most <code>q_i / S</code> to a term whose own gain is A22's 1.0 — and it is unreachable through the shipped data path, where <a href="../work_packages/wp-057/">WP-057</a> drops or flags sub-pixel instances long before assignment. The floor is also what keeps the backward pass finite: unfloored, <code>ln(w/h)</code> goes to <code>inf</code> and its gradient to <code>NaN</code></td>
 <td>R1 (silent on degenerate targets); the floor value itself: gap</td>
-<td><code>test_angle_loss.py::test_degenerate_targets_stay_finite_forwards_and_backwards</code> covers one-sided and two-sided collapse, forwards and backwards; <code>::test_omega_profile</code> pins the undegenerate profile at 1.000, 0.948, 0.750, 0.555, 0.369 for 1:1 through 20:1. Whether a real OBB run ever presents one is unmeasured until WP-088</td>
+<td><code>test_angle_loss.py::test_degenerate_targets_stay_finite_forwards_and_backwards</code> covers one-sided and two-sided collapse, forwards and backwards; <code>::test_omega_profile</code> pins the undegenerate profile at 1.000, 0.948, 0.750, 0.555, 0.369 for 1:1 through 20:1. Whether a real OBB run ever presents one is unmeasured until <a href="../work_packages/wp-088/">WP-088</a></td>
 <td>active</td>
 </tr>
 <tr>
@@ -1690,9 +4289,9 @@
 <tr>
 <td>A44</td>
 <td>How the angle composes with the ltrb regression (R1 gives Eq. 13 for the angle and the "separate branch" wording for where it comes from, but never says how that scalar and the four distances become one oriented box)</td>
-<td>The minimal composition the "separate branch" wording implies: the ltrb distances are decoded by <code>decode_ltrb</code> <strong>unchanged</strong> — the same function, not a rotated variant of it — the resulting <code>xyxy</code> box supplies the centre and the two extents, and theta then rotates that box about its own centre (<code>decode_rboxes</code>, WP-062). The angle branch therefore <em>adds</em> orientation to the existing box regression rather than reinterpreting it, and a predicted theta of 0 reproduces the axis-aligned decode exactly, which is the cheapest available check that the two paths have not drifted. Extents are passed through <strong>unclamped</strong>, matching the axis-aligned decode: an untrained head emitting <code>r &lt; -l</code> yields a negative extent in both paths, and clamping only the oriented one would hide the divergence rather than fix it. The alternative readings this forecloses — distances measured in the rotated frame, or the anchor offset turned by theta before the box is formed — are not excluded by anything in R1 and would change what the box regression means; the oriented tier is what can distinguish them</td>
+<td>The minimal composition the "separate branch" wording implies: the ltrb distances are decoded by <code>decode_ltrb</code> <strong>unchanged</strong> — the same function, not a rotated variant of it — the resulting <code>xyxy</code> box supplies the centre and the two extents, and theta then rotates that box about its own centre (<code>decode_rboxes</code>, <a href="../work_packages/wp-062/">WP-062</a>). The angle branch therefore <em>adds</em> orientation to the existing box regression rather than reinterpreting it, and a predicted theta of 0 reproduces the axis-aligned decode exactly, which is the cheapest available check that the two paths have not drifted. Extents are passed through <strong>unclamped</strong>, matching the axis-aligned decode: an untrained head emitting <code>r &lt; -l</code> yields a negative extent in both paths, and clamping only the oriented one would hide the divergence rather than fix it. The alternative readings this forecloses — distances measured in the rotated frame, or the anchor offset turned by theta before the box is formed — are not excluded by anything in R1 and would change what the box regression means; the oriented tier is what can distinguish them</td>
 <td>R1 sec. 3.4.3, R1 Eq. 13 (both silent on the composition); the composition itself: gap</td>
-<td><code>test_obb_head.py::test_zero_angle_decode_reproduces_axis_aligned_box</code> against <code>decode_ltrb</code> on the same inputs; end-to-end through the deployed view in <code>::test_deployed_view_decodes_end_to_end_into_oriented_detections</code>. Whether it is R1's composition is unmeasurable without a trained oriented tier (WP-088)</td>
+<td><code>test_obb_head.py::test_zero_angle_decode_reproduces_axis_aligned_box</code> against <code>decode_ltrb</code> on the same inputs; end-to-end through the deployed view in <code>::test_deployed_view_decodes_end_to_end_into_oriented_detections</code>. Whether it is R1's composition is unmeasurable without a trained oriented tier (<a href="../work_packages/wp-088/">WP-088</a>)</td>
 <td>open</td>
 </tr>
 <tr>
@@ -1700,7 +4299,7 @@
 <td>Oriented output tuple (the A9 analogue: R1 sec. 3.2.1 fixes neither layout, and the oriented one has no published form at all)</td>
 <td>Width <strong>7</strong>, <code>[cx, cy, w, h, theta, score, class]</code> (<code>RBOX_DET_WIDTH</code>): the five-column long-edge rotated box of <code>rotated_geom</code> followed by the same score and class columns A9's axis-aligned tuple ends with, so the two layouts differ only in their box columns. Selection is <strong>not</strong> recomputed here — <code>o2o_rotated_topk</code> delegates to <code>o2o_topk_with_indices</code> and gathers theta by the anchor indices that helper reports, the rule A9's segmentation coefficients already follow. A second ranking would be free to disagree with the first and pair one anchor's orientation with another anchor's box: a detection with a correct centre, a correct score and a silently wrong heading</td>
 <td>R1 sec. 3.2.1 (dense one-to-one output, no tuple layout); the layout itself: gap, by analogy with A9</td>
-<td><code>test_obb_head.py::TestRotatedTopk::test_emits_oriented_detection_tuple</code>, <code>::test_pairs_each_angle_with_own_anchor</code> (the anti-drift gate), <code>::test_returns_every_anchor_when_fewer_than_k</code> (node ids moved under <code>TestRotatedTopk</code> by WP-128)</td>
+<td><code>test_obb_head.py::TestRotatedTopk::test_emits_oriented_detection_tuple</code>, <code>::test_pairs_each_angle_with_own_anchor</code> (the anti-drift gate), <code>::test_returns_every_anchor_when_fewer_than_k</code> (node ids moved under <code>TestRotatedTopk</code> by <a href="../work_packages/wp-128/">WP-128</a>)</td>
 <td>open</td>
 </tr>
 <tr>
@@ -1732,7 +4331,7 @@
 <td>Which of R17's two ProbIoU losses the oriented path uses, and at what gain (R17 proposes both the bounded Hellinger form and the unbounded Bhattacharyya form, and recommends starting on the latter and switching; R1 names neither, and settles no gain for an oriented box term)</td>
 <td>The bounded Hellinger form <code>L1 = H_D = 1 - ProbIoU</code>, at A13's <code>box_gain = 7.5</code> carried over unchanged. It occupies the slot the Complete-IoU loss vacated and shares its <code>[0, 1]</code> range, so the existing gain transfers without inventing a magnitude, which the unbounded form's distance-dependent scale would have required. R17's argument for <code>B_D</code> is its non-vanishing far field, and that far field is largely unreachable here: an anchor is a candidate only if its centre lies inside the rotated ground truth (A25), and a positive's weight is a normalized <code>s**alpha * u**beta</code> already near zero for a badly placed box. R17's start-on-<code>L2</code>-then-switch schedule would add both a switch epoch and a second gain, neither of which any source states. The form is a constructor argument rather than a hard-coded call, so the alternative is one config key away</td>
 <td>R17 (both forms and the switching schedule); R1 (silent on which, and on the gain); the selection and the gain transfer: gap</td>
-<td><code>tests/ptl/test_obb_training.py::test_each_oriented_gain_enters_total_at_weight</code> pins the gain's leverage on the total. Measured lead-side on the WP-088 overfit slice at seed 0, 100 epochs, recipe otherwise untouched: the registered Hellinger form scores 0.8959 rotated mAP50 against 0.3914 for <code>bhattacharyya</code>, a deficit of 0.5046. The alternative is not marginally worse but far worse, so this is a measured choice rather than an argued one</td>
+<td><code>tests/ptl/test_obb_training.py::test_each_oriented_gain_enters_total_at_weight</code> pins the gain's leverage on the total. Measured lead-side on the <a href="../work_packages/wp-088/">WP-088</a> overfit slice at seed 0, 100 epochs, recipe otherwise untouched: the registered Hellinger form scores 0.8959 rotated mAP50 against 0.3914 for <code>bhattacharyya</code>, a deficit of 0.5046. The alternative is not marginally worse but far worse, so this is a measured choice rather than an argued one</td>
 <td>validated</td>
 </tr>
 <tr>
@@ -1740,7 +4339,7 @@
 <td>Whether the L1 box term survives beside a rotated IoU term, and against which target (R1 sec. 3.4.3 gives the oriented objective's terms but does not say whether the axis-aligned L1 term is kept, dropped, or retargeted)</td>
 <td>Kept, with its target moved to the rotated box's own <code>(cx, cy, w, h)</code>. Keeping it unchanged is not available: its original target is <code>assign.target_boxes</code>, the axis-aligned <em>envelope</em> of the ground truth, while A44's composition reads the decoded <code>xyxy</code> as the oriented box's own extents before rotating about its centre. For a 40x10 box at 45 degrees the envelope is roughly 35x35, so the two terms would pull the same <code>w</code> and <code>h</code> towards targets that disagree by the whole of the rotation; they coincide only at <code>theta = 0</code>. Dropping it is worse still: it would leave the extents supervised by ProbIoU alone, which floors a collapsed side at <code>min_side</code> with exactly zero gradient there (A41), and that is the state an untrained head starts in, since raw ltrb distances routinely decode to <code>r &lt; -l</code>. The L1 term is what pulls a collapsed extent back out. <code>theta</code> is deliberately not an L1 column: it is not a stride-unit quantity, and R1 Eq. 15 already owns the angular residual</td>
 <td>R1 sec. 3.4.3 (the term list); A41 (the ProbIoU gradient floor this depends on); A44 (the decode frame that makes the original target wrong); the retargeting: gap</td>
-<td><code>tests/ptl/test_obb_training.py::test_each_oriented_gain_enters_total_at_weight</code> pins the term's leverage. Measured lead-side on the WP-088 overfit slice at seed 0, 100 epochs: retargeting scores 0.8959 rotated mAP50 against 0.1847 with the term dropped, a deficit of 0.7112 — the largest single effect measured on this path, and direct confirmation of the collapsed-extent mechanism argued above</td>
+<td><code>tests/ptl/test_obb_training.py::test_each_oriented_gain_enters_total_at_weight</code> pins the term's leverage. Measured lead-side on the <a href="../work_packages/wp-088/">WP-088</a> overfit slice at seed 0, 100 epochs: retargeting scores 0.8959 rotated mAP50 against 0.1847 with the term dropped, a deficit of 0.7112 — the largest single effect measured on this path, and direct confirmation of the collapsed-extent mechanism argued above</td>
 <td>validated</td>
 </tr>
 <tr>
@@ -1818,9 +4417,9 @@
 <tr>
 <td>A60</td>
 <td>How many detections are scored per evaluation unit when the unit is a merged whole image (A47 fixes 300 because that is what <code>o2o_rotated_topk</code> emits per forward pass; a merged source image is many forward passes)</td>
-<td>The whole-image path scores with the cap <strong>off</strong>. A47's 300 still applies where it was put — at emission, per tile — so nothing is uncapped that the head did not already cap, while re-capping the merged image at 300 would measure a truncation rather than a model, a dense DOTA image carrying far more than 300 instances. The per-tile path is unchanged and bit-identical at the default. Exposure: the metric key stays <code>mar_300</code>, A47's name, whatever cap produced it, so a report quoting a whole-image figure must name the cap it used — the report payload's <code>whole_image.max_detections</code> field does. First exercised at WP-111: the OBB-smoke checkpoint's whole-image mAR_300 came out 0.0118 above its per-tile figure on real DOTA-v1.0 val, consistent with the dense-image rationale above, though that run does not isolate the lifted cap from WP-107's core-ownership merge running alongside it</td>
+<td>The whole-image path scores with the cap <strong>off</strong>. A47's 300 still applies where it was put — at emission, per tile — so nothing is uncapped that the head did not already cap, while re-capping the merged image at 300 would measure a truncation rather than a model, a dense DOTA image carrying far more than 300 instances. The per-tile path is unchanged and bit-identical at the default. Exposure: the metric key stays <code>mar_300</code>, A47's name, whatever cap produced it, so a report quoting a whole-image figure must name the cap it used — the report payload's <code>whole_image.max_detections</code> field does. First exercised at <a href="../work_packages/wp-111/">WP-111</a>: the OBB-smoke checkpoint's whole-image mAR_300 came out 0.0118 above its per-tile figure on real DOTA-v1.0 val, consistent with the dense-image rationale above, though that run does not isolate the lifted cap from <a href="../work_packages/wp-107/">WP-107</a>'s core-ownership merge running alongside it</td>
 <td>A47 (the per-tile cap this departs from); R12 (COCO's <code>maxDets</code>); the lifting: gap</td>
-<td><code>tests/eval/test_tile_merge.py::TestDetectionCap</code>; <code>tests/eval/test_eval_obb.py</code> — the report names both figures rather than quoting one; WP-111's real-data run, log-only, not test-pinned</td>
+<td><code>tests/eval/test_tile_merge.py::TestDetectionCap</code>; <code>tests/eval/test_eval_obb.py</code> — the report names both figures rather than quoting one; <a href="../work_packages/wp-111/">WP-111</a>'s real-data run, log-only, not test-pinned</td>
 <td>active</td>
 </tr>
 <tr>
@@ -1833,7 +4432,7 @@
 </tr>
 <tr>
 <td>A62</td>
-<td>The IoU threshold of <strong>axis-aligned</strong> class-wise NMS (R1's dense branch is a training-time auxiliary and no allowlisted source states a decode-side suppression threshold for it; the value has shipped since WP-042 as <code>NMSDecoder</code>'s default with no row of its own, which WP-091b found when A61 went looking for a lineage to inherit)</td>
+<td>The IoU threshold of <strong>axis-aligned</strong> class-wise NMS (R1's dense branch is a training-time auxiliary and no allowlisted source states a decode-side suppression threshold for it; the value has shipped since WP-042 as <code>NMSDecoder</code>'s default with no row of its own, which <a href="../work_packages/wp-091b/">WP-091b</a> found when A61 went looking for a lineage to inherit)</td>
 <td><code>0.7</code>, unchanged — registered here as the convention it has always been rather than revised in place, because every axis-aligned "mAP (non-E2E)" number this project has published was measured at it and re-picking the value now would silently move a comparison column that already has committed figures beside it. It is the widely used detection-NMS convention and nothing more; no source on the allowlist is cited for it, and A61 inherits it as a convention rather than as a citation</td>
 <td>R1 (no decode-side suppression parameter); the value itself: gap</td>
 <td><code>tests/decode/test_nms_path.py</code> — the existing decoder suite exercises the default; a revision is a golden-moving change and would ship as the next 0.MINOR</td>
@@ -1850,7 +4449,7 @@
 <tr>
 <td>A64</td>
 <td><code>HorizontalFlip</code>'s left/right keypoint identity swap under a mirror (Phase 12's keypoint container is deliberately K-generic — no source states which index swaps with which, and none could: that pairing is anatomical, not geometric, and belongs to whichever dataset supplies K points, not to the mirror transform itself)</td>
-<td>The swap is a caller-supplied <code>keypoint_flip_pairs</code> constructor argument, never a constant inside <code>HorizontalFlip</code>; <code>None</code> mirrors x-coordinates only, which is correct for any K-point task with no left/right symmetry. For the COCO human-pose demo dataset (R12's 17-point person category, ordered nose, left/right eye, left/right ear, left/right shoulder, left/right elbow, left/right wrist, left/right hip, left/right knee, left/right ankle), the pairing is indices <code>(1,2),(3,4),(5,6),(7,8),(9,10),(11,12),(13,14),(15,16)</code>, index <code>0</code> (nose) fixed — recorded here as the value to pass, not yet wired anywhere: WP-121 is the reader only (COCO <code>keypoints</code> field into the <code>Targets</code> channel, no datamodule change), and no roadmap row currently owns constructing <code>HorizontalFlip(keypoint_flip_pairs=...)</code> for a pose task. That wiring lands whenever a pose task first reaches <code>DetectionDataModule</code> -- WP-122 is the head/decode module only, not datamodule wiring either, so this still names no row -- not stated as settled here. <strong>Resolved by WP-132, and very nearly missed.</strong> The row was first drafted here as still-deferred, on the reading that WP-132's overfit gate ran with augmentation off -- which was wrong, and wrong in the direction that hides: <code>DetectionDataModule.__getitem__</code> applies <code>self._flip</code> unconditionally at <code>_FLIP_PROB = 0.5</code>, so the gate mirrors half its samples. <code>HorizontalFlip</code> was being constructed with no <code>keypoint_flip_pairs</code> at all, which mirrors coordinates without swapping identities: every <code>flank_left</code> in a mirrored sample was supervised toward the physical point <code>flank_right</code> now occupies. That is not a crash, a shape error, or anything a gate reports -- it trains, and it trains a left/right-confused head. It surfaced only because the affine's own hard error stopped the run first and forced a second reading of the whole train path. The pairing is therefore now <strong>dataset-supplied and threaded through the datamodule</strong> rather than left as a value nobody passes: the reader carries its annotation schema's own permutation, R21's 7-point <code>SYMBOL_KEYPOINT_FLIP_IDX = (0, 1, 2, 4, 3, 6, 5)</code> for the symbol family (<code>flank_left</code>/<code>flank_right</code> and <code>base_left</code>/<code>base_right</code> swap; <code>center</code>, <code>apex</code>, <code>tail</code> lie on the mirror axis and map to themselves), R12's 17-point list above for COCO human pose. A <code>None</code> pairing still means "mirror coordinates only" and is still correct for a K-point task with no left/right symmetry; what is no longer possible is a <em>symmetric</em> schema silently receiving it</td>
+<td>The swap is a caller-supplied <code>keypoint_flip_pairs</code> constructor argument, never a constant inside <code>HorizontalFlip</code>; <code>None</code> mirrors x-coordinates only, which is correct for any K-point task with no left/right symmetry. For the COCO human-pose demo dataset (R12's 17-point person category, ordered nose, left/right eye, left/right ear, left/right shoulder, left/right elbow, left/right wrist, left/right hip, left/right knee, left/right ankle), the pairing is indices <code>(1,2),(3,4),(5,6),(7,8),(9,10),(11,12),(13,14),(15,16)</code>, index <code>0</code> (nose) fixed — recorded here as the value to pass, not yet wired anywhere: <a href="../work_packages/wp-121/">WP-121</a> is the reader only (COCO <code>keypoints</code> field into the <code>Targets</code> channel, no datamodule change), and no roadmap row currently owns constructing <code>HorizontalFlip(keypoint_flip_pairs=...)</code> for a pose task. That wiring lands whenever a pose task first reaches <code>DetectionDataModule</code> -- <a href="../work_packages/wp-122/">WP-122</a> is the head/decode module only, not datamodule wiring either, so this still names no row -- not stated as settled here. <strong>Resolved by <a href="../work_packages/wp-132/">WP-132</a>, and very nearly missed.</strong> The row was first drafted here as still-deferred, on the reading that <a href="../work_packages/wp-132/">WP-132</a>'s overfit gate ran with augmentation off -- which was wrong, and wrong in the direction that hides: <code>DetectionDataModule.__getitem__</code> applies <code>self._flip</code> unconditionally at <code>_FLIP_PROB = 0.5</code>, so the gate mirrors half its samples. <code>HorizontalFlip</code> was being constructed with no <code>keypoint_flip_pairs</code> at all, which mirrors coordinates without swapping identities: every <code>flank_left</code> in a mirrored sample was supervised toward the physical point <code>flank_right</code> now occupies. That is not a crash, a shape error, or anything a gate reports -- it trains, and it trains a left/right-confused head. It surfaced only because the affine's own hard error stopped the run first and forced a second reading of the whole train path. The pairing is therefore now <strong>dataset-supplied and threaded through the datamodule</strong> rather than left as a value nobody passes: the reader carries its annotation schema's own permutation, R21's 7-point <code>SYMBOL_KEYPOINT_FLIP_IDX = (0, 1, 2, 4, 3, 6, 5)</code> for the symbol family (<code>flank_left</code>/<code>flank_right</code> and <code>base_left</code>/<code>base_right</code> swap; <code>center</code>, <code>apex</code>, <code>tail</code> lie on the mirror axis and map to themselves), R12's 17-point list above for COCO human pose. A <code>None</code> pairing still means "mirror coordinates only" and is still correct for a K-point task with no left/right symmetry; what is no longer possible is a <em>symmetric</em> schema silently receiving it</td>
 <td>R12 (COCO keypoint category and point order); R21 (the symbol schema's own flip permutation)</td>
 <td><code>tests/data/test_photometric.py::TestHorizontalFlip::test_keypoints_mirror_without_identity_swap</code>, <code>::test_keypoints_mirror_and_swap_supplied_pairs</code>, <code>::test_out_of_range_keypoint_pair_raises</code> pin the mechanism; <code>tests/ptl/test_keypoint_training.py</code> pins that the datamodule actually passes the schema's pairing rather than defaulting it away -- the assertion whose absence let this sit unnoticed</td>
 <td>active</td>
@@ -1858,7 +4457,7 @@
 <tr>
 <td>A65</td>
 <td>What guarantees the RLE per-axis uncertainty (<code>sigma</code>) stays positive between the keypoint head's raw output and the flow's density (R14's RealNVP-plus-Laplace-base formulation needs a strictly positive scale; nothing in R1 addresses a keypoint task at all -- R14's own <code>docs/PROVENANCE.md</code> role is "future pose milestone only" -- so no allowlisted source hands this project a value or a formula to carry over the way A20's angle range did from R1 Eq. 13 [<strong>struck 2026-09-17, D22</strong>: R1 sec. 3.4.2 does address it, and states the same bound directly -- "a parallel sigma branch predicts per-axis uncertainty sigma = (sigma_x, sigma_y) in (0, 1)^2 for each joint" -- so the resolution below is R1's as well as R14's; the section was unread when this row was written])</td>
-<td><strong>Resolved by WP-123, from R14 directly rather than assumed.</strong> R14 sec. 3.3 states its own answer verbatim: "the deviation sigma_hat_i is predicted with a sigmoid function. Hence we have sigma_hat_i in (0, 1)." <code>RLELoss.forward</code> (<code>losses/rle_loss.py</code>) applies <code>torch.sigmoid</code> to the head's raw sigma output at the point that consumes it, matching A23's precedent of normalizing a raw head output where it is used rather than where it is emitted; <code>DualDetectionHead</code>'s keypoint stem (WP-122) and <code>decode_keypoints</code> still emit and pass through the value completely raw, exactly as this row originally deferred</td>
+<td><strong>Resolved by <a href="../work_packages/wp-123/">WP-123</a>, from R14 directly rather than assumed.</strong> R14 sec. 3.3 states its own answer verbatim: "the deviation sigma_hat_i is predicted with a sigmoid function. Hence we have sigma_hat_i in (0, 1)." <code>RLELoss.forward</code> (<code>losses/rle_loss.py</code>) applies <code>torch.sigmoid</code> to the head's raw sigma output at the point that consumes it, matching A23's precedent of normalizing a raw head output where it is used rather than where it is emitted; <code>DualDetectionHead</code>'s keypoint stem (<a href="../work_packages/wp-122/">WP-122</a>) and <code>decode_keypoints</code> still emit and pass through the value completely raw, exactly as this row originally deferred</td>
 <td>R14 sec. 3.3 (states the sigmoid explicitly); R1 sec. 3.4.2 (states the <code>(0, 1)^2</code> bound, read 2026-09-17)</td>
 <td><code>tests/losses/test_rle_loss.py::TestSigmaRange</code> -- sigma stays in the sigmoid's open range at both saturation extremes; <code>tests/models/test_keypoint_head.py</code> -- the head's own raw output is still unactivated, confirming the split held</td>
 <td>active</td>
@@ -1874,17 +4473,17 @@
 <tr>
 <td>A67</td>
 <td>Which per-point OKS sigmas score a <strong>synthetic symbol</strong> keypoint run (R12's 17-value table is the only sigma vector any allowlisted source states, and it is derived from measured <em>annotator</em> standard deviations on human anatomy -- a quantity that does not exist for R21's <code>SymbolShape</code> landmarks, which are placed analytically at three-quarters of the way from each outline's area centroid to a named vertex, with no annotator and therefore no variance to measure)</td>
-<td>A <strong>uniform</strong> sigma across all K points, at R12's own median value <code>0.072</code> (<code>SYMBOL_KEYPOINT_OKS_SIGMA</code>). Uniform is not a simplification but the only honest reading: a per-point table encodes which landmarks humans localize less reliably, and for analytically-placed points that structure is absent, so any non-uniform vector this project wrote would fabricate it. The <em>value</em> is close to arbitrary by construction -- a uniform sigma is a monotone rescaling of OKS, so it moves every score together and changes no ordering, meaning it sets only where an acceptance floor sits and never which run wins. R12's median is chosen over a round number so the resulting figure stays on a scale comparable to a real COCO pose run, keeping the WP-132 gate floor interpretable rather than free-floating. Exposure: an OKS quoted for a symbol run is <strong>not</strong> comparable to a published COCO pose OKS despite sharing a scale -- different sigma vector, different point count, synthetic data (A26) What the uniform value costs is now measured rather than assumed: with the prediction set to the ground truth the gate's scorer returns exactly <code>1.0</code>, and displacing every point of every instance uniformly walks it down <code>+1 px -&gt; 0.934</code>, <code>+3 px -&gt; 0.269</code>, <code>+8 px -&gt; 0.000</code>. At <code>0.072</code> on symbols a few dozen pixels across, OKS AP is a cliff, which is why the <code>kp</code> gate's frozen figure (0.3357) is an order below its sibling gates' while describing a loop that memorized the slice just as they did. The rescaling is monotone, so this fixes only where the floor sits -- but it fixes it steeply, and a future sigma change moves the frozen value a long way.</td>
+<td>A <strong>uniform</strong> sigma across all K points, at R12's own median value <code>0.072</code> (<code>SYMBOL_KEYPOINT_OKS_SIGMA</code>). Uniform is not a simplification but the only honest reading: a per-point table encodes which landmarks humans localize less reliably, and for analytically-placed points that structure is absent, so any non-uniform vector this project wrote would fabricate it. The <em>value</em> is close to arbitrary by construction -- a uniform sigma is a monotone rescaling of OKS, so it moves every score together and changes no ordering, meaning it sets only where an acceptance floor sits and never which run wins. R12's median is chosen over a round number so the resulting figure stays on a scale comparable to a real COCO pose run, keeping the <a href="../work_packages/wp-132/">WP-132</a> gate floor interpretable rather than free-floating. Exposure: an OKS quoted for a symbol run is <strong>not</strong> comparable to a published COCO pose OKS despite sharing a scale -- different sigma vector, different point count, synthetic data (A26) What the uniform value costs is now measured rather than assumed: with the prediction set to the ground truth the gate's scorer returns exactly <code>1.0</code>, and displacing every point of every instance uniformly walks it down <code>+1 px -&gt; 0.934</code>, <code>+3 px -&gt; 0.269</code>, <code>+8 px -&gt; 0.000</code>. At <code>0.072</code> on symbols a few dozen pixels across, OKS AP is a cliff, which is why the <code>kp</code> gate's frozen figure (0.3357) is an order below its sibling gates' while describing a loop that memorized the slice just as they did. The rescaling is monotone, so this fixes only where the floor sits -- but it fixes it steeply, and a future sigma change moves the frozen value a long way.</td>
 <td>R12 (the 17-value table and its annotator-variance derivation); the uniform choice and the value: gap</td>
 <td><code>scripts/_tests/test_overfit_micro.py</code> -- the <code>kp</code> gate's frozen train OKS; a per-point table is never constructed, so drift here is a code change rather than a silent retune</td>
 <td>active</td>
 </tr>
 <tr>
 <td>A68</td>
-<td>The gain the RLE keypoint term enters the detection total at (R14 states the loss and its flow, never a multi-task weight -- it trains a pose-only network; R1 addresses no keypoint task at all, so neither source hands this project the balance the way R1 Eq. 15 handed A22 its <code>0.25</code> angle gain [<strong>struck 2026-09-17, D22</strong>: R1 sec. 3.4.2 addresses it and R1 Table 9 hands over a balance -- <code>wOKS = 24, wRLE = 1</code> is its best split on YOLO26s (63.0 mAP), with RLE alone at <code>(0, 1)</code> 61.9 and <code>(0, 2)</code> 62.4. The unity below coincides with <code>wRLE = 1</code> in value, not in frame: Table 9's weights sit beside R1 Table S5's box/cls gains (9.83 / 0.65 at <code>s</code>), this project's beside 7.5 / 0.5 (A13), so the two are comparable only up to that ratio, and no run here has tested either. The OKS term Table 9 weighs at 24 did not exist in this project until WP-178 (A75) and enters at <code>oks_gain = 0.0</code>])</td>
-<td><code>keypoint_gain = 1.0</code>, carried as a <code>DetectionLitModule</code> constructor argument rather than a module constant, matching how <code>angle_gain</code> (A22) is plumbed for the oriented task. Unity is chosen as the deliberately un-tuned starting point: the WP-132 gate it first ships under is an overfit-100 loop-composition check, where the question is whether the RLE term reaches the optimizer and drives the points at all, not whether it is balanced against the box and class terms -- a tuned value picked against a 100-image memorization run would not transfer to a real pose run anyway, and would look like evidence while being none. Exposure: unity is <strong>untested at tier scale</strong>; the first run entitled to move it is WP-125's pose-smoke, where a keypoint term that swamps or is swamped by the detection objective would show as a mechanism failure rather than a tuning one. <strong>WP-125 ran</strong>: unity trained a real pose head in both the RLE and Laplace-NLL arms, each beating its own control on OKS rather than being swamped by or swamping the detection objective -- the mechanism-failure exposure this row named did not happen. The value's own tuned adequacy, as distinct from that narrower bar, was never this row's question and is still unmeasured -- no sweep ran, and unity stays the un-tuned starting point it was chosen as</td>
+<td>The gain the RLE keypoint term enters the detection total at (R14 states the loss and its flow, never a multi-task weight -- it trains a pose-only network; R1 addresses no keypoint task at all, so neither source hands this project the balance the way R1 Eq. 15 handed A22 its <code>0.25</code> angle gain [<strong>struck 2026-09-17, D22</strong>: R1 sec. 3.4.2 addresses it and R1 Table 9 hands over a balance -- <code>wOKS = 24, wRLE = 1</code> is its best split on YOLO26s (63.0 mAP), with RLE alone at <code>(0, 1)</code> 61.9 and <code>(0, 2)</code> 62.4. The unity below coincides with <code>wRLE = 1</code> in value, not in frame: Table 9's weights sit beside R1 Table S5's box/cls gains (9.83 / 0.65 at <code>s</code>), this project's beside 7.5 / 0.5 (A13), so the two are comparable only up to that ratio, and no run here has tested either. The OKS term Table 9 weighs at 24 did not exist in this project until <a href="../work_packages/wp-178/">WP-178</a> (A75) and enters at <code>oks_gain = 0.0</code>])</td>
+<td><code>keypoint_gain = 1.0</code>, carried as a <code>DetectionLitModule</code> constructor argument rather than a module constant, matching how <code>angle_gain</code> (A22) is plumbed for the oriented task. Unity is chosen as the deliberately un-tuned starting point: the <a href="../work_packages/wp-132/">WP-132</a> gate it first ships under is an overfit-100 loop-composition check, where the question is whether the RLE term reaches the optimizer and drives the points at all, not whether it is balanced against the box and class terms -- a tuned value picked against a 100-image memorization run would not transfer to a real pose run anyway, and would look like evidence while being none. Exposure: unity is <strong>untested at tier scale</strong>; the first run entitled to move it is <a href="../work_packages/wp-125/">WP-125</a>'s pose-smoke, where a keypoint term that swamps or is swamped by the detection objective would show as a mechanism failure rather than a tuning one. <strong><a href="../work_packages/wp-125/">WP-125</a> ran</strong>: unity trained a real pose head in both the RLE and Laplace-NLL arms, each beating its own control on OKS rather than being swamped by or swamping the detection objective -- the mechanism-failure exposure this row named did not happen. The value's own tuned adequacy, as distinct from that narrower bar, was never this row's question and is still unmeasured -- no sweep ran, and unity stays the un-tuned starting point it was chosen as</td>
 <td>R14 (the loss, no weight); R1 Table 9 (the published <code>(24, 1)</code> split, read 2026-09-17, untested here); R1 Eq. 15 / A22 (the precedent for how a task gain is plumbed, not for the value); the value itself: gap</td>
-<td><code>tests/ptl/test_keypoint_training.py</code> -- <code>keypoint_gain=0</code> leaves the detection total bit-exact, proving the term is genuinely additive and the gain genuinely consulted; WP-125 (RESEARCH_LOG.md#wp-125) is the tier-scale mechanism-failure check, not a tuning sweep</td>
+<td><code>tests/ptl/test_keypoint_training.py</code> -- <code>keypoint_gain=0</code> leaves the detection total bit-exact, proving the term is genuinely additive and the gain genuinely consulted; <a href="../work_packages/wp-125/">WP-125</a> (work_packages/wp-125.md#wp-125) is the tier-scale mechanism-failure check, not a tuning sweep</td>
 <td>open</td>
 </tr>
 <tr>
@@ -1892,12 +4491,12 @@
 <td>Whether the one-to-many and one-to-two branches share a single RLE normalizing flow or train one each (R14 fits one density to one regressor's residuals and has no dual-branch architecture to speak to; R1's dual assignment predates any keypoint task, so neither source has a view on how a learned residual density should be split across two branches that are deliberately trained to disagree early and converge late)</td>
 <td><strong>One shared flow</strong> (<code>DetectionLitModule.rle_loss</code>, a single <code>RLELoss</code> called once per branch and blended by WP-035's <code>alpha</code>, the same arrangement the mask and oriented terms use). Two arguments, neither decisive alone: it is the smaller claim -- one density over one model's residuals is what R14 actually describes, where two would assert that the branches' error distributions are different in kind rather than merely in schedule -- and it is the smaller parameter count, the flow being the only trainable-weight loss in the project. It is called twice rather than once over concatenated positives so each branch's term keeps its own <code>alpha</code> share; that much is forced by the blend, not chosen. Exposure: <strong>untested against the alternative.</strong> If the two branches' residual distributions genuinely differ early in training, one flow is fit to a mixture and may serve neither well -- a failure that would show as a keypoint term that falls slowly while the box terms converge normally, not as an error. No measurement here distinguishes the two, and the overfit gate cannot: a 100-image memorization run drives both branches to the same near-zero residual, which is exactly the regime where one flow and two are least distinguishable</td>
 <td>R14 (one density, one regressor, no dual branch); R1 (dual assignment, no keypoint task); the split itself: gap</td>
-<td><code>tests/ptl/test_keypoint_training.py</code> -- pins that one flow is constructed and that both branches reach it; the shared-vs-split question is a WP-125 measurement, since only a tier-scale run has branches whose residuals differ enough to tell</td>
+<td><code>tests/ptl/test_keypoint_training.py</code> -- pins that one flow is constructed and that both branches reach it; the shared-vs-split question is a <a href="../work_packages/wp-125/">WP-125</a> measurement, since only a tier-scale run has branches whose residuals differ enough to tell</td>
 <td>open</td>
 </tr>
 <tr>
 <td>A70</td>
-<td>What becomes of a keypoint that a geometric transform warps outside the canvas, on an instance the transform <em>keeps</em> (R12 annotates only what a human could see and so never faces the question -- a point outside the photograph was simply never labelled; R14 regresses points in a cropped person box and states no cropping policy of its own. The case is manufactured by this project's own augmentation pipeline: the training warp translates by up to 10% and scales, so a point on a kept instance can land off-canvas while its box survives the keep mask. Named for what they were when this row was written, both mechanisms have since moved without the case moving with them -- <code>_keep_mask</code> became upstream's <code>instance_keep_mask</code> at WP-155, and <code>FusedAffineLetterbox</code> became <code>RandomAffine(letterbox=...)</code> over one <code>fuse</code> segment at WP-156)</td>
+<td>What becomes of a keypoint that a geometric transform warps outside the canvas, on an instance the transform <em>keeps</em> (R12 annotates only what a human could see and so never faces the question -- a point outside the photograph was simply never labelled; R14 regresses points in a cropped person box and states no cropping policy of its own. The case is manufactured by this project's own augmentation pipeline: the training warp translates by up to 10% and scales, so a point on a kept instance can land off-canvas while its box survives the keep mask. Named for what they were when this row was written, both mechanisms have since moved without the case moving with them -- <code>_keep_mask</code> became upstream's <code>instance_keep_mask</code> at <a href="../work_packages/wp-155/">WP-155</a>, and <code>FusedAffineLetterbox</code> became <code>RandomAffine(letterbox=...)</code> over one <code>fuse</code> segment at <a href="../work_packages/wp-156/">WP-156</a>)</td>
 <td><strong>Carried through unchanged</strong> -- true coordinate preserved, visibility untouched, no clamping and no demotion. The two alternatives were rejected on what they teach rather than on cost. Clamping to the boundary invents a target: it supervises the model toward a location the anatomy is demonstrably <em>not</em> at, which is worse than absent supervision because it is confident and wrong. Demoting to <code>v=0</code> discards a coordinate that is genuinely known and overloads a flag A66 defines as <em>no annotation exists</em> with a second, incompatible meaning, <em>existed and left the frame</em> -- after which no consumer can tell the two apart, including the OKS scorer. Carrying through is also the reading A66's own argument already implies: it admits <code>v=1</code> because "occlusion is exactly the case a regression model must learn to infer from context", and a point pushed past the edge by an affine is that same case with the occluder being the crop. Nothing in the head or the loss objects -- <code>decode_keypoints</code> adds stride-scaled offsets to an anchor centre and is unbounded by construction, so an off-canvas target is representable, not a special case. Exposure: a run whose augmentation pushes points off-canvas <em>often</em> is training partly on evidence the image does not contain, and this project has no measurement of where that stops helping; the overfit gate cannot supply one, since memorization succeeds regardless</td>
 <td>A66 (the visibility semantics this refuses to overload, and whose occlusion argument this extends); R12 and R14: gap on this case</td>
 <td><code>tests/data/test_affine.py</code>, <code>tests/data/test_mosaic.py</code> -- a point warped past the boundary keeps its coordinate and its visibility, and is neither clamped to the edge nor zeroed</td>
@@ -1914,7 +4513,7 @@
 <tr>
 <td>A72</td>
 <td>Whether the RealNVP coupling layer's log-scale is emitted raw or bounded (R14 specifies the conditioner -- "Lfc=3 and Nn=64 by default... Each fully-connected layer is followed by a Leaky-RELU" -- and cites RealNVP for the coupling construction itself rather than restating it, so the parameterization of <code>s</code> is stated only in Dinh et al.)</td>
-<td><strong>Bounded: a tanh times a per-layer learned scale</strong>, which is RealNVP's own parameterization and is given there as a stability measure -- "To compute the scaling functions s, we use a hyperbolic tangent function multiplied by a learned scale" (Dinh et al. sec. 4). WP-123 emitted the conditioner's raw linear output, which is not a simplification of that but a different layer, and the difference is invisible until the loss is composed into a training run: the stack multiplies <code>exp(log_scale)</code> six times, so an unbounded log-scale compounds. Measured: a residual of <strong>27</strong> reached the latent as <strong>4e11</strong> and the loss as <strong>7e22</strong>, and the run went non-finite -- while the loss's own unit tests, which evaluate it at <code>O(1)</code> residuals, stayed green throughout. Only the log-scale is bounded; the shift is additive, compounds linearly, and is not what the paper stabilizes. Exposure: the learned scale is itself unbounded, so the runaway is damped rather than provably impossible -- what the tanh removes is the compounding feedback path, since a saturated tanh passes no gradient back to the conditioner. Residual spikes into the thousands still occur on this gate's data and are <strong>not</strong> understood to be harmless; they are the A70 off-canvas tail meeting a quadratic base density</td>
+<td><strong>Bounded: a tanh times a per-layer learned scale</strong>, which is RealNVP's own parameterization and is given there as a stability measure -- "To compute the scaling functions s, we use a hyperbolic tangent function multiplied by a learned scale" (Dinh et al. sec. 4). <a href="../work_packages/wp-123/">WP-123</a> emitted the conditioner's raw linear output, which is not a simplification of that but a different layer, and the difference is invisible until the loss is composed into a training run: the stack multiplies <code>exp(log_scale)</code> six times, so an unbounded log-scale compounds. Measured: a residual of <strong>27</strong> reached the latent as <strong>4e11</strong> and the loss as <strong>7e22</strong>, and the run went non-finite -- while the loss's own unit tests, which evaluate it at <code>O(1)</code> residuals, stayed green throughout. Only the log-scale is bounded; the shift is additive, compounds linearly, and is not what the paper stabilizes. Exposure: the learned scale is itself unbounded, so the runaway is damped rather than provably impossible -- what the tanh removes is the compounding feedback path, since a saturated tanh passes no gradient back to the conditioner. Residual spikes into the thousands still occur on this gate's data and are <strong>not</strong> understood to be harmless; they are the A70 off-canvas tail meeting a quadratic base density</td>
 <td>Dinh et al., <em>Density estimation using Real NVP</em> (arXiv:1605.08803) sec. 4, the source R14 Appendix A Eq. 12 defers to; R14: gap (does not restate the parameterization)</td>
 <td><code>tests/losses/test_rle_loss.py</code> -- the log-scale stays inside the learned bound, and a residual an order of magnitude outside the training range still yields a finite loss and finite gradients</td>
 <td>active</td>
@@ -1922,23 +4521,23 @@
 <tr>
 <td>A73</td>
 <td>Whether det/seg's torchmetrics-backed eval and keypoints' hand-driven <code>faster_coco_eval</code> eval should be forced onto one code path (no paper states an evaluation architecture; torchmetrics 1.9's detection module carries zero keypoint/OKS support -- confirmed by grep, no "keypoint"/"kpt"/"oks" symbol anywhere)</td>
-<td>Keep keypoints hand-driven behind <code>evaluate_keypoints</code>; do not fork torchmetrics' <code>CocoBackend</code>/<code>MeanAveragePrecision</code> internals to add a keypoints iou_type (that fork is WP B, deferred, not attempted). WP-137: <code>val/oks_mAP</code> runs every validation epoch beside <code>val/mAP</code>, the same "beside, not instead of" relationship <code>val/segm_mAP</code> already has, closing the actual gap -- keypoints previously logged no per-epoch pose signal at all. <strong>Revised 2026-08-25 by WP-138</strong>: WP-137's own text here claimed a hand-driven <code>hotcoco</code> path "would cost back the memory-bounded streaming <code>_StreamingScorer</code> exists for" -- checked against torchmetrics' actual <code>_get_safe_item_values</code> source and found <strong>wrong</strong>: torchmetrics RLE-encodes every mask immediately inside <code>update()</code> and discards the dense tensor per batch, and nothing stops a hand-driven adapter doing the identical thing. WP-138 does exactly that: <code>hotcoco</code> is adopted as <code>lucid-eval</code>'s default bbox/segm engine (<code>DualPathEvaluator(backend=...)</code>, <code>--eval_backend auto\|hotcoco\|faster_coco_eval</code>), a hand-driven <code>_HotcocoStreamingScorer</code> RLE-encoding per batch same as torchmetrics does, verified bit-for-bit (<code>abs=1e-6</code>) against <code>faster_coco_eval</code> on bbox-only, bbox+segm and the empty-preds case. Five real hotcoco compatibility traps found and fixed, matching rf-detr PR 1402's own documented list: <code>params</code>/<code>dataset</code> are copy-on-read (get-mutate-reassign, never in-place); RLE <code>counts</code> comes back <code>bytes</code>, hotcoco's constructor silently reads it as an empty mask unless decoded to <code>str</code> first (verified directly: a 9-pixel mask round-tripped through this project's installed hotcoco as 0 pixels, no exception); <code>mask.encode</code> accepts <code>uint8</code> only, not bool; <code>iou_type</code> is spelled snake_case; hotcoco writes stdout/stderr from Rust, which <code>contextlib.redirect_stdout</code> does not reach (verified directly) -- fd-level <code>os.dup2</code> redirection required. Keypoints' OKS scoring and <code>module.py</code>'s training-loop <code>val/mAP</code>/<code>val/segm_mAP</code> are untouched either way -- the torchmetrics-subclass fork this row still declines stays declined for both</td>
-<td>roboflow/rf-detr PR #1183 (<code>keypoint_oks.py</code>'s <code>MetricKeypointOKS</code>, the identical hand-driven-behind-a-torchmetrics-shaped-interface choice for keypoints, citing upstream torchmetrics PR #3348 as the eventual real fix) and PR #1402 (<code>_HotCocoBackend(CocoBackend)</code>, the working torchmetrics-subclass hotcoco integration this project's own WP B would follow if attempted -- 4.2-4.6x measured through the real <code>compute()</code> pathway, "not a training-throughput change... under 2% of an epoch" by their own stated verdict, corroborating this project's independent WP-137 benchmark); this project's own WP-137/WP-138 benchmarks (bbox 13x, segm ~127-180x in isolation at COCO-val scale -- ~1 minute saved over a multi-hour training run either way, the reason <code>module.py</code>'s own per-epoch metrics stay on <code>faster_coco_eval</code>)</td>
+<td>Keep keypoints hand-driven behind <code>evaluate_keypoints</code>; do not fork torchmetrics' <code>CocoBackend</code>/<code>MeanAveragePrecision</code> internals to add a keypoints iou_type (that fork is WP B, deferred, not attempted). <a href="../work_packages/wp-137/">WP-137</a>: <code>val/oks_mAP</code> runs every validation epoch beside <code>val/mAP</code>, the same "beside, not instead of" relationship <code>val/segm_mAP</code> already has, closing the actual gap -- keypoints previously logged no per-epoch pose signal at all. <strong>Revised 2026-08-25 by <a href="../work_packages/wp-138/">WP-138</a></strong>: <a href="../work_packages/wp-137/">WP-137</a>'s own text here claimed a hand-driven <code>hotcoco</code> path "would cost back the memory-bounded streaming <code>_StreamingScorer</code> exists for" -- checked against torchmetrics' actual <code>_get_safe_item_values</code> source and found <strong>wrong</strong>: torchmetrics RLE-encodes every mask immediately inside <code>update()</code> and discards the dense tensor per batch, and nothing stops a hand-driven adapter doing the identical thing. <a href="../work_packages/wp-138/">WP-138</a> does exactly that: <code>hotcoco</code> is adopted as <code>lucid-eval</code>'s default bbox/segm engine (<code>DualPathEvaluator(backend=...)</code>, <code>--eval_backend auto\|hotcoco\|faster_coco_eval</code>), a hand-driven <code>_HotcocoStreamingScorer</code> RLE-encoding per batch same as torchmetrics does, verified bit-for-bit (<code>abs=1e-6</code>) against <code>faster_coco_eval</code> on bbox-only, bbox+segm and the empty-preds case. Five real hotcoco compatibility traps found and fixed, matching rf-detr PR 1402's own documented list: <code>params</code>/<code>dataset</code> are copy-on-read (get-mutate-reassign, never in-place); RLE <code>counts</code> comes back <code>bytes</code>, hotcoco's constructor silently reads it as an empty mask unless decoded to <code>str</code> first (verified directly: a 9-pixel mask round-tripped through this project's installed hotcoco as 0 pixels, no exception); <code>mask.encode</code> accepts <code>uint8</code> only, not bool; <code>iou_type</code> is spelled snake_case; hotcoco writes stdout/stderr from Rust, which <code>contextlib.redirect_stdout</code> does not reach (verified directly) -- fd-level <code>os.dup2</code> redirection required. Keypoints' OKS scoring and <code>module.py</code>'s training-loop <code>val/mAP</code>/<code>val/segm_mAP</code> are untouched either way -- the torchmetrics-subclass fork this row still declines stays declined for both</td>
+<td>roboflow/rf-detr PR #1183 (<code>keypoint_oks.py</code>'s <code>MetricKeypointOKS</code>, the identical hand-driven-behind-a-torchmetrics-shaped-interface choice for keypoints, citing upstream torchmetrics PR #3348 as the eventual real fix) and PR #1402 (<code>_HotCocoBackend(CocoBackend)</code>, the working torchmetrics-subclass hotcoco integration this project's own WP B would follow if attempted -- 4.2-4.6x measured through the real <code>compute()</code> pathway, "not a training-throughput change... under 2% of an epoch" by their own stated verdict, corroborating this project's independent <a href="../work_packages/wp-137/">WP-137</a> benchmark); this project's own <a href="../work_packages/wp-137/">WP-137</a>/WP-138 benchmarks (bbox 13x, segm ~127-180x in isolation at COCO-val scale -- ~1 minute saved over a multi-hour training run either way, the reason <code>module.py</code>'s own per-epoch metrics stay on <code>faster_coco_eval</code>)</td>
 <td><code>tests/ptl/test_keypoint_training.py::TestKeypointValidation</code>; <code>tests/eval/test_coco_eval.py::TestHotcocoParity</code>; revisit the torchmetrics-subclass fork (WP B) if <code>module.py</code>'s own segm training-loop wall-clock is ever measured and found to matter, or when torchmetrics PR #3348 (native keypoint support) lands</td>
 <td>active</td>
 </tr>
 <tr>
 <td>A74</td>
 <td>Whether R14 sec. 4's "Each fully-connected layer is followed by a Leaky-RELU" covers the conditioner's output projection as well as its hidden layers (the paper's figure and appendix draw no distinction, so the sentence admits both readings)</td>
-<td>Read it literally: the output projection carries the trailing LeakyReLU, as it has since WP-125</td>
+<td>Read it literally: the output projection carries the trailing LeakyReLU, as it has since <a href="../work_packages/wp-125/">WP-125</a></td>
 <td>R14 sec. 4</td>
-<td>The pose smoke recipe trained twice at one seed, with and without the trailing activation, compared on WP-125's acceptance metric. Not run -- needs an accelerator</td>
+<td>The pose smoke recipe trained twice at one seed, with and without the trailing activation, compared on <a href="../work_packages/wp-125/">WP-125</a>'s acceptance metric. Not run -- needs an accelerator</td>
 <td>active</td>
 </tr>
 <tr>
 <td>A75</td>
 <td>The form of the OKS-based keypoint loss R1 composes with RLE (R1 sec. 3.4.2 says only that "training uses an Object Keypoint Similarity (OKS)-based loss, which normalizes keypoint localization error by person scale and per-keypoint OKS constants", cites the formulation to YOLO-Pose (Maji et al., CVPRW 2022) -- <strong>not on the allowlist</strong> -- and states no equation; R1 Table 9 weighs the term at <code>wOKS = 24</code> beside <code>wRLE = 1</code> without saying what one unit of it is)</td>
-<td><code>1 - OKS</code> per assigned instance, <code>OKS</code> being R12's own evaluation quantity: <code>sum_i exp(-d_i^2 / (2 s^2 k_i^2)) [v_i &gt; 0] / sum_i [v_i &gt; 0]</code>, <code>d_i</code> the pixel distance between predicted and annotated point, <code>k_i = 2 sigma_i</code> from R12's 17-value sigma table (A67's uniform sigma for any other schema), and <code>s^2</code> the <strong>assigned ground-truth box area</strong> -- COCO's <code>area</code> is the segment area, which a keypoints batch does not carry, so the box is the scale this project has; floored at 1.0 (A36's precedent). Instances with no labelled point are excluded from the mean rather than scored zero; <code>v = 0</code> points are excluded before any arithmetic (A66). Enters at <code>oks_gain = 0.0</code> (WP-178): the shipped RLE-only objective stays bit-exact and WP-125's paired-run evidence keeps its meaning. Table 9's <code>(24, 1)</code> is the published split and is <strong>untested here</strong>; a default of 24 with no run behind it would look like evidence while being none (A68's own reasoning)</td>
+<td><code>1 - OKS</code> per assigned instance, <code>OKS</code> being R12's own evaluation quantity: <code>sum_i exp(-d_i^2 / (2 s^2 k_i^2)) [v_i &gt; 0] / sum_i [v_i &gt; 0]</code>, <code>d_i</code> the pixel distance between predicted and annotated point, <code>k_i = 2 sigma_i</code> from R12's 17-value sigma table (A67's uniform sigma for any other schema), and <code>s^2</code> the <strong>assigned ground-truth box area</strong> -- COCO's <code>area</code> is the segment area, which a keypoints batch does not carry, so the box is the scale this project has; floored at 1.0 (A36's precedent). Instances with no labelled point are excluded from the mean rather than scored zero; <code>v = 0</code> points are excluded before any arithmetic (A66). Enters at <code>oks_gain = 0.0</code> (<a href="../work_packages/wp-178/">WP-178</a>): the shipped RLE-only objective stays bit-exact and <a href="../work_packages/wp-125/">WP-125</a>'s paired-run evidence keeps its meaning. Table 9's <code>(24, 1)</code> is the published split and is <strong>untested here</strong>; a default of 24 with no run behind it would look like evidence while being none (A68's own reasoning)</td>
 <td>R1 sec. 3.4.2 (the composition, no formula); R1 Table 9 (the weights); R12 (the OKS definition and sigma table); the loss form and the box-area scale: gap</td>
 <td><code>tests/losses/test_oks_loss.py</code> -- exact prediction scores 0, a hand-computed two-point OKS matches, <code>v = 0</code> is inert, an all-unlabelled batch is a finite zero; <code>tests/ptl/test_keypoint_training.py</code> -- <code>oks_gain = 0</code> leaves the total bit-exact and <code>oks_gain = 1</code> adds exactly the logged term. The Table 9 sweep at smoke scale is a roadmap item, not run</td>
 <td>open</td>
@@ -1946,15 +4545,15 @@
 <tr>
 <td>A76</td>
 <td>Whether the <code>log sigma</code> term enters the RLE objective once or twice. R1 Eq. 11 prints <code>L_RLE = log sigma - log phi(eps) + log(2 sigma) + abs(eps)</code>, with the bracketed pair labelled <code>-log Laplace(x_hat; x*, sigma)</code> -- the Laplace NLL written in the <strong>un-normalized</strong> frame, which carries its own <code>log sigma</code>, beside the reparameterization Jacobian's <code>log sigma</code>, so <code>sigma</code> is penalized twice per axis. R14 Eq. 8, which <code>losses/rle_loss.py</code> transcribes, evaluates the base density on the <strong>normalized</strong> residual (<code>-log Q(x_bar)</code>, a unit Laplace, no <code>sigma</code> inside) and carries <code>log sigma_hat</code> once</td>
-<td>Keep R14's form, as landed by WP-123: <code>L = -log Q(x_bar) - log G_phi(x_bar) + log sigma_hat</code>, one <code>log sigma</code> per axis. The two objectives differ by exactly <code>log sigma</code> per axis -- a gradient of <code>1/sigma</code> pushing every scale smaller regardless of the residual -- and R1's own text says nothing that resolves whether the doubling is intended or a transcription of an implementation; either way it is a behaviour change to a landed loss whose paired-run comparison (WP-125) is the thing it would move, so it is recorded, not made. Read 2026-09-17 (D22)</td>
+<td>Keep R14's form, as landed by <a href="../work_packages/wp-123/">WP-123</a>: <code>L = -log Q(x_bar) - log G_phi(x_bar) + log sigma_hat</code>, one <code>log sigma</code> per axis. The two objectives differ by exactly <code>log sigma</code> per axis -- a gradient of <code>1/sigma</code> pushing every scale smaller regardless of the residual -- and R1's own text says nothing that resolves whether the doubling is intended or a transcription of an implementation; either way it is a behaviour change to a landed loss whose paired-run comparison (<a href="../work_packages/wp-125/">WP-125</a>) is the thing it would move, so it is recorded, not made. Read 2026-09-17 (D22)</td>
 <td>R1 sec. 3.4.2, Eq. 11 (the doubled form); R14 Eq. 8, sec. 3.2 (the single form); which R1 means: gap</td>
-<td>The pose smoke recipe trained twice at one seed, once per form, compared on WP-125's acceptance metric. Not run -- needs an accelerator</td>
+<td>The pose smoke recipe trained twice at one seed, once per form, compared on <a href="../work_packages/wp-125/">WP-125</a>'s acceptance metric. Not run -- needs an accelerator</td>
 <td>open</td>
 </tr>
 <tr>
 <td>A77</td>
 <td>The keypoint stem's hidden width, now that a published size table exists to check it against (R1 Table S10 publishes params and FLOPs for every pose scale at 640 px -- n 2.9 M / 7.5 G, s 10.4 / 23.9, m 21.5 / 73.1, l 25.9 / 91.3, x 57.6 / 201.7 -- which <code>_build_keypoint_stem</code> and <code>test_kp_params_flops_golden</code> both said did not exist)</td>
-<td>Unchanged for now: A28's shared <code>max(16, channels // 3)</code>, as landed by WP-122. <strong>Measured 2026-09-17</strong> at Table S10's protocol (640 px, 1 class, 17 points), this project against the table: params n <strong>-13.0%</strong>, s -4.5%, m -3.8%, l -3.8%, x -3.0%; FLOPs n <strong>-26.5%</strong>, s -10.8%, m -5.9%, l -0.4%, x +1.0%. Against this project's own detection golden the point stems add 0.11 M / 0.12 G at <code>n</code>; Table S10 minus Table 7 implies R1's add 0.5 M / 2.1 G, and crediting back the 80-to-1 class saving the way A20 credited 80-to-15 (0.024 M at <code>n</code>, measured on this project's detector) moves that to ~0.52 M — the finding gets slightly stronger, not weaker. The stem is therefore several times narrower than R1's at the small scales, converging by <code>l</code>/<code>x</code> where the trunk dominates -- the same shape of finding A20 made for the angle stem before its <code>// 2</code> revision, and it is left for the same kind of gate-driven revision rather than tuned by hand in a documentation commit. Every other size gate in <code>test_param_flops.py</code> passes at ±2–3.5% params and ±5% FLOPs; this one would fail at every scale but <code>l</code> and <code>x</code> on FLOPs and at every scale on params, so no <code>_TABLE_S10</code> gate ships until a width is chosen against it</td>
+<td>Unchanged for now: A28's shared <code>max(16, channels // 3)</code>, as landed by <a href="../work_packages/wp-122/">WP-122</a>. <strong>Measured 2026-09-17</strong> at Table S10's protocol (640 px, 1 class, 17 points), this project against the table: params n <strong>-13.0%</strong>, s -4.5%, m -3.8%, l -3.8%, x -3.0%; FLOPs n <strong>-26.5%</strong>, s -10.8%, m -5.9%, l -0.4%, x +1.0%. Against this project's own detection golden the point stems add 0.11 M / 0.12 G at <code>n</code>; Table S10 minus Table 7 implies R1's add 0.5 M / 2.1 G, and crediting back the 80-to-1 class saving the way A20 credited 80-to-15 (0.024 M at <code>n</code>, measured on this project's detector) moves that to ~0.52 M — the finding gets slightly stronger, not weaker. The stem is therefore several times narrower than R1's at the small scales, converging by <code>l</code>/<code>x</code> where the trunk dominates -- the same shape of finding A20 made for the angle stem before its <code>// 2</code> revision, and it is left for the same kind of gate-driven revision rather than tuned by hand in a documentation commit. Every other size gate in <code>test_param_flops.py</code> passes at ±2–3.5% params and ±5% FLOPs; this one would fail at every scale but <code>l</code> and <code>x</code> on FLOPs and at every scale on params, so no <code>_TABLE_S10</code> gate ships until a width is chosen against it</td>
 <td>R1 Table S10 (the sizes, read 2026-09-17); R1 sec. 3.4.2 ("a parallel sigma branch", no width); the width itself: gap, as A20's was</td>
 <td>A <code>test_kp_vs_tableS10</code> gate mirroring <code>test_obb_vs_tableS11</code>, once a width is selected against Table S10 the way A20's was against Table S11 -- roadmap item. Until then <code>test_kp_params_flops_golden</code> stays the regression lock it is</td>
 <td>open</td>
@@ -1962,7 +4561,7 @@
 <tr>
 <td>A78</td>
 <td>No paper covers compilation: R1 reports step times and nothing about how the graph was executed, and no allowlisted source states whether an Inductor-compiled objective trains to the published figures</td>
-<td>The compiled detection objective (<code>compile_step: true</code>, WP-184, D24) trains to the same mAP as eager within run noise. Compilation reorders and fuses floating-point work, so the two are not bit-identical; the assumption is that the difference is below what seed-to-seed variation already produces, which the region's 1-graph trace and the dense loss (WP-183, absdiff 0.0 in eager) make plausible but do not show</td>
+<td>The compiled detection objective (<code>compile_step: true</code>, WP-184, D24) trains to the same mAP as eager within run noise. Compilation reorders and fuses floating-point work, so the two are not bit-identical; the assumption is that the difference is below what seed-to-seed variation already produces, which the region's 1-graph trace and the dense loss (<a href="../work_packages/wp-183/">WP-183</a>, absdiff 0.0 in eager) make plausible but do not show</td>
 <td>Gap; torch's own documentation of Inductor as numerics-preserving up to fusion-order rounding</td>
 <td>One <code>det_nano_smoke</code> epoch plus validation, <code>compile_step</code> true vs false at the same seed and worker count, under <code>TORCH_LOGS=recompiles</code>: <code>val/mAP</code> within run noise, ≤ 3 recompiles, training step ≥ x1.15 vs eager detect. <strong>Run 2026-09-19/20 on an A100-40GB (torch 2.14.0+cu130), rounds 3–5 of the Colab gate</strong>: a paired 4-epoch <code>det_nano_smoke</code> run on val2017 at seed 0, <code>compile_step</code> true against false — 1 recompile (the first <code>no_grad</code> evaluation graph), training step 180.6 → 144.2 ms (x1.25), and the same weights and batch through the real training path (<code>setup("fit")</code>, <code>deterministic</code>, <code>channels_last</code>, marked dynamic shapes) agree to <code>3.6e-5</code> on the total loss with TF32 off; with TF32 on they differ by <code>1e-2</code>–<code>1e-1</code> per batch because the task-aligned assignment is discrete and TF32 rounding moves its top-k set, which is why <code>train/loss</code> is not the comparison to make under the default matmul precision. <code>val/mAP</code> after 4 epochs from scratch is <code>~1e-5</code> in both arms and carries no signal, so the mAP clause is met by the paired loss parity rather than by a converged run</td>
 <td>validated</td>
@@ -1980,8 +4579,13 @@
 
 
 
+  
+  
 
 
+
+
+  
 
 
 
@@ -2032,7 +4636,7 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
       <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>

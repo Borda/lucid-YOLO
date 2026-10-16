@@ -1,0 +1,4244 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Engineering log for Phase 14 — Augmentation upstreaming to fuse, v0.7.0: the findings of WP-154, WP-154c, WP-154b, WP-155, WP-156, WP-157, WP-158, WP-159, one…">
+      
+      
+        <meta name="author" content="Jirka Borovec">
+      
+      
+        <link rel="canonical" href="https://borda.github.io/lucid-YOLO/engineering/phase-14-augmentation-upstreaming/">
+      
+      
+        <link rel="prev" href="../phase-13-contributor-admission/">
+      
+      
+        <link rel="next" href="../phase-15-audit-remediation/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+  
+    <title>Phase 14 — Augmentation upstreaming to fuse, v0.7.0 — engineering log - lucid-yolo</title>
+  
+
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="lucid-yolo">
+  <meta property="og:title" content="Phase 14 — Augmentation upstreaming to fuse, v0.7.0 — engineering log">
+  <meta property="og:description" content="Engineering log for Phase 14 — Augmentation upstreaming to fuse, v0.7.0: the findings of WP-154, WP-154c, WP-154b, WP-155, WP-156, WP-157, WP-158, WP-159, one…">
+  <meta property="og:url" content="https://borda.github.io/lucid-YOLO/engineering/phase-14-augmentation-upstreaming/"><meta property="og:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="lucid-yolo: clean-room, NMS-free YOLO in PyTorch Lightning">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
+  <meta name="twitter:title" content="Phase 14 — Augmentation upstreaming to fuse, v0.7.0 — engineering log">
+  <meta name="twitter:description" content="Engineering log for Phase 14 — Augmentation upstreaming to fuse, v0.7.0: the findings of WP-154, WP-154c, WP-154b, WP-155, WP-156, WP-157, WP-158, WP-159, one…">
+  
+    <link rel="alternate" type="text/markdown" href="index.md" title="Markdown copy of this page">
+  
+  
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phase-14-augmentation-upstreaming-to-fuse-v070" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="lucid-yolo" class="md-header__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lucid-yolo
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Phase 14 — Augmentation upstreaming to fuse, v0.7.0 — engineering log
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../REPRODUCTION_REPORT/" class="md-tabs__link">
+          
+  
+  
+  Results
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../model_cards/detection/" class="md-tabs__link">
+          
+  
+  
+  Models
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../ROADMAP/" class="md-tabs__link">
+          
+  
+  
+  Project
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="lucid-yolo" class="md-nav__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lucid-yolo
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Home
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_1_2" id="__nav_1_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Method
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Method
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../method/how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How the detector works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../method/nms-vs-nms-free/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NMS versus NMS-free
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_1_3" id="__nav_1_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Run it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TRAINING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching a training run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DATASETS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_1_4" id="__nav_1_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clean-room
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Clean-room
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROVENANCE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ASSUMPTIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assumptions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DECISIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Results
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../REPRODUCTION_REPORT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_2" id="__nav_2_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releases
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Releases
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.1.0: Detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.2.0: Instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/oriented-detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.3.0: Oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/consolidated-note/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.4.0: Consolidated note
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.5.0: Keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_2_6" id="__nav_2_2_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unreleased
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_2_2_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_2_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Unreleased
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/correction-scoring-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Correction, scoring engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/correction-keypoint-sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Correction, keypoint sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model cards
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Model cards
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../model_cards/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../model_cards/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../model_cards/obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../model_cards/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebooks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/development_gates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development gates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/demo_detect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detection on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/demo_segment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instance segmentation on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/demo_obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Oriented detection on DOTA tiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/demo_keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keypoints on COCO person_keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ROADMAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_2" id="__nav_4_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Logs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RESEARCH_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ENGINEERING_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cross-cutting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-cutting engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ESCALATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Escalation log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_3" id="__nav_4_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phases
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phases
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_1" id="__nav_4_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 0 — Foundation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 0 — Foundation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-00-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_2" id="__nav_4_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 1 — Data pipeline
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 1 — Data pipeline
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-01-data-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_3" id="__nav_4_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 2 — Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 2 — Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-02-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_4" id="__nav_4_3_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 3 — Assignment and losses
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 3 — Assignment and losses
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-03-assignment-and-losses/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_5" id="__nav_4_3_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 4 — MuSGD
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 4 — MuSGD
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-04-musgd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_6" id="__nav_4_3_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 5 — Lightning training loop
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 5 — Lightning training loop
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-05-training-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-05-training-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_7" id="__nav_4_3_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 6 — Evaluation, v0.1.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 6 — Evaluation, v0.1.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-06-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-06-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_8" id="__nav_4_3_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 7 — Instance segmentation, v0.2.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 7 — Instance segmentation, v0.2.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-07-instance-segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_9" id="__nav_4_3_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 8 — Oriented detection, v0.3.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 8 — Oriented detection, v0.3.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-08-oriented-detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-08-oriented-detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_10" id="__nav_4_3_10_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 9 — Inference and generalization
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 9 — Inference and generalization
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-09-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-09-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_11" id="__nav_4_3_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 10 — Consolidation, v0.4.0, then rolling
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 10 — Consolidation, v0.4.0, then rolling
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-10-consolidation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-10-consolidation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_12" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_12" id="__nav_4_3_12_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 11 — Rolling, toward v0.5.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_12">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 11 — Rolling, toward v0.5.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-11-rolling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_13" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_13" id="__nav_4_3_13_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 12 — Keypoint detection, v0.5.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 12 — Keypoint detection, v0.5.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-12-keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-12-keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_14" id="__nav_4_3_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 13 — Contributor admission, augmentation guard and keypoint parity, v0.6.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 13 — Contributor admission, augmentation guard and keypoint parity, v0.6.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-13-contributor-admission/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_15" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_15" id="__nav_4_3_15_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 14 — Augmentation upstreaming to fuse, v0.7.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_15_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_3_15">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 14 — Augmentation upstreaming to fuse, v0.7.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#wp-154-every-delta-traced-and-the-frozen-tree-could-not-absorb-it-again" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-154 — every delta traced, and the frozen tree could not absorb it again
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-154c-the-mechanism-stops-reintroducing-what-it-was-already-told-to-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-154c — the mechanism stops reintroducing what it was already told to remove
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-154b-two-conventions-given-up-and-one-frozen-golden-overridden-to-hold-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-154b — two conventions given up, and one frozen golden overridden to hold them
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-155-and-wp-155b-the-letterbox-and-the-keep-mask-delegate-and-the-one-pixel-metric-that-moved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-155 and WP-155b — the letterbox and the keep mask delegate, and the one pixel metric that moved
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-156-the-warp-delegates-the-decomposition-does-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-156 — the warp delegates, the decomposition does not
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-157-a-convention-passed-in-and-the-one-test-that-can-see-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-157 — a convention passed in, and the one test that can see it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-158-what-reduced-to-what-survives-was-measured-as" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-158 — what "reduced to what survives" was measured as
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-159-the-release-that-cannot-be-published-and-why-that-was-the-better-half" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-159 — the release that cannot be published, and why that was the better half
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-14-what-each-row-does-and-where-its-boundary-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 14 — what each row does, and where its boundary is
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_16" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_16" id="__nav_4_3_16_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 15 — Audit remediation, v0.8.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_16">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 15 — Audit remediation, v0.8.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-15-audit-remediation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_17" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_17" id="__nav_4_3_17_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 16 — Training throughput
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_17">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 16 — Training throughput
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-16-training-throughput/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_18" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_18" id="__nav_4_3_18_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 17 — R1 pose-objective parity
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_18">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 17 — R1 pose-objective parity
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-17-pose-objective-parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributor guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#wp-154-every-delta-traced-and-the-frozen-tree-could-not-absorb-it-again" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-154 — every delta traced, and the frozen tree could not absorb it again
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-154c-the-mechanism-stops-reintroducing-what-it-was-already-told-to-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-154c — the mechanism stops reintroducing what it was already told to remove
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-154b-two-conventions-given-up-and-one-frozen-golden-overridden-to-hold-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-154b — two conventions given up, and one frozen golden overridden to hold them
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-155-and-wp-155b-the-letterbox-and-the-keep-mask-delegate-and-the-one-pixel-metric-that-moved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-155 and WP-155b — the letterbox and the keep mask delegate, and the one pixel metric that moved
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-156-the-warp-delegates-the-decomposition-does-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-156 — the warp delegates, the decomposition does not
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-157-a-convention-passed-in-and-the-one-test-that-can-see-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-157 — a convention passed in, and the one test that can see it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-158-what-reduced-to-what-survives-was-measured-as" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-158 — what "reduced to what survives" was measured as
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-159-the-release-that-cannot-be-published-and-why-that-was-the-better-half" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-159 — the release that cannot be published, and why that was the better half
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-14-what-each-row-does-and-where-its-boundary-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 14 — what each row does, and where its boundary is
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/Borda/lucid-YOLO/edit/main/docs/engineering/phase-14-augmentation-upstreaming.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phase-14-augmentation-upstreaming-to-fuse-v070">🔗 Phase 14 — Augmentation upstreaming to <code>fuse</code>, v0.7.0<a class="headerlink" href="#phase-14-augmentation-upstreaming-to-fuse-v070" title="Permanent link">&para;</a></h1>
+<h2 id="wp-154-every-delta-traced-and-the-frozen-tree-could-not-absorb-it-again">WP-154 — every delta traced, and the frozen tree could not absorb it again<a class="headerlink" href="#wp-154-every-delta-traced-and-the-frozen-tree-could-not-absorb-it-again" title="Permanent link">&para;</a></h2>
+<p><a id="wp-154"></a></p>
+<p>R21 advances from <code>fedde0c1</code> to <code>a5a276a</code>, and the two breaks <a href="../../work_packages/wp-153c/">WP-153c</a> predicted both arrived exactly as described. The import break is the pleasant kind: <code>tests/fixtures/synthetic.py</code> imported <code>animal_shapes</code> from <code>fuse_augmentations.data.animals</code>, upstream's restructure removed it, and collection fails immediately rather than at some later assertion. The replacement is <code>tuple(AnimalShape)[:KEYPOINTS_ANIMAL_COUNT]</code>, and its equivalence is read from upstream's own source at the old pin rather than assumed from the name: <code>animal_shapes(count)</code> was <code>tuple(AnimalShape)[:count]</code> with a range check, so the selection is identical and the range check is the only thing lost — on a constant of 2 against a 12-member enum. The other three imports from that package all still resolve, checked one at a time rather than inferred from the module importing. <code>AnimalShape</code> declaration order still opens on duck and elephant, which is what makes the constant's own comment still true; had the restructure reordered the enum, the keypoints fixture would have silently changed categories with no golden anywhere to notice.</p>
+<p><strong>The trace is a two-commit partition, and it is bit-exact.</strong> Sixteen values moved across the two generator-derived goldens, and the discipline the row owes is matching each to a named upstream change rather than merely observing that they moved. Only two of the fifteen commits between the pins touch <code>src/fuse_augmentations/data/</code> at all — <code>964fd07</code> (registry, SVG assets, <code>Fill</code> type) and <code>abbf1f2</code> (upright OBB, triangle, docs split) — so the generator was installed at four commits in turn (<code>fedde0c1</code>, <code>964fd07</code>, <code>abbf1f2</code>, <code>a5a276a</code>) and both producers run at each, the method <a href="../../work_packages/wp-146/">WP-146</a> established. The partition came back clean. <code>fedde0c1</code> reproduces all 22 stored values exactly, which is what certifies the harness and the import edit as behaviour-neutral before anything is attributed. <code>964fd07</code> moves nothing at all, despite being the commit that removed <code>animal_shapes</code> and rebuilt the animal family around the packaged SVG zoo — a restructure that changed how the assets are stored and not what they are. Every one of the sixteen moved values moves at <code>abbf1f2</code>, and nothing moves after it: the entire augmentation-engine half of the diff, eleven commits of letterbox, keep-mask, rotated-box and keypoint-swap work, is fixture-neutral, as a change to the transform stack rather than the generator should be.</p>
+<p><strong>The values do not merely move; they return.</strong> <code>abbf1f2</code> makes <code>PrimitiveShape.TRIANGLE</code> equilateral again, undoing the obtuse-scalene redesign <code>0a0cc640</code> introduced and <a href="../../work_packages/wp-132/">WP-132</a> absorbed, and it re-derives <code>polygon_to_obb</code> in the shape's own upright frame instead of by minimum-area calipers. The strongest evidence that this is the whole cause is that all sixteen values land bit-exactly on the figures this repository itself froze before <code>0a0cc640</code> — 93 detection annotations, 964 segmentation points, 66380.64 box-area sum, 44 oriented annotations, 176 oriented segmentation points, and the ten <code>data_pipeline_metrics</code> values including <code>image_std_sum</code> at 1.0084 and <code>bbox_area_sum</code> at 32923.115, every one of them recoverable from the <code>goldens/frozen/0.2/</code> snapshot <a href="../../work_packages/wp-132/">WP-132</a> removed. <a href="../../work_packages/wp-132/">WP-132</a>'s log recorded <code>obb_num_annotations</code> going 44 to 61 and <code>image_std_sum</code> falling 35.5% when the triangle became obtuse-scalene; both walk back to the digit. A trace that lands on a number the project already wrote down is a different quality of evidence from one that merely sounds plausible, and it leaves zero untraced deltas — so nothing here is a regression being frozen over.</p>
+<p><strong>The gate went red on four files for a reason no work in this row could fix.</strong> Every hook passes, 2534 tests pass, and 36 of 40 goldens pass. The four that fail are <code>fixture_checksums.json</code> and <code>data_checksums.json</code> under <code>goldens/frozen/0.5/</code> and <code>goldens/frozen/0.6/</code>, and they fail for a reason no work in this row can fix: their producers render images through an external package, so once that package changes they can never satisfy "current code must still satisfy every value a past release pinned". This is not a new discovery. <a href="../../work_packages/wp-132/">WP-132</a> hit the identical wall with the identical partition — every pure-code frozen golden green, only the two generator-derived ones red — took the question to the principal rather than resolving it in the row that raised it, and the decision was that those two "were never really freezable; they were a category error in what got snapshotted, not a regression". They were removed from the frozen tree and the live copies re-frozen. The row therefore stopped at the same place, under escalation trigger 4, rather than editing release history on a precedent it had not been given. The principal authorized the same remedy: the four files are removed here — recoverable in history, and the live copies of both metrics were already re-frozen correctly in this row — leaving 36 of 36 goldens green and the frozen-golden regression still meaning what it means for every metric it can actually test.</p>
+<p><strong>What is worth naming is why the wall came back.</strong> <a href="../../work_packages/wp-132/">WP-132</a>'s removal was correct and did not survive, because <code>make freeze-goldens</code> copies whatever live goldens exist into the new release directory with no notion that two of them are generator-derived. <a href="../../work_packages/wp-140/">WP-140</a> froze them into <code>0.5</code> and <a href="../../work_packages/wp-153/">WP-153</a> into <code>0.6</code>, each re-committing the category error the principal had already ruled on, and neither could have noticed: the freeze is a copy, and a copy of a green golden is green until the generator moves. So the remedy the principal authorized once needs to be applied to two more directories, and the mechanism needs to stop reintroducing them, so <a href="../../work_packages/wp-154c/">WP-154c</a> is opened to stop the mechanism reintroducing them rather than to remove them a third time — without it <code>0.7</code> freezes them again and <a href="../../work_packages/wp-159/">WP-159</a> meets this same wall. The general shape is <a href="../../work_packages/wp-153b/">WP-153b</a>'s own lesson in a new place — what the gate reads is safe, and what it does not read drifts silently. Here the gate does read the frozen tree; what nothing reads is the question of which metrics belong in it.</p>
+<h2 id="wp-154c-the-mechanism-stops-reintroducing-what-it-was-already-told-to-remove">WP-154c — the mechanism stops reintroducing what it was already told to remove<a class="headerlink" href="#wp-154c-the-mechanism-stops-reintroducing-what-it-was-already-told-to-remove" title="Permanent link">&para;</a></h2>
+<p><a id="wp-154c"></a></p>
+<p><a href="../../work_packages/wp-154/">WP-154</a> closed by naming why <a href="../../work_packages/wp-132/">WP-132</a>'s wall came back: <code>make freeze-goldens</code> was a blind <code>cp goldens/*.json goldens/frozen/$(MINOR)/</code>, with no notion that <code>fixture_checksums.json</code> and <code>data_checksums.json</code> are generator-derived — their producers render synthetic images through <code>fuse-augmentations</code>, so once that package's generator moves, no future code change can satisfy "the frozen copy still holds". <a href="../../work_packages/wp-132/">WP-132</a> removed the two files that wall produced; <a href="../../work_packages/wp-140/">WP-140</a> and <a href="../../work_packages/wp-153/">WP-153</a> each re-froze them anyway, because a copy of a green golden is green until the generator moves, and nothing in the copy path could tell the two categories apart. Removing the files a third time at <a href="../../work_packages/wp-159/">WP-159</a> would only restart the same clock.</p>
+<p>The fix is a schema field rather than a human checklist item. <code>fixture_checksums.json</code> and <code>data_checksums.json</code> now carry <code>"freezable": false</code>; every other live golden is freezable by omission, which keeps the six pure-code goldens' files untouched and states the rule as "false is the exception, not true". <code>scripts/freeze_goldens.py</code> replaces the Makefile's inline <code>cp</code>: it reads each live golden's <code>freezable</code> field and copies only the eligible ones, reporting what it skipped rather than skipping silently. <code>Makefile</code>'s <code>freeze-goldens</code> target calls it. <code>scripts/check_goldens.py</code>'s <code>_parse_golden</code> reads the same field, and <code>check_golden</code> rejects — with a named error, not a silent skip — any golden it finds under <code>goldens/frozen/</code> whose <code>freezable</code> is <code>false</code>; this should never happen once the freeze path is fixed, but a manual copy or a retroactively-flagged old snapshot must still be caught by the gate that reads the frozen tree, not assumed away.</p>
+<p>Two things this row does not do. It does not touch either <code>goldens/frozen/</code> directory — <a href="../../work_packages/wp-154/">WP-154</a> already removed what needed removing, and this row's job is only to stop the mechanism, not to re-litigate the removal. And it does not re-freeze anything: no live golden's values changed, so <code>goldens/fixture_checksums.json</code> and <code>goldens/data_checksums.json</code> gain one field and nothing else.</p>
+<h2 id="wp-154b-two-conventions-given-up-and-one-frozen-golden-overridden-to-hold-them">WP-154b — two conventions given up, and one frozen golden overridden to hold them<a class="headerlink" href="#wp-154b-two-conventions-given-up-and-one-frozen-golden-overridden-to-hold-them" title="Permanent link">&para;</a></h2>
+<p><a id="wp-154b"></a></p>
+<p>Two local geometric conventions move to match <code>fuse-augmentations</code>, both before any delegation row touches these files. <code>AffineParams.matrix</code> (<code>data/affine.py</code>) composes rotation, scale and shear about <code>((W-1)/2, (H-1)/2)</code> rather than <code>(W/2, H/2)</code>. <code>mirror_rboxes</code> (<code>data/rotated_aug.py</code>) and <code>HorizontalFlip._mirror_targets</code> (<code>data/augment.py</code>) mirror about <code>(width-1)/2</code> rather than <code>width/2</code>. Neither file imports <code>fuse_augmentations</code>; this row is the convention alone, not the delegation.</p>
+<p><strong>Every dependent literal traced before it moved, never pasted from output.</strong> <code>goldens/aug_invariants.json</code>'s producer was re-run with the centre reverted and nothing else; all fifteen stored values reproduced bit-exactly, certifying that the whole movement in the live re-freeze is the centre change and nothing else. Seven metrics moved — <code>affine_image_mean</code>, <code>affine_bbox_coord_sum</code>, <code>affine_polygon_area</code>, <code>fused_image_mean</code>, <code>fused_bbox_coord_sum</code> past tolerance, <code>mixup_image_mean</code> and <code>rotated_rbox_area</code> within it but re-frozen anyway for the same traced cause. The mirror axis is not exercised by this producer (no <code>HorizontalFlip</code> or <code>mirror_rboxes</code> call inside it), and none of its metrics moved from that change, exactly as predicted. <code>goldens/data_checksums.json</code> (<code>"freezable": false</code> since <a href="../../work_packages/wp-154c/">WP-154c</a>, no frozen copy) moved from both conventions at once — the producer runs the whole WP-015 pipeline including the flip — and a four-way attribution run (both old, centre-only, mirror-only, both new) split <code>bbox_coord_sum</code>'s move into <code>-242.000</code> from the mirror (every one of 242 drawn x-coordinates shifts by exactly one pixel — a mirror is an isometry, so <code>bbox_area_sum</code> is untouched by it) and <code>+13.363</code> from the centre, with the both-old reconstruction reproducing the stored values bit-exactly as the control.</p>
+<p><strong>The brief's rule for tier-A/C contract tests needed a correction, not a waiver.</strong> The expectation going in was that invariant cases (an involution is an involution under either pixel convention) need no changes and any break there is a real bug — that held. What it missed: a <em>point-anchored derived</em> case states the old convention in its own closed-form arithmetic, so five cases in <code>test_aug_contract.py</code>, <code>test_photometric.py</code> and <code>test_rotated_aug.py</code> needed re-derivation, not correction-by-code-output. Each was worked by hand from the new convention — a quarter turn about <code>(3.5, 3.5)</code> sending <code>(1,2)→(5,1)</code> under the new centre, a mirror axis at <code>2.5</code> on a six-pixel canvas, and so on — and only then checked against the running code, so a hand-derivation error would have surfaced as a test failure rather than silently demoting a tier-A derivation to a tier-B characterization. Every one matched. <code>test_aug_frozen.py</code>'s five affected cases (<code>test_boxes_land_on_frozen_coordinates</code>, <code>test_polygon_ring_lands_on_frozen_vertices</code>, <code>test_boxes_land_on_frozen_output_canvas_coordinates</code>, <code>test_sheared_rotated_box_lands_on_frozen_parameters</code>, <code>test_mirrored_then_warped_keypoints_land_on_frozen_coordinates</code>) were recomputed from the code path directly, being tier B by definition. The rotated-box case's own signature confirmed the mechanism: <code>w</code>, <code>h</code> and <code>theta</code> held to six decimals and only the centre coordinates moved, which is exactly what a translation of the composed map should do to a shape's position and not to its extent.</p>
+<p><strong>One frozen golden could not be satisfied by any resolution the brief was authorized to make.</strong> <code>goldens/frozen/0.6/aug_invariants.json</code> — a pure-code snapshot the v0.6.0 release (<code>22739e1</code>) wrote — pins the same five metrics past their tolerance, and AGENTS.md §7 lists modifying a frozen golden as a standing prohibition, not one of the escalation triggers a ruling can waive case by case. This is not <a href="../../work_packages/wp-132/">WP-132</a>/WP-154's category: those two goldens were generator-derived and could never again be satisfied by any code change, a category error in what got snapshotted rather than a real guard; this one is pure local code and was a genuine guard for 0.6.0's behaviour, broken here by a deliberate, traced convention change rather than by drift. An entry went to <code>docs/ESCALATION.md</code> (2026-09-03) with three options — remove the file on the <a href="../../work_packages/wp-132/">WP-132</a>/WP-154 precedent, update its five values in place (which §7 forbids outright), or re-scope the row to 0.7 and block every remaining Phase 14 row on that wait, all of which depend on this one landing. Presented with the no-rule-override alternative, the principal chose the override: the file's seven traced metrics are updated in place to match the live golden exactly, on record in <code>docs/ESCALATION.md</code>, rather than removed. §7's prohibition otherwise stands; this is one dated exception, not a precedent for the next one.</p>
+<p>Left untouched by design: <code>rotated_geom.py</code>'s <code>canonicalize</code>, every invariant-based contract case, <code>goldens/frozen/0.5/</code> and every other <code>0.6/</code> file, and no <code>fuse_augmentations</code> import anywhere in this row — the delegation itself is <a href="../../work_packages/wp-155/">WP-155</a>/156/157's work.</p>
+<h2 id="wp-155-and-wp-155b-the-letterbox-and-the-keep-mask-delegate-and-the-one-pixel-metric-that-moved">WP-155 and WP-155b — the letterbox and the keep mask delegate, and the one pixel metric that moved<a class="headerlink" href="#wp-155-and-wp-155b-the-letterbox-and-the-keep-mask-delegate-and-the-one-pixel-metric-that-moved" title="Permanent link">&para;</a></h2>
+<p><a id="wp-155"></a> <a id="wp-155b"></a></p>
+<p>The two rows land as one commit. They were split so a delegation swap would never travel with a frozen value (§6.5), and the split cannot be honoured here: the swap moves a value, so WP-155 alone cannot pass <code>make gate</code> and WP-155b alone has nothing to measure. The choice was between a commit that mixes them and a red <code>main</code> between two commits; the principal took the mixed commit. What §6.5 buys — the ability to name the row that moved a value — is preserved by the measurement below rather than by the commit boundary.</p>
+<p><strong>What delegates.</strong> <code>Letterbox</code> (<code>data/letterbox.py</code>) drops <code>_LetterboxGeom</code>, <code>_resolve_geometry</code> and <code>_resize_pad</code>. The fit comes from <code>letterbox_geometry</code>, the forward affine from <code>letterbox_matrix</code>, and the image from a letterbox-only <code>Compose.from_params(letterbox=..., allow_upscale=..., fill=..., padding_mode="zeros")</code> built once at construction — one <code>grid_sample</code> from the source canvas straight to the letterboxed one instead of an <code>F.interpolate</code> followed by an <code>F.pad</code>. <code>inverse_map</code> and <code>forward_affine</code> keep their signatures and their semantics, so the six evaluation and prediction call sites are untouched. The inverse stays local and closed-form (<code>inv_r</code>, <code>-pad * inv_r</code>) rather than being obtained by inverting the forward matrix numerically, because A10 requires the round trip to be exact and a numerical inversion leaves a residual in it. <code>RandomAffine</code> and <code>MosaicAssembly</code> drop their two byte-identical <code>_keep_mask</code> copies for upstream's <code>instance_keep_mask</code> at all six call sites.</p>
+<p><strong>The threshold trap, made loud.</strong> Upstream defaults <code>min_size</code> and <code>min_visibility</code> to <code>0.0</code> — deliberately, so the package holds no opinion about a training recipe's numbers — against this project's <code>2.0</code> and <code>0.1</code>. Both are passed explicitly at every one of the six call sites, and <code>TestKeepThresholdsReachUpstream</code> in <code>test_affine.py</code> and <code>test_mosaic.py</code> covers each of the three routing sites per class with a size case, a visibility case and a control. The mosaic control states the cost of an omission exactly: at <code>0.0</code>/<code>0.0</code> not only the 4%-visible sliver survives but the three instances the placement clips away to nothing survive too, a zero-width box being <code>&gt;= 0.0</code> on both rules — three empty instances carried down the pipeline with every shape lining up and nothing raising.</p>
+<p><strong>The measurement WP-155b owns.</strong> Geometry is bit-unchanged: <code>letterbox_pad_fraction</code> holds at <code>0.4</code>, every coordinate round-trip case passes, <code>goldens/data_checksums.json</code> does not move, and 35 of 36 goldens pass untouched. Exactly one value moved — <code>aug_invariants</code>' <code>letterbox_image_mean</code>, <code>0.5024 → 0.4994</code>, against a <code>0.002</code> tolerance, so 1.5× tolerance and no more. That is the whole eval-path cost of the resampling swap, and it is one number rather than a class of drift because the geometry did not move with it. Upstream's opt-in <code>antialias=True</code> was measured rather than assumed: it recovers nothing here (still <code>0.4994</code>), its Gaussian mipmap prefilter not engaging at this producer's downscale, so keeping the antialiased filter was not available short of keeping the local implementation. A32 is revised rather than contradicted — non-antialiased resampling is now the whole pipeline's filter rather than the train path's deviation from the eval path, and the two paths differ only in warp count.</p>
+<p><strong>The frozen golden, overridden a second time.</strong> <code>goldens/frozen/0.6/aug_invariants.json</code> pins that same metric, so the same §7 wall as <a href="../../work_packages/wp-154b/">WP-154b</a>, on the same file, eight commits later. The alternatives were put again — remove the file on the <a href="../../work_packages/wp-132/">WP-132</a>/WP-154 precedent, or narrow the row to the keep mask and keep the local resample, running two resample implementations and deferring the delegation to 0.7 — and the principal chose the override again: <code>letterbox_image_mean</code> updated in place to <code>0.4994</code> in both the live and the frozen copy. <code>docs/ESCALATION.md</code> (2026-09-03, second entry) carries it. That this is the second override of the same file in one session is the reason it is recorded separately rather than folded into the first: two dated exceptions, still not a standing waiver, and the next one is a fresh decision rather than a precedent already set.</p>
+<h2 id="wp-156-the-warp-delegates-the-decomposition-does-not">WP-156 — the warp delegates, the decomposition does not<a class="headerlink" href="#wp-156-the-warp-delegates-the-decomposition-does-not" title="Permanent link">&para;</a></h2>
+<p><a id="wp-156"></a></p>
+<p>The row was scoped as "the affine reduces to ranges over one <code>fuse</code> segment", and the obvious reading of that — hand R1 Table S3's ranges to <code>Compose.from_params</code> and let upstream sample and compose them — is wrong, for a reason nothing in Phase 14 had measured.</p>
+<p><strong>A third convention, found by building against it.</strong> <code>AffineParams.matrix</code> composes one <em>combined</em> shear <code>[[1, tan sx], [tan sy, 1]]</code> <strong>before</strong> rotate-and-scale; upstream's <code>_DirectParamAdapter</code> composes two <em>sequential</em> shears <code>T @ Sy @ Sx @ S @ R</code> <strong>after</strong> it. Two independent causes inside the shear — <code>Sy @ Sx</code> differs from the combined form in the <code>yy</code> entry by <code>a·b</code>, and shear-before-rotate does not commute with shear-after-rotate. Measured max-abs matrix delta on a 32×48 canvas: 1.1e-06 at zero shear (float32 noise), 0.1498 for <code>shear_x</code> and <code>shear_y</code> together, 0.9716 for rotation plus <code>shear_x</code>, and 0.4984 for the goldens' own <code>COMPOSITE</code> (angle 0.35, shear 0.12/-0.08, scale 1.15). <a href="../../work_packages/wp-153b/">WP-153b</a> and <a href="../../work_packages/wp-154b/">WP-154b</a> measured and moved exactly two conventions, the composition centre and the mirror axis; this is a third, and it was never on the list.</p>
+<p>Production would not have noticed: <code>datamodule.py</code> builds the affine with <code>scale</code> and <code>translate</code> only, leaving <code>degrees</code> and <code>shear</code> at <code>0.0</code>, where the two agree to 1e-6. The goldens would have — <code>affine_bbox_coord_sum</code>, <code>affine_polygon_area</code>, <code>fused_bbox_coord_sum</code> and <code>rotated_rbox_area</code> all move, with <code>test_aug_frozen.py</code>'s tier-B literals behind them. §6.5 calls a tier-A/B/C value moving inside a delegation row a defect that names its own row, so the parameter route was not available without first opening a WP-154b-style convention row and a third frozen-golden override.</p>
+<p><strong>The seam that makes the convention question moot.</strong> <code>Compose.from_params</code> is a convenience over a lower layer that takes an adapter: <code>build_segments(transforms, adapter, ...)</code>, and <code>TransformAdapter</code> is a public <code>@runtime_checkable</code> Protocol whose <code>build_matrix(transform, params, height, width) -&gt; (B, 3, 3)</code> is exactly the seam a caller with its own parameterisation needs. <code>_DirectParamAdapter</code>'s decomposition is one implementation's choice rather than the package's convention, which is why the package publishes the Protocol at all. <code>_StatedGeometryAdapter</code> is this project's implementation: <code>build_matrix</code> answers with <code>AffineParams.matrix</code> unchanged, so the matrix reaching the pixels is the matrix reaching the boxes, the decomposition never leaves this project, and nothing needs harmonising. The warp, the fusion, the inversion, the sampling grid and the constant fill are upstream's.</p>
+<p><strong>What the tier-C invariant became.</strong> The scope specified <em>not <code>None</code> AND single segment</em>, read off <code>return_matrix</code>. <code>return_matrix</code> turns out to be unreachable from a hand-built segment list — it is a <code>Compose</code>-level flag and <code>FusedCompose.__init__</code> rejects non-backend transforms — so the composed matrix is <code>build_matrix</code>'s own output and the condition is restated in the terms this route can actually check: <strong>exactly one segment, and that segment a <code>FusedAffineSegment</code></strong>. An exact or crop-resize segment carries no composed affine, which is the same case upstream reports <code>None</code> for, so the two readings agree on what they forbid. <code>RandomAffine._segment</code> raises on anything else and <code>test_aug_contract.py</code> asserts both shapes, plus protocol conformance and a fused-versus-two-step coordinate equality that pins the composition <em>order</em> rather than only the result.</p>
+<p><strong>Two smaller things worth the record.</strong> Upstream's segment draws a per-sample activation gate for every transform it holds even at <code>prob = 1.0</code>, where the draw is made and discarded; that draw goes to a deliberately anonymous, never-seeded <code>RandomAffine._gate_stream</code>, because taking it from the caller's generator would shift the caller's sequence — the property <a href="../../work_packages/wp-079/">WP-079</a> was opened by losing — and taking it from the global stream would touch every other transform. And <code>class X(TransformAdapter)</code> fails mypy strict against an untyped package, so conformance is structural plus a runtime <code>isinstance</code> assertion rather than a <code># type: ignore</code>.</p>
+<p><strong>Nothing moved, and that is the evidence.</strong> 36/36 goldens pass with the producers re-run and diffed at zero tolerance: <code>aug_invariants</code> 15/15 and <code>data_checksums</code> 10/10 bit-identical, <code>git diff -- goldens/</code> empty. <code>data_checksums</code> runs the whole training pipeline under a fixed seed, so its ten bit-identical values are also the determinism proof — the caller's generator consuming the same draws in the same order as before the swap. Deleted: <code>FusedAffineLetterbox</code>, <code>_warp_image</code>, <code>_theta_from_pixel_matrix</code>, <code>_transform_box_corners</code> (upstream's <code>transform_bbox_xyxy</code> now), and <code>warp_to</code>/<code>apply_to</code>, which served only the fused class and take an arbitrary post-matrix the segment API does not express. A70's cell in <code>docs/ASSUMPTIONS.md</code> named both <code>FusedAffineLetterbox</code> and <code>_keep_mask</code> as the mechanism manufacturing its case; both are gone and the case is not, so the cell now says so rather than naming what no longer exists.</p>
+<h2 id="wp-157-a-convention-passed-in-and-the-one-test-that-can-see-it">WP-157 — a convention passed in, and the one test that can see it<a class="headerlink" href="#wp-157-a-convention-passed-in-and-the-one-test-that-can-see-it" title="Permanent link">&para;</a></h2>
+<p><a id="wp-157"></a></p>
+<p>Four functions in <code>rotated_aug.py</code> become adapters — <code>mirror_rboxes</code>, <code>shift_rboxes</code>, <code>warp_rboxes</code> and <code>rbox_envelopes</code> over upstream's <code>mirror_rboxes</code>, <code>shift_rboxes</code>, <code>transform_rboxes</code> and <code>rbox_envelopes</code> — and two bodies stay: <code>clip_rboxes_to_canvas</code> with its per-instance helper, because clipping a rotated box yields a polygon and upstream declines the operation by design, and <code>check_rotated_pairing</code>, which validates a local <code>Targets</code> invariant and was never geometry. <code>rotated_geom.py</code> is untouched. <code>rbox_envelopes</code> was not on the scope's list of three; it delegates bit-identically and the row's principle is "shrink to what upstream declines to own", so it went with them.</p>
+<p><strong>The callback is the whole row, and only one test can tell whether it was passed.</strong> Upstream imposes no angle convention and its <code>canonicalize</code> argument defaults to <code>None</code>, returning the box exactly as the arithmetic left it. Its mirror returns <code>pi - theta</code> where <a href="../../work_packages/wp-058/">WP-058</a> returned <code>-theta</code> — the same rectangle, since the two differ by the half turn a rectangle is invariant under. Passing this project's canonicalizer collapses them, and the residual is the rounding of the wrap alone: measured max-abs <code>2.98e-07</code> on the angle column across 512 swept boxes with centre and extents bit-identical, against the <code>1e-4</code> <code>test_aug_frozen.py</code>'s <code>GEOM</code> compares geometric expectations at. Omitting the callback is the dangerous case and it is <em>invisible</em> to almost everything: on the same sweep the un-canonicalized angles run to <code>3.9195</code>, well past <code>3*pi/4</code>, while the corner sets the two forms produce are bit-identical. No corner, coordinate, envelope or IoU assertion can distinguish them — <code>TestCanonicalOutput</code>'s range assertions are the entire safety net for this row, which is worth stating because the natural instinct at a delegation is to trust the geometry tests.</p>
+<p><strong>The fit moved from float32 to float64, and the evidence that this is harmless is not a coordinate tolerance.</strong> The corner round trip now runs in the matrix's dtype, <code>float64</code> throughout this package, where it previously narrowed to the box dtype first: max-abs <code>1.91e-06</code> under a similarity and <code>9.54e-07</code> under shear. The golden that bounds it directly, <code>rotated_rbox_area</code> at 96.1934, has a tolerance of 0.5 — wide enough to have hidden a flipped keep decision. What actually rules that out is the pair of zero-tolerance counts, <code>affine_kept_instances</code> 2.0 and <code>mosaic_kept_instances</code> 8.0, matching exactly. The narrowing back to the box dtype happens <em>inside</em> the callback rather than after it, because a canonical <code>float64</code> angle sitting a hair inside the half-open <code>[-pi/4, 3*pi/4)</code> can round out of that range on the way to <code>float32</code>, and the range is a postcondition the assigner and the OBB head read in the dtype <code>Targets</code> actually carries.</p>
+<p><strong>The keypoint table is a shape conversion this project owns.</strong> A dataset publishes the <em>pairs</em> it wants swapped (A64 keeps that the public surface, so <code>K</code> stays generic); <code>permute_keypoint_pairs</code> takes a full-length <code>(K,)</code> index in which slot <code>i</code> takes its value from slot <code>index[i]</code>, identity slots included. Applying the pairs in list order to <code>range(K)</code> reproduces the sequential per-pair swap this transform used to perform, overlapping pairs included — <code>[(0, 1), (1, 2)]</code> composes to the same three-cycle either way. The bounds check and its error string stay on this side, since a bad pair is a caller error whichever side permutes. Upstream moves <em>coordinates</em> and says so, so the matching <code>keypoint_vis</code> permutation stays local; <a href="../../work_packages/wp-153c/">WP-153c</a>'s §8.12 measurement already named the trap, and the case that pins it — <code>test_mirrored_visibility_flags_follow_own_points</code> — asserts the <em>pairing</em> of each mirrored point with its own flag rather than the two columns separately, with an unpaired third slot to pin that an identity slot neither moves nor loses its flag. Without it a mirrored sample carries a visible point marked occluded and its partner marked visible, at identical shapes with every coordinate assertion passing.</p>
+<p><strong>One device hazard, closed because no test here can catch it.</strong> The flip index is built on the CPU from a Python list. Upstream moves it to the keypoint device itself before gathering; the local visibility gather now does the same explicitly, since the loop it replaced was device-agnostic for free and a CPU index reaching <code>index_select</code> on an MPS tensor raises. The gate runs on the CPU, so nothing in it would have failed.</p>
+<p>No golden moved: 36/36 with <code>git status goldens/</code> empty. Deleted with the bodies they served: <code>_POINT_DIM</code>, <code>_QUAD_CORNERS</code>, and the <code>apply_affine_to_points</code> import.</p>
+<h2 id="wp-158-what-reduced-to-what-survives-was-measured-as">WP-158 — what "reduced to what survives" was measured as<a class="headerlink" href="#wp-158-what-reduced-to-what-survives-was-measured-as" title="Permanent link">&para;</a></h2>
+<p><a id="wp-158"></a></p>
+<p>The scope asked for the export list to be "reduced to what survives, so the public surface states what this project still implements", and read literally that instruction does nothing: exactly one name did not survive Phase 14, <code>FusedAffineLetterbox</code>, and <a href="../../work_packages/wp-156/">WP-156</a> already removed it. So the row's first job was to choose what the phrase is measured as, and to say so rather than leave the choice implicit in a diff.</p>
+<p><strong>The measure taken.</strong> A name stays if some consumer reaches for it <em>through the package</em> — <code>from lucid_yolo.data import X</code> from outside the module that defines it — or if living-doc prose names it. Measured by AST walk over <code>src/</code>, <code>tests/</code> and <code>scripts/</code>, 30 of 54 names have a package-level importer and 24 have none, and every one of those 24 is consumed through its defining submodule instead (<code>from lucid_yolo.data.coco import CocoDetectionDataset</code>, and so on). There is no runtime attribute access on the package anywhere; <code>src/</code> and <code>scripts/</code> never import from the package at all, only <code>tests/</code> do. The living-doc prong rescued six the import census alone would have dropped, <code>build_scale_policy</code> most pointedly — ADR-005 names it as a thing <code>lucid-yolo</code> owns, which is the sentence the whole row is trying to make the surface say. The list goes 54 to 37, and every submodule still declares its own <code>__all__</code>, so nothing published became unpublished: the package list is an index, and the module list is the declaration. The docstring now says that, so the next reader does not re-add names out of habit.</p>
+<p><strong>Two readings rejected, both defensible.</strong> The stricter one observes that every doc naming a rescued symbol cites its <em>submodule</em> path alongside it and never the package surface, so no document rescues anything and the list lands at 30. The other runs on ownership rather than use — publish what this project still implements, drop the four rotated transports that are now adapters — and lands near 45. It was rejected on its own example: <code>warp_rboxes</code> is not a thin adapter, it carries this row's narrow-inside-the-callback decision, so "drop what upstream owns" splits the transport family on a judgement no firmer than "who imports it", and it would publish zero-consumer names on ownership grounds alone. Use is the measure, and the docstring states that membership tracks use rather than ownership so the list is not misread as the boundary.</p>
+<p><strong>One name added back against the measure.</strong> <code>HSVJitter</code> has no package-level importer and the census removed it, which left six of the pipeline's seven transforms published and one missing — while the docstring introducing the list named the transforms as a group. An index whose description contradicts its contents teaches worse than an index with one arguable member, so the group is published whole. That is the single place in this row where the stated measure was overridden, and it is recorded rather than absorbed.</p>
+<p><strong>What each document needed, including the ones that needed nothing.</strong> A10 was a bare "Letterbox, aspect-preserving" and now records what delegated and what did not — the inverse stays closed-form because A10's own round trip has to be exact and a numerical inversion leaves a residual in it — closing on the boundary's actual content: pixels moved, geometry did not. A26 stops describing a test-only dependency: one pin now moves fixtures and training-time behaviour together, and what keeps them apart is <code>freezable: false</code> on the two generator-derived goldens rather than care. <code>docs/PROVENANCE.md</code>'s R21 cell gains the second role in acquisition order, with the clean-room line restated — a permissive general-purpose package admitted as a dependency, never as a source to read a method from — and its per-commit fixture trace untouched. A21 needed nothing, evidenced: <code>data/tiling.py</code> is not in Phase 14's diff at all. The four model cards needed nothing, evidenced three ways: they are dated records of runs trained before the swap and retro-editing their procedure tables would falsify how those checkpoints were produced; "fused affine+letterbox" is still a true recipe description, since <a href="../../work_packages/wp-156/">WP-156</a> preserved the fusion rather than dissolving it; and they contain zero references to any symbol Phase 14 deleted.</p>
+<p><strong>A11 was left alone, and why is worth recording.</strong> The scope paragraph calls A11 "the half-open rasterisation rule". A11's own row is anchor centre placement, <code>(i+0.5)*stride</code>; the half-open pixel-centre membership rule is cited <em>as</em> A11 from A37(iii). So the register carries one id for two rules, which the scope inherited. Nothing in A11 concerns the augmentation engine either way, so the row's outcome is no change — but the inconsistency is named here rather than silently reinterpreted, since the next reader to follow that citation will hit it too.</p>
+<p><strong>Nothing was left to re-freeze</strong>, which is the outcome the three delegation rows predicted: 36/36 with <code>git status goldens/</code> empty. <a href="../../work_packages/wp-155/">WP-155</a> moved <code>letterbox_image_mean</code> and re-froze it inside its own row; <a href="../../work_packages/wp-156/">WP-156</a> and <a href="../../work_packages/wp-157/">WP-157</a> moved nothing. Tiers A through D are untouched, tier D having no literal and no golden to re-freeze by design. <code>README.md</code> gained the decision it was missing — ADR-005/D19 removed a whole subsystem and was not among the six shaping choices the README enumerates, now seven — and one stale count was corrected in passing, 63 numbered assumptions against the register's actual 73. Its <code>Current release: 0.4.0</code> is two releases behind <code>__version__</code> and is left for the release row, which is what moves it.</p>
+<h2 id="wp-159-the-release-that-cannot-be-published-and-why-that-was-the-better-half">WP-159 — the release that cannot be published, and why that was the better half<a class="headerlink" href="#wp-159-the-release-that-cannot-be-published-and-why-that-was-the-better-half" title="Permanent link">&para;</a></h2>
+<p><a id="wp-159"></a></p>
+<p><code>__version__</code> moves <code>0.6.0</code> to <code>0.7.0</code>, which is the whole of the version change — <code>pyproject.toml</code> declares the version dynamic and reads the module attribute. <code>[Unreleased]</code> closes as <code>[0.7.0]</code>. <code>make freeze-goldens MINOR=0.7</code> copies seven live metric sets into <code>goldens/frozen/0.7/</code>, the same seven <code>0.6</code> holds since <a href="../../work_packages/wp-154c/">WP-154c</a> taught the mechanism to skip the two generator-derived goldens, and 43 goldens pass where 36 did before the freeze.</p>
+<p><strong>The fourth clause could not be executed as written, and finding that out was the row's real work.</strong> ADR-005 gates promoting <code>fuse-augmentations</code> to a runtime dependency on four conditions, the first being real SemVer releases to PyPI. Measured against PyPI's own API rather than recalled: the latest <code>fuse-augmentations</code> there is <code>0.10.0.dev0</code>, there is no 0.11 or 0.12 at all, and all eleven releases are <code>.dev0</code> pre-releases. The floor this phase stands on is <code>a5a276a</code>. Half of that was already written down in <code>pyproject.toml</code> before the row opened — PyPI forbids re-uploading the <code>0.10.0.dev0</code> version string — which is worth noting on its own: the blocker was legible in the tree for five work packages and nothing surfaced it, because <code>scripts/release_guard.py</code> checks the tag, the changelog section and the gate, and has no notion of dependency tiers.</p>
+<p><strong>What made refusal the worse option is that ADR-005's own fallback expired.</strong> The ADR says a refusal "returns the dependency story to a SHA pin, which keeps the augmentation stack local rather than making it unpublishable". That sentence was true when it was written and is not true now: <code>data/affine.py</code>, <code>data/augment.py</code>, <code>data/letterbox.py</code>, <code>data/mosaic.py</code> and <code>data/rotated_aug.py</code> all import <code>fuse_augmentations</code> at module level, so <code>lucid_yolo.data</code> — and <code>predict</code>, through <code>letterbox</code> — cannot import without it. The stack is not local any more, so refusing promotion returns nothing; it leaves the package in the <code>dev</code> group, where every install omitting that group yields a distribution that fails at import. The choice was never "publishable or not". It was "unpublishable, or broken for anyone who installs it without a development group", and those are not symmetrical.</p>
+<p><strong>Condition 1 is therefore recorded as knowingly failed rather than quietly satisfied.</strong> The pin moves into <code>[project].dependencies</code> as a direct reference, which is legal to build and install and illegal to upload, so the distribution is unpublishable to PyPI. That costs nothing this project currently does: <code>release.yml</code> states in its own header that publication is an unmade <code>[PRINCIPAL]</code> decision and deliberately omits it, so there is no upload for the rejection to break. Conditions 2, 3 and 4 are met and each was checked rather than asserted — the exact SHA is a stricter ceiling than the range condition 2 asks for; the promotion landed in its own work package whose licence audit was run and now places <code>fuse-augmentations</code> in the republished <code>base</code> tier beside <code>hotcoco</code>, clean at 107 distributions and 344 shipped binaries; and D20 with the <code>docs/ESCALATION.md</code> entry is the record condition 4 asks for. The principal was shown three alternatives — hold the release for PyPI, split the promotion into a later row, or stop — and chose this one. The remedy is small and dated: the day a 0.12 reaches PyPI, a <code>&gt;=0.12,&lt;0.13</code> range replaces the SHA and nothing else here changes.</p>
+<p><strong>What this release does not claim.</strong> No tag is cut and no distribution is published, as at 0.4.0, 0.5.0 and 0.6.0 — four release commits now stand ahead of the train's own tags. The contributor-admission rows <a href="../../work_packages/wp-141/">WP-141</a> through <a href="../../work_packages/wp-144/">WP-144</a> are still unstarted, <a href="../../work_packages/wp-141/">WP-141</a> being a principal row whose three preconditions sit outside the roadmap, so Phase 14 ships with the same four-row tail Phase 13 did. A68, A69 and A70 remain open. No trained weights ship (D14). And the phase's subject is a boundary rather than a capability: nothing in 0.7.0 detects anything 0.6.0 could not, and the case for it is that the augmentation engine is now one implementation maintained in one place, with 43 goldens and a four-tier guard standing where the second copy used to be.</p>
+<h2 id="phase-14-what-each-row-does-and-where-its-boundary-is">Phase 14 — what each row does, and where its boundary is<a class="headerlink" href="#phase-14-what-each-row-does-and-where-its-boundary-is" title="Permanent link">&para;</a></h2>
+<p><a id="phase-14-rows"></a></p>
+<p>Phase 14's roadmap cells were the longest in the register by a factor of three, because each row carries a boundary that is easy to cross by accident: the swaps are large, and the difference between "this much of the engine moved" and "and this other thing came with it" is exactly what a scope cell exists to state. That reasoning belongs here, where there is room for it, and the roadmap keeps the summary. Each row below is written before it lands, so it is a specification rather than a record; the <code>### WP-nnn</code> entry written when the row lands is what says what actually happened.</p>
+<p><a id="wp-154-scope"></a></p>
+<p><strong><a href="../../work_packages/wp-154/">WP-154</a> — the pin bump alone.</strong> The dependency bump and the re-freeze it forces, with nothing delegated. R21 advances from <code>fedde0c1</code> to <code>a5a276a</code> — the commit <code>v0.12.0</code> is tagged from once this roll-out is clean. Two things break loudly and are repaired here. <code>tests/fixtures/synthetic.py</code> imports <code>animal_shapes</code>, which upstream's restructure removed; the replacement is <code>tuple(AnimalShape)[:KEYPOINTS_ANIMAL_COUNT]</code>, the same declaration-order selection the helper performed, and the other three imports from that package are unaffected. The synthetic fixtures themselves also moved: <code>PrimitiveShape.TRIANGLE</code> was redesigned from obtuse-scalene to equilateral, <code>polygon_to_obb</code> re-derived from an upright frame rather than minimum-area calipers, and the animal family rebuilt around a packaged SVG zoo, against goldens whose tolerance is zero. Every changed golden value is traced to a named upstream change before it is re-frozen; one that cannot be traced is a regression and stops the row rather than being frozen over.</p>
+<p><a id="wp-154c-scope"></a></p>
+<p><strong><a href="../../work_packages/wp-154c/">WP-154c</a> — the freeze mechanism, fixed rather than the files, a third time.</strong> <a href="../../work_packages/wp-154/">WP-154</a> hit <a href="../../work_packages/wp-132/">WP-132</a>'s wall again: <code>goldens/frozen/0.5</code> and <code>0.6</code> both re-acquired the two generator-derived goldens, because <code>make freeze-goldens</code> is a blind copy with no notion that a golden can be pinned to an external package's output rather than to this project's own code. A <code>"freezable": false</code> field on the two live goldens, a <code>scripts/freeze_goldens.py</code> that skips them at copy time, and a <code>check_goldens.py</code> that rejects one found frozen anyway — so the row that removed the files this time is not the row that has to remove them again next time. No golden value changes and neither frozen directory is touched.</p>
+<p><a id="wp-154b-scope"></a></p>
+<p><strong><a href="../../work_packages/wp-154b/">WP-154b</a> — the conventions, before anything delegates.</strong> Absorbs FA-1, FA-2 and FA-3, and gives up the two conventions §8.12 measured as genuinely different — deliberately before any delegation, so the frozen literals they move travel with a local edit rather than with a swap. The composition centre becomes <code>((W-1)/2, (H-1)/2)</code> and the mirror axis <code>(width - 1) / 2</code> (<code>data/augment.py</code>, <code>data/rotated_aug.py</code>), on the principal's reasoning that one convention across image and coordinate transport is worth a re-freeze and two conventions inside one pipeline are worth nothing; rotated angles are unaffected, since <code>pi - theta</code> and <code>-theta</code> differ by a half turn the long-edge convention absorbs.</p>
+<p>What is asserted rather than changed: the datamodule's existing <code>torch.Generator</code> reaches <code>fuse</code>'s own draws rather than a second stream — the property <a href="../../work_packages/wp-079/">WP-079</a> was opened by losing — and end to end under <code>num_workers &gt; 0</code>, which upstream does not exercise; and constant-value padding is a <code>fill=</code> parameter requiring <code>padding_mode="zeros"</code> rather than the <code>PaddingMode.CONSTANT</code> member the plan expected, in the image's own value range so <code>114/255</code> transfers unchanged. The half-pixel convention has nothing left to pin: 0.12 declined to add <code>align_corners</code> and sampled with <code>align_corners=True</code> against the normalization sandwich derived for that same flag, so the pixel-space map is the one an <code>align_corners=False</code> implementation produces for the same matrix, measured to <code>atol=1e-5</code>. That measurement is recorded, not frozen — there is no flag whose flip it would catch.</p>
+<p><a id="wp-155-scope"></a></p>
+<p><strong><a href="../../work_packages/wp-155/">WP-155</a> — the letterbox and the instance filter.</strong> Absorbs FA-4 and FA-5. <code>Letterbox</code> keeps <code>inverse_map</code> and <code>forward_affine</code> unchanged in signature and semantics, so its consumers — six evaluation and prediction call sites, four since <a href="../../work_packages/wp-152/">WP-152</a> added <code>predict_keypoints</code> — are untouched, and delegates the resize-and-pad internals. <code>RandomAffine</code> and <code>MosaicAssembly</code> consume one upstream keep mask instead of two local <code>_keep_mask</code> copies that must agree; <code>Targets.filter</code> is unchanged, since which instances survive is a <code>fuse</code> question and what a surviving instance means is not.</p>
+<p>The trap is in the defaults. Upstream's <code>min_size</code> and <code>min_visibility</code> are both <code>0.0</code>, deliberately — the defaults drop nothing rather than encode a plausible-looking minimum — against this project's <code>2.0</code> and <code>0.1</code>. Omit either argument at any call site and every instance survives the warp, including ones pushed entirely off canvas, with no exception and no shape change. Both are passed explicitly at every call site and a test asserts it. Deletes <code>_resize_pad</code>, <code>_LetterboxGeom</code> and both <code>_keep_mask</code>.</p>
+<p><a id="wp-155b-scope"></a></p>
+<p><strong>WP-155b — the resampling delta, measured on purpose.</strong> The row decision 6 asked for, holding no swap. Delegating the letterbox keeps its geometry exactly — unrounded ratio, <code>max(1, round(size * r))</code> content size, <code>(out - new) // 2</code> floor-halved pads with the odd pixel right or bottom, verified in both directions on integer arithmetic — while changing its pixels: this project resized with an antialiased bilinear <code>F.interpolate</code> followed by <code>F.pad</code>, where upstream runs one <code>grid_sample</code> from source canvas to letterboxed canvas with <code>antialias=False</code> by default and, when enabled, a Gaussian mipmap prefilter rather than torch's area-weighted kernel. So every coordinate round-trip test passes and only image-derived metrics move, on the evaluation path, across the six evaluation and prediction call sites. A delta that hides behind a green coordinate suite is exactly the one that has to be measured on purpose. This row measures it against the 0.6 frozen goldens, records the number, and re-freezes what moved. Nothing moving is a legitimate outcome and is recorded as one.</p>
+<p><a id="wp-156-scope"></a></p>
+<p><strong><a href="../../work_packages/wp-156/">WP-156</a> — the affine reduces to ranges over a segment.</strong> Absorbs FA-3 and FA-5 into the warp itself, and takes the local fusion with it. What remains locally is R1 Table S3's ranges and the sampling of them. <code>FusedAffineLetterbox</code> is deleted outright — <a href="../../work_packages/wp-155/">WP-155</a> and this row composed inside <code>fuse</code> <em>are</em> that composition, so the local class is a second implementation of the package's whole subject. Polygon rings ride the composed matrix rather than a duplicate warp path: <code>return_matrix=True</code> hands the composed pixel matrix back and <code>apply_affine_to_points</code> applies it to rings here.</p>
+<p>What decides whether that matrix is the whole chain is adjacency, not <code>clip_policy</code> — which governs when a fused <em>colour</em> chain clamps and shares nothing with this. Only consecutive geometric operations group into one segment, so a colour operation between two geometric ones splits the run and the returned matrix then describes the last segment alone. Ordering geometry before the letterbox before any colour is therefore a requirement of this row, and the single-geometric-segment condition is asserted as a tier-C invariant because silence is how it would fail. The returned matrix is also <code>None</code> for an exact-only pipeline and for a letterbox-only one, where <code>letterbox_matrix()</code> is the route instead, so a consumer checks <em>not <code>None</code></em> <strong>and</strong> single segment before treating it as the whole chain — two conditions, not one. Deletes <code>_warp_image</code>, <code>_theta_from_pixel_matrix</code>, <code>_transform_box_corners</code> and the whole fused class.</p>
+<p><a id="wp-157-scope"></a></p>
+<p><strong><a href="../../work_packages/wp-157/">WP-157</a> — the two task conventions.</strong> Absorbs FA-7 and FA-8, together because each passes a table or a callback upstream rather than moving a rule there. <code>rotated_aug.py</code> shrinks to what upstream declines to own rather than being deleted outright: <code>clip_rboxes_to_canvas</code> stays, because clipping a rotated box yields a polygon and not a rotated box, so upstream refuses the operation by design and bridges through <code>rbox_envelopes</code> to a plain-box clip and the keep mask for the survival decision instead; <code>check_rotated_pairing</code> stays too, validating a local <code>Targets</code> pairing invariant (<a href="../../work_packages/wp-056/">WP-056</a>) rather than any geometry. <code>canonicalize</code> is passed as a callback rather than reimplemented upstream, since angle range and periodicity are a task convention (A22) and not a resampling concern, and <code>rotated_geom.py</code> is untouched — the assigner, rotated NMS and the OBB head all read it.</p>
+<p>The left/right index-swap table is passed through rather than owned; <code>HorizontalFlip</code> delegates, the table staying dataset metadata read from the caller (A64), which is what keeps <code>K</code> generic. <code>_mirror_targets</code> shrinks rather than being deleted: upstream's <code>permute_keypoint_pairs</code> moves coordinates only and leaves the visibility flags where they were, so the local permutation of <code>keypoint_vis</code> stays. Drop it and every mirrored sample carries a visible point marked occluded and its partner marked visible, with identical shapes throughout and no failing coordinate assertion. The mirror axis is not this row's concern — <a href="../../work_packages/wp-154b/">WP-154b</a> already moved it, which is why nothing frozen moves here.</p>
+<p><a id="wp-158-scope"></a></p>
+<p><strong><a href="../../work_packages/wp-158/">WP-158</a> — the closing sweep.</strong> The last of the four rows that re-freeze; like the other three, it holds no swap. <code>data/__init__.py</code> re-exports 54 symbols — 55 when this paragraph was written, less the <code>FusedAffineLetterbox</code> <a href="../../work_packages/wp-156/">WP-156</a> deleted — a count set when the package owned the whole augmentation stack and raised by <a href="../../work_packages/wp-147/">WP-147</a>'s five parameter dataclasses; it is reduced to what survives, so the public surface states what this project still implements. <code>docs/ROADMAP.md</code>, <code>docs/ASSUMPTIONS.md</code> (A10, A11, A21, A26), <code>docs/PROVENANCE.md</code>, the model cards and <code>README.md</code> are rewritten to describe the boundary rather than a stack this project no longer implements, with A11's half-open rasterisation rule kept — that one stays local and still governs mask supervision.</p>
+<p>Any structural fixture metric the swaps moved is re-frozen with the move recorded. Tier D is <em>not</em> re-frozen, because there is nothing there to re-freeze: it holds no literal and no golden, only same-seed-equal and different-seed-differ against whichever implementation is live, so it either still holds after the swaps or names a real loss of reproducibility. Tiers A, B and C are not re-frozen either: if any moved, the swap was wrong and the row that moved it is the defect.</p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright 2026 Jirka Borovec — Apache-2.0 (see LICENSE and NOTICE)
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

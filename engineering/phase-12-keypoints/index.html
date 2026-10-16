@@ -1,0 +1,4569 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Engineering log for Phase 12 — Keypoint detection, v0.5.0: the findings of WP-120, WP-121, WP-122, WP-123, WP-124, WP-121b, WP-131, WP-132, WP-133, WP-134…">
+      
+      
+        <meta name="author" content="Jirka Borovec">
+      
+      
+        <link rel="canonical" href="https://borda.github.io/lucid-YOLO/engineering/phase-12-keypoints/">
+      
+      
+        <link rel="prev" href="../../research/phase-12-keypoints/">
+      
+      
+        <link rel="next" href="../phase-13-contributor-admission/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+  
+    <title>Phase 12 — Keypoint detection, v0.5.0 — engineering log - lucid-yolo</title>
+  
+
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="lucid-yolo">
+  <meta property="og:title" content="Phase 12 — Keypoint detection, v0.5.0 — engineering log">
+  <meta property="og:description" content="Engineering log for Phase 12 — Keypoint detection, v0.5.0: the findings of WP-120, WP-121, WP-122, WP-123, WP-124, WP-121b, WP-131, WP-132, WP-133, WP-134…">
+  <meta property="og:url" content="https://borda.github.io/lucid-YOLO/engineering/phase-12-keypoints/"><meta property="og:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="lucid-yolo: clean-room, NMS-free YOLO in PyTorch Lightning">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
+  <meta name="twitter:title" content="Phase 12 — Keypoint detection, v0.5.0 — engineering log">
+  <meta name="twitter:description" content="Engineering log for Phase 12 — Keypoint detection, v0.5.0: the findings of WP-120, WP-121, WP-122, WP-123, WP-124, WP-121b, WP-131, WP-132, WP-133, WP-134…">
+  
+    <link rel="alternate" type="text/markdown" href="index.md" title="Markdown copy of this page">
+  
+  
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phase-12-keypoint-detection-v050" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="lucid-yolo" class="md-header__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lucid-yolo
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Phase 12 — Keypoint detection, v0.5.0 — engineering log
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../REPRODUCTION_REPORT/" class="md-tabs__link">
+          
+  
+  
+  Results
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../model_cards/detection/" class="md-tabs__link">
+          
+  
+  
+  Models
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../ROADMAP/" class="md-tabs__link">
+          
+  
+  
+  Project
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="lucid-yolo" class="md-nav__button md-logo" aria-label="lucid-yolo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lucid-yolo
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Borda/lucid-YOLO" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Borda/lucid-YOLO
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Home
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_1_2" id="__nav_1_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Method
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Method
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../method/how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How the detector works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../method/nms-vs-nms-free/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NMS versus NMS-free
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_1_3" id="__nav_1_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run it
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Run it
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TRAINING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching a training run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DATASETS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_1_4" id="__nav_1_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clean-room
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Clean-room
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROVENANCE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Provenance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ASSUMPTIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assumptions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DECISIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Results
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../REPRODUCTION_REPORT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_2" id="__nav_2_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releases
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Releases
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.1.0: Detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.2.0: Instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/oriented-detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.3.0: Oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/consolidated-note/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.4.0: Consolidated note
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v0.5.0: Keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_2_6" id="__nav_2_2_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unreleased
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_2_2_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_2_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Unreleased
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/correction-scoring-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Correction, scoring engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../report/correction-keypoint-sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Correction, keypoint sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model cards
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Model cards
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../model_cards/detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../model_cards/segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instance segmentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../model_cards/obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Oriented detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../model_cards/keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebooks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/development_gates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development gates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/demo_detect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detection on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/demo_segment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instance segmentation on COCO 2017
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/demo_obb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Oriented detection on DOTA tiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/demo_keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keypoints on COCO person_keypoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ROADMAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_2" id="__nav_4_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Logs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RESEARCH_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ENGINEERING_LOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cross-cutting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-cutting engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ESCALATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Escalation log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_3" id="__nav_4_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phases
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phases
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_1" id="__nav_4_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 0 — Foundation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 0 — Foundation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-00-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_2" id="__nav_4_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 1 — Data pipeline
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 1 — Data pipeline
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-01-data-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_3" id="__nav_4_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 2 — Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 2 — Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-02-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_4" id="__nav_4_3_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 3 — Assignment and losses
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 3 — Assignment and losses
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-03-assignment-and-losses/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_5" id="__nav_4_3_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 4 — MuSGD
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 4 — MuSGD
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-04-musgd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_6" id="__nav_4_3_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 5 — Lightning training loop
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 5 — Lightning training loop
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-05-training-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-05-training-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_7" id="__nav_4_3_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 6 — Evaluation, v0.1.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 6 — Evaluation, v0.1.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-06-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-06-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_8" id="__nav_4_3_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 7 — Instance segmentation, v0.2.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 7 — Instance segmentation, v0.2.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-07-instance-segmentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_9" id="__nav_4_3_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 8 — Oriented detection, v0.3.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 8 — Oriented detection, v0.3.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-08-oriented-detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-08-oriented-detection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_10" id="__nav_4_3_10_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 9 — Inference and generalization
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 9 — Inference and generalization
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-09-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-09-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_11" id="__nav_4_3_11_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 10 — Consolidation, v0.4.0, then rolling
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 10 — Consolidation, v0.4.0, then rolling
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-10-consolidation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-10-consolidation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_12" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_12" id="__nav_4_3_12_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 11 — Rolling, toward v0.5.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_12">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 11 — Rolling, toward v0.5.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-11-rolling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_13" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_13" id="__nav_4_3_13_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 12 — Keypoint detection, v0.5.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_13_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_3_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 12 — Keypoint detection, v0.5.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../research/phase-12-keypoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Research
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#wp-120-a-mirror-does-not-know-anatomy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-120 — a mirror does not know anatomy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-121-a-reader-is-not-a-wiring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-121 — a reader is not a wiring
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-122-a-stem-is-architecture-its-sigma-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-122 — a stem is architecture, its sigma is not
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-123-a-loss-written-by-hand-from-equations-fetched-three-times" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-123 — a loss written by hand, from equations fetched three times
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-124-a-premise-checked-against-the-installed-package-not-the-roadmap-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-124 — a premise checked against the installed package, not the roadmap text
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-121b-a-segmentation-ring-only-an-oriented-reading-actually-needs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-121b — a segmentation ring only an oriented reading actually needs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-131-a-dependency-fixed-upstream-checked-rather-than-trusted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-131 — a dependency fixed upstream, checked rather than trusted
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-132-every-part-built-nothing-connected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-132 — every part built, nothing connected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-133-an-unreleased-section-and-the-rule-it-follows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-133 — an Unreleased section, and the rule it follows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-134-a-checkpoint-reported-at-one-eightieth-of-its-own-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-134 — a checkpoint reported at one eightieth of its own score
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-135-a-control-arm-because-one-number-states-no-direction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-135 — a control arm, because one number states no direction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-136-a-filename-is-not-a-scratch-space-for-whatever-axis-is-on-your-mind-that-day" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-136 — a filename is not a scratch space for whatever axis is on your mind that day
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-137-a-signal-that-only-ever-existed-downstream-of-the-run-it-should-have-warned-about" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-137 — a signal that only ever existed downstream of the run it should have warned about
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-138-a-claim-was-wrong-and-the-fix-it-justified-had-already-shipped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-138 -- a claim was wrong, and the fix it justified had already shipped
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-126-the-fourth-task-existed-everywhere-except-where-a-reader-would-look" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-126 — the fourth task existed everywhere except where a reader would look
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-139-the-same-blindness-one-layer-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-139 — the same blindness, one layer down
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-140-a-release-is-a-boundary-not-an-achievement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-140 — a release is a boundary, not an achievement
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-140b-the-contract-names-a-role-and-says-when-it-ends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-140b — the contract names a role, and says when it ends
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_14" id="__nav_4_3_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 13 — Contributor admission, augmentation guard and keypoint parity, v0.6.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 13 — Contributor admission, augmentation guard and keypoint parity, v0.6.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-13-contributor-admission/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_15" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_15" id="__nav_4_3_15_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 14 — Augmentation upstreaming to fuse, v0.7.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_15">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 14 — Augmentation upstreaming to fuse, v0.7.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-14-augmentation-upstreaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_16" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_16" id="__nav_4_3_16_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 15 — Audit remediation, v0.8.0
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_16">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 15 — Audit remediation, v0.8.0
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-15-audit-remediation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_17" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_17" id="__nav_4_3_17_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 16 — Training throughput
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_17_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_17">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 16 — Training throughput
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-16-training-throughput/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_3_18" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_3_18" id="__nav_4_3_18_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 17 — R1 pose-objective parity
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_4_3_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_3_18">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 17 — R1 pose-objective parity
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phase-17-pose-objective-parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributor guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#wp-120-a-mirror-does-not-know-anatomy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-120 — a mirror does not know anatomy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-121-a-reader-is-not-a-wiring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-121 — a reader is not a wiring
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-122-a-stem-is-architecture-its-sigma-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-122 — a stem is architecture, its sigma is not
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-123-a-loss-written-by-hand-from-equations-fetched-three-times" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-123 — a loss written by hand, from equations fetched three times
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-124-a-premise-checked-against-the-installed-package-not-the-roadmap-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-124 — a premise checked against the installed package, not the roadmap text
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-121b-a-segmentation-ring-only-an-oriented-reading-actually-needs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-121b — a segmentation ring only an oriented reading actually needs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-131-a-dependency-fixed-upstream-checked-rather-than-trusted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-131 — a dependency fixed upstream, checked rather than trusted
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-132-every-part-built-nothing-connected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-132 — every part built, nothing connected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-133-an-unreleased-section-and-the-rule-it-follows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-133 — an Unreleased section, and the rule it follows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-134-a-checkpoint-reported-at-one-eightieth-of-its-own-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-134 — a checkpoint reported at one eightieth of its own score
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-135-a-control-arm-because-one-number-states-no-direction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-135 — a control arm, because one number states no direction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-136-a-filename-is-not-a-scratch-space-for-whatever-axis-is-on-your-mind-that-day" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-136 — a filename is not a scratch space for whatever axis is on your mind that day
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-137-a-signal-that-only-ever-existed-downstream-of-the-run-it-should-have-warned-about" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-137 — a signal that only ever existed downstream of the run it should have warned about
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-138-a-claim-was-wrong-and-the-fix-it-justified-had-already-shipped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-138 -- a claim was wrong, and the fix it justified had already shipped
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-126-the-fourth-task-existed-everywhere-except-where-a-reader-would-look" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-126 — the fourth task existed everywhere except where a reader would look
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-139-the-same-blindness-one-layer-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-139 — the same blindness, one layer down
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-140-a-release-is-a-boundary-not-an-achievement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-140 — a release is a boundary, not an achievement
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-140b-the-contract-names-a-role-and-says-when-it-ends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-140b — the contract names a role, and says when it ends
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/Borda/lucid-YOLO/edit/main/docs/engineering/phase-12-keypoints.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phase-12-keypoint-detection-v050">🕺 Phase 12 — Keypoint detection, v0.5.0<a class="headerlink" href="#phase-12-keypoint-detection-v050" title="Permanent link">&para;</a></h1>
+<h2 id="wp-120-a-mirror-does-not-know-anatomy">WP-120 — a mirror does not know anatomy<a class="headerlink" href="#wp-120-a-mirror-does-not-know-anatomy" title="Permanent link">&para;</a></h2>
+<p><a id="wp-120"></a></p>
+<p>Phase 12 opens on a container change rather than a model change: <code>Targets</code> gains <code>keypoints</code> (<code>(N, K, 2)</code> float32) and <code>keypoint_vis</code> (<code>(N, K)</code> int64), and <code>HorizontalFlip</code> -- the one existing transform this WP's scope covers -- gains the matching mirror. Every other geometric transform (<code>RandomAffine</code>, <code>MosaicAssembly</code>, <code>Mixup</code>/<code>CopyPaste</code>, <code>Letterbox</code>) is untouched; keypoint support there is a later WP's concern, not this one's.</p>
+<p>K is a constructor argument the way the class count already is: <code>keypoints</code>/<code>keypoint_vis</code> follow <code>polygons</code>' existing "count is 0 or N" convention (the shared instance axis every box-aligned modality already uses) rather than <code>rboxes</code>' independent-axis-plus-separate-mask one, since a keypoint set belongs to one box the way a polygon ring does, not to a second geometry entirely. <code>concat</code> additionally rejects differing <code>K</code> across items that do carry keypoints -- a check <code>_concat_polygons</code> has no analogue for, since ring length is per-instance there and K is fixed per dataset here, so two items disagreeing on K is corruption, not a valid ragged shape.</p>
+<p>The harder decision is what <code>HorizontalFlip</code> does with left/right identity. A mirror reflects every point's x-coordinate unconditionally -- that part is geometry, not anatomy, and needed no new assumption. But swapping <em>which</em> index is now "left knee" after the flip is anatomical, dataset-specific knowledge the transform has no business hardcoding into a K-generic container's own mirror: nothing in this repository's K-point design says K=17 or names a COCO ordering, and baking the pairing into <code>HorizontalFlip</code> would silently narrow "generic K-point task" back down to "COCO human pose" the first time this class ran. <code>keypoint_flip_pairs: list[tuple[int, int]] | None = None</code> is the resolution -- a caller-supplied swap map, <code>None</code> meaning "mirror coordinates, keep column identity", the correct default for a K-point task with no left/right symmetry. A64 records COCO's own 17-point pairing as the value the demo dataset will actually supply, but the row is marked <code>open</code>: <a href="../../work_packages/wp-121/">WP-121</a>'s COCO datamodule is what passes the concrete list in, not this one.</p>
+<p>Implementation delegated to <code>codex:codex-rescue --write</code> against a design spec fixing the exact field names, shapes, validation rules, and test scenarios up front, rather than leaving the K-point/anatomy split to be discovered mid-implementation -- reviewed diff-by-diff against that spec before landing; one docstring grammar slip (<code>"A supplied, a dataset keypoint pair map..."</code>) was the only correction needed.</p>
+<hr />
+<h2 id="wp-121-a-reader-is-not-a-wiring">WP-121 — a reader is not a wiring<a class="headerlink" href="#wp-121-a-reader-is-not-a-wiring" title="Permanent link">&para;</a></h2>
+<p><a id="wp-121"></a></p>
+<p><code>CocoDetectionDataset</code> gains <code>keypoints: bool = False</code>, matching <code>oriented</code>'s existing shape exactly: opt-in, defaulting to "leaves the reader exactly as it was". When set, each retained annotation's flat COCO <code>keypoints</code> field (<code>[x, y, v, ...]</code>, <a href="../../work_packages/wp-120/">WP-120</a>'s <code>Targets.keypoints</code>/<code>keypoint_vis</code> on the receiving end) is split by a new <code>_parse_keypoints</code> helper into <code>(K, 2)</code> coordinates and <code>(K,)</code> visibility, stacked across an image's retained instances, and threaded into whichever of the axis-aligned or <code>_oriented_targets</code> construction paths <code>_build_targets</code> takes -- both grew optional <code>keypoints</code>/<code>keypoint_vis</code> parameters rather than staying axis-aligned-only, so a caller who sets both <code>oriented=True</code> and <code>keypoints=True</code> does not crash even though this repository's real pose data is never oriented. Crowd and RLE-skipped annotations are excluded from keypoint parsing exactly as they already are from boxes/labels/polygons -- the same retained-annotation loop populates all four, so the axes cannot drift apart. A mismatched <code>K</code> across two instances of one image raises naming the file and both observed counts, the same "cannot describe a rectangular tensor" failure <code>_oriented_targets</code> already raises for a non-quadrilateral ring.</p>
+<p><a href="../../work_packages/wp-120/">WP-120</a>'s own log entry above states "WP-121's COCO datamodule is what passes the concrete [flip-pair] list in" -- that was wrong when written, not merely superseded: this row's DoD names only <code>tests/data/test_coco.py</code>, and the roadmap row's Scope never promised datamodule or <code>HorizontalFlip</code> wiring. Left standing in <a href="../../work_packages/wp-120/">WP-120</a>'s own entry per this log's convention of not editing a historical paragraph to match a later correction, but A64 in <code>docs/ASSUMPTIONS.md</code> is corrected in this WP's own commit, since the assumption row itself (not a narrative entry) still needs to be accurate going forward: it now states that no roadmap row currently owns constructing <code>HorizontalFlip(keypoint_flip_pairs=...)</code> for a pose task, rather than pointing at a WP whose actual scope never included it.</p>
+<p>Delegated to <code>codex:codex-rescue --write</code> against a fixed design spec, as <a href="../../work_packages/wp-120/">WP-120</a> was. One environment-only test failure surfaced during codex's own verification pass (<code>test_worker_loader_augments_differently_each_epoch</code>, a pre-existing, unrelated DataLoader-worker test failing because codex's sandbox blocks <code>torch_shm_manager</code>'s multiprocessing calls) -- root-caused correctly by codex itself (failure occurs during worker process startup, before any WP-121 code runs; the same 62-test file otherwise passed) and left for the lead's full-access environment rather than patched around. Confirmed independently: the same test file passes 63/63 outside the sandbox, and the full <code>make gate</code> (2282 passed, 27/27 goldens) is green.</p>
+<hr />
+<h2 id="wp-122-a-stem-is-architecture-its-sigma-is-not">WP-122 — a stem is architecture, its sigma is not<a class="headerlink" href="#wp-122-a-stem-is-architecture-its-sigma-is-not" title="Permanent link">&para;</a></h2>
+<p><a id="wp-122"></a></p>
+<p><code>DualDetectionHead</code> gains a third opt-in stem set, <code>num_keypoints</code>, following <code>num_coeffs</code>'/<code>predict_angle</code>'s exact shape: absent by default, so the accepted detection/segmentation/oriented module trees are untouched byte-for-byte. <code>_build_keypoint_stem</code> reuses <code>_stem_width</code> (A28's <code>channels // 3</code>) rather than a bespoke width the way <code>_build_coeff_stem</code> already does -- unlike the angle stem, no R1 Table S11 or any allowlisted source measures a keypoint task at all, R14 being registered "future pose milestone only", so there is nothing to fit a dedicated width against [<strong>struck 2026-09-17 (D22)</strong>: R1 Table S10 measures exactly this task, and at its protocol this stem is 13.0% / 26.5% under the paper's <code>n</code> params / FLOPs — A77]. The final 1x1 emits <code>4 * K</code> raw channels in point-major order (<code>x, y, sigma_x, sigma_y</code> per point) and nothing follows it -- coordinates are unbounded offsets exactly like the angle branch, and per the scope boundary below, sigma is equally raw.</p>
+<p>The scope line that mattered most here was what this WP explicitly does <strong>not</strong> decide: R14's RLE loss needs <code>sigma &gt; 0</code> for its flow's density, but the specific function that guarantees that (softplus, exp, a scaled sigmoid) is tied to the loss equations themselves, and AGENTS.md sec. 6 reserves loss/assignment/optimizer/rotated-geometry modules for hand-written implementation from the equations, not generated code. A65 records the split explicitly: <code>DualDetectionHead</code> and the new <code>decode_keypoints</code> (<code>heads/keypoint.py</code>, <code>decode_ltrb</code>'s anchor-centre/stride convention generalized from a four-value ltrb offset to a direct two-value per-point offset) both leave sigma completely untouched, and <a href="../../work_packages/wp-123/">WP-123</a> is where the mapping is decided, from R14 directly. The codex spec for this WP said so in as many words -- "if you find yourself reaching for such a transform, stop" -- and the delegated diff held the line: <code>heads/keypoint.py</code>'s decode function does not even accept a sigma argument, and the test suite's <code>test_sigma_output_remains_raw_unbounded_and_point_major</code> drives the stem's output convolution to explicit large-magnitude values and asserts they survive unchanged, which would fail against any accidentally-added activation.</p>
+<p>Delegated to <code>codex:codex-rescue --write</code> as <a href="../../work_packages/wp-120/">WP-120</a>/121 were, but this one surfaced a real regression its own sandboxed test run correctly caught and correctly declined to fix: <code>_DetectionBranch.forward</code>'s return tuple grew from four elements to six (<code>cls, box, coeff, angle</code> to <code>..., keypoints, keypoint_sigma</code>), and three call sites in <code>models/build.py</code> (<code>Detector</code>, <code>OrientedDetector</code>, <code>Segmenter</code>) unpack that tuple positionally rather than through <code>DualHeadOutput</code>'s named fields -- <code>cls, box, _, _ = self.o2o(...)</code> and its two siblings. The spec had excluded <code>build.py</code> from scope entirely, which was the actual mistake: those three lines are a direct, unavoidable consequence of widening a tuple those call sites already depend on, not a new feature crossing a WP boundary. Codex's own gate ran <code>tests/models/</code> as a regression check, found 22 failures and 6 errors all tracing to those three lines, correctly refused to touch the excluded file, and reported the gap rather than guessing. Fixed by hand in three one-line edits (widening each unpack to six positions, matching the new tuple width) -- mechanical enough, and small enough, not to warrant a second delegation round; <code>make gate</code> (2290 passed, 27/27 goldens, including all four <code>params_flops_*</code> goldens the widened tuple had been silently breaking) confirms nothing else depended on the old width.</p>
+<hr />
+<h2 id="wp-123-a-loss-written-by-hand-from-equations-fetched-three-times">WP-123 — a loss written by hand, from equations fetched three times<a class="headerlink" href="#wp-123-a-loss-written-by-hand-from-equations-fetched-three-times" title="Permanent link">&para;</a></h2>
+<p><a id="wp-123"></a></p>
+<p>Not delegated. AGENTS.md sec. 6 reserves loss/assignment/optimizer/rotated-geometry modules for hand-written implementation from the equations -- the highest AGPL-regurgitation-risk surface -- and R14's RLE loss is squarely a loss module, the first one this project's Phase 12 work has touched. Every other WP in this phase (120/121/122) went to <code>codex:codex-rescue</code>; this one did not, and no part of it was delegated except (implicitly) nothing -- the module, its RealNVP flow, and its test suite are all written directly against R14's own equations, fetched from arXiv's HTML rendering (the allowlisted primary-source endpoint) across three separate targeted <code>WebFetch</code> passes rather than one broad read, specifically to cross-corroborate the one detail secondary summarization is most likely to get subtly wrong: which direction the flow runs and what sits at its latent end. All three fetches agreed on Eq. 8 verbatim, R14 sec. 4's <code>K=6</code>/<code>Lfc=3</code>/<code>Nn=64</code>/Leaky-ReLU conditioner config, and Eq. 12's affine coupling formula; the third fetch additionally recovered R14 sec. 3.2's <code>z_bar ~ N(0, I)</code> latent statement and sec. 3.3's <code>sigma_hat</code> sigmoid sentence -- resolving A65, which <a href="../../work_packages/wp-122/">WP-122</a> had deliberately left open rather than guessed at. No detection-repository code, including R14's own official implementation, was opened at any point (AGENTS.md sec. 7).</p>
+<p><strong>The loss (Eq. 8, <code>log s</code> dropped per R14's own stated implementation choice):</strong> <code>L_rle = -log Q(x_bar) - log G_phi(x_bar) + log sigma_hat</code>, where <code>x_bar = (mu_g - mu_hat) / sigma_hat</code> is the standardized residual, <code>Q</code> a fixed unit Laplace (no parameters, R14's "preset density"), and <code>G_phi</code> the density the RealNVP flow induces over <code>x_bar</code> via the standard change-of-variables identity. <code>Q</code>'s gradient reaching <code>mu_hat</code>/<code>sigma_hat</code> independently of the flow is R14's own stated "gradient shortcut" motivation for the additive split (sec. 3.2) rather than an incidental property -- <code>test_gradient_shortcut_reaches_mu_and_sigma_with_flow_frozen</code> freezes every flow parameter and confirms the regression head still receives nonzero gradient, a direct test of that specific paper claim rather than a generic backprop smoke test.</p>
+<p><strong>The flow (Eq. 12, Appendix A):</strong> six stacked affine coupling layers over the 2-D residual, each holding one coordinate fixed and transforming the other by a scale-and-shift pair from a 3-layer/64-unit/Leaky-ReLU conditioner. The paper states the coupling formula but not that the fixed/transformed partition alternates between layers -- that is RealNVP's own standard construction (Dinh et al., which R14 cites rather than restates), and without it one of the two coordinates could never move at all under the whole stack, making it degenerate rather than a valid bijection over R^2. Implemented as <code>synthesize</code> (the generative <code>z -&gt; x</code> direction) and <code>invert</code> (<code>x -&gt; z</code>, RealNVP's defining closed-form property, needed for density evaluation) as two directions of the same module rather than one direction plus a solved inverse.</p>
+<p><strong>What a unit gate can and cannot prove here:</strong> the mechanism-claim validation this row's roadmap text (and R14 itself) cares about -- RLE beating an OKS-only ablation -- needs the [GPU][PRINCIPAL]-gated <a href="../../work_packages/wp-125/">WP-125</a> tier run this session cannot execute. Every property a unit test <em>can</em> pin was therefore treated as load-bearing rather than incidental: <code>test_flow_density_integrates_to_one</code> numerically integrates the flow's induced density over a 161x161 grid and checks it lands within 0.05 of 1.0 -- the single most discriminating check of change-of-variables bookkeeping, since a base-density term without its accompanying log-determinant (or vice versa) passes every other test in the file but does not integrate to a proper probability density. <code>test_log_determinant_matches_autograd_jacobian</code> compares the analytic per-layer log-determinant against <code>torch.autograd.functional.jacobian</code>'s own determinant, independently of <code>invert</code> entirely -- self-consistency between <code>synthesize</code> and <code>invert</code> alone could not catch a sign error that happened to cancel between the two, and this check cannot make that mistake since it never calls <code>invert</code>.</p>
+<p><strong>Design decisions this row records rather than silently makes (A65, A66):</strong> sigma's positivity mapping (deferred by <a href="../../work_packages/wp-122/">WP-122</a>/A65) resolves here as <code>torch.sigmoid</code>, applied in the loss rather than the head, per R14 sec. 3.3's own stated sentence -- not chosen freehand. Visibility masking (A66, new): COCO <code>v=0</code> is excluded unconditionally (no ground truth exists to train against), <code>v=1</code>/<code>v=2</code> both contribute equally, since COCO's own OKS protocol already scores against <code>v&gt;=1</code> regardless of occlusion and training against a narrower set than the metric evaluates against would be the inconsistent choice, not the safe one.</p>
+<p><strong>A structural fix along the way:</strong> every other loss in this repo (<code>instance_mask_loss</code>, <code>ciou_loss</code>, <code>probabilistic_iou</code>, ...) is a parameter-free pure function over already-produced network outputs. RLE's flow is the first loss component in this project with trainable weights of its own, and a first draft reached for a lazily-built module-level global singleton to hold it -- convenient for a bare function's signature, but a violation of this project's own "no global mutable state" rule, undiscoverable by an optimizer's <code>.parameters()</code>, and unable to move devices or checkpoint the way a registered submodule does. Corrected before landing: <code>RLELoss</code> is an <code>nn.Module</code> owning the flow as <code>self.flow</code>, the shape every other stateful component in this codebase (<code>DualDetectionHead</code>, <code>ProtoNet</code>) already takes.</p>
+<h2 id="wp-124-a-premise-checked-against-the-installed-package-not-the-roadmap-text">WP-124 — a premise checked against the installed package, not the roadmap text<a class="headerlink" href="#wp-124-a-premise-checked-against-the-installed-package-not-the-roadmap-text" title="Permanent link">&para;</a></h2>
+<p><a id="wp-124"></a></p>
+<p>Delegated to <code>codex:codex-rescue</code>, <code>--write</code>, scoped to <code>src/lucid_yolo/eval/coco_eval.py</code> and a new <code>tests/eval/test_keypoint_eval.py</code> only -- no decoder, model, CLI, roadmap, or assumption edits, no commit, no full <code>make gate</code> inside the sandbox. Before dispatch this row's own Scope text was verified against the installed environment rather than trusted: <code>torchmetrics==1.9.0</code>'s <code>MeanAveragePrecision.__init__</code> accepts <code>iou_type</code> values of only <code>"bbox"</code>/<code>"segm"</code> (checked via direct signature/source inspection, not memory), so the row's premise -- "keypoint mAP wired the way WP-069 wired box mAP" -- was factually wrong for what is actually installed. This did not rise to an AGENTS.md sec. 4 escalation: the row's actual intent, a COCO-OKS-faithful engine wired against <a href="../../work_packages/wp-121/">WP-121</a>'s ground truth and <a href="../../work_packages/wp-122/">WP-122</a>'s decode, is still satisfiable, just through a different already-a-dependency library (<code>faster_coco_eval</code>, R23) called directly instead of through torchmetrics's wrapper. The spec handed to codex stated the corrected mechanism up front and explicitly instructed it to re-verify the premise itself against the installed package before writing any code, rather than trust the prompt.</p>
+<p><strong>What codex built:</strong> <code>keypoints_to_predictions</code> adapts a fixed-size <code>(B, N, K, 2)</code> decode-shaped batch into COCO prediction dicts, filtering the score-zero padding rows a fixed decoder shape produces and remapping contiguous class labels back to original COCO category ids -- the same shape of adapter <code>detections_to_predictions</code> already provides for boxes, not a new pattern. <code>evaluate_keypoints</code> builds a minimal in-memory COCO ground-truth/result document pair from <a href="../../work_packages/wp-121/">WP-121</a>'s <code>keypoints</code>/<code>keypoint_vis</code> tensor convention directly (<code>v == 0</code> excluded from both OKS matching and the per-instance bounding-box area, <code>v &gt;= 1</code> included -- A66 applied here exactly as <a href="../../work_packages/wp-123/">WP-123</a> defined it, not re-decided) and drives <code>faster_coco_eval.COCOeval_faster(iouType="keypoints", kpt_oks_sigmas=...)</code> through its native <code>evaluate()</code> / <code>accumulate()</code> / <code>summarize()</code> sequence, one-shot rather than <code>DualPathEvaluator</code>-streaming since no keypoint decode pipeline exists yet for a streaming caller to feed. <code>COCO_KEYPOINT_OKS_SIGMAS</code> names R12's 17-point sigma table as a module constant rather than leaving it to the library's own <code>Params.setKpParams</code> default -- the values are identical today, but a project-owned constant keeps the number this project reports against from silently moving if the dependency's own default ever changes.</p>
+<p><strong>Independent re-verification (lead, outside the sandbox):</strong> <code>tests/eval/test_keypoint_eval.py</code> -- 5 passed (padding-drop/category-remap adapter contract; a perfect-match OKS oracle scoring near-1.0 AP; a far-miss oracle scoring exactly 0.0 AP, ruling out a category-only match; the empty-input all-zero ten-key contract, avoiding a degenerate call into <code>COCO.loadRes</code>'s empty-list case; corrupting only a <code>v=0</code> target coordinate and asserting the ten stats are bit-for-bit unchanged, reusing <a href="../../work_packages/wp-123/">WP-123</a>'s own <code>TestVisibilityMasking</code> pattern). <code>coco_eval.py</code>'s module doctests -- 6 passed, 1 pre-existing skip. <code>mypy</code> on the file -- clean. Full <code>tests/eval/</code> regression -- 216 passed (211 pre-existing + 5 new, matching codex's own reported delta exactly). Full <code>make gate</code> -- 2319 passed, 37 skipped, 3 deselected, 27/27 goldens, run twice to confirm no stray failure line in the fuller output.</p>
+<p><strong>No new assumption recorded.</strong> The spec instructed codex not to add an <code>ASSUMPTIONS.md</code> row itself and to flag anything it found instead; nothing surfaced that qualifies -- the sigma-table caution above is a documented fragility comment, not an open gap, since the value is pinned as a citable constant rather than inherited implicitly either way.</p>
+<h2 id="wp-121b-a-segmentation-ring-only-an-oriented-reading-actually-needs">WP-121b — a segmentation ring only an oriented reading actually needs<a class="headerlink" href="#wp-121b-a-segmentation-ring-only-an-oriented-reading-actually-needs" title="Permanent link">&para;</a></h2>
+<p><a id="wp-121b"></a></p>
+<p>Surfaced during Phase 12's own dogfooding rather than invented: validating a fuse-augmentations <code>Task.KEYPOINTS</code> COCO export against <a href="../../work_packages/wp-121/">WP-121</a>'s reader (an offline check of the user's own upstream package, ahead of wiring a fixture from it) found that every annotation in the export parsed to zero instances. Root cause traced two layers deep. The proximate one was upstream -- fuse-augmentations' <code>CocoWriter</code> never emitted a <code>segmentation</code> field for <code>Task.KEYPOINTS</code>, even though the outline polygon it would need was already computed for every shape regardless of task -- and was fixed there, by the user, not here (AGENTS.md sec. 6/7: no fix to a dependency's own source from this repo). The deeper one was this repo's own: <code>_parse_annotation</code> (<a href="../../work_packages/wp-014/">WP-014</a>'s original reader) required a <em>parseable</em> <code>segmentation</code> ring to retain any annotation at all, in <strong>every</strong> mode -- plain, oriented, and <a href="../../work_packages/wp-121/">WP-121</a>'s own keypoints reading alike -- so the upstream bug's fix alone was not sufficient; a keypoints-only or plain-detect-only export genuinely has no ring to give, by design, and the reader treated that as identical to a crowd or RLE annotation it should legitimately drop.</p>
+<p><strong>The fix, scoped precisely.</strong> Two kinds of "no ring" are not the same claim. A <code>segmentation</code> value that is <em>present but unusable</em> -- an RLE crowd dict, an empty list, a ring under three points -- is never a real countable instance, in any mode; that half of <a href="../../work_packages/wp-014/">WP-014</a>'s original policy is untouched, and it is exactly what <code>TestKeypointParsing</code>'s own existing fixture already exercises (one RLE annotation, no <code>iscrowd</code> flag set, expected to still be dropped) -- a first draft that relaxed on "ring is <code>None</code>" alone broke that test immediately (<code>KeyError</code> reading <code>ann["keypoints"]</code> off an annotation the keypoints branch was never meant to see), which is what forced the narrower <code>raw_segmentation is not None or self._oriented</code> condition actually landed. A <code>segmentation</code> key that is <strong>absent entirely</strong> is the other case, and it is fatal only for <code>oriented=True</code>, which has no other source for the rotated box (<code>_oriented_targets</code> derives both <code>boxes</code> and <code>rboxes</code> from the same quadrilateral ring); a plain or keypoints reading now keeps the box instead. <code>_build_targets</code> collapses the whole image's <code>polygons</code> to <code>[]</code> the moment any one retained instance lacks a ring, rather than leaving a ragged per-instance mix -- <code>Targets.polygons</code>'s own documented contract is "0 (no masks) or N," never in between.</p>
+<p><strong>Why this does not reopen the silent-empty-mask hole.</strong> <code>instance_mask_targets</code> already raises <code>ValueError</code> when <code>len(target.polygons) != len(target.boxes)</code> -- a guard written for exactly this shape of mismatch, already in place before this fix, for a different reason (<a href="../../work_packages/wp-099b/">WP-099b</a>'s YOLO-layout path, which never carries rings at all). Relaxing the parse-time gate does not need a new guard; it needs this existing one to still be reachable, and it is: requesting <code>mask_targets=True</code> against a ring-less image raises there precisely as it does for a genuinely maskless dataset.</p>
+<p><strong>Verification.</strong> <code>tests/data/test_coco.py::TestRinglessAnnotations</code> -- a plain reading keeps both ringless boxes with <code>polygons == []</code>; an oriented reading against the same file still returns zero instances, locking in that oriented mode's requirement did not loosen; <code>instance_mask_targets</code> against the same ringless targets still raises, naming "detection-only annotation cannot supervise masks." Every existing <code>CocoDetectionDataset</code> caller re-run as a regression sweep -- <code>test_coco.py</code>, <code>test_coco_eval.py</code>, <code>test_annotations.py</code>, <code>test_build_dota_tiles.py</code>, <code>test_overfit_batch.py</code>, <code>test_datamodule.py</code> -- 175 passed. <code>coco.py</code>'s own module doctests and <code>mypy --strict</code> both clean. Full <code>make gate</code> green (2322 passed, 37 skipped, 27/27 goldens), run against the project's actually-pinned <code>fuse-augmentations</code> wheel -- deliberately not the newer local checkout the upstream fix and the keypoints-fixture wiring both need, since that checkout's widened <code>Shape</code> vocabulary moves <code>class_names(ClassMode.SHAPE)</code>'s span for every task (det/obb/seg included) and would silently drag the frozen <code>*_num_categories</code> goldens along with it. That vocabulary-scoping gap is a separate, still-open finding, reported back rather than worked around: <code>class_names()</code> has no parameter to restrict its span to a shape family, so det/obb/seg cannot currently pin "geometric shapes only" against a <code>fuse-augmentations</code> version new enough to carry keypoints at all. The keypoints-fixture wiring this fix unblocks (<code>tests/fixtures/synthetic.py::generate_keypoints_fixtures</code>, a small fixed animal subset for an overfit-friendly category count) is validated end-to-end against a local dev-only override but held uncommitted pending that upstream resolution and the resulting pin bump.</p>
+<h2 id="wp-131-a-dependency-fixed-upstream-checked-rather-than-trusted">WP-131 — a dependency fixed upstream, checked rather than trusted<a class="headerlink" href="#wp-131-a-dependency-fixed-upstream-checked-rather-than-trusted" title="Permanent link">&para;</a></h2>
+<p><a id="wp-131"></a></p>
+<p>The upstream half of <a href="../../work_packages/wp-121b/">WP-121b</a>'s "still-open finding" landed same-day: <code>class_names(class_mode, shapes=...)</code> (opt-in, defaulting to the old full-vocabulary span when omitted, so every existing caller is unaffected), a mirrored <code>SyntheticConfig.colors</code> field, and the <code>Task.KEYPOINTS</code> segmentation-emission fix <a href="../../work_packages/wp-121b/">WP-121b</a> already depended on. Verified rather than assumed fixed: the first check found the new parameter existed and its own tests passed, but <code>generate_dataset</code> -- the convenience function this project's fixtures actually call, not the primitive directly -- still called the bare unscoped <code>class_names(config.class_mode)</code> at its one writer-construction call site, so <code>generate_dataset(..., shapes=DEFAULT_SHAPES, ...)</code> kept emitting all 16 categories regardless. Reported back with the exact line and the one-line fix it needed; landed within the hour as an amended commit (<code>74af985</code>), re-verified empirically both ways -- <code>shapes=DEFAULT_SHAPES</code> now yields exactly <code>['circle', 'rectangle', 'square', 'triangle']</code>, <code>shapes=animal_shapes(2)</code> yields exactly <code>['duck', 'elephant']</code> -- before trusting it for anything downstream.</p>
+<p><strong>Pinned by commit, not by version (R21).</strong> <code>fuse-augmentations</code>' version string had not moved (<code>0.10.0.dev0</code>) across every commit in this saga, and PyPI forbids re-uploading that string, so a bare <code>uv lock</code> re-resolve would have kept silently re-pinning the stale 2026-08-02 wheel. <code>pyproject.toml</code>'s dependency became a git+commit-SHA pin instead (<code>git+https://...@74af985...</code>) -- matching R21's own provenance row, which already cited a fixed commit rather than a floating version, closer to A26's original intent than the PyPI-registry pin the project had drifted to. <code>uv lock</code>'s re-resolution incidentally also picked up <code>onnx</code>/<code>onnxruntime</code> into the lock for the first time; both had been declared in the <code>dev</code> dependency group but were absent from <code>uv.lock</code> entirely, a pre-existing drift unrelated to this row that a plain <code>uv sync --frozen</code> had exposed by removing the two packages someone had evidently <code>pip install</code>ed by hand outside the lock.</p>
+<p><strong>Goldens verified unchanged, not re-frozen.</strong> <code>generate_detseg_fixtures</code>/<code>generate_obb_fixtures</code> gained an explicit <code>shapes=DEFAULT_SHAPES</code> argument -- defensive, not corrective, since that was already the implicit default -- so the fix restores exactly the 4-category vocabulary the frozen goldens were built against. Full <code>make gate</code> after the pin bump: 2325 passed (2322 plus the two new keypoints-fixture tests plus one doctest), 27/27 goldens passed with no <code>--freeze</code> needed, confirming the restored parity rather than assuming it.</p>
+<p><strong><code>generate_keypoints_fixtures</code>.</strong> 12 images, <code>animal_shapes(2)</code> -- duck and elephant, not fuse-augmentations' full 12-animal vocabulary -- specifically to keep an eventual overfit-style milestone run's category count low; more animal classes means a wider vocabulary a memorization-style run has to fit before its own metric means anything. Mirrors <code>generate_detseg_fixtures</code>/<code>generate_obb_fixtures</code>'s existing shape exactly: idempotent, seeded (<code>KEYPOINTS_SEED</code>), a matching <code>keypoints_fixture_dir</code> session fixture in <code>conftest.py</code>. <code>test_keypoints_set_loads</code> pins every annotation's landmark table at fuse-augmentations' fixed 16-point animal schema and the category count at or under <code>KEYPOINTS_ANIMAL_COUNT</code>; <code>test_keypoints_generation_deterministic</code> mirrors the existing det/obb determinism tests byte-for-byte.</p>
+<h2 id="wp-132-every-part-built-nothing-connected">WP-132 — every part built, nothing connected<a class="headerlink" href="#wp-132-every-part-built-nothing-connected" title="Permanent link">&para;</a></h2>
+<p><a id="wp-132"></a></p>
+<p>Phase 12 shipped five consecutive rows of keypoint work and never once ran a keypoint. <a href="../../work_packages/wp-120/">WP-120</a> added the target channels, <a href="../../work_packages/wp-121/">WP-121</a> the COCO reader, <a href="../../work_packages/wp-122/">WP-122</a> the head stem, <a href="../../work_packages/wp-123/">WP-123</a> the RLE loss, <a href="../../work_packages/wp-124/">WP-124</a> the OKS scorer -- each landed green, each with its own passing unit suite, and the composition none of them owned did not exist. <code>DetectionLitModule</code>'s task enumeration still read <code>detect</code>/<code>segment</code>/<code>obb</code>, so the keypoint stem was never constructed by anything; <code>RLELoss</code> was exported from <code>losses/__init__.py</code> and had <strong>zero call sites</strong> outside the module that defined it; <code>keypoint</code> appeared nowhere in <code>ptl/module.py</code>, <code>ptl/datamodule.py</code>, <code>data/collate.py</code> or <code>models/build.py</code>. The suite was green because every test was a component test, and a component test cannot fail for a wire that was never run.</p>
+<p>The trigger for finding it was a question about running the overfit gate, not a failing test -- which is the part worth recording. Nothing would have surfaced this until someone tried to train, because "wire absent" and "wire correct" are indistinguishable to a test suite that only ever exercises the parts. <a href="../../work_packages/wp-087/">WP-087</a> and <a href="../../work_packages/wp-088/">WP-088</a> exist for exactly this reason and are the precedent this row follows: each is a <em>training path</em> row that carries its own overfit-100 golden as DoD, rather than a component row trusting that a later integration will notice. The gate is the thing that makes a wire testable at all.</p>
+<p><strong>Additive, not substitutive.</strong> The RLE term enters the detection total at <code>keypoint_gain</code> (A68) alongside the box and class terms, which makes this <a href="../../work_packages/wp-087/">WP-087</a>'s structural shape rather than <a href="../../work_packages/wp-088/">WP-088</a>'s -- the oriented path is the one task that <em>replaces</em> terms, zeroing <code>box_gain</code>/<code>l1_gain</code> inside the dual loss and respending them on rotated equivalents. Keypoints add a channel of supervision without contesting any existing one, so the arrangement is the simpler one and the <code>keypoint_gain=0</code> bit-exactness test is what proves it: with the gain at zero the detection total is bit-identical to a detect run, so the term is genuinely additive and the gain genuinely consulted rather than folded in somewhere upstream.</p>
+<p><strong>The whole transform layer, after a scoping that was wrong twice.</strong> Every geometric transform rebuilds <code>Targets(...)</code> from scratch, and all of them dropped the keypoint fields on the floor -- <code>letterbox.py</code>, <code>mosaic.py</code>, <code>affine.py</code>, <code>mixup.py</code>. The first scoping fixed <code>Letterbox</code> alone and argued the boundary was principled: <code>_warp_targets</code> is a pure forward affine that resizes and pads, never crops, so no point can leave the canvas and there is no policy to decide, where mosaic/affine/mixup crop and would force a clamp-vs-demote decision an augmentation-off gate could not settle honestly. Every sentence of that is true and the conclusion was still wrong, because the premise it rested on was never checked: the claim "augmentation is off" was verified against the <strong>validation</strong> loader, which is letterbox-only, and generalized to the training loader, which is not. <code>_TrainPipeline</code> runs mosaic, <code>FusedAffineLetterbox</code>, mixup, copy-paste, HSV and flip unconditionally. The gate died on <code>pad_keypoints</code>' instance-count mismatch on its first batch, and the fix was the whole layer -- which is what made A70 this row's decision instead of <a href="../../work_packages/wp-125/">WP-125</a>'s.</p>
+<p><strong>The loud bug was hiding a silent one.</strong> Re-reading the transform path after that failure -- rather than only the line that raised -- turned up <code>HorizontalFlip</code> constructed at <code>datamodule.py:767</code> with no <code>keypoint_flip_pairs</code> argument at all. The flip is K-generic by design and cannot know which index mirrors which, so the omission did not mean "no swap needed", it meant every mirrored sample supervised <code>flank_left</code> toward the location of <code>flank_right</code>. That trains, converges to a left/right-confused head, and reports nothing: no shape check fails, no loss value looks wrong, and the overfit gate would very likely still have passed. Worse, the first draft of A64 asserted the pairing <em>was</em> being threaded through -- a documentation claim written from what the code should have done rather than from what it did, and corrected only because the affine's hard error forced a second reading of the same path. A64 now resolves by reading the pairing off the dataset's own COCO category names (<code>left_eye</code>, <code>flank_left</code>), which is where the anatomy is actually stated.</p>
+<p><strong>Symbols over animals, for reasons that outrank "simpler".</strong> R21's <code>SymbolShape</code> family carries K=7 against the animals' K=16, and its landmarks are placed analytically -- three-quarters of the way from each outline's area centroid toward a named vertex -- rather than traced anatomically. Two consequences beyond the cheaper stem. Only 5 of 7 slots are populated on most symbols, so a symbol run carries <code>v=0</code> points natively and exercises A66's visibility exclusion inside a real training loop instead of only in <code>test_rle_loss.py</code>. And because the points are analytic, R12's OKS sigma table -- 17 values derived from measured <em>annotator</em> standard deviations on human anatomy -- describes a quantity that does not exist here, which is what A67 records: a uniform sigma is not a simplification of the real table but the only honest reading, since any per-point vector this project invented would fabricate a structure the data does not have.</p>
+<p><strong>The pin bump was not fixture-neutral, and the frozen tree could not absorb it.</strong> Reaching <code>SymbolShape</code> meant advancing R21 from <code>74af985</code> to <code>0a0cc64</code>, a commit that also redefines <code>GeomShape.TRIANGLE</code> from equilateral to obtuse-scalene and re-centres every outline on its area centroid. Both moved the existing fixtures substantially -- <code>obb_num_annotations</code> 44 to 61 (+38.6%), <code>data_checksums.bbox_area_sum</code> -45.2%, <code>image_std_sum</code> -35.5% -- and eight of 27 goldens went red. Six of those eight were in <code>goldens/frozen/0.2|0.3|0.4</code>, the per-release snapshots whose whole purpose (<code>check_goldens.py</code>: "a release's frozen goldens staying green <em>is</em> the frozen-golden regression") is that current code still satisfies every value a past release pinned. Re-freezing those would have rewritten what v0.2.0 actually produced, so the question went to the principal rather than being resolved by the row that raised it. What decided it was that the failures partitioned exactly: every pure-code frozen golden (<code>assignment_cases</code>, <code>optim_toy</code>, <code>params_flops_*</code>) still passed, and the only two that failed were <code>data_checksums</code> and <code>fixture_checksums</code> -- the two whose producers render images through an external package. A generator-derived metric can never satisfy "current code must still satisfy every past value" once the generator changes, so those two were never really freezable; they were a category error in what got snapshotted, not a regression. They were removed from the frozen release tree (recoverable in history) and the two current copies re-frozen, leaving 21/21 green and the frozen-golden regression still meaning something for everything it can actually test.</p>
+<p><strong>One flow or two, and a gate that cannot tell.</strong> Wiring the RLE term forced a choice neither R14 nor R1 speaks to: the dual head has two branches, and a normalizing flow is the only trainable-weight loss in this project, so the term either shares one density across both branches or fits one per branch. One shared flow was taken (A69) on two arguments that are each weak alone -- it is what R14 actually describes, one density over one regressor's residuals, where two would assert the branches' errors differ in kind rather than merely in schedule; and it is the smaller parameter count. What matters more than the choice is that this row's own gate cannot check it: an overfit-100 run drives both branches to the same near-zero residual, which is precisely the regime where one flow and two are least distinguishable. So A69 ships <code>open</code> with <a href="../../work_packages/wp-125/">WP-125</a> named as the first run whose branches disagree enough to tell, rather than being quietly ratified by a green gate that was never sensitive to it. The same caution applies to A68's <code>keypoint_gain = 1.0</code>: a memorization run will pass at almost any gain, so passing is not evidence the weight is right.</p>
+<p><strong>Two numerical faults that no component test could have caught.</strong> With the wiring done and the transforms carrying points, the gate still would not run -- it went non-finite inside the RLE flow, and the two causes are the clearest evidence this row could offer for why a <em>training path</em> is its own work package.</p>
+<p>The first is a frame mismatch (A71). <code>decode_keypoints</code> returns absolute input pixels, deliberately and correctly -- it is the deployed decode. R14 forms the residual as <code>(mu_g - mu_hat) / sigma_hat</code> and bounds <code>sigma_hat</code> into <code>(0, 1)</code> with a sigmoid, which it can do because it regresses inside a top-down person crop: the crop is the normalization, so the paper never names a frame and this project had no reason to notice one was missing. Composed, the two make a residual whose <em>smallest</em> expressible value for a 40 px error is 40. Measured on the first batch, the keypoint term entered at <strong>1300 of a 1342 total loss</strong> -- three orders above the box and class terms it is supposed to sit beside -- and the flow overflowed on the second step. Normalizing both point tensors into the assigned box's frame first brings the median residual to <strong>1.28</strong>. Nothing about this is visible to <code>test_rle_loss.py</code>, which evaluates the loss at <code>O(1)</code> residuals because that is the regime the equations describe; the loss was never wrong, its input frame was unstated.</p>
+<p>The second is a missing stabilization (A72). <a href="../../work_packages/wp-123/">WP-123</a> built the coupling conditioner from R14's stated recipe -- 3 fully-connected layers, 64 units, Leaky-ReLU after each -- and emitted its raw linear output as the log-scale. R14 cites RealNVP for the coupling construction rather than restating it, and the parameterization of <code>s</code> is stated only in Dinh et al.: "To compute the scaling functions s, we use a hyperbolic tangent function multiplied by a learned scale", given there explicitly as a stability measure. A raw linear log-scale is not a simplification of that, it is a different layer, and the stack multiplies <code>exp(log_scale)</code> six times so the difference compounds. Measured after the frame was fixed: a residual of <strong>27</strong> arrived at the latent as <strong>4e11</strong> and at the loss as <strong>7e22</strong>. The general lesson is narrower than "read the citations": <a href="../../work_packages/wp-123/">WP-123</a> read R14 closely and implemented what R14 states, and what bit it was a detail R14 <em>delegates</em> -- the one place a paper's own citation is load-bearing rather than contextual.</p>
+<p><strong>The gate's number is small and that is the ruler, not the model.</strong> With both faults fixed the gate runs its 100 epochs clean and scores <strong>OKS AP 0.3357</strong> over 548 instances -- next to the detection gate's 0.995, the oriented gate's 0.939 and the mask gate's 0.815, a number that reads like a failure. It was checked before it was believed, and the check says otherwise. Feeding the ground truth back through the scoring path as the prediction returns exactly <strong>1.0</strong>, so the harness, the sigma vector and the label space are all wired correctly and the ceiling is real. Displacing every point of every instance by a uniform offset then measures the slope: <strong>+1 px scores 0.934, +3 px scores 0.269, +8 px scores 0.000</strong>. On symbols a few dozen pixels across, scored at A67's uniform sigma, OKS AP is a cliff rather than a slope, and 0.3357 is where a landmark error of roughly 3 px lands. The floor was set from that measurement -- 0.30, with the same 0.05 tolerance the oriented gate uses -- rather than from the 0.75 that had been guessed before any number existed. One honest limit on the reading: the probe displaces every point <em>uniformly</em>, so it bounds the interpretation without proving it; the same AP is also consistent with a mixture of exact and badly-missed instances, which only a per-instance breakdown would separate.</p>
+<p>Both faults were found by running the gate and neither by any test in the suite, which is the same shape as the wiring gap this row opened with. What is deliberately <strong>not</strong> claimed here is that the numerics are now healthy: the residual tail still spikes into the thousands on this data, the A70 off-canvas points meeting a flow whose base density is quadratic in the residual. The tanh removes the compounding feedback path; it does not make the tail bounded, and A72 says so rather than letting a green gate imply otherwise.</p>
+<h2 id="wp-133-an-unreleased-section-and-the-rule-it-follows">WP-133 — an Unreleased section, and the rule it follows<a class="headerlink" href="#wp-133-an-unreleased-section-and-the-rule-it-follows" title="Permanent link">&para;</a></h2>
+<p><a id="wp-133"></a></p>
+<p><code>CHANGELOG.md</code> had no <code>## [Unreleased]</code> section at all. 27 commits had landed since the 0.4.0 release commit (<code>0a3ef8b</code>) -- the dev-version bump to <code>0.5.0.dev0</code> and <a href="../../work_packages/wp-132/">WP-132</a>'s own keypoint training path among them -- and every one of them carried zero changelog entries, so the file read as though nothing had shipped since 0.4.0. Surfaced by a direct question, not a check: nothing in <code>make gate</code> or the pre-commit hooks reads <code>CHANGELOG.md</code>'s content (<code>release_guard.py</code> checks a tag has <em>a</em> matching entry, not that intervening commits do), so the gap had no way to fail loud.</p>
+<p><strong>Backfilled from <code>git log 0a3ef8b..HEAD</code></strong>, one bullet per user-visible change, grouped Added/Changed/Fixed to match the existing release sections' own convention. Internal-only commits -- test reorganization, roadmap bookkeeping, CI hook wiring, docstring formatting -- are omitted by the same judgment the existing sections already apply; none of the four shipped 0.x sections carries an entry for its own test suite. The keypoint task's five component WPs (120-124) plus its training-path composition (132) and the ringless-annotation fix (121b) collapse into one Added bullet rather than six, since a changelog reader wants "the keypoint task landed and what it cost to get right," not a WP-by-WP replay -- that granularity already exists in this table and in RESEARCH_LOG.md.</p>
+<p><strong>The section states its own closing rule inline</strong>, per the standing instruction this row also establishes: a commit that sets <code>__version__</code> to a plain, non-dev, non-rc value closes the <code>## [Unreleased]</code> section and opens the next one. Going forward, a WP's own commit should add its own <code>## [Unreleased]</code> bullet rather than the whole set being reconstructed after the fact the way this row had to -- the reconstruction is legible from git history exactly once; a habit of writing it live is not.</p>
+<p><strong>Two pre-existing date mismatches surfaced and are recorded rather than silently corrected.</strong> <code>[0.2.0] - 2026-08-10</code> against release commit <code>eb81caa</code>'s <code>2026-08-11</code>; <code>[0.4.0] - 2026-08-15</code> against <code>0a3ef8b</code>'s <code>2026-08-16</code>. Both one day earlier than the commit, both the same direction -- consistent with the date recorded being the day a run was accepted rather than the day the release commit landed, not a typo in either single case. <code>[0.3.0] - 2026-08-14</code> matches its commit exactly, so the convention is not applied consistently even under that reading. Left as a known discrepancy: correcting two dates nobody had complained about is a scope this row did not need, and the pattern is now written down for whoever next touches a release date to decide.</p>
+<p><strong><code>configs/pose_smoke.yaml</code> folded into this same commit, at the user's direction, rather than opening a separate WP.</strong> <a href="../../work_packages/wp-125/">WP-125</a> needed a launch config before a Colab session already underway could proceed; writing one is mechanical against the <code>det_smoke.yaml</code>/<code>seg_smoke.yaml</code> precedent (<code>task: keypoints</code>, <code>num_keypoints: 17</code> for COCO <code>person_keypoints</code>, <code>keypoint_gain: 1.0</code> per A68's un-tuned default, explicit <code>train_ann_file</code>/<code>val_ann_file</code> since <code>lucid_yolo.data.layout</code> only ever resolves the <code>instances_</code> spelling and <code>person_keypoints_{split}2017.json</code> sits beside it in the same annotations archive under a different name). Verified by dry-parse only -- <code>tests/ptl/test_cli.py::test_config_dry_parses[pose_smoke.yaml]</code>, the same DoD every other shipped config carries -- not by a training run. This is explicitly not <a href="../../work_packages/wp-125/">WP-125</a>'s acceptance: that row is <code>[GPU][PRINCIPAL]</code> and its criterion is RLE's mechanism claim against an OKS-only ablation, which a config file cannot settle and this entry does not claim to.</p>
+<h2 id="wp-134-a-checkpoint-reported-at-one-eightieth-of-its-own-score">WP-134 — a checkpoint reported at one eightieth of its own score<a class="headerlink" href="#wp-134-a-checkpoint-reported-at-one-eightieth-of-its-own-score" title="Permanent link">&para;</a></h2>
+<p><a id="wp-134"></a></p>
+<p><a href="../../work_packages/wp-124/">WP-124</a> built the OKS scorer. <a href="../../work_packages/wp-132/">WP-132</a> built the training path. Nothing ever joined them: <code>evaluate_keypoints</code> and <code>keypoints_to_predictions</code> had no caller anywhere outside their own module and its tests, and <code>cli/eval.py</code> branched on three tasks. <a href="../../work_packages/wp-125/">WP-125</a>'s acceptance metric -- OKS keypoint mAP on COCO human pose -- was therefore not producible by any shipped command at all, which is the same shape of gap <a href="../../work_packages/wp-132/">WP-132</a> opened with and the reason that row's own log ends where it does.</p>
+<p><strong>The 0.006288 was not a decode fault, and finding that out first is what kept this row small.</strong> A keypoints checkpoint run through <code>lucid-eval</code> fell through to <code>detect_eval</code> and reported <code>map=0.006288</code> against a training loop that had logged <code>val/mAP=0.48</code> at the same epoch. That reads as a broken decode, a broken un-letterbox, or a broken assignment, and any of the three would have made this a much larger row. It is none of them. <code>detect_eval.run</code> hardcodes <code>annotations/instances_val2017.json</code> regardless of what the checkpoint's task or class count is, and COCO's mAP averages average precision over <strong>every category the ground truth contains</strong>. A person-only checkpoint predicts contiguous class 0 and nothing else, so the other 79 categories each hold ground truth, receive no prediction, and score AP=0. The arithmetic closes: <code>0.006288 * 80 = 0.503</code>, against the 0.48 the epoch metric logged. Confirmed independently on a synthetic three-category case through <code>torchmetrics</code> directly -- perfect predictions in one category of three give <code>map=0.333</code> and <code>map_per_class=[1.0, 0.0, 0.0]</code> -- before any code here changed.</p>
+<p>So the fix is the ground-truth file, not the mathematics. <code>pose_eval.run</code> reads <code>person_keypoints_val2017.json</code>, which names one category, and the dilution disappears as a side effect of scoring the protocol the checkpoint was trained for. <code>detect_eval</code>'s behaviour is untouched: for a <code>detect</code> or <code>segment</code> checkpoint the GT category count matches the model's own, and its average is over exactly the right set.</p>
+<p><strong>Which row of the report compares.</strong> Training's <code>val/mAP</code> is logged from the o2o branch alone -- <code>_val_decoder.decode_with_indices(head_out.o2o_cls, head_out.o2o_box, ...)</code> against the datamodule's already single-class targets. The comparable figure in a new report is the <strong>e2e</strong> entry, and the <code>nms</code> entry is the dense branch's own answer, expected to sit above it by R1 sec. 4.4's deficit. The runner prints that in words, because a report that does not say which figure it quotes is how the oriented tier confused two of them for a whole release.</p>
+<p><strong>The keypoint mode enters <code>DualPathEvaluator</code> exactly where masks did, and differs where the pieces force it to.</strong> Structural detection off <code>o2o_keypoints</code>/<code>o2m_keypoints</code> rather than a flag, so a detect, segment or obb checkpoint provably takes the path it already took -- those fields are <code>None</code> on its head output. Per-branch and per-path, so the E2E path reads the one-to-one branch's points at the E2E decoder's own anchor indices and the dense path reads its own. Two differences from the mask case, both dictated rather than chosen: <code>decode_keypoints</code> composes the raw offsets with the whole <code>(A, 2)</code> anchor grid and has no per-detection indexing, so this path decodes the dense batch and <em>then</em> gathers, where the mask path gathers coefficients and then decodes; and COCO's keypoint protocol is one matching over one document with no incremental update, so the points are accumulated for the split and scored once where the boxes stream. The second is affordable only because the sizes are opposite -- a split of masks is hundreds of gigabytes and a split of points is a few megabytes.</p>
+<p>The <code>PAD_ANCHOR_INDEX</code> sentinel is <code>-1</code>, which <code>Tensor.gather</code> accepts and answers with the last anchor's row. It is clamped to a valid position and the result zeroed, the same two steps <code>_gather_coefficients</code> takes, and those rows carry score 0 and are dropped regardless -- belt and braces on a failure whose symptom would be a plausible pose at a correct box.</p>
+<p>Points invert the letterbox through <code>Letterbox.inverse_map</code>, which is already point-shaped: <code>to_letterboxed_original</code> is that same call plus the score and class columns of a detection tuple. Reaching for the box function would carry two columns onto coordinates, and writing a second affine would be a second definition of what a letterbox is, which is the rule WP-053a set.</p>
+<p><strong>The ground truth was the part that was quietly wrong, and it was wrong before this row.</strong> <code>evaluate_keypoints</code> reconstructed each instance's <code>bbox</code> and <code>area</code> from the extent of its visible keypoints and forced <code>iscrowd=0</code> and <code>num_keypoints</code> to a recount. Every one of those four is a <strong>supplied</strong> field in COCO's protocol and each does real work: <code>area</code> is what OKS divides by <em>and</em> what draws the medium/large bucket boundary, and for a person it is the segmented area rather than the hull of the labeled joints; <code>iscrowd</code> and a declared <code>num_keypoints == 0</code> are the two flags the backend marks an instance ignored on, verified by reading <code>COCOeval_faster._prepare</code> in the installed <code>faster_coco_eval</code> 1.7.2 rather than recalling pycocotools' behaviour. Reconstructing them scores a different protocol under the same name. They are now read from the annotation when the target carries them, <code>annotations_to_target(with_keypoints=True)</code> carries them, and the reconstruction stays as the fallback -- so <a href="../../work_packages/wp-124/">WP-124</a>'s one-shot callers, its doctests and every synthetic fixture keep the exact numbers they had.</p>
+<p>The regression test makes the two readings disagree on purpose: an instance whose visible points span 2500 px² and whose annotation declares 20000 belongs to the medium bucket under one reading and the large bucket under the other, and exactly one of the two can be populated. Reconstruction reports <code>AP_medium=1.0, AP_large=-1.0</code>; the annotation reports the reverse.</p>
+<p><strong>A K that is not 17 is refused rather than scored.</strong> This protocol's ground truth, its point ordering and its sigma table are all COCO's person schema. A checkpoint predicting some other K has no correspondence to it -- point <em>i</em> of the prediction is not point <em>i</em> of the annotation -- and R12's sigmas measure annotator variance on joints that are not the ones being predicted. That is A67's argument read from the other side: A67 already refuses to fabricate a per-point table for analytically-placed synthetic landmarks and scores them on its own uniform sigma in its own gate, so this row needs no new assumption and invents no table.</p>
+<p><strong>Validation is synthetic, and says so.</strong> There is no COCO checkout and no GPU on this machine, so nothing here ran against real data. Each claim is separated by construction instead: the two branches carry offsets of opposite sign and each anchor a different magnitude, so of the four combinations of branch and index the evaluator could take, only the right one scores OKS 1.0. Both mutations were checked to fail -- crossing the branches and dropping the padding clamp each turn the suite red. What that does <strong>not</strong> establish is the figure a real pose checkpoint will report; the first honest reading of this instrument is <a href="../../work_packages/wp-125/">WP-125</a>'s, on real data, and the arithmetic above is a prediction of what it should show rather than a measurement of it.</p>
+<p>One promotion rode along: <code>_parse_keypoints</code> in <code>data/coco.py</code> becomes <code>parse_coco_keypoints</code>, because the evaluation reader now parses the same field off the same file format and a second copy would be free to disagree about the triplet stride or the visibility dtype -- after which a training run and its own acceptance score would read different ground truth from one file.</p>
+<h2 id="wp-135-a-control-arm-because-one-number-states-no-direction">WP-135 — a control arm, because one number states no direction<a class="headerlink" href="#wp-135-a-control-arm-because-one-number-states-no-direction" title="Permanent link">&para;</a></h2>
+<p><a id="wp-135"></a></p>
+<p><a href="../../work_packages/wp-125/">WP-125</a>'s acceptance is not a pose figure. It is RLE's <strong>mechanism</strong> claim: that the <em>learned</em> residual density is what buys the improvement, rather than the reparameterization, the sigmoid-bounded per-point scale, or the <code>log sigma_hat</code> Jacobian that come with it. A claim of that shape cannot be settled by a run, however good the number, because one figure is equally consistent with the flow doing all the work, none of it, and two terms cancelling. It needs a paired run whose only difference is the mechanism under test -- and the tier had no second arm to pair against. This row is that arm, and nothing else: it builds the instrument and does not read it.</p>
+<p><strong>The comparison is R14's own, not this project's invention.</strong> R14 Table 7 ablates exactly this: "Laplace, learnable variance" -- the NLL over a learned per-point scale with no normalizing flow -- scores <strong>67.4 AP</strong> against full RLE's <strong>70.5 AP</strong> on COCO. Verified this session against the paper itself (arXiv:2107.11291, read through the ar5iv HTML rendering), not recalled. So the direction of effect is already published, and what a paired run here measures is whether it reproduces at this scale on this recipe -- a much smaller question than the one it would be if the baseline were invented. That is also why no assumption id accompanies this row: an assumption records an open project decision made without a source, and this one has a source with numbers in it.</p>
+<p><strong>The loss is <code>RLELoss</code>'s formula with one term deleted.</strong> R14 Eq. 8 (with the <code>log s</code> normalization R14's own implementation drops) is <code>-log Q(x_bar) - log G_phi(x_bar) + log sigma_hat</code> over the standardized residual <code>x_bar = (mu_g - mu_hat) / sigma_hat</code>. <code>LaplaceNLLLoss</code> is that expression without <code>G_phi</code>. Everything else is held: the residual is formed the same way, <code>sigma_hat</code> comes through the same R14 sec. 3.3 sigmoid (A65), the <code>log sigma_hat</code> term is the same reparameterization log-Jacobian, the sum is over the same two axes, A66's visibility mask is the same mask, and the zero-positives reduction is the same one. Holding all of it fixed is the entire point -- a control that differed in a second place would make the result unattributable, and every one of those clauses is a place it could have differed silently.</p>
+<p>The identity is asserted rather than argued: <code>test_rle_loss_with_exactly_flow_term_removed</code> scores both losses on shared inputs and checks the difference equals the flow's own log-density term to <code>1e-5</code>. A drifted residual, a different sigma activation or a different reduction in either module turns that test red, and nothing else in either suite would have reported it.</p>
+<p><strong>"Learnable variance" names what is kept.</strong> <code>sigma_hat</code> is still a head output and still trained -- the <code>log sigma_hat</code> term is what gives the likelihood a reason to prefer a small scale where the model is accurate, and <code>test_gradient_reaches_both_location_and_learned_scale</code> pins that both <code>mu_hat</code> and <code>sigma_raw</code> receive gradient. What the ablation removes is the learned <em>shape</em> of the error distribution. The further-degenerate baseline with a fixed scale too is not this row, is not built here, and is just L1; R14 lists it separately.</p>
+<p><strong>Zero parameters is the structural difference, and it is load-bearing twice.</strong> <code>RLELoss</code> is the one loss in this repository carrying weights -- 42 flow tensors on the tiny test module -- which is why it is held as a submodule at all. <code>LaplaceNLLLoss</code> has none: <code>.parameters()</code> is empty, <code>state_dict()</code> is empty, and construction draws no RNG. The second consequence is the useful one. The module docstring's construction-order rule exists because the flow's <code>Linear</code> layers consume RNG and would perturb every parameter drawn after them; an ablation module draws nothing, so its weights are bit-for-bit a same-seed detection module's, and <code>test_ablation_adds_no_parameters_to_model</code> pins its state dict as a detection module's plus the point stems and no third thing.</p>
+<p><strong>The attribute keeps the name <code>rle_loss</code>, deliberately.</strong> It is an <code>nn.Module</code> attribute, so it prefixes the loss's state-dict keys, and renaming it to something task-neutral would move <code>rle_loss.flow.*</code> to a new prefix and stop every keypoints checkpoint produced before this row from loading -- including the one behind the frozen <code>goldens/gpu/overfit_micro_kp.json</code>. That is the same key-stability rule <a href="../../work_packages/wp-087/">WP-087</a> established and this module keeps its stages flat for, arriving from a direction it had not been tested from. The name is now slightly wrong under one of two arms; a broken checkpoint is worse than a slightly wrong name, and the attribute says so in a comment rather than being quietly left to look like an oversight.</p>
+<p><strong>Selection is additive, and the default is what makes it so.</strong> <code>DetectionLitModule(keypoint_loss=...)</code> defaults to <code>"rle"</code>, so every shipped config, every checkpoint on disk and every accepted figure describes exactly what it described before. The two names are validated against one mapping that also builds them, mirroring how <code>task</code> and <code>rotated_iou_form</code> are validated in the same constructor -- one dict rather than a name tuple beside a constructor branch, so the accepted set and the thing each name builds cannot drift apart. An unrecognized value raises at construction, which matters more here than the pattern usually does: a silent fallback would produce an "ablation" run that trained the very objective it was meant to control for, and a comparison whose two arms are the same arm looks exactly like a null result.</p>
+<p><code>pose_smoke_ablation.yaml</code> is <code>pose_smoke.yaml</code> with one line added. Seed, variant, epochs, callbacks, every gain and the data placeholders are identical, <code>keypoint_gain</code> included -- it stays at A68's un-tuned <code>1.0</code> not because that is right but because moving it would make the arms differ twice. Verified by dry-parse only (<code>tests/ptl/test_cli.py::test_config_dry_parses[pose_smoke_ablation.yaml]</code>), the same DoD every shipped config carries.</p>
+<p><strong>One claim this row makes about numerics, and its limit.</strong> The ablation degrades more gently than RLE outside the <code>O(1)</code> residual range A71 normalizes into: the unit Laplace's log-density is linear in <code>|x_bar|</code>, where the flow's latent is exponential in a compounding log-scale and its base density quadratic in that latent -- A72's non-finite run. <code>test_far_out_residual_stays_finite_rather_than_overflowing</code> measures it at a residual two orders out rather than leaving it as an argument. What that does <strong>not</strong> say is that the ablation is safe unnormalized: a loss dominated by a handful of far-out points is still training the wrong thing, and both arms take the same A71 box frame for the same reason.</p>
+<p><strong>Nothing here was run against real data.</strong> There is no COCO checkout and no GPU on this machine, so this row ships a tool and a set of unit gates, not a result. The 67.4-vs-70.5 figures are R14's measurement quoted, not this project's; the arithmetic of the comparison is a prediction of what a paired run should show, and the first honest reading of it is <a href="../../work_packages/wp-125/">WP-125</a>'s, which is <code>[GPU][PRINCIPAL]</code>-tagged and belongs to the user's machine.</p>
+<hr />
+<h2 id="wp-136-a-filename-is-not-a-scratch-space-for-whatever-axis-is-on-your-mind-that-day">WP-136 — a filename is not a scratch space for whatever axis is on your mind that day<a class="headerlink" href="#wp-136-a-filename-is-not-a-scratch-space-for-whatever-axis-is-on-your-mind-that-day" title="Permanent link">&para;</a></h2>
+<p><a id="wp-136"></a></p>
+<p><code>src/lucid_yolo/configs/</code> had grown eight files under what read as one two-token scheme (<code>&lt;task&gt;_&lt;tier&gt;.yaml</code>), but a closer look found three separate inconsistencies rather than one: two files used a third token to mean something no sibling file's name carried at all, one word (<code>ablation</code>) meant two structurally different things across two files, and the scheme itself never named the one axis every config actually sets differently -- <code>variant</code>. User direction (mid-session, superseding this row's own first draft) was to stop patching the two collisions and instead put every config on one explicit scheme: <code>&lt;task&gt;_&lt;variant&gt;_&lt;tier&gt;[_&lt;detail&gt;].yaml</code>, variant spelled out in full rather than left as the bare letter the CLI and each file's own <code>variant:</code> field use.</p>
+<p><strong>The full rename, driven by what each file's own <code>variant:</code> line already said (checked, not assumed):</strong></p>
+<table>
+<thead>
+<tr>
+<th>old</th>
+<th>new</th>
+<th>why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>det_smoke.yaml</code></td>
+<td><code>det_nano_smoke.yaml</code></td>
+<td><code>variant: n</code>, task truncated as it already was</td>
+</tr>
+<tr>
+<td><code>seg_smoke.yaml</code></td>
+<td><code>seg_nano_smoke.yaml</code></td>
+<td><code>variant: n</code></td>
+</tr>
+<tr>
+<td><code>obb_smoke.yaml</code></td>
+<td><code>obb_nano_smoke.yaml</code></td>
+<td><code>variant: n</code></td>
+</tr>
+<tr>
+<td><code>pose_smoke.yaml</code></td>
+<td><code>pose_nano_smoke.yaml</code></td>
+<td><code>variant: n</code>; <code>pose</code> kept as <code>task: keypoints</code>'s established domain term (roadmap's own "Pose-smoke tier" language, not a choice this row introduced)</td>
+</tr>
+<tr>
+<td><code>det_ablations.yaml</code></td>
+<td><code>det_small_ablations.yaml</code></td>
+<td><code>variant: s</code> -- the one config in the directory that is not <code>n</code>, previously invisible in its own filename</td>
+</tr>
+<tr>
+<td><code>overfit_100.yaml</code></td>
+<td><code>det_nano_overfit_100.yaml</code></td>
+<td>had no task prefix at all, relying on <code>task</code>'s implicit <code>"detect"</code> default; <code>variant: n</code>; <code>100</code> kept as <a href="../../work_packages/wp-040/">WP-040</a>'s own detail (image count, not a tier word)</td>
+</tr>
+<tr>
+<td><code>det_yolo_smoke.yaml</code></td>
+<td><em>dropped</em></td>
+<td>see below</td>
+</tr>
+<tr>
+<td><code>pose_smoke_ablation.yaml</code></td>
+<td><code>pose_nano_smoke_laplace_nll.yaml</code></td>
+<td><code>ablation</code> collided with <code>det_ablations.yaml</code>'s different sense (a whole blueprint tier, sec. 10 tier B, ~120-epoch paired runs, its own sign-matching acceptance against R1 Tables 2/3/5/6) where this file is a same-budget arm of the <em>smoke</em> tier; <code>laplace_nll</code> names the mechanism swapped in, matching how the loss class and the <code>DetectionLitModule</code> docstring already refer to the arm</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>det_yolo_smoke.yaml</code> was dropped, not renamed.</strong> It was first renamed <code>det_smoke_layout.yaml</code> (naming the <code>--data.layout</code> axis, not the one value it took), then reconsidered a second time against <code>det_nano_smoke.yaml</code> sitting beside it in a listing -- "layout" alone read as no more specific than the word it replaced, so the candidate became <code>det_nano_smoke_yolo.yaml</code>, spelling the actual value. Diffing it against <code>det_nano_smoke.yaml</code> at that point (checked, not assumed) found the two differ in exactly three things: the <code>data:</code> block (a YOLO root and its <code>layout: yolo</code>), <code>model.num_classes</code> (<code>3</code> for the demo root vs COCO's <code>80</code> -- a property of the demoed root, not an independent axis), and header prose. Everything else -- schedule, gains, optimizer, <code>variant: n</code> -- is identical. A whole config file whose only content beyond a data override and its dependent class count is header prose is not a ninth point in the scheme; it is three CLI flags on <code>det_nano_smoke.yaml</code> that never needed a file of their own. The prose itself was not lost: <code>docs/DATASETS.md</code>'s "Dataset formats" section already carries the deeper mechanics (<code>layout</code> vs <code>format</code>, <code>YOLO_CANDIDATES</code>, <code>data.yaml</code> priority, why <code>segment</code> is unavailable), so the file's comments were largely restating what that section already says more completely. <code>docs/TRAINING.md</code> gains a "A YOLO-format root instead of COCO's" section instead: the three-flag override, why <code>--data.layout yolo</code> is stated rather than probed (A63's undecidable-tie case), the <code>num_classes</code> coupling to the root's own <code>data.yaml</code>, and the <code>segment</code> refusal, each in one paragraph rather than a whole file's worth of header comments.</p>
+<p><strong>Variant spelled out, deliberately creating a second vocabulary.</strong> Every config's own <code>variant:</code> field and the <code>--variant</code> CLI flag stay bare letters -- that is the real API and does not change here. The filename now spells <code>nano</code>/<code>small</code> for readability at the cost of a reader having to know <code>nano == n</code> when connecting a filename to the config's own content or an override. Confirmed with the user rather than assumed, since nothing else in this codebase (code, docs, or CLI) has ever spelled these out.</p>
+<p><strong>What that scheme cannot promise, stated rather than left implicit.</strong> A filename's variant token is the config's <em>default</em>; <code>--variant s</code> on <code>det_nano_smoke.yaml</code> still runs an s-scale job under an n-named file, exactly as <code>keypoint_gain 1.0</code> in a filename would not survive a <code>--model.keypoint_gain</code> override. The name documents the shipped default, not a runtime guarantee -- the same caveat every config's own header comment already states about <code>variant</code> ("this file's default scale, not a claim about the run").</p>
+<p><strong>What did not move: the historical record.</strong> <code>docs/REPRODUCTION_REPORT.md</code>'s rows are explicit about being "the exact commands as they were run at the time" (<code>docs/TRAINING.md</code>), and the <code>ROADMAP.md</code>/<code>ENGINEERING_LOG.md</code> rows for <a href="../../work_packages/wp-040/">WP-040</a>, <a href="../../work_packages/wp-099c/">WP-099c</a>, and <a href="../../work_packages/wp-135/">WP-135</a> describe what those WPs built and named <em>then</em>. <a href="../../work_packages/wp-129/">WP-129</a> already set this project's precedent for exactly this situation: moving <code>audit_licenses.py</code>/<code>check_commit_trailers.py</code> into <code>scripts/lint/</code> did not rewrite <a href="../../work_packages/wp-084/">WP-084</a>'s, <a href="../../work_packages/wp-109/">WP-109</a>'s or <a href="../../work_packages/wp-115/">WP-115</a>'s rows, which still cite the pre-move path. None of those earlier rows are touched here; this section is where all eight old names are cited for the last time.</p>
+<p><strong>What did move: everything a reader or the tool itself would act on.</strong> <code>README.md</code>, <code>docs/TRAINING.md</code>, <code>AGENTS.md</code>, <code>docs/DATASETS.md</code> (live usage docs, not a historical ledger -- a stale name there is just a broken command); <code>scripts/overfit_micro.py</code>'s and <code>scripts/shapes_regression.py</code>'s <code>_RECIPE_PATH</code> (functional, not prose -- the old name pointed at a file that no longer exists under it); <code>src/lucid_yolo/cli/train.py</code>'s <code>_DEFAULT_CONFIG</code> and its own doctests; <code>tests/ptl/test_cli.py</code>'s hardcoded <code>test_configs_dir_non_empty</code> set and every parametrized config-name literal; and every config's own internal header comment that named a sibling file. <code>CHANGELOG.md</code>'s still-open <code>## [Unreleased]</code> section also updated, on the same live-vs-historical reasoning -- it describes what the next release will ship, not what a past WP called something at the time, so a stale name there would mislead exactly the reader it exists for.</p>
+<p>No test needed a structural change: <code>tests/ptl/test_cli.py</code>'s <code>_CONFIG_PATHS</code> is <code>_CONFIGS_DIR.glob("*.yaml")</code>, so all eight renamed files are discovered and dry-parsed under their new names automatically. The one hardcoded list (<code>test_configs_dir_non_empty</code>'s membership assertion) and the several tests parametrized on a literal config name still needed the literals updated by hand, since a glob does not know what a test author meant to assert about.</p>
+<h2 id="wp-137-a-signal-that-only-ever-existed-downstream-of-the-run-it-should-have-warned-about">WP-137 — a signal that only ever existed downstream of the run it should have warned about<a class="headerlink" href="#wp-137-a-signal-that-only-ever-existed-downstream-of-the-run-it-should-have-warned-about" title="Permanent link">&para;</a></h2>
+<p><a id="wp-137"></a></p>
+<p>Started as a request to prototype <code>hotcoco</code> (github.com/derekallman/hotcoco), a Rust-backed reimplementation of <code>pycocotools</code>'s <code>COCOeval</code>, as a faster replacement for <code>faster_coco_eval</code>. It ended somewhere else, and the two findings that moved it there are both worth keeping.</p>
+<p><strong><code>hotcoco</code> cannot be a torchmetrics backend, and the reason is structural rather than a version gap.</strong> <code>torchmetrics.detection.MeanAveragePrecision</code>'s <code>CocoBackend</code> builds an empty <code>COCO()</code>, assigns a plain dict to its <code>.dataset</code> attribute, and calls <code>.createIndex()</code> -- a construction contract shared by <code>pycocotools</code> and <code>faster_coco_eval</code> alike. Installed and inspected directly (Tier-1 evidence, not the README's own drop-in claim): hotcoco's <code>COCO.dataset</code> is a read-only Rust-bound attribute (<code>AttributeError: attribute 'dataset' of 'builtins.COCO' objects is not writable</code>), and no <code>createIndex</code>/<code>create_index</code> method exists at all -- confirmed even after calling hotcoco's own <code>init_as_pycocotools()</code> monkeypatch, which does make <code>from pycocotools.coco import COCO</code> resolve to hotcoco's class (verified via <code>sys.modules</code> inspection) but returns an object that still fails both calls. A working hotcoco integration exists -- <code>COCO(full_dict)</code> -&gt; <code>.loadRes(results)</code> -&gt; <code>COCOeval(gt, dt, iou_type=...)</code> -&gt; <code>.evaluate()/.accumulate()/.summarize()</code>, verified end to end with correct numbers -- but it is the same hand-driven shape <code>evaluate_keypoints</code> already uses for <code>faster_coco_eval</code>, not a <code>backend=</code> value, and it costs two things a subclass does not: hotcoco's dict schema requires <code>height</code>/<code>width</code> per image unconditionally (torchmetrics' own bbox-only dataset builder never produces them), and hotcoco offers no incremental <code>.update()</code> -- the whole dataset must be built in memory before scoring. For segm that reintroduces exactly what <code>_StreamingScorer</code>'s own docstring exists to prevent: a full split's masks held at once, "hundreds of gigabytes" in this module's own words.</p>
+<p><strong>Benchmarked anyway, since a real cost needs a real number rather than a plausible one.</strong> A synthetic bbox-only benchmark at COCO val2017 scale (5000 images, 34,227 instances, matched to <code>REPRODUCTION_REPORT.md</code>'s own cited count) measured <code>faster_coco_eval</code> (via <code>evaluate_bbox</code>) at 1.160 s and a hand-driven hotcoco path at 0.089 s -- roughly 13x, and the two engines agreed to three decimals (AP 0.888 both). But <code>MeanAveragePrecision.update()</code>/<code>.compute()</code> runs once per <strong>validation epoch</strong> (<code>module.py</code>'s <code>self._val_map</code>), inside a training run whose own per-epoch wall-clock is measured in minutes; ~1.07 s saved per epoch over a 50-epoch run is roughly a minute total against hours, not a bottleneck a training loop notices. Separately, <code>roboflow/rf-detr</code>'s own PR #1375 ("consolidate COCO mAP evaluation", 3.28x CPU speedup measured in its own PR body) turned out not to apply here either, for a reason worth stating precisely rather than waved past: that PR fixes a cost specific to <code>class_metrics=True</code> on torchmetrics <code>&lt;1.9</code>, and this project is on <code>torchmetrics&gt;=1.9</code> with <code>class_metrics</code> never set -- already the fast path that PR exists to reach. <strong>Conclusion: <code>hotcoco</code> is rejected</strong> (A73) -- not for lacking a benefit, but because the benefit it has does not clear the cost of reaching it.</p>
+<p><strong>What the research surfaced instead was a real gap, one already named earlier this session and left open.</strong> A <code>task="keypoints"</code> module's <code>validation_step</code> fell into the <code>if self.task != "obb":</code> branch and called <code>self._val_map.update(...)</code> with plain box/label dicts -- the same call a plain detection module makes. Nothing scored keypoints during training validation at all; the only place OKS was ever computed was the standalone <code>lucid-eval</code> report, run by hand, after the fact. A user direction mid-turn reframed the whole question around this: not "should det/seg's eval get faster," but "should keypoints and det/seg have one eval <em>experience</em>" -- and <code>roboflow/rf-detr</code>'s own <code>PR #1183</code> (<code>keypoint_oks.py</code>'s <code>MetricKeypointOKS</code>, read in full via <code>gh pr diff</code>) turned out to be a real precedent, but one that validates the shape this project already had for keypoints rather than motivating a change to it: a hand-rolled <code>reset/update/compute</code> facade over a <code>faster_coco_eval</code>-backed evaluator, built for the identical reason -- their own docstring names it, citing upstream torchmetrics <code>PR #3348</code> as the eventual real fix rather than attempting one themselves.</p>
+<p><strong>So the unification landed as: give keypoints the same per-epoch validation monitoring det/seg/obb already had, not a new abstraction to hold it in.</strong> <code>DetectionLitModule</code> already carries this exact pattern for <code>"obb"</code>'s <a href="../../work_packages/wp-063/">WP-063</a> rotated mAP -- <code>self._val_rotated_preds</code>/<code>self._val_rotated_targets</code> as plain lists, accumulated per batch and scored once at epoch end, because "mAP is not a per-batch quantity that can be averaged" (the module's own words) and there is no <code>torchmetrics.Metric</code> shape to hold an epoch-whole matching. Keypoints' OKS is the identical case, so <code>self._val_keypoint_preds</code>/<code>self._val_keypoint_targets</code> follow it exactly rather than reaching for a wrapper class: <code>_update_val_keypoints</code> decodes the one-to-one branch's raw point offsets (<code>decode_keypoints</code>) and gathers each kept detection's own set by the anchor index the <em>same</em> top-k selection already returned (<code>gather_keypoints</code> -- <code>coco_eval.py</code>'s <code>_gather_keypoints</code>, made public, since <code>DualPathEvaluator</code> and this module now both need the identical padding-row-zeroing contract and a second hand-copied version of it is exactly the drift <a href="../../work_packages/wp-109/">WP-109</a>'s "three strides, two of them private" lesson warns against); <code>_log_oks_map</code> scores the epoch once via the existing, unmodified <code>evaluate_keypoints</code> and logs <code>val/oks_mAP</code>.</p>
+<p>Unlike <code>"obb"</code>, this sits <strong>beside</strong> <code>val/mAP</code>, not instead of it (<a href="../../work_packages/wp-102/">WP-102</a>'s own distinction, restated for the new case): a keypoints module's box branch is a real person detector, orthogonal to its pose quality, the same relationship <code>val/segm_mAP</code> already has to <code>val/mAP</code>. The sigma vector is picked by point count rather than stated once: <code>COCO_KEYPOINT_OKS_SIGMAS</code> only when <code>num_keypoints == 17</code> matches COCO's own schema exactly, A67's uniform <code>SYMBOL_KEYPOINT_OKS_SIGMA</code> for every other count -- the same choice <code>scripts/overfit_micro.py</code>'s synthetic gate already made for its own fixture, now read from one place (<code>coco_eval.py</code>) instead of two independently-hardcoded <code>0.072</code> literals that could have drifted apart.</p>
+<p><strong>Verification.</strong> <code>tests/ptl/test_keypoint_training.py::TestKeypointValidation</code> -- one validation step populates both buffers and <code>on_validation_epoch_end</code> logs a finite <code>val/oks_mAP</code> and clears them; <code>val/mAP</code> and <code>val/oks_mAP</code> are both present, confirming the "beside" relationship; a monkeypatched <code>evaluate_keypoints</code> confirms the sigma ternary picks <code>COCO_KEYPOINT_OKS_SIGMAS</code> only at <code>num_keypoints == 17</code> and <code>SYMBOL_KEYPOINT_OKS_SIGMA</code> otherwise. Full regression sweep (<code>test_keypoint_training.py</code>, <code>test_coco_eval.py</code>, <code>test_module.py</code>, <code>scripts/_tests/test_overfit_micro.py</code> -- the last one exercising <code>SYMBOL_KEYPOINT_OKS_SIGMA</code> from its new location) -- 75 passed. <code>make gate</code> green.</p>
+<h2 id="wp-138-a-claim-was-wrong-and-the-fix-it-justified-had-already-shipped">WP-138 -- a claim was wrong, and the fix it justified had already shipped<a class="headerlink" href="#wp-138-a-claim-was-wrong-and-the-fix-it-justified-had-already-shipped" title="Permanent link">&para;</a></h2>
+<p><a id="wp-138"></a></p>
+<p><strong><a href="../../work_packages/wp-137/">WP-137</a>'s own text claimed something false, and this row exists to say so plainly rather than quietly patch it.</strong> That entry rejected a hand-driven <code>hotcoco</code> path for segmentation on the grounds that it "would cost back the memory-bounded streaming <code>_StreamingScorer</code> exists for" -- an assumption never checked against the code it was reasoning about. Checked here, against torchmetrics' actual <code>_get_safe_item_values</code> source (the function <code>_StreamingScorer</code>'s own docstring already cites): it RLE-encodes every mask <strong>immediately inside <code>update()</code></strong> and discards the dense tensor the moment the batch is scored. Nothing about that is exclusive to torchmetrics' own machinery -- a hand-driven adapter can do the identical thing, encode-then-discard per batch, and only assemble the small already-encoded document at <code>compute()</code> time. The memory bound is about dense masks, not about "whole document at once," and conflating the two was the error. <code>docs/ASSUMPTIONS.md</code> A73 is revised in place rather than left standing, per this project's own rule that a wrong claim gets corrected where it was made, not silently worked around.</p>
+<p><strong>The correction changed the answer, not just the reasoning.</strong> With the memory objection gone, the remaining question was purely a feasibility one -- can hotcoco's actual API be driven correctly -- and the user asked for it reassessed with a harder constraint: even accepting a <code>MeanAveragePrecision</code> subclass if that is what it takes. Two things closed that question before any subclass was needed. First, <code>roboflow/rf-detr</code> merged PR #1402 in the interim (after <a href="../../work_packages/wp-137/">WP-137</a>'s own research agent scanned <code>develop</code>'s merged commits, which is why it was missed then) -- a real, working <code>_HotCocoBackend(CocoBackend)</code> subclass: constructed under the accepted <code>"faster_coco_eval"</code> string (passes <code>CocoBackend</code>'s own validation), its <code>coco</code>/<code>cocoeval</code>/<code>mask_utils</code> properties overridden to return hotcoco's objects, and <code>_get_coco_datasets</code> (the assign-<code>.dataset</code>-then-<code>createIndex()</code> method hotcoco cannot support) skipped entirely on that path -- confirming a subclass <em>is</em> buildable, contradicting <a href="../../work_packages/wp-137/">WP-137</a>'s blanket "cannot be a torchmetrics backend" framing. Their own measured verdict, independent of this project's: "not a training-throughput change... under 2% of an epoch," even with an array-fast-path optimization this project did not attempt. Second, this project has no DDP anywhere (<code>grep</code> across <code>cli/train.py</code>, <code>module.py</code>, <code>docs/TRAINING.md</code> -- nothing), which is <code>Metric</code>'s other real selling point beyond what a hand-driven scorer already gets for free by copying the same encode-then-discard pattern. Between a training-loop win both this project's own benchmark and rf-detr's independently measure as negligible, and a subclass whose main other benefit does not apply here, the subclass (WP B) stays deferred rather than built.</p>
+<p><strong>What landed instead: hotcoco behind <code>lucid-eval</code>'s own <code>--eval_backend</code> knob, where rf-detr's own PR says it actually matters</strong> -- "standalone evaluation of a checkpoint, large validation sets, sweeps that evaluate far more often than they train" is <code>lucid-eval</code>'s exact shape, not <code>module.py</code>'s per-epoch training loop, which stays on <code>faster_coco_eval</code> untouched. Default <code>"auto"</code> prefers hotcoco -- its wheels cover this project's real target platforms (<code>cp39-abi3</code>, macOS/Linux/Windows) -- and falls back to <code>faster_coco_eval</code> only if a runtime probe (<code>hotcoco_available()</code>: import, then construct an empty document, since a partially-broken compiled extension imports fine but cannot build anything) finds it unusable, recording the reason in the report's own <code>info</code> dict rather than only printing it. An explicit <code>--eval_backend hotcoco</code> is a stated requirement and raises rather than silently substituting -- the same "explicit override wins" shape <code>--data.layout</code> already has (A63). <code>--eval_backend faster_coco_eval</code> stays a fully-tested rollback, no reinstall, matching rf-detr's own choice to ship theirs the same way.</p>
+<p><strong>Five real hotcoco compatibility traps, each verified directly against this project's own installed package rather than taken from rf-detr's PR on faith</strong> (all five match their documented list exactly, which is itself worth recording -- independent verification, not a citation):</p>
+<ol>
+<li><code>params</code> is copy-on-read. <code>ev.params.recThrs = [...]</code> is a silent no-op; the whole object has to be reassigned (<code>p = ev.params; p.recThrs = ...; ev.params = p</code>). Confirmed directly: a mutate-in-place <code>maxDets</code> change did not survive, the reassignment did.</li>
+<li><code>dataset</code> is copy-on-read too, which is why <code>_HotcocoStreamingScorer</code> builds <strong>two independent</strong> ground-truth/result documents for a combined bbox+segm model (one box-area, one mask-area) rather than mutating one loaded document's <code>area</code> field between passes the way torchmetrics' own internal combined path does.</li>
+<li>RLE <code>counts</code> comes back <code>bytes</code> from <code>faster_coco_eval</code>'s own <code>mask.encode</code>, and hotcoco's constructor decodes only the <code>str</code> form -- silently reading a bytes payload as an <strong>empty mask</strong>, no exception. Verified directly: a 9-pixel mask round-tripped through bytes scored 0 pixels; through <code>str</code> (<code>.decode("utf-8")</code>), 9. This is now centralized in one function (<code>_encode_mask_rle</code>) specifically so the fix cannot be half-applied at some call site that builds a record by hand.</li>
+<li><code>mask.encode</code> accepts <code>uint8</code> only, not the boolean arrays this project's mask tensors already are -- cast before encoding.</li>
+<li>hotcoco writes its own stdout (a summary table) and stderr (one warning per evaluator parameter differing from COCO's defaults -- this project overrides <code>recThrs</code> and <code>maxDets</code>, so every call would otherwise warn) directly from Rust. Verified directly, the same way rf-detr's PR states it: wrapping a hotcoco <code>summarize()</code> call in <code>contextlib.redirect_stdout</code> left the table on the real terminal and an empty capture buffer. Fixed with descriptor-level <code>os.dup2</code> redirection (<code>_redirect_native_output</code>), scoped tightly around the three evaluator calls so a genuine failure -- hotcoco raises Python exceptions on error, never merely writes to descriptor 2 -- still surfaces normally.</li>
+</ol>
+<p><strong>The acceptance instrument is <code>TestHotcocoParity</code>, not a benchmark.</strong> Bit-for-bit (<code>abs=1e-6</code>, float32 precision noise) parity between <code>_StreamingScorer</code> and the new <code>_HotcocoStreamingScorer</code>, fed the <em>identical</em> accumulated predictions and targets: all 12 bbox statistics, all 24 bbox+segm statistics, the empty-preds all-zero case, and a full end-to-end <code>DualPathEvaluator</code> run through the real decode/letterbox pipeline on the detseg fixture (<code>test_dual_path_report_matches_across_backends</code>) -- the last one specifically to catch anything that only surfaces once real decoded detections, not a hand-built dict, reach the RLE/height-width/params machinery. <code>hotcoco&gt;=0.5,&lt;0.6</code> joins <code>pyproject.toml</code>'s core dependencies (a tight pre-1.0 ceiling, deliberate: three of the five traps above fail silently rather than raising, so each minor needs re-verifying against this same parity suite before it is trusted) -- <code>faster-coco-eval</code> stays required alongside it, since keypoints and <code>module.py</code> both still call it directly. <code>make gate</code> green, full suite plus the new parity class.</p>
+<h2 id="wp-126-the-fourth-task-existed-everywhere-except-where-a-reader-would-look">WP-126 — the fourth task existed everywhere except where a reader would look<a class="headerlink" href="#wp-126-the-fourth-task-existed-everywhere-except-where-a-reader-would-look" title="Permanent link">&para;</a></h2>
+<p><a id="wp-126"></a></p>
+<p>The tier's own artifacts landed cleanly: a model card, a <code>0.5.0</code> reproduction-report section, a fourth panel on <code>plot_training.py</code> for the keypoint loss term. What did not land, and was not noticed until the naming of one file was questioned, is that every general-audience document still described a three-task project. <code>README.md</code> said "Three tasks, one trunk" and listed three; <code>docs/index.md</code> had a heading reading "The three tasks"; <code>docs/TRAINING.md</code> carried a launch section for detection, segmentation and oriented detection and none for keypoints, and its wiring-gate block listed three of the four <code>overfit_micro.py</code> tasks. None of that is a gate failure — every register check, link check and section check passed throughout, because each of them asks whether a named thing exists, and no gate asks whether a <em>newly</em> named thing has been added everywhere its three siblings appear.</p>
+<p><strong>The naming question that surfaced it is itself the more useful finding.</strong> The card shipped as <code>model_cards/pose.md</code>, describing a "pose detector", which is precisely backwards: this project's keypoint task is <code>K</code>-generic by construction — <code>num_keypoints</code> is a constructor argument the way the class count is, nothing in the head, the loss or the decode path reads a point's meaning, and the wiring gate deliberately runs a 7-point synthetic symbol schema rather than a human one (A67 exists only because that schema has no annotator variance to derive sigmas from). Human pose is one instantiation, distinguished by having a published sigma table and a ground-truth file, not by being what the architecture is for. The file is <code>model_cards/keypoints.md</code>, and the general docs say keypoints and then name pose as the instantiation the shipped checkpoint trained on.</p>
+<p>The task-specific prose stays in pose terms wherever it is actually describing the shipped checkpoint — its training data is <code>person_keypoints</code>, its ethical-considerations section is about predicting human skeletons, and softening those into schema-neutral language would make the card describe something safer than what was trained. The distinction the rename enforces is between the architecture (keypoints) and this checkpoint (pose), not a blanket find-and-replace.</p>
+<p><strong>Three stale figures were corrected in passing</strong>, each found by reading a line rather than by any check: the README claimed 63 registered assumptions against an actual 73, and 20 frozen golden files against an actual 14 (the number had been read off a total that included the seven live sets); and it described roadmap 111's whole-image oriented figure as not yet measured, which had stopped being true when that row closed and the reproduction report gained the number. A document that quotes a count is a document that goes stale silently, and none of the three would have been caught by anything in <code>make gate</code>.</p>
+<p>The general lesson for the next task family, whenever there is one: adding a task is not done when its own artifacts exist. The check worth running by hand is to grep for the <em>previous</em> task's name across the tree and ask, at each hit, whether the new one belongs beside it.</p>
+<h2 id="wp-139-the-same-blindness-one-layer-down">WP-139 — the same blindness, one layer down<a class="headerlink" href="#wp-139-the-same-blindness-one-layer-down" title="Permanent link">&para;</a></h2>
+<p><a id="wp-139"></a></p>
+<p><strong><a href="../../work_packages/wp-126/">WP-126</a> above closes with a lesson, and this row is what running that lesson found.</strong> Greping for the previous tasks' names across <code>src/</code> rather than across <code>docs/</code> turns up a structural gap the documentation sweep could not see: detection, segmentation and oriented detection each ship a composite <code>nn.Module</code>, a <code>build_*</code> factory, a <code>.deploy()</code> NMS-free inference view and a frozen params/FLOPs golden. Keypoints shipped none of the four. The keypoint model existed only as an inline <code>build_detection_stages(..., num_keypoints=K)</code> call inside <code>DetectionLitModule.__init__</code> — enough to train, evaluate and report, which is exactly why nothing complained.</p>
+<p><strong>The golden harness cannot notice a golden that was never written.</strong> <code>check_goldens.py</code> discovers its work by globbing <code>goldens/*.json</code> and <code>goldens/frozen/**/*.json</code>, so every golden present is checked and no count is asserted anywhere. Nothing in the repository enumerates "one size golden per task" and compares that list to the tasks that exist. This is the identical shape of blindness <a href="../../work_packages/wp-126/">WP-126</a> recorded one layer up — a check that asks whether a named thing is intact, never whether a newly named thing was added beside its siblings — and it would have shipped a 0.5.0 whose headline feature was the one task absent from the release's own regression contract.</p>
+<p><strong>What the measurement says.</strong> The golden is taken at detection's own protocol — a 640-pixel input over 80 classes — rather than at a protocol of its own, specifically so that <code>params_flops_kp.json</code> minus <code>params_flops_det.json</code> is the point stems and nothing else. At <code>n</code> that difference is <strong>+110,652 parameters and +0.1238 GFLOPs</strong>, and the asymmetry between those two numbers is the A29 convention made visible: parameters count the whole checkpoint, so both head branches' stems are in the tally, while FLOPs count only the deployed one-to-one branch, so one branch's stems are. The per-branch stem cost is therefore half the parameter figure, and the two numbers are consistent rather than in tension.</p>
+<p><strong>No published table, and that absence is recorded rather than filled.</strong> [<strong>Struck 2026-09-17 (D22)</strong>: there is one — R1 Table S10 — and this paragraph's care about not fabricating a table was spent on the wrong side of an unread section. The measurement against it is A77.] R14 (RLE) specifies a loss and an OKS evaluation protocol and no architecture at all, so unlike detection (R1 Table 7), segmentation (Table S9) and oriented detection (Table S11), there is no size table in the literature to hold this model against. The three siblings each pair their golden with a published-table gate; this one has a golden alone, and <code>tests/models/test_param_flops.py</code> says so in a comment where a fourth <code>_TABLE_*</code> constant would otherwise be reached for. Inventing one — from a sibling table, from a third-party pose model, or from this project's own measurements — would fabricate a published claim, which is the failure mode the whole register system exists to prevent.</p>
+<p><code>num_keypoints</code> is keyword-only and required on both the class and the factory, with no default, matching the refusal <code>DetectionLitModule</code> already makes: <code>K</code> is a property of the dataset's annotation schema, so a default would be a silent claim about data the model has never seen. The shipped nano checkpoint's own figures in <code>docs/model_cards/keypoints.md</code> stay where they are and stay different — they are measured over COCO's single <code>person</code> category, which is a different question from the architecture's size.</p>
+<p><strong>Verification.</strong> <code>make gate</code> green: 2458 passed, 39 skipped, 3 deselected, <strong>22/22 goldens</strong> where 21 passed before. The new composite gates in <code>tests/models/test_keypoint_head.py::TestKeypointDetector</code> assert what the golden cannot — that the stems are run rather than merely built, that the deployed view holds no one-to-many parameter and shares rather than copies the rest, that its returned triple feeds <code>decode_keypoints</code> unadapted, and that omitting <code>num_keypoints</code> raises.</p>
+<h2 id="wp-140-a-release-is-a-boundary-not-an-achievement">WP-140 — a release is a boundary, not an achievement<a class="headerlink" href="#wp-140-a-release-is-a-boundary-not-an-achievement" title="Permanent link">&para;</a></h2>
+<p><a id="wp-140"></a></p>
+<p>0.5.0 closes the keypoint phase. <code>__version__</code> moves from <code>0.5.0.dev2</code> to a plain <code>0.5.0</code>, which is the whole of the version change — <code>pyproject.toml</code> declares the version dynamic and reads the module attribute — and the <code>## [Unreleased]</code> section <a href="../../work_packages/wp-133/">WP-133</a> opened closes as <code>## [0.5.0]</code>, on the schedule its own opening paragraph wrote down.</p>
+<p><strong>The frozen goldens are the release's regression contract, and this one is a set larger than the last.</strong> <code>make freeze-goldens MINOR=0.5</code> copies the eight live metric sets into <code>goldens/frozen/0.5/</code>, where 0.4.0 froze seven; the extra set is <a href="../../work_packages/wp-139/">WP-139</a>'s keypoint size golden, which did not exist a commit earlier. That is the difference between freezing what happens to be lying around and freezing what the release actually claims, and it is only a difference because the missing golden was found before the freeze rather than after it.</p>
+<p><strong>What this release does not claim.</strong> The keypoint tier's acceptance is a <em>direction of effect</em> against a control — RLE beat <a href="../../work_packages/wp-135/">WP-135</a>'s Laplace-NLL arm at e2e OKS AP 0.2738 against 0.2527 on real COCO human-pose data, the same sign as R14 Table 7's own 70.5-against-67.4 — and it is not a pose figure comparable to anything published. R14's own numbers come from a different backbone, a different schedule and a different scale; this project's smoke tier is fifty epochs at <code>n</code>. Three keypoint assumptions stay <code>open</code> and each names an experiment nobody has run: A68's tuned gain adequacy (the mechanism-failure bar cleared, no sweep run), A69's one shared flow against one per branch (untested against the alternative, and the overfit gate structurally cannot tell), A70's off-canvas point policy (exercised live in both arms, its frequency and effect unmeasured). The oriented figures are unchanged from 0.4.0's caveat only in that <a href="../../work_packages/wp-111/">WP-111</a> has since measured a whole-image number; every other limit that release recorded still stands, and no trained weights ship (D14).</p>
+<p><strong>The fourth task trains, validates and evaluates; it does not yet deploy.</strong> <code>tests/models/test_onnx_export.py</code> still runs three tasks, and <code>predict.py</code> still ships three functions. That is parity work for a later phase, named here rather than left for a reader to infer from an absence.</p>
+<p><strong>Two CI failures the offline gate structurally cannot see, both found on the release's own run and folded in here.</strong> The first is a four-character bug with a document-wide blast radius: <code>docs/ENGINEERING_LOG.md</code> and <code>docs/ROADMAP.md</code> both wrote the placeholder <code>test_</code> followed by an angle-bracketed <code>script</code>, and Python-Markdown's HTML block pass runs <em>before</em> inline code spans are recognized, so the backticks protect nothing — an angle-bracketed <code>script</code> opens a raw-text element that swallows the rest of the document, and every <code>&lt;a id="wp-NNN"&gt;&lt;/a&gt;</code> anchor after it vanishes from the element tree <code>mkdocs build --strict</code> reads. Eighteen roadmap links broke at once, every one of them from the <a href="../../work_packages/wp-130/">WP-130</a> paragraph onward, and the anchors were all still present in the rendered HTML — the post-processing step restores stashed raw HTML, so the page looked correct while the validator that never sees that step was right to fail. Renamed to <code>test_&lt;script_name&gt;.py</code>, which is not an HTML tag. The second is <code>scripts/lint/audit_docs_site.py</code>'s <code># type: ignore[no-untyped-call]</code> on <code>add_multi_constructor</code>: whether that call is typed depends on the resolved <code>types-PyYAML</code>, which the lockfile does not pin, so the ignore is load-bearing locally and dead on CI's newer stubs, where <code>warn_unused_ignores</code> then fails the run. <code>unused-ignore</code> now rides along in the same bracket, correct under either version without pinning a stub package for one comment.</p>
+<p>The general shape is worth keeping: <code>make gate</code> is an offline gate and does not build the docs site, so a docs-site failure is invisible until CI, and a lint that depends on an unpinned transitive stub version is invisible until CI resolves a different one. Neither is a gate to add — the docs build is genuinely CI's job and pinning stubs to satisfy one comment is worse than the comment — but both are reasons the gate being green is not the same claim as the branch being green.</p>
+<p><strong>No tag is cut here and no distribution is published</strong>, as at 0.4.0. <code>release.yml</code> fires on a pushed <code>v0.*</code> tag and re-runs the guard, which refuses a tag whose changelog section is missing or whose gate is red; both are the operator's to trigger. <code>v0.4.0</code> is also still uncut, so the train has now shipped two release commits ahead of its own tags — a gap worth stating plainly, since a reader who looks for <code>v0.5.0</code> will find neither it nor its predecessor.</p>
+<h2 id="wp-140b-the-contract-names-a-role-and-says-when-it-ends">WP-140b — the contract names a role, and says when it ends<a class="headerlink" href="#wp-140b-the-contract-names-a-role-and-says-when-it-ends" title="Permanent link">&para;</a></h2>
+<p><a id="wp-140b"></a></p>
+<p>Lettered off 140: governance work that follows the release rather than any package. Three things land together because each is the reason for the next.</p>
+<p><strong><code>[HUMAN]</code> becomes <code>[PRINCIPAL]</code>.</strong> The tag never meant <em>a person rather than a machine</em>; it meant <em>the party who drives the project rather than the party who executes it</em>, and every use of it is a call that comes from intent, ownership or risk appetite — a release, a push, a GPU budget, an acceptance. <code>[OPERATOR]</code> was tried first and rejected on reading: an operator is one who <em>operates the machine</em>, which names the executing half, exactly the half the tag does not mean. <code>principal</code> is the term of art for the party whose intent an agent serves, and it survives the human/bot question permanently, because a principal can itself be an agent one level up. The rename is governance-sense only. Anatomical uses stay untouched — "COCO human pose", "human anatomy", "human-readable", "human-drawn polygons" — as do the pre-existing uses of <code>operator</code> meaning <em>whoever runs the command</em>, which now read as the useful contrast rather than as a competing sense of one word: the principal decides, the operator executes.</p>
+<p><strong>The WP contract is a reproduction instrument, and instruments end (D18).</strong> One WP, one commit, one roadmap row exists so that a from-scratch reproduction of three papers is auditable row by row. Once the reproduction report carries all four accepted tiers that purpose is served, and continuing to demand a tracked row for a typo fix would be ceremony rather than evidence. What relaxes is only the tracking: a change altering no shipped behaviour, no public symbol, no golden and no documented assumption becomes an ordinary gated commit, and the gate itself never relaxes. What restarts it is a new <strong>task</strong> — a fifth head after detection, segmentation, oriented detection and keypoints — because a new task is a new reproduction claim and D2's standard applies to it exactly as it applied to the first four.</p>
+<p><strong>Admission is three layers, because a signature is not a detector.</strong> The exposure is not one vendor. It is any source this project cannot redistribute under Apache-2.0: copyleft, source-available, paid, proprietary, or with a licence that cannot be read. Ultralytics is the loudest instance of that class, not the class itself, and today's pull-request template names it where the rule is D13's whole allowlist. No attestation detects such code arriving, so the layers are picked for how differently they fail — a DCO sign-off records who submitted it and under what claim of right, a generalized attestation fixes what that claim covers, and a provenance trailer on every contributor commit is the only one of the three that yields something reviewable: an id resolvable against <code>docs/PROVENANCE.md</code>, whose absence on a change to a loss or an assigner is visible before release rather than after. Enforcement is a check in this repository rather than a third-party app, because a survey on 2026-09-02 found every free hosted CLA service either archived, years stale, or a two-star project, and an admission record should not depend on someone else's uptime.</p>
+<p><strong>Phases 13 and 14 are written down.</strong> The augmentation stack leaves for <code>fuse-augmentations</code> — the plan of record is kept outside the tree, and only its roadmap rows land here. The split into two phases is not cosmetic: the guard that authorizes a swap is <em>published</em> in 0.6.0 before anything it guards is allowed to move in 0.7.0, so a swap is measured against a released version rather than a working tree. The guard is deliberately not an old-versus-new comparison, which would enshrine legacy behaviour as the definition of correct and keep the code alive as its own reference, blocking the deletion the check exists to authorize. Keypoint ONNX export and <code>predict_keypoints</code> join Phase 13 because 0.5.0's own release entry names them as the parity a later phase owes.</p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright 2026 Jirka Borovec — Apache-2.0 (see LICENSE and NOTICE)
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

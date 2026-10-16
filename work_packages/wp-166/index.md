@@ -1,0 +1,27 @@
+# 📦 WP-166 — `fix(eval): crowd and area reach the default scorer`
+
+> Engineering log · [Phase 15 — Audit remediation, v0.8.0](https://borda.github.io/lucid-YOLO/engineering/phase-15-audit-remediation/)
+>
+> 🔗 Depends on [WP-165b](https://borda.github.io/lucid-YOLO/work_packages/wp-165b/) · Needed by [WP-175](https://borda.github.io/lucid-YOLO/work_packages/wp-175/)
+>
+> ⬅️ [WP-165b](https://borda.github.io/lucid-YOLO/work_packages/wp-165b/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-167](https://borda.github.io/lucid-YOLO/work_packages/wp-167/) ➡️
+
+
+## WP-166 — the scorer that shipped by default was reporting a different protocol
+
+<a id="wp-166"></a>
+
+`lucid-eval` picks its engine with `eval_backend="auto"`, and `auto` resolves to hotcoco wherever it is usable, which is everywhere this project runs. That engine's ground-truth records were built by `_accumulate_boxes`, which hardcoded `"iscrowd": 0` and recomputed `"area"` as box width times height. `annotations.py` has parsed both fields off the COCO file since it was written and hands them over in the target dict, and the identical dicts reach both scorers — so the default engine implemented neither COCO's crowd-ignore rule nor its small/medium/large partition, while the `faster_coco_eval` path fed the same targets implemented both.
+
+**The size of it.** On a crowd case — one normal ground truth, one `iscrowd=1` ground truth, one detection sitting inside the crowd region — hotcoco reported `map` 0.5050 against faster_coco_eval's 1.0000. On an area case whose annotation `area` is 200 under a box measuring 40000, the instance landed in the large bucket instead of the small one. On a real split this is systematic rather than marginal: `instances_val2017.json` carries roughly 1.6% crowd annotations, whose detections became false positives and whose instances became false negatives, and its `area` field is the *segmentation* area, always at or below the box area, so objects shifted small→medium→large and the three size statistics described a different partition of the split than COCO's.
+
+**The defect was this project's, not the library's.** Driving `_hotcoco_stats` with hand-built records that do carry the fields returns COCO's answer exactly. hotcoco honours both; `_accumulate_boxes` never gave them to it.
+
+**Why the gate could not see it.** Every fixture `TestHotcocoParity` fed to both scorers omitted `iscrowd` and `area` entirely, so torchmetrics defaulted area to the box area and crowd to zero — exactly what the hotcoco path hardcoded — and the two engines agreed *by construction* on the only two fields where they could differ. The CHANGELOG's "verified bit-for-bit against the existing engine" was true of a fixture family that could not express the divergence. That is the shape worth remembering: a parity test proves two implementations agree, not that either is right, and it proves nothing at all about a field no fixture carries.
+
+**The mask half was measured, not assumed.** The class docstring claims the two engines differ in how they swap box area for mask area, which would have made the same fix wrong on the segm side. A probe whose annotation `area` (200), mask area (2025) and box area (40000) name three *different* buckets scored small on both halves — so torchmetrics reads the supplied `area` there too, and the annotation's value is correct on both paths.
+
+**What travelled with it.** Four consistency items in the same module, each the same shape as the main defect — a number that depends on which library computed it. `_MAX_DETS` now reaches both engines instead of hotcoco alone; the keypoint detection cap and area partition are pinned beside the sigmas that were pinned for exactly that reason; the sigma comment's claim to equal the library default "exactly" was false at 1.39e-17 and now states the measured figure; and the OKS category table is built from ground truth alone, as COCO fixes it, rather than from the union with prediction labels.
+
+**One narrowing worth its own line.** `_redirect_native_output` blinded file descriptors 1 and 2 for the whole evaluator call, discarding native warnings about exactly the malformed records this scorer builds. Running each phase with both descriptors captured separately showed every phase but `summarize` writing zero bytes — including a run whose ground truth carried a negative-width box, a negative `area` and an out-of-range `iscrowd`. Blinding the rest bought no silence and cost the one channel a malformed record would be reported on.
+

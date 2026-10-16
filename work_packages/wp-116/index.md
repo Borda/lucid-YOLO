@@ -1,0 +1,33 @@
+# 📦 WP-116 — `refine(docs): docformatter over every docstring`
+
+> Engineering log · [Phase 11 — Rolling, toward v0.5.0](https://borda.github.io/lucid-YOLO/engineering/phase-11-rolling/)
+>
+> 🔗 Depends on WP-003 · Needed by [WP-116b](https://borda.github.io/lucid-YOLO/work_packages/wp-116b/), [WP-117](https://borda.github.io/lucid-YOLO/work_packages/wp-117/)
+>
+> ⬅️ [WP-115b](https://borda.github.io/lucid-YOLO/work_packages/wp-115b/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-116b](https://borda.github.io/lucid-YOLO/work_packages/wp-116b/) ➡️
+
+
+## WP-116 — a formatter that reads `Eq.` as the end of a sentence
+
+<a id="wp-116"></a>
+
+docformatter joins the three formatters already on the commit hook, configured in `[tool.docformatter]` and ordered ahead of ruff-format so the docstring body is rewritten first and the quotes and indentation around it normalized second -- the reverse order converges too, but only on the commit after.
+
+**Wrapping is off in both axes, and that is the load-bearing setting rather than a timid one.** `wrap-descriptions = 0` because this project's docstrings carry argued paragraphs, `**bold**` lead-ins, and Google `Args:`/`Returns:` blocks whose indentation is what Napoleon parses; re-flowing them to a column would run those blocks together and rewrite hand-chosen line breaks across the whole tree in a single commit nobody could review. `wrap-summaries = 0` for a smaller reason: a summary is one sentence by construction and has nothing to gain from being re-flowed.
+
+**What it cost once was 32 summary lines.** docformatter decides where the summary ends by finding the first period it reads as a sentence end, and it reads every abbreviation that way. This repository writes the papers' own notation -- `R1 Eq. 15`, `blueprint sec. 5.9`, `Redmon et al.` -- in summary lines, so those summaries were cut mid-citation and everything after them re-indented as continuation text, which is what turns an `Args:` block into prose Napoleon cannot parse:
+
+```
+"""Initialize the two coarse-level projections required by Eq.
+
+8.
+        Args:
+            in_channels: Per-level neck channel counts ``(N3, N4, N5)`` in
+```
+
+No option prevents it. `--wrap-summaries 0` disables wrapping, not the split; `--non-strict` governs reST list detection; `--docstring-length` would only choose which docstrings get mangled. So the source is what changed: `Eq.` and `sec.` are spelled out and `et al.` rephrased, **in summary lines only** -- the bodies keep the papers' abbreviations, since nothing reads them for sentence boundaries. One summary genuinely held two sentences and was split into a summary and a body paragraph, which is what PEP 257 asked for anyway.
+
+**`non-cap` names 17 identifiers.** The formatter capitalizes a summary's first word, which is right for English and wrong for a name: `lucid-yolo:` became `Lucid-yolo:`, `mAP` became `MAP`, and `empty()`, `backward()`, `rboxes[i]`, `o2o` and the nine subpackage names were all renamed to something that does not exist. Each is listed rather than the check being disabled, so a future summary opening with an ordinary English word is still capitalized.
+
+**The hook now reformats nothing, and that is the honest result.** Every line in this commit's diff is the one-time rephrase; docformatter's own second pass is empty, because these docstrings were already PEP 257-clean. Its value is prospective -- it is a gate on what gets written next, not a repair of what is there.
+

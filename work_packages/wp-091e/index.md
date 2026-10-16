@@ -1,0 +1,19 @@
+# 📦 WP-091e — `refine(losses): the shape a loss will accept`
+
+> Research log · [Phase 9 — Inference and generalization](https://borda.github.io/lucid-YOLO/research/phase-09-inference/)
+>
+> 🔗 Depends on [WP-091d](https://borda.github.io/lucid-YOLO/work_packages/wp-091d/) · Needed by none
+>
+> ⬅️ [WP-091d](https://borda.github.io/lucid-YOLO/work_packages/wp-091d/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-099](https://borda.github.io/lucid-YOLO/work_packages/wp-099/) ➡️
+
+
+## WP-091e — a contract nothing in the tree exercises
+
+<a id="wp-091e"></a>
+
+The row asked which way to settle `losses/probiou.py`'s looser guard, and named the evidence it wanted: what the loss is actually called with. That evidence is one line. `oriented_loss.py:217` calls the resolved form on `(P, 5)` against `(P, 5)` and gets `(P,)` — aligned pairs, already matched by the assigner. **No caller in `src/` ever passes a leading dimension.** The pairwise `(4, 1, 5)` against `(1, 3, 5)` shape appears in `tests/losses/test_probiou.py` and nowhere else, and the one place in the tree that does want a pairwise rotated-overlap matrix — `decode/rotated_nms.py`, and the DOTA evaluator behind it — reaches for `rotated_geom.rotated_iou` instead, because it needs the polygon-exact measure and not R17's Gaussian surrogate.
+
+So the honest reading is that the N-d contract is a property of the *public* function rather than of any in-tree use, and the decision turns on whether that is a reason to drop it. It is not. Everything in these two losses is elementwise in the leading shape — `_unpack` unbinds the last dimension and every term after it is arithmetic on those five tensors — so the broadcast is not a feature that was added, it is what the code does when the guard stops refusing. Narrowing to 2-D would be the validator inventing a restriction the arithmetic does not have, and it would take `probabilistic_iou`, an exported symbol whose docstring promises `(..., 5)`, with it. A guard should assert what the function needs, and this one needs the trailing five.
+
+What the package changes is therefore not behaviour but what is asserted. The test matched `"target must be"` — the prefix only, leaving the shape the message names unpinned, so a future edit could have narrowed the promise from `(..., 5)` to `(N, 5)` with every test still green. It now matches the tail as well, and a new case runs a `(2, 3, 4, 5)` input through both losses and then through `canonicalize`, which rejects it: the divergence between the two validators is stated in one place, by a test that fails if either side of it moves. That is the answer to 091c's third finding — three lookalikes, two of them the same check, and now both facts are pinned rather than remembered.
+

@@ -1,0 +1,25 @@
+# 📦 WP-130 — `refine(scripts): consolidate scripts/-testing tests, wire remaining lint hooks`
+
+> Engineering log · [Phase 11 — Rolling, toward v0.5.0](https://borda.github.io/lucid-YOLO/engineering/phase-11-rolling/)
+>
+> 🔗 Depends on [WP-129](https://borda.github.io/lucid-YOLO/work_packages/wp-129/) · Needed by [WP-130b](https://borda.github.io/lucid-YOLO/work_packages/wp-130b/)
+>
+> ⬅️ [WP-129](https://borda.github.io/lucid-YOLO/work_packages/wp-129/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-130b](https://borda.github.io/lucid-YOLO/work_packages/wp-130b/) ➡️
+
+
+## WP-130 — a test of a script belongs beside the script
+
+<a id="wp-130"></a>
+
+[WP-129](https://borda.github.io/lucid-YOLO/work_packages/wp-129/) split the doctest-audit check itself out of `tests/meta/` but left its test where the whole family had always lived, `tests/meta/test_audit_test_doctests.py` -- and left the other eight `tests/meta/` files, plus `tests/scripts/`, `tests/train/test_shapes_regression.py` and `tests/integration/test_overfit_micro.py`, exactly where they were: every one of them a test whose subject is a `scripts/` module, sitting in `tests/` anyway because that is where tests conventionally go. The convention was wrong for this shape: `src/lucid_yolo/` and `tests/unit/` mirror each other by design, and `scripts/` had grown its own testable surface without growing its own mirror. Fixed by moving all fifteen files into a new `scripts/_tests/`, each renamed `test_<script_name>.py` after the module it exercises -- `test_license_audit.py` becomes `test_audit_licenses.py`, `test_golden_harness.py` becomes `test_check_goldens.py` -- so the pairing reads directly off the two filenames rather than needing the docstring to say which script a test covers.
+
+The other five `tests/meta/` checkers still inline (docs presence, docs site, figure captions, license headers, version single source) convert the same way [WP-129](https://borda.github.io/lucid-YOLO/work_packages/wp-129/) converted the doctest audit: a `scripts/lint/<name>.py` script plus a `.pre-commit-config.yaml` hook, `scripts/_tests/test_<name>.py` left as the functional-core test. `release_guard.py` and `check_goldens.py` were already scripts with no hook -- both gain one, `stages: [manual]` like nothing else in the file, since a release tag and a golden recompute are not per-commit checks. `release_guard.py` needed one real change to be hook-shaped at all: `--tag` was `required=True`, unrunnable from a hook that fires with no arguments on every commit. It now defaults to `git describe --tags --exact-match HEAD` and no-ops when `HEAD` isn't exactly a tag -- true for nearly every commit, which is the point.
+
+Every hook's `name:` field gained a distinct leading emoji chosen for the action it performs (🧠 mypy, ⚖️ license audit, 📋 docs presence, 🗺️ docs site, 🖼️ figure captions, 📄 license headers, 🔢 version single source, 📝 doctest audit, 🏷️ commit trailers, 🥇 golden check, 🛡️ release guard) -- eleven hooks read a lot faster on `pre-commit run --all-files`'s output when each line starts with a different glyph than when all eleven start with the same bullet.
+
+The move itself broke two things that had never been exercised before, both structural rather than content bugs. **mypy**: `[tool.mypy]` scans `files = ["src", "scripts"]` with no `mypy_path` entry for the repo root, so a file inside `scripts/` got two identities at once -- `absolutize_readme` from the direct directory walk, `scripts.absolutize_readme` from `scripts/_tests/test_absolutize_readme.py`'s own `from scripts.absolutize_readme import ...`, now itself swept into the `scripts` scan for the first time. `explicit_package_bases = true` plus `mypy_path = "src:."` gives both paths the same resolution; `scripts/_tests/` itself is excluded from strict checking afterward, matching `tests/`'s own long-standing exemption for exactly the same fixture-heavy, `monkeypatch`-typed, dynamically-imported character. **pytest**: `scripts/_tests/conftest.py` and `tests/conftest.py` are both non-package `conftest.py` files with the bare module name `conftest`; under the default prepend import mode, loading them from two different top-level collection roots (`scripts` and `tests` in the same `pytest ... src scripts tests` invocation) rather than nested under a shared one raised `import file mismatch`. `--import-mode=importlib` fixes it structurally, keying each module's identity on its resolved path rather than its stem, and is now the addopts default for every invocation, not just this one.
+
+`scripts/README.md` is new: a table per subtree (core, `lint/`, `_tests/`) naming every script, what it does, what invokes it, and which test covers it -- the crossroad a developer new to `scripts/` reads first, and the thing that makes "no dedicated test, doctests only" for `golden_producers.py`, `plot_training.py`, and `dump_debug_grid.py` a documented decision instead of a silent gap.
+
+______________________________________________________________________
+

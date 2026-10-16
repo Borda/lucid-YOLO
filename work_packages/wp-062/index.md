@@ -1,0 +1,17 @@
+# 📦 WP-062 — `feat(models): OBB head, direct angle, NMS-free decode`
+
+> Research log · [Phase 8 — Oriented detection, v0.3.0](https://borda.github.io/lucid-YOLO/research/phase-08-oriented-detection/)
+>
+> 🔗 Depends on [WP-061](https://borda.github.io/lucid-YOLO/work_packages/wp-061/) · Needed by [WP-063](https://borda.github.io/lucid-YOLO/work_packages/wp-063/), [WP-122](https://borda.github.io/lucid-YOLO/work_packages/wp-122/)
+>
+> ⬅️ [WP-061](https://borda.github.io/lucid-YOLO/work_packages/wp-061/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-063](https://borda.github.io/lucid-YOLO/work_packages/wp-063/) ➡️
+
+
+## WP-062 — the fidelity gate picked the stem width
+
+<a id="wp-062"></a>
+
+A20 records that R1 gives the angle branch no width: sec. 3.4.3 says only "separate branch", Fig. S2 draws one stem shape and no numbers, and Table S11 reports whole-model sizes a branch width can only be inferred back out of. This is the package where that inference was made, and it was made by the gate rather than by argument — the Table S11 comparison at 1024 px over 15 classes selected the **wider `channels // 2` stem**, and A20 was revised to it.
+
+The margins say how much room the choice had: params bind at scale `s`, +3.27% against a ±3.5% band, and FLOPs at scale `n`, +4.84% against ±5%.
+

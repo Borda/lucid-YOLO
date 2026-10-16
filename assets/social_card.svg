@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-labelledby="t d">
+  <!-- Source of social_card.png, the Open Graph preview image (WP-196). Static on purpose:
+       link-preview renderers take one frame, and the animated sketches start faded.
+       Regenerate the PNG with headless Chrome at device scale 1:
+       chrome --headless=new --hide-scrollbars --force-device-scale-factor=1
+              --window-size=1200,630 --screenshot=social_card.png file://.../social_card.svg -->
+  <title id="t">lucid-yolo</title>
+  <desc id="d">Clean-room, NMS-free YOLO in PyTorch Lightning: an image passes a backbone and neck, a one-to-one head, and a top-k step that keeps one box per object.</desc>
+  <rect width="1200" height="630" fill="#1e2340"/>
+  <rect x="0" y="0" width="1200" height="8" fill="#7c8cff"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+    <text x="80" y="150" font-size="88" font-weight="700" fill="#ffffff">lucid-yolo</text>
+    <text x="80" y="215" font-size="38" fill="#c9cff7">Clean-room, NMS-free YOLO in PyTorch Lightning</text>
+    <text x="80" y="268" font-size="28" fill="#9aa3d6">Detection · Instance segmentation · Oriented boxes · Keypoints</text>
+    <g font-size="24" fill="#ffffff" text-anchor="middle">
+      <rect x="80" y="340" width="170" height="130" rx="14" fill="#2c3360" stroke="#7c8cff" stroke-width="2"/>
+      <rect x="104" y="366" width="56" height="70" rx="6" fill="none" stroke="#ffb454" stroke-width="3"/>
+      <rect x="172" y="392" width="56" height="58" rx="6" fill="none" stroke="#5ad19a" stroke-width="3"/>
+      <text x="165" y="500" fill="#c9cff7">image</text>
+      <path d="M262 405 h58" stroke="#7c8cff" stroke-width="4"/><path d="M320 395 l16 10 l-16 10z" fill="#7c8cff"/>
+      <rect x="348" y="340" width="230" height="130" rx="14" fill="#2c3360" stroke="#7c8cff" stroke-width="2"/>
+      <text x="463" y="398">backbone</text><text x="463" y="430">+ neck</text>
+      <path d="M590 405 h58" stroke="#7c8cff" stroke-width="4"/><path d="M648 395 l16 10 l-16 10z" fill="#7c8cff"/>
+      <rect x="676" y="340" width="230" height="130" rx="14" fill="#2c3360" stroke="#7c8cff" stroke-width="2"/>
+      <text x="791" y="398">one-to-one</text><text x="791" y="430">head</text>
+      <path d="M918 405 h58" stroke="#7c8cff" stroke-width="4"/><path d="M976 395 l16 10 l-16 10z" fill="#7c8cff"/>
+      <rect x="1004" y="340" width="116" height="130" rx="14" fill="#2c3360" stroke="#ffb454" stroke-width="2"/>
+      <text x="1062" y="398">top-k</text><text x="1062" y="430" fill="#ffb454">no NMS</text>
+    </g>
+    <text x="80" y="570" font-size="24" fill="#9aa3d6">Reproduced from the papers alone · Apache-2.0 · borda.github.io/lucid-YOLO</text>
+  </g>
+</svg>

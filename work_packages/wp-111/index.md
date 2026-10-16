@@ -1,0 +1,19 @@
+# 📦 WP-111 — `exp(obb): a whole-image oriented figure`
+
+> Research log · [Phase 9 — Inference and generalization](https://borda.github.io/lucid-YOLO/research/phase-09-inference/)
+>
+> 🔗 Depends on [WP-107](https://borda.github.io/lucid-YOLO/work_packages/wp-107/), [WP-064](https://borda.github.io/lucid-YOLO/work_packages/wp-064/) · Needed by none
+>
+> ⬅️ [WP-067](https://borda.github.io/lucid-YOLO/work_packages/wp-067/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-112](https://borda.github.io/lucid-YOLO/work_packages/wp-112/) ➡️
+
+
+## WP-111 — the whole-image figure runs higher, not lower, and both reasons are already on the register
+
+<a id="wp-111"></a>
+
+[WP-107](https://borda.github.io/lucid-YOLO/work_packages/wp-107/) built the merge and its own log entry above is explicit: "whole-image recall is the owner's recall, so this merge can only *lower* a per-tile number", pinned by a fixture test. The first real run — the accepted OBB-smoke checkpoint (`version_10`, 2026-08-14) re-scored on DOTA-v1.0 val, 458 source images — comes out the other way on every one of the four metrics: mAP50-95 0.2914 → 0.3146, mAP50 0.5242 → 0.5484, mAP75 0.2770 → 0.3111, mAR_300 0.5075 → 0.5193. That is not the merge mechanism breaking its own guarantee; it is a second, separately registered effect outrunning it.
+
+[WP-107](https://borda.github.io/lucid-YOLO/work_packages/wp-107/)'s claim is about core ownership in isolation — on a fixture too small to ever reach a detection cap, dropping every non-owning tile's copy of an object can only cost recall. The real pipeline runs the merge alongside A60: per-tile scoring caps each 1024 px tile at 300 detections (`MAX_DETECTIONS`, A47 — what `o2o_rotated_topk` emits per forward pass), while the whole-image pass scores with that cap lifted, because a source image assembled from ~22 tiles (10,132 tiles / 458 images) is not one forward pass and re-imposing 300 on it would measure a truncation rather than the model — exactly the exposure A60's own text names ("a dense DOTA image carrying far more than 300 instances"). This is the first run that actually exercises that lifted cap against real data, and the direction is consistent with what A60 predicted: recall recovered by the uncapped pass outweighs what core ownership gives up.
+
+The two effects run in the same pass here and are not separated by this measurement — a controlled comparison (whole-image scoring with the 300 cap re-imposed, versus lifted) would isolate how much of the `+0.012` mAR_300 is the cap and how much is anything else, and nothing in this run does that. Recorded as consistent with A60, not as proof of it.
+

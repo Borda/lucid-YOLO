@@ -1,0 +1,32 @@
+# 📦 WP-004 — `ci(pr): lint, types, tests, coverage, license audit`
+
+> Engineering log · [Phase 0 — Foundation](https://borda.github.io/lucid-YOLO/engineering/phase-00-foundation/)
+>
+> 🔗 Depends on WP-002, WP-003 · Needed by [WP-005](https://borda.github.io/lucid-YOLO/work_packages/wp-005/), [WP-084](https://borda.github.io/lucid-YOLO/work_packages/wp-084/), [WP-085](https://borda.github.io/lucid-YOLO/work_packages/wp-085/), WP-086, [WP-109](https://borda.github.io/lucid-YOLO/work_packages/wp-109/)
+>
+> ⬅️ [WP-001](https://borda.github.io/lucid-YOLO/work_packages/wp-001/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-005](https://borda.github.io/lucid-YOLO/work_packages/wp-005/) ➡️
+
+
+## WP-004 — auditing what a wheel *bundles*, not what it declares
+
+<a id="wp-004"></a>
+
+The copyleft audit read what a distribution says about itself — `License`, `License-Expression`, OSI classifiers — and nothing about what it ships. A wheel may vendor a native library under a licence its own metadata never mentions, which is precisely the case the gate exists to catch.
+
+Reading the `License-File` documents too, it found something on the first run:
+
+| package | declares | bundles |
+| -- | -- | -- |
+| numpy | BSD-3-Clause | libgfortran, libgcc — GPL-3.0-or-later **with GCC Runtime Library Exception**; libquadmath — LGPL-2.1-or-later |
+| shapely | BSD-3-Clause | GEOS binaries — LGPL-2.1 |
+
+numpy is a runtime dependency, not a test-only one, and no audit this project had run could ever have seen it.
+
+Three rules keep the result meaningful rather than merely red:
+
+- **Only declaration lines are read, never licence prose.** A bundled copy of the LGPL names the GPL on dozens of its own lines, and a gate that fires on every wheel shipping a licence file teaches its reader to bypass it.
+- **A recognized licence exception is permissive by construction**, matched by expression rather than by name, so a future gcc-built dependency needs no entry.
+- **The exception is tested before the allowlist, not after.** Written the other way round the allowlist short-circuits first, the exception never runs, and a per-package entry quietly covers whatever that package vendors *next*. Mutation testing is what caught the ordering: with numpy delisted the audit reports libquadmath alone, and with the exception disabled it reports the GPL-3 line — evidence the two mechanisms act independently rather than one masking the other.
+
+A related gate lesson from the same package: the decisions test moved from a hardcoded `D1–D14` to **contiguity plus a floor**. The hardcoded upper bound failed the moment a decision was added, which is a test asking for maintenance rather than reporting a defect; contiguity alone would not notice the last row being deleted, since what remains stays contiguous. The roadmap's `_WP_FLOOR` ratchet is the same pattern.
+

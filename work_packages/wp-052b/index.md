@@ -1,0 +1,21 @@
+# 📦 WP-052b — `test(models): Table S9 seg fidelity gate`
+
+> Research log · [Phase 7 — Instance segmentation, v0.2.0](https://borda.github.io/lucid-YOLO/research/phase-07-instance-segmentation/)
+>
+> 🔗 Depends on [WP-052](https://borda.github.io/lucid-YOLO/work_packages/wp-052/) · Needed by none
+>
+> ⬅️ [WP-052](https://borda.github.io/lucid-YOLO/work_packages/wp-052/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-087](https://borda.github.io/lucid-YOLO/work_packages/wp-087/) ➡️
+
+
+## WP-052b — Table S9 fidelity gate
+
+<a id="wp-052b"></a>
+
+R1 Table S9 was transcribed from the arXiv **PDF** (page 28) after the HTML rendering proved to truncate before section S5 — worth knowing before trusting any other appendix table read from HTML: n 2.7/9.1, s 10.4/34.2, m 23.6/121.5, l 28.0/139.8, x 62.8/313.5 (M params / B FLOPs).
+
+The params tolerance is **±3%**, wider than detection's ±2%, and the widening is argued rather than fitted: the segmentation head's sizing rests on five registered assumptions (A14, A15, A18, A34, A35) instead of published structure. `s` is the binding scale at +2.5% and every other lands inside ±1.5%.
+
+FLOPs hold ±5% on all five scales under the same 2×MACs convention Table 7 needed (A29). That is corroboration of A29 rather than a second assumption — the convention was fixed on detection and predicted segmentation correctly.
+
+Two gaps in the source worth recording: S9 states neither its FLOP convention nor whether Params denotes the full or the deployed model (E2E and non-E2E share one pair per scale), and unlike Table 7 it attributes no source.
+

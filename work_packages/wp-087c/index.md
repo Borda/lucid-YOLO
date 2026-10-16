@@ -1,0 +1,29 @@
+# 📦 WP-087c — `perf(data): vectorised, batched polygon rasterisation`
+
+> Research log · [Phase 7 — Instance segmentation, v0.2.0](https://borda.github.io/lucid-YOLO/research/phase-07-instance-segmentation/)
+>
+> 🔗 Depends on [WP-087](https://borda.github.io/lucid-YOLO/work_packages/wp-087/) · Needed by [WP-087d](https://borda.github.io/lucid-YOLO/work_packages/wp-087d/)
+>
+> ⬅️ [WP-087b](https://borda.github.io/lucid-YOLO/work_packages/wp-087b/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-087d](https://borda.github.io/lucid-YOLO/work_packages/wp-087d/) ➡️
+
+
+## WP-087c — vectorised polygon rasterisation
+
+<a id="wp-087c"></a>
+
+The structural difference between the detection and segmentation training steps was one CPU loop: rasterising every instance polygon onto the prototype grid, in the main process between forward and loss, walking each ring's vertices in Python with a full `height × width` tensor op per vertex.
+
+Cost is linear in **point count**, which is why earlier four-vertex benchmarks missed it entirely. At a 160-px grid: 0.11 ms at 4 vertices, 1.65 at 64, 3.32 at 128 — i.e. 0.37 s a step at batch 32 with seven instances an image, and mosaic quadruples the instance count.
+
+That single fact explains every symptom the earlier hypotheses fit and then failed to predict: GPU idle waiting on CPU; `num_workers` irrelevant because this runs outside the workers; `OMP_NUM_THREADS` irrelevant because the cost is per-op overhead rather than arithmetic.
+
+Three steps, each superseding the last:
+
+| step | measurement |
+| -- | -- |
+| all of a ring's edges at once | 1.65 → 0.434 ms at 64 vertices; 3.32 → 0.700 at 128 |
+| a whole image's rings in one crossing test | 1,138 real-COCO instances across 32 mosaic images at 23 points a ring: 10.14 → 4.87 ms an image |
+| edges flattened with an instance index instead of padding every ring to the image's longest | seven 23-point rings 7.22 → 2.06 ms; the same seven with one 500-point ring 20.24 → 3.44; 35 rings with one of 300 55.95 → 6.03 |
+
+The third step is where the ragged-versus-padded question was settled empirically: COCO rings are ragged enough that padding to the longest dominates. Output is identical at every step, not merely close.
+

@@ -1,0 +1,23 @@
+# 📦 WP-089 — `feat(predict): detection inference on one image`
+
+> Engineering log · [Phase 9 — Inference and generalization](https://borda.github.io/lucid-YOLO/engineering/phase-09-inference/)
+>
+> 🔗 Depends on WP-046 · Needed by [WP-090](https://borda.github.io/lucid-YOLO/work_packages/wp-090/), [WP-091](https://borda.github.io/lucid-YOLO/work_packages/wp-091/), [WP-110](https://borda.github.io/lucid-YOLO/work_packages/wp-110/)
+>
+> ⬅️ [WP-064](https://borda.github.io/lucid-YOLO/work_packages/wp-064/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-090](https://borda.github.io/lucid-YOLO/work_packages/wp-090/) ➡️
+
+
+## WP-089 — the grid was already written three times
+
+<a id="wp-089"></a>
+
+The package exists because a letterbox inverse must not be written twice: two copies of one transform, each with its own passing tests, are free to disagree by a pad the day either side's rounding changes. That part went as intended — nothing in the predict path computes a ratio, a pad or a corner.
+
+What the work found is that the *other* geometry had already made the mistake. The head's anchor grid — divide the canvas by the three strides, build the points, move them to the device — was written once in the dual-path evaluator, once in the oriented evaluator, and would have been written a third time here. The stride triple `(8, 16, 32)` had three separate declarations to match, two of them private. Nobody duplicated it carelessly; each consumer needed three lines and wrote them. That is how the duplication a project actively guards against still accumulates: the guarded case is the one everyone can see is dangerous, and the neighbouring case looks too small to bother with.
+
+Consolidated into `assign/grid.py`, beside `make_anchor_points`. The general signature won: a canvas is `(height, width)`, and a square side cannot express a letterbox that is not square. Every golden was unchanged afterwards — 20/20 — which is the only evidence that a refactor of the scoring path changed nothing.
+
+A second finding, recorded because it is a trap the next two packages walk into: `DetectionLitModule.forward` returns a `DualHeadOutput` for **every** task. A segmentation or oriented checkpoint handed to a detection predict path therefore produces boxes, silently, with its mask or angle branch never consulted — plausible output, no error, and the masks the caller asked for simply absent. The refusal is in the library rather than in the command for that reason: a wrong answer that looks right is worse than a traceback, and the command is not the only door.
+
+Two citations that belong with the above rather than in the roadmap row. The duplicated-inverse hazard has a name in this project — it is the **WP-053a defect class**, the shared-decode function whose second caller found what its first never could ([WP-090b](https://borda.github.io/lucid-YOLO/work_packages/wp-090b/#wp-090b) is the same class caught later). And the task string is read from the checkpoint by the same mechanism `lucid-eval` reads it, so the two commands cannot disagree about what a checkpoint is: a refusal that depended on which entry point asked would be worth less than no refusal at all.
+
