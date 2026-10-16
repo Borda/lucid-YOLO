@@ -95,7 +95,7 @@ def _render(labels: list[str]) -> dict[str, Glyphs]:
 
 
 def check_figures_present(repo_root: Path) -> list[str]:
-    """Every figure ``docs/REPRODUCTION_REPORT.md`` links must exist under ``docs/figures/``.
+    """Every figure the reproduction report links must exist under ``docs/figures/``.
 
     Args:
         repo_root: Repository root; the report and figures directory are found relative to it.
@@ -116,8 +116,10 @@ def check_figures_present(repo_root: Path) -> list[str]:
         ...     check_figures_present(root)
         ['report links missing figures: figures/missing.svg']
     """
-    report = (repo_root / "docs" / "REPRODUCTION_REPORT.md").read_text(encoding="utf-8")
-    linked = {name for name in re.findall(r"!\[[^\]]*\]\(figures/([^)]+)\)", report)}
+    docs = repo_root / "docs"
+    pages = [docs / "REPRODUCTION_REPORT.md", *sorted((docs / "report").glob("*.md"))]
+    report = "".join(page.read_text(encoding="utf-8") for page in pages if page.is_file())
+    linked = {name for name in re.findall(r"!\[[^\]]*\]\((?:\.\./)?figures/([^)]+)\)", report)}
     if not linked:
         return ["the report links no figure; this gate would be vacuous"]
     missing = sorted(name for name in linked if not (repo_root / "docs" / "figures" / name).is_file())

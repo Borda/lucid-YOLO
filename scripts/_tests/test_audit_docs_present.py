@@ -74,7 +74,7 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     )
     _write(
         docs_dir / "DECISIONS.md",
-        "".join(f"| D{i} | t |\n" for i in range(1, 28))
+        "".join(f"| D{i} | t |\n" for i in range(1, 29))
         + "".join(
             f"## Decision D{i} — {adr}\n"
             for i, adr in enumerate(("ADR-001", "ADR-002", "ADR-003", "ADR-004", "ADR-005"), 1)
@@ -83,7 +83,7 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     _write(docs_dir / "ESCALATION.md", "escalation\n")
     _write(
         docs_dir / "ROADMAP.md",
-        "195 numbered work packages.\n" + "".join(f"| {i:03d} | a | b | c | d | ✅ |\n" for i in range(1, 196)),
+        "196 numbered work packages.\n" + "".join(f"| {i:03d} | a | b | c | d | ✅ |\n" for i in range(1, 197)),
     )
     _write(docs_dir / "DATASETS.md", "datasets\n")
     _write(docs_dir / "TRAINING.md", "training\n")
@@ -162,6 +162,78 @@ class TestCheckLogLinksResolve:
 
         assert audit.check_log_links_resolve(tmp_path / "docs", tmp_path) == []
 
+    def test_clean_when_anchor_lives_on_a_split_page(self, tmp_path: Path) -> None:
+        """A roadmap link into ``research/<page>.md`` resolves against the anchors on that page.
+
+        The research log is one page per phase, so its anchors are no longer in the landing
+        file; a check reading only the landing file would flag every row as undefined.
+        """
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(
+            tmp_path / "docs" / "ROADMAP.md",
+            "160 numbered work packages.\nSee research/phase-01.md#the-anchor.\n"
+            + "".join(f"| {i:03d} | a | b | c | d | ✅ |\n" for i in range(1, 160)),
+        )
+        (tmp_path / "docs" / "research").mkdir()
+        _write(tmp_path / "docs" / "research" / "phase-01.md", '<a id="the-anchor">note</a>\n')
+
+        assert audit.check_log_links_resolve(tmp_path / "docs", tmp_path) == []
+
+    def test_flags_undefined_anchor_on_a_split_page_link(self, tmp_path: Path) -> None:
+        """A link naming a split page but an anchor no page defines is still reported."""
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(tmp_path / "docs" / "ROADMAP.md", "See engineering/phase-01.md#ghost.\n")
+
+        violations = audit.check_log_links_resolve(tmp_path / "docs", tmp_path)
+
+        assert any("ghost" in violation for violation in violations)
+
+
+class TestCheckWorkPackageFiles:
+    """Tests for ``audit.check_work_package_files``."""
+
+    def test_clean_when_every_file_is_numbered_and_included(self, tmp_path: Path) -> None:
+        """A WP file whose id is a roadmap row and which a phase page includes reports nothing."""
+        docs = tmp_path / "docs"
+        _write_required_docs(docs, tmp_path)
+        (docs / "work_packages").mkdir()
+        _write(docs / "work_packages" / "wp-001.md", "x\n")
+        (docs / "engineering").mkdir()
+        _write(docs / "engineering" / "phase-00.md", '--8<-- "work_packages/wp-001.md:engineering"\n')
+
+        assert audit.check_work_package_files(docs, tmp_path) == []
+
+    def test_flags_file_with_no_roadmap_row(self, tmp_path: Path) -> None:
+        """A WP file the roadmap never numbered is reported, even when a phase page includes it.
+
+        A typo in the file name or a renumbered row leaves findings filed under an id no row
+        carries, and the roadmap's own checks cannot see a file they never read.
+        """
+        docs = tmp_path / "docs"
+        _write_required_docs(docs, tmp_path)
+        (docs / "work_packages").mkdir()
+        _write(docs / "work_packages" / "wp-999z.md", "x\n")
+        (docs / "research").mkdir()
+        _write(docs / "research" / "phase-01.md", '--8<-- "work_packages/wp-999z.md:research"\n')
+
+        assert audit.check_work_package_files(docs, tmp_path) == [
+            "work-package files with no roadmap row: ['wp-999z.md']"
+        ]
+
+    def test_flags_file_no_phase_page_includes(self, tmp_path: Path) -> None:
+        """A WP file no research or engineering phase page includes is reported as an orphan.
+
+        The site would build and serve it, while the log a reader browses lacks the entry.
+        """
+        docs = tmp_path / "docs"
+        _write_required_docs(docs, tmp_path)
+        (docs / "work_packages").mkdir()
+        _write(docs / "work_packages" / "wp-001.md", "x\n")
+
+        assert audit.check_work_package_files(docs, tmp_path) == [
+            "work-package files no phase page includes: ['wp-001.md']"
+        ]
+
 
 class TestCheckAssumptionIdsContiguous:
     """Tests for ``audit.check_assumption_ids_contiguous``."""
@@ -237,7 +309,7 @@ class TestCheckRoadmapWpIdsUniqueAndComplete:
 
         violations = audit.check_roadmap_wp_ids_unique_and_complete(tmp_path / "docs", tmp_path)
 
-        assert any("shrank below 195" in violation for violation in violations)
+        assert any("shrank below 196" in violation for violation in violations)
 
     def test_clean_at_floor(self, tmp_path: Path) -> None:
         """A contiguous roadmap at the floor count reports no violation."""
@@ -293,12 +365,12 @@ class TestCheckRoadmapHeaderCount:
         _write_required_docs(tmp_path / "docs", tmp_path)
         text = (tmp_path / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
         _write(
-            tmp_path / "docs" / "ROADMAP.md", text.replace("195 numbered work packages.", "5 numbered work packages.")
+            tmp_path / "docs" / "ROADMAP.md", text.replace("196 numbered work packages.", "5 numbered work packages.")
         )
 
         violations = audit.check_roadmap_header_count(tmp_path / "docs", tmp_path)
 
-        assert violations == ["header states 5 numbered work packages but the table carries 195"]
+        assert violations == ["header states 5 numbered work packages but the table carries 196"]
 
     def test_clean_when_counts_agree(self, tmp_path: Path) -> None:
         """A stated package count matching the numbered rows reports no violation."""
@@ -341,6 +413,21 @@ class TestCheckReportSections:
         _write_required_docs(tmp_path / "docs", tmp_path)
         assert audit.check_report_sections(tmp_path / "docs", tmp_path) == []
 
+    def test_finds_section_heading_on_a_split_page(self, tmp_path: Path) -> None:
+        """A required section whose heading moved to a ``report/`` page as an H1 still counts.
+
+        The report is one page per release section, each promoted from H2 to H1; the check
+        reads the landing file and every page so the split does not look like a dropped section.
+        """
+        _write_required_docs(tmp_path / "docs", tmp_path)
+        _write(tmp_path / "docs" / "REPRODUCTION_REPORT.md", "## 0.1.0 — Detection\n")
+        (tmp_path / "docs" / "report").mkdir()
+        _write(tmp_path / "docs" / "report" / "keypoints.md", "# 0.5.0 — Keypoint detection\n")
+
+        violations = audit.check_report_sections(tmp_path / "docs", tmp_path)
+
+        assert "0.5.0 — Keypoint detection" not in violations[0]
+
 
 class TestCheckDecisionsIds:
     """Tests for ``audit.check_decisions_ids``."""
@@ -348,7 +435,7 @@ class TestCheckDecisionsIds:
     def test_flags_missing_adr(self, tmp_path: Path) -> None:
         """A missing ADR section heading is reported even when ids are contiguous."""
         _write_required_docs(tmp_path / "docs", tmp_path)
-        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 28)))
+        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 29)))
 
         violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
 
@@ -358,7 +445,7 @@ class TestCheckDecisionsIds:
         """Deleting D5 from a full register drops the count below the floor and is reported.
 
         The predicate this pins: a ``max(ids)`` floor grades the register by its last
-        row, so D27 surviving would hide D5's deletion behind a contiguity violation
+        row, so D28 surviving would hide D5's deletion behind a contiguity violation
         alone -- and a contiguity violation is what an id renumbering also produces.
         Counting rows makes the shrink its own finding.
         """
@@ -368,7 +455,7 @@ class TestCheckDecisionsIds:
 
         violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
 
-        assert any("decisions shrank below 27 rows: 26" in violation for violation in violations)
+        assert any("decisions shrank below 28 rows: 27" in violation for violation in violations)
 
     def test_clean_for_full_register(self, tmp_path: Path) -> None:
         """A contiguous register at the floor with every ADR section reports no violation."""

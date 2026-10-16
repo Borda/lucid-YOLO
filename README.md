@@ -2,6 +2,8 @@
 
 > lucid-yolo is an independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance segmentation, and oriented detection methods described in the YOLO26 paper ([arXiv:2606.03748](https://arxiv.org/abs/2606.03748)), plus a keypoint task composed onto the same trunk whose loss and evaluation protocol are taken from RLE (arXiv:2107.11291) rather than from that paper. "YOLO" refers to the family of real-time detectors originated by Redmon et al. (2016). This project is not affiliated with, endorsed by, or derived from Ultralytics or its codebase. No Ultralytics source code, configurations, or model weights were consulted or used. See docs/PROVENANCE.md.
 
+📖 **Documentation: [borda.github.io/lucid-YOLO](https://borda.github.io/lucid-YOLO/)**: how the detector works, the reproduction report, model cards and the full research and engineering record. Agents can start from [`llms.txt`](https://borda.github.io/lucid-YOLO/llms.txt). To cite this project, use [`CITATION.cff`](CITATION.cff).
+
 **A modern YOLO, written out in full, with its homework shown.** Every mechanism in the paper — the NMS-free end-to-end head, the removal of distribution focal loss, the MuSGD optimizer, the progressive loss schedule, the rotated-box formulation — is implemented here from the published equations, trained, measured, and written up with the numbers it actually produced. Where the papers leave a choice open, the choice is recorded as a numbered assumption instead of buried in the code.
 
 It is a teaching artifact, a research baseline, and a reproduction record at the same time. It is **not** a production detector: every trained tier is the smallest scale for 50 epochs, and no weights ship.
@@ -33,18 +35,9 @@ This project rebuilds the methods from the papers alone, deliberately without re
 
 One image, one forward pass, and **two** ways of reading the same output:
 
-```mermaid
-flowchart LR
-    IMG[image<br/>letterboxed 640x640] --> BB[backbone<br/>ConvBNAct, C3k2, SPPF, C2PSA]
-    BB --> NK[neck<br/>top-down + bottom-up fusion]
-    NK --> P3[P3 stride 8]
-    NK --> P4[P4 stride 16]
-    NK --> P5[P5 stride 32]
-    P3 & P4 & P5 --> HEAD[dual head<br/>one-to-many + one-to-one]
-    HEAD --> O2M[one-to-many branch<br/>training signal, NMS at inference]
-    HEAD --> O2O[one-to-one branch<br/>top-k, no suppression]
-    O2O --> OUT[300 detections<br/>x1 y1 x2 y2 score class]
-```
+![Animated sketch: a letterboxed image, backbone and neck, feature grids at strides 8, 16 and 32, the one-to-many and one-to-one heads, top-k, boxes](docs/assets/how_yolo_works.svg)
+
+The backbone is built from ConvBNAct, C3k2, SPPF and C2PSA blocks; the neck fuses top-down and bottom-up into the P3, P4 and P5 grids. The one-to-many branch is the training signal and the optional NMS path; the one-to-one branch is what ships, and each of its 300 output rows reads `x1 y1 x2 y2 score class`.
 
 The interesting part is the **one-to-one branch**. A classical detector predicts many boxes per object and deletes the duplicates afterwards with non-maximum suppression — an operation that is not a neural network, does not export cleanly, and costs latency that grows with the number of objects. Train a second branch to assign exactly one prediction per object, and suppression has nothing left to do: ranking by score and taking the top 300 *is* the decode. The exported graph carries a `TopK` node and no `NonMaxSuppression` node, and a test in this repository asserts exactly that on all four tasks.
 

@@ -24,6 +24,7 @@ ci:
     - test-doctest-audit
     - flat-test-group-audit
     - docs-present
+    - wp-links
     - docs-site
     - figure-captions
     - license-headers
@@ -176,6 +177,15 @@ repos:
         language: system
         pass_filenames: false
         files: ^(docs/.*\.md|AGENTS\.md|README\.md)$
+      # Every WP-<id> a docs page names links to that WP's page, and each WP page's
+      # header (logs, depends on, needed by, neighbours) matches the roadmap (WP-196).
+      # Fix with `.venv/bin/python scripts/lint/audit_wp_links.py --fix`.
+      - id: wp-links
+        name: "🔗 work-package mentions linked, WP headers current"
+        entry: .venv/bin/python scripts/lint/audit_wp_links.py
+        language: system
+        pass_filenames: false
+        files: ^docs/.*\.md$
       # MkDocs Material site: nav entries, plugin/extension list, identity fields.
       - id: docs-site
         name: "🗺️ mkdocs site config and nav"
@@ -191,7 +201,7 @@ repos:
         entry: .venv/bin/python scripts/lint/audit_figure_captions.py
         language: system
         pass_filenames: false
-        files: ^(docs/figures/.*\.svg|docs/REPRODUCTION_REPORT\.md)$
+        files: ^(docs/figures/.*\.svg|docs/REPRODUCTION_REPORT\.md|docs/report/.*\.md)$
       # LICENSE/NOTICE/README wording plus the SPDX header every file under src/,
       # scripts/ and tests/ carries. The checker's scope became a named constant in
       # the same change that widened it past src/ (L-61), so this pattern follows it:

@@ -1,6 +1,32 @@
-# 🎯 Model card — lucid-yolo detector (n scale)
+# 🎯 Detection — lucid-yolo `n`
 
-Covers the detection model accepted at the Det-smoke tier for release `0.1.0`. One card per task family; segmentation and oriented detection get their own at `0.2.0` and `0.3.0`.
+![Animated sketch: a box with a class label and a score is drawn around each object](../assets/card_detection.svg)
+
+> Finds the objects of 80 everyday categories in an image and returns one box, class and score per object, with no NMS step after the network.
+
+## ⚡ At a glance
+
+|  |  |
+| -- | -- |
+| Task | object detection: a box, a class and a score per object |
+| Data | COCO 2017, 80 categories, 640 px |
+| Size | `n` scale, 2.4M parameters, 5.4 GFLOPs |
+| Result | mAP50-95 on COCO val2017, both decode paths — see [Evaluation](#evaluation) |
+| Release | v0.1.0, Det-smoke tier |
+| Try it | [detection demo notebook](../notebooks/demo_detect.ipynb) |
+| Weights | not published (D14) |
+
+## 💡 Motivation
+
+Detection is the trunk the other three tasks are built on: segmentation, oriented detection and keypoints each add a head to this model rather than replacing it. The model exists to test whether the paper's detector follows from its description alone — boxes as four direct distances with no distribution bins, a one-to-one branch that makes NMS unnecessary at inference, small-target-aware assignment, a progressive loss schedule between the two branches, and the MuSGD optimizer. [How the detector works](../method/how-it-works.md) walks through the data path, and [NMS versus NMS-free](../method/nms-vs-nms-free.md) what dropping NMS cost here.
+
+## 🧭 Use cases
+
+**Intended.** Reproduction research: verifying the paper's architectural and training claims, ablating its mechanisms, and serving as a readable from-scratch implementation of NMS-free detection. The `e2e` path is the interesting artifact — it exports without suppression ops.
+
+**Walk-through.** The pipeline this card describes — data, a short fit, `lucid-eval`, predictions drawn over the ground truth — runs end to end in [the detection demo notebook](../notebooks/demo_detect.ipynb), short enough for a Colab session and not a reproduction of the numbers here.
+
+**Not intended.** Production detection, safety-critical or rights-affecting decisions, surveillance, biometric identification, or any deployment where 25 mAP on 80 common object categories would be mistaken for a reliable perception system. This is a smoke-tier reproduction at the smallest scale, roughly half the accuracy of a well-trained detector of this family, and it has been evaluated on exactly one benchmark.
 
 ## 📇 Model details
 
@@ -16,14 +42,6 @@ Covers the detection model accepted at the Det-smoke tier for release `0.1.0`. O
 | Paper | Methods per the YOLO26 paper, arXiv:2606.03748. Independent implementation; not affiliated with, endorsed by, or derived from Ultralytics or its codebase |
 
 The architecture is typed Python, not a config DSL (ADR-001): five scale rows (`n/s/m/l/x`) multiply depth, width and max-channels over one topology. Only the `n` scale has been trained.
-
-## 🧭 Intended use
-
-**Intended.** Reproduction research: verifying the paper's architectural and training claims, ablating its mechanisms, and serving as a readable from-scratch implementation of NMS-free detection. The `e2e` path is the interesting artifact — it exports without suppression ops.
-
-**Walk-through.** The pipeline this card describes — data, a short fit, `lucid-eval`, predictions drawn over the ground truth — runs end to end in [the detection demo notebook](../notebooks/demo_detect.ipynb), short enough for a Colab session and not a reproduction of the numbers here.
-
-**Not intended.** Production detection, safety-critical or rights-affecting decisions, surveillance, biometric identification, or any deployment where 25 mAP on 80 common object categories would be mistaken for a reliable perception system. This is a smoke-tier reproduction at the smallest scale, roughly half the accuracy of a well-trained detector of this family, and it has been evaluated on exactly one benchmark.
 
 ## 🗂️ Training data
 
@@ -45,16 +63,19 @@ COCO's documented composition limits apply to this model directly: category freq
 
 **`w_muon` and `w_sgd` are independent gains (A7), so `w_muon = 0` is a supported SGD-only configuration** — `MuSGD._parameter_update` branches on it explicitly and skips the Newton–Schulz iteration rather than computing and discarding it, and `tests/optim/test_musgd.py` pins the resulting update. Supported is all it is: no run in this project has ever trained a tier under it, so there is **no measurement of what the Muon branch is worth on this architecture** and this row should not be read as one arm of an ablation. Every tier above trained at `0.5 / 0.5`.
 
+## 📈 Training curves
+
+![Det-smoke training curves](../figures/det_smoke_training.svg)
+
+*Run v8. Left: the epoch-end E2E mAP proxy logged during training (letterbox coordinates — the acceptance figure under Evaluation comes from the standalone evaluator). Middle: epoch-mean totals, log axis. Right: the one-to-one branch's pre-gain components; the L1 term is in stride units.*
+
+How the run went, and what the curves show, is discussed in the [reproduction report](../report/detection.md).
+
 ## 📊 Evaluation
 
 COCO val2017, all 5000 images, `torchmetrics` `MeanAveragePrecision` on the `faster_coco_eval` backend. Both decode paths from one forward per batch.
 
-| weights | path | mAP50-95 | mAP50 | mAP75 | mAP_S | mAP_M | mAP_L |
-| -- | -- | -- | -- | -- | -- | -- | -- |
-| EMA | NMS | **25.30** | 38.12 | 26.94 | 11.86 | 27.09 | 33.88 |
-| EMA | E2E | 23.84 | 36.00 | 25.15 | 11.64 | 25.86 | 31.38 |
-| raw | NMS | 25.33 | 38.45 | 27.05 | — | — | — |
-| raw | E2E | 24.23 | 36.72 | 25.82 | 11.24 | — | — |
+--8<-- "report/detection.md:eval"
 
 Recall at 100 detections (E2E, EMA): 46.07. The NMS-free path costs 1.11 AP against the NMS path on raw weights, 1.46 on EMA.
 
@@ -66,11 +87,11 @@ No latency figures are published. Throughput is hardware-dependent and the proje
 - **Small objects are weakest** — 11.9 mAP_S against 33.9 mAP_L. STAL is implemented but its benefit is a Det-ablations trend claim, unmeasured here.
 - **80 COCO categories only.** No open-vocabulary capability; anything outside those categories is either missed or misclassified as the nearest one.
 - **640×640 letterboxed.** Untested at other resolutions or aspect extremes.
-- **One benchmark, one seed, one scale, one device.** No variance estimate across seeds, and no cross-dataset generalization measurement at all: the RF100-VL tier that would have supplied one (WP-074/075) was **dropped on 2026-08-18** over an unresolved per-dataset licence question, so nothing replaces it and none is scheduled. Training has also never spanned more than a single accelerator. This task's metrics are torchmetrics metrics that do synchronise across ranks, so a multi-device run is not obstructed the way the oriented and keypoint tiers are — but unobstructed is an untested inheritance from Lightning, not a result this project has.
+- **One benchmark, one seed, one scale, one device.** No variance estimate across seeds, and no cross-dataset generalization measurement at all: the RF100-VL tier that would have supplied one ([WP-074](../work_packages/wp-074.md)/075) was **dropped on 2026-08-18** over an unresolved per-dataset licence question, so nothing replaces it and none is scheduled. Training has also never spanned more than a single accelerator. This task's metrics are torchmetrics metrics that do synchronise across ranks, so a multi-device run is not obstructed the way the oriented and keypoint tiers are — but unobstructed is an untested inheritance from Lightning, not a result this project has.
 - **No robustness evaluation** — weather, blur, occlusion, adversarial or distribution-shift behavior is entirely uncharacterized.
 - **Not bitwise reproducible across platforms** (A26): libm last-bit rounding differs across OS and architecture; the goldens assert structural metrics with tolerance, not byte hashes.
 - **Determinism is weaker on MPS than the recipe reads.** `default_determinism` (`cli/train.py`) resolves `deterministic` to `"warn_only"` whenever MPS is the auto-picked accelerator, because MPS ships no deterministic kernel for some backwards this model hits (`index_put_with_accumulate` in the assignment/loss backward); strict `True` would abort the step. CPU and CUDA keep strict determinism. An Apple-silicon run is therefore reproducible only up to those non-deterministic kernels, and says so in warnings rather than by failing.
-- **The seed reproduces a run only at the same worker count.** `--data.num_workers 0` replays the augmentation stream byte for byte; with workers each one is re-seeded per worker and per epoch from the loader's own generator (WP-079). Both are fully determined by `seed`, but they are *different* streams — a run at 32 workers does not reproduce the same seed at 0 workers, or at 16.
+- **The seed reproduces a run only at the same worker count.** `--data.num_workers 0` replays the augmentation stream byte for byte; with workers each one is re-seeded per worker and per epoch from the loader's own generator ([WP-079](../work_packages/wp-079.md)). Both are fully determined by `seed`, but they are *different* streams — a run at 32 workers does not reproduce the same seed at 0 workers, or at 16.
 
 ## 🤝 Ethical considerations
 

@@ -1,0 +1,45 @@
+# Citation metadata for lucid-yolo (WP-196). GitHub renders "Cite this repository" from
+# this file. No version or release date is stated: __version__ in src/lucid_yolo is the
+# single source of truth for the version, and a copy here would drift from it.
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below, and cite the papers it reproduces."
+type: software
+title: "lucid-yolo"
+abstract: >-
+  Independent, from-scratch PyTorch Lightning implementation of the real-time detection,
+  instance-segmentation, oriented-detection, and keypoint-detection methods described in
+  the YOLO26 paper (arXiv:2606.03748), written from the papers alone, with every design
+  choice cited and every gap recorded as a numbered assumption.
+authors:
+  - family-names: "Borovec"
+    given-names: "Jirka"
+repository-code: "https://github.com/Borda/lucid-YOLO"
+url: "https://borda.github.io/lucid-YOLO/"
+license: Apache-2.0
+keywords:
+  - object-detection
+  - instance-segmentation
+  - oriented-detection
+  - keypoint-detection
+  - nms-free
+  - pytorch-lightning
+  - reproduction
+references:
+  - type: article
+    title: "Ultralytics YOLO26: Unified Real-Time End-to-End Vision Models"
+    authors:
+      - family-names: "Jocher"
+        given-names: "G."
+      - name: "et al."
+    year: 2026
+    url: "https://arxiv.org/abs/2606.03748"
+  - type: conference-paper
+    title: "Human Pose Regression with Residual Log-Likelihood Estimation"
+    authors:
+      - family-names: "Li"
+        given-names: "J."
+      - name: "et al."
+    year: 2021
+    conference:
+      name: "ICCV 2021"
+    url: "https://arxiv.org/abs/2107.11291"

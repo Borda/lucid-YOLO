@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 260" width="640" height="260" role="img" aria-labelledby="t d">
+  <title id="t">Instance segmentation</title>
+  <desc id="d">The same three objects. The outline of each object is traced along its own boundary, then the pixels inside fill with a coloured mask, one mask per instance.</desc>
+  <style>
+    :root { --bg:#f7f8fb; --scene:#e7eaf4; --obj:#9aa3b8; --a:#3f51b5; --b:#1f9e89; --c:#d08a1e; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#1b2030; --scene:#252c42; --obj:#56607a; --a:#8c9eff; --b:#4fd1b5; --c:#f2b55a; } }
+    .obj { fill: var(--obj); }
+    .contour > * { fill: none; stroke-width: 2.6; stroke-linejoin: round; stroke-dasharray: 100; }
+    .contour { animation: trace 9s infinite backwards; }
+    .contour > * { animation: draw 9s infinite backwards; animation-delay: inherit; }
+    .mask { animation: mask 9s infinite backwards; }
+    .k2 { animation-delay: .6s; } .k3 { animation-delay: 1.2s; }
+    @keyframes draw { 0% { stroke-dashoffset:100 } 16%,100% { stroke-dashoffset:0 } }
+    @keyframes trace { 0%,84% { opacity:1 } 94%,100% { opacity:0 } }
+    @keyframes mask { 0%,18% { opacity:0 } 30%,84% { opacity:.55 } 94%,100% { opacity:0 } }
+    @media (prefers-reduced-motion: reduce) { .contour, .contour > *, .mask { animation: none; } .contour > * { stroke-dashoffset: 0; } .mask { opacity: .55; } }
+  </style>
+  <defs>
+    <path id="car" d="M316 140H330V126Q330 116 340 116H404Q414 116 414 126V140H434Q450 140 450 156V180Q450 196 434 196H316Q300 196 300 180V156Q300 140 316 140Z"/>
+  </defs>
+  <rect width="640" height="260" rx="10" fill="var(--bg)"/>
+  <rect x="20" y="20" width="600" height="220" rx="8" fill="var(--scene)"/>
+
+  <circle class="obj" cx="150" cy="72" r="15"/>
+  <rect class="obj" x="132" y="90" width="36" height="92" rx="10"/>
+  <use class="obj" href="#car"/>
+  <circle class="obj" cx="335" cy="200" r="12"/>
+  <circle class="obj" cx="415" cy="200" r="12"/>
+  <ellipse class="obj" cx="515" cy="178" rx="40" ry="22"/>
+  <circle class="obj" cx="556" cy="156" r="15"/>
+
+  <g class="mask" fill="var(--a)"><circle cx="150" cy="72" r="15"/><rect x="132" y="90" width="36" height="92" rx="10"/></g>
+  <g class="mask k2" fill="var(--b)"><use href="#car"/><circle cx="335" cy="200" r="12"/><circle cx="415" cy="200" r="12"/></g>
+  <g class="mask k3" fill="var(--c)"><ellipse cx="515" cy="178" rx="40" ry="22"/><circle cx="556" cy="156" r="15"/></g>
+
+  <g class="contour" stroke="var(--a)">
+    <circle cx="150" cy="72" r="15" pathLength="100"/>
+    <rect x="132" y="90" width="36" height="92" rx="10" pathLength="100"/>
+  </g>
+  <g class="contour k2" stroke="var(--b)">
+    <path d="M316 140H330V126Q330 116 340 116H404Q414 116 414 126V140H434Q450 140 450 156V180Q450 196 434 196H316Q300 196 300 180V156Q300 140 316 140Z" pathLength="100"/>
+    <circle cx="335" cy="200" r="12" pathLength="100"/>
+    <circle cx="415" cy="200" r="12" pathLength="100"/>
+  </g>
+  <g class="contour k3" stroke="var(--c)">
+    <ellipse cx="515" cy="178" rx="40" ry="22" pathLength="100"/>
+    <circle cx="556" cy="156" r="15" pathLength="100"/>
+  </g>
+</svg>

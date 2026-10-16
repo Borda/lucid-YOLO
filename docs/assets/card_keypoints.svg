@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 260" width="640" height="260" role="img" aria-labelledby="t d">
+  <title id="t">Keypoint detection</title>
+  <desc id="d">A person is found with a box. Seventeen points appear on the head, arms, hips and legs, in the COCO human-pose order, and lines join them into a skeleton.</desc>
+  <style>
+    :root { --bg:#f7f8fb; --scene:#e7eaf4; --obj:#b4bbcc; --mute:#7d869a; --a:#3f51b5; --pt:#d6455d; --ink:#1c2333; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#1b2030; --scene:#252c42; --obj:#3c4560; --mute:#7d869a; --a:#8c9eff; --pt:#ff7a8f; --ink:#e6e9f2; } }
+    text { font: 12px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--mute); }
+    .obj { fill: var(--obj); }
+    .box { fill: none; stroke: var(--mute); stroke-width: 1.6; stroke-dasharray: 100; animation: box 10s infinite backwards; }
+    .pts circle { fill: var(--pt); }
+    .pts { animation: pts 10s infinite backwards; }
+    .g2 { animation-delay: .5s; } .g3 { animation-delay: 1s; } .g4 { animation-delay: 1.5s; }
+    .bone { fill: none; stroke: var(--a); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 100; animation: bone 10s infinite backwards; }
+    @keyframes box { 0% { stroke-dashoffset:100; opacity:1 } 10% { stroke-dashoffset:0 } 86% { stroke-dashoffset:0; opacity:1 } 94%,100% { stroke-dashoffset:0; opacity:0 } }
+    @keyframes pts { 0%,12% { opacity:0 } 18%,86% { opacity:1 } 94%,100% { opacity:0 } }
+    @keyframes bone { 0%,40% { stroke-dashoffset:100; opacity:1 } 56% { stroke-dashoffset:0 } 86% { stroke-dashoffset:0; opacity:1 } 94%,100% { stroke-dashoffset:0; opacity:0 } }
+    @media (prefers-reduced-motion: reduce) { .box, .pts, .bone { animation: none; stroke-dashoffset: 0; opacity: 1; } }
+  </style>
+  <rect width="640" height="260" rx="10" fill="var(--bg)"/>
+  <rect x="20" y="20" width="600" height="220" rx="8" fill="var(--scene)"/>
+
+  <circle class="obj" cx="320" cy="62" r="17"/>
+  <path class="obj" d="M292 86h56l6 78h-68z"/>
+  <path class="obj" d="M296 88l-24 38-6 34 10 2 8-32 18-26zM344 88l24-20 14-26 9 5-14 30-28 24z"/>
+  <path class="obj" d="M300 158h16l-6 82h-14zM324 158h16l14 78h-12z"/>
+
+  <rect class="box" x="254" y="30" width="142" height="218" pathLength="100"/>
+
+  <g class="bone">
+    <path d="M296 92L344 92M296 92L276 124L268 158M344 92L366 70L380 44M296 92L304 160M344 92L336 160M304 160L336 160M304 160L300 200L296 238M336 160L344 198L352 236" pathLength="100"/>
+  </g>
+
+  <g class="pts"><circle cx="320" cy="62" r="4.5"/><circle cx="313" cy="56" r="3.5"/><circle cx="327" cy="56" r="3.5"/><circle cx="304" cy="60" r="3.5"/><circle cx="336" cy="60" r="3.5"/></g>
+  <g class="pts g2"><circle cx="296" cy="92" r="4.5"/><circle cx="344" cy="92" r="4.5"/><circle cx="276" cy="124" r="4.5"/><circle cx="366" cy="70" r="4.5"/><circle cx="268" cy="158" r="4.5"/><circle cx="380" cy="44" r="4.5"/></g>
+  <g class="pts g3"><circle cx="304" cy="160" r="4.5"/><circle cx="336" cy="160" r="4.5"/></g>
+  <g class="pts g4"><circle cx="300" cy="200" r="4.5"/><circle cx="344" cy="198" r="4.5"/><circle cx="296" cy="238" r="4.5"/><circle cx="352" cy="236" r="4.5"/></g>
+
+  <text x="34" y="226">K = 17 here, COCO's person schema</text>
+  <text x="34" y="242">K is a constructor argument</text>
+</svg>

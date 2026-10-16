@@ -21,6 +21,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import re
 import sys
 from pathlib import Path
@@ -106,9 +107,27 @@ def check_every_docs_page_is_listed_in_the_nav(docs_dir: Path, mkdocs_yml: Path)
         ...     _ = mkdocs_yml.write_text("nav:\\n  - index.md\\n", encoding="utf-8")
         ...     check_every_docs_page_is_listed_in_the_nav(docs, mkdocs_yml)
         ["docs pages absent from the nav: ['orphan.md']"]
+
+        A page matched by the config's ``not_in_nav`` patterns is deliberately unlisted:
+
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     root = Path(tmp)
+        ...     docs = root / "docs"
+        ...     (docs / "parts").mkdir(parents=True)
+        ...     _ = (docs / "parts" / "a.md").write_text("x", encoding="utf-8")
+        ...     mkdocs_yml = root / "mkdocs.yml"
+        ...     _ = mkdocs_yml.write_text("not_in_nav: |\\n  /parts/*.md\\nnav:\\n  - x.md\\n", encoding="utf-8")
+        ...     check_every_docs_page_is_listed_in_the_nav(docs, mkdocs_yml)
+        []
     """
-    on_disk = {str(path.relative_to(docs_dir)) for path in docs_dir.rglob("*.md")}
-    in_nav = set(_nav_targets(_config(mkdocs_yml)["nav"]))
+    config = _config(mkdocs_yml)
+    unlisted = [line.strip().lstrip("/") for line in str(config.get("not_in_nav") or "").splitlines() if line.strip()]
+    on_disk = {
+        rel
+        for rel in (path.relative_to(docs_dir).as_posix() for path in docs_dir.rglob("*.md"))
+        if not any(fnmatch.fnmatch(rel, pattern) for pattern in unlisted)
+    }
+    in_nav = set(_nav_targets(config["nav"]))
     missing = on_disk - in_nav
     if missing:
         return [f"docs pages absent from the nav: {sorted(missing)}"]

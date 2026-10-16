@@ -31,12 +31,12 @@ DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 #: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted. Raise it when adding
 #: a work package; never lower it.
-_WP_FLOOR = 195
+_WP_FLOOR = 196
 
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
 #: stays contiguous. Raise it when adding a decision; never lower it.
-_DECISION_FLOOR = 27
+_DECISION_FLOOR = 28
 
 #: Lowest assumption count ASSUMPTIONS.md is allowed to hold, for the same ratchet
 #: reason as the two floors above.
@@ -76,6 +76,37 @@ _REPORT_SECTIONS = (
     "Consolidated note — detection, segmentation, oriented detection",
     "0.5.0 — Keypoint detection",
 )
+
+
+#: Where each long register keeps the pages it was split into (WP-196). The landing file
+#: (``ENGINEERING_LOG.md`` and so on) stays at the docs root so existing links resolve; its
+#: sections live one per page under the directory named here.
+_SPLIT_DIRS = {
+    "REPRODUCTION_REPORT.md": "report",
+    "RESEARCH_LOG.md": "research",
+    "ENGINEERING_LOG.md": "engineering",
+}
+
+
+def _register_text(docs_dir: Path, name: str) -> str:
+    """The landing file's text followed by every page of the directory it was split into.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     docs = Path(tmp)
+        ...     _ = (docs / "RESEARCH_LOG.md").write_text("landing\\n", encoding="utf-8")
+        ...     (docs / "research").mkdir()
+        ...     _ = (docs / "research" / "a.md").write_text("page\\n", encoding="utf-8")
+        ...     _register_text(docs, "RESEARCH_LOG.md")
+        'landing\\npage\\n'
+    """
+    parts = [(docs_dir / name).read_text(encoding="utf-8")]
+    pages_dir = docs_dir / _SPLIT_DIRS[name]
+    if pages_dir.is_dir():
+        parts += [page.read_text(encoding="utf-8") for page in sorted(pages_dir.glob("*.md"))]
+    return "".join(parts)
 
 
 def _undecorated(title: str) -> str:
@@ -181,16 +212,27 @@ def check_model_cards_are_required(docs_dir: Path, repo_root: Path) -> list[str]
     return [f"model cards not in REQUIRED_FILES: {sorted(on_disk - required)}"]
 
 
+#: Where each work package's findings live, one file per WP (WP-196); the research and
+#: engineering phase pages include their sections by name rather than holding the text.
+_WP_DIR = "work_packages"
+
+#: A roadmap link into the logs: a landing file, a phase page, or a work-package file.
+_LOG_LINK = re.compile(
+    rf"((?:RESEARCH_LOG|ENGINEERING_LOG)\.md|(?:research|engineering|{_WP_DIR})/[\w-]+\.md)#([\w-]+)"
+)
+
+
 def check_log_links_resolve(docs_dir: Path, repo_root: Path) -> list[str]:
-    """Each ``<LOG>.md#anchor`` the roadmap cites is an anchor that log file defines.
+    """Each log link the roadmap cites names an anchor its own target file defines.
 
     WP-118 split what was one research log into a fidelity log and an engineering log,
-    by claim rather than by work package: a WP whose finding straddles both gets one
-    entry in each, cross-linked, so a roadmap row may cite either file or both. That
-    split is only safe while the pointers hold: a renamed section leaves a row citing
-    evidence a reader cannot reach, and nothing about the roadmap itself would look
-    wrong. Anchors are explicit ``<a id=>`` tags rather than heading slugs, so they are
-    greppable and survive a retitle.
+    by claim rather than by work package, and WP-196 moved each WP's findings into its
+    own file under ``work_packages/``; a roadmap row may cite a landing file, a phase
+    page or a WP file. That is only safe while the pointers hold: a renamed section
+    leaves a row citing evidence a reader cannot reach, and nothing about the roadmap
+    itself would look wrong. Anchors are explicit ``<a id=>`` tags rather than heading
+    slugs, so they are greppable and survive a retitle; each is checked against the
+    file the link names, not against the logs pooled together.
 
     Examples:
         >>> import tempfile
@@ -201,26 +243,71 @@ def check_log_links_resolve(docs_dir: Path, repo_root: Path) -> list[str]:
         ...         "See RESEARCH_LOG.md#missing-anchor for detail.\\n", encoding="utf-8"
         ...     )
         ...     _ = (docs / "RESEARCH_LOG.md").write_text("no anchors here\\n", encoding="utf-8")
-        ...     _ = (docs / "ENGINEERING_LOG.md").write_text("no anchors here\\n", encoding="utf-8")
         ...     check_log_links_resolve(docs, docs)
-        ["roadmap cites undefined RESEARCH_LOG.md anchors: ['missing-anchor']"]
+        ["roadmap cites undefined log anchors: ['RESEARCH_LOG.md#missing-anchor']"]
     """
     roadmap = (docs_dir / "ROADMAP.md").read_text(encoding="utf-8")
-    logs = {
-        "RESEARCH_LOG.md": (docs_dir / "RESEARCH_LOG.md").read_text(encoding="utf-8"),
-        "ENGINEERING_LOG.md": (docs_dir / "ENGINEERING_LOG.md").read_text(encoding="utf-8"),
-    }
+    cited = set(_LOG_LINK.findall(roadmap))
+    if not cited:
+        return ["no roadmap row links either log"]
+    undefined = []
+    for path, anchor in sorted(cited):
+        target = docs_dir / path
+        text = target.read_text(encoding="utf-8") if target.is_file() else ""
+        if f'<a id="{anchor}">' not in text:
+            undefined.append(f"{path}#{anchor}")
+    if undefined:
+        return [f"roadmap cites undefined log anchors: {undefined}"]
+    return []
 
+
+def check_work_package_files(docs_dir: Path, repo_root: Path) -> list[str]:
+    """Every ``work_packages/wp-<id>.md`` names a roadmap row and is included by a phase page.
+
+    A WP file is the single home of that package's findings (WP-196); the phase pages of the
+    research and engineering logs only include it. Two failures hide well in that layout: a
+    file whose id the roadmap never numbered (a typo, or a row renumbered after the fact),
+    and a file no phase page includes, which the site would build and serve while the log a
+    reader actually browses silently lacks the entry.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     docs = Path(tmp)
+        ...     _ = (docs / "ROADMAP.md").write_text("| 001 | a |\\n", encoding="utf-8")
+        ...     (docs / "work_packages").mkdir()
+        ...     _ = (docs / "work_packages" / "wp-001.md").write_text("x\\n", encoding="utf-8")
+        ...     _ = (docs / "work_packages" / "wp-009.md").write_text("x\\n", encoding="utf-8")
+        ...     (docs / "research").mkdir()
+        ...     _ = (docs / "research" / "phase-01.md").write_text(
+        ...         '--8<-- "work_packages/wp-001.md:research"\\n', encoding="utf-8"
+        ...     )
+        ...     violations = check_work_package_files(docs, docs)
+        >>> violations[0]
+        "work-package files with no roadmap row: ['wp-009.md']"
+        >>> violations[1]
+        "work-package files no phase page includes: ['wp-009.md']"
+    """
+    wp_dir = docs_dir / _WP_DIR
+    if not wp_dir.is_dir():
+        return []
+    rows = set(re.findall(r"^\| (\d{3}[a-z]?) \|", (docs_dir / "ROADMAP.md").read_text(encoding="utf-8"), flags=re.M))
+    files = sorted(path.name for path in wp_dir.glob("*.md"))
+    included = {
+        name
+        for log in ("research", "engineering")
+        if (docs_dir / log).is_dir()
+        for page in (docs_dir / log).glob("*.md")
+        for name in re.findall(rf'--8<-- "{_WP_DIR}/([\w-]+\.md):', page.read_text(encoding="utf-8"))
+    }
     violations = []
-    cited_total = 0
-    for name, log in logs.items():
-        cited = set(re.findall(rf"{re.escape(name)}#([\w-]+)", roadmap))
-        defined = set(re.findall(r'<a id="([\w-]+)">', log))
-        cited_total += len(cited)
-        if not cited <= defined:
-            violations.append(f"roadmap cites undefined {name} anchors: {sorted(cited - defined)}")
-    if not cited_total:
-        violations.append("no roadmap row links either log")
+    unnumbered = [name for name in files if name.removeprefix("wp-").removesuffix(".md") not in rows]
+    if unnumbered:
+        violations.append(f"work-package files with no roadmap row: {unnumbered}")
+    orphans = [name for name in files if name not in included]
+    if orphans:
+        violations.append(f"work-package files no phase page includes: {orphans}")
     return violations
 
 
@@ -470,8 +557,8 @@ def check_report_sections(docs_dir: Path, repo_root: Path) -> list[str]:
         ...     violations[0].startswith("REPRODUCTION_REPORT.md missing section headings")
         True
     """
-    text = (docs_dir / "REPRODUCTION_REPORT.md").read_text(encoding="utf-8")
-    headings = {line.lstrip("# ").strip() for line in text.splitlines() if line.startswith("## ")}
+    text = _register_text(docs_dir, "REPRODUCTION_REPORT.md")
+    headings = {line.lstrip("# ").strip() for line in text.splitlines() if re.match(r"#{1,2} ", line)}
     titles = {_undecorated(heading) for heading in headings}
     missing = [title for title in _REPORT_SECTIONS if title not in titles]
     if not missing:
@@ -581,6 +668,7 @@ _CHECKS = (
     check_pull_request_attestation_covers_the_allowlist,
     check_model_cards_are_required,
     check_log_links_resolve,
+    check_work_package_files,
     check_assumption_ids_contiguous,
     check_assumption_rows_complete,
     check_roadmap_wp_ids_unique_and_complete,

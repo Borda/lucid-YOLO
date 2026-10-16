@@ -2,7 +2,7 @@
 
 Datasets are never committed to this repository and never downloaded by test code (AGENTS.md sec. 3). Every unit gate runs offline against synthetic fixtures (A26/D12b); only the WPs marked `[DATA]` need a real tree, and a tier acceptance run needs one that passes `lucid-data check`.
 
-This file says where each dataset comes from, what has to be on disk before a run starts, and — since WP-099d — how the two dataset formats lay out on disk and what their annotations actually contain. None of it is restated from memory: the provisioning sections follow what `lucid_yolo.data.check` validates, and the **Dataset formats** reference below follows `lucid_yolo.data.layout`, `.coco`, `.yolo` and `.dota` — those modules are the specification, and every claim below cites the one it came from.
+This file says where each dataset comes from, what has to be on disk before a run starts, and — since [WP-099d](work_packages/wp-099d.md) — how the two dataset formats lay out on disk and what their annotations actually contain. None of it is restated from memory: the provisioning sections follow what `lucid_yolo.data.check` validates, and the **Dataset formats** reference below follows `lucid_yolo.data.layout`, `.coco`, `.yolo` and `.dota` — those modules are the specification, and every claim below cites the one it came from.
 
 ## 🖼️ COCO 2017 (R12)
 
@@ -55,7 +55,7 @@ Under **Data Download**, take the **DOTA-v1.0** section — the page also carrie
 | Validation set | images plus their `labelTxt` annotations | yes |
 | Testing images | images only | no |
 
-The testing images are not needed and not downloaded: R18 states that ground truth is released for the training and validation sets *"but not for the testing set. For testing, we are currently building an evaluation server."* The tier is scored on val (WP-063), so nothing here depends on the withheld annotations.
+The testing images are not needed and not downloaded: R18 states that ground truth is released for the training and validation sets *"but not for the testing set. For testing, we are currently building an evaluation server."* The tier is scored on val ([WP-063](work_packages/wp-063.md)), so nothing here depends on the withheld annotations.
 
 Two cautions from the page as it stands:
 
@@ -93,11 +93,11 @@ lucid-data check --data_root <dota_root> --dataset dota \
   --expected_images 1869 --expected_instances 127843
 ```
 
-**What it does not check by default, and why.** The totals across the checked splits are reported, not required. The published 2,806 images / 188,282 instances / 15 classes describe DOTA-v1.0 *whole*, and R18 splits it as "half of the original images as the training set, 1/6 as validation set, and 1/3 as the testing set" while releasing ground truth for the first two only — so an annotated root holds about two thirds of that and can never sum to it. Requiring those totals by default is what the check did until WP-097, which made it fail on every correct download. The line to read is now `NOTE totals across ...`; once the counts for a given provisioning are known they can be asserted with `--expected_images`, `--expected_instances` and `--expected_classes`, and are then enforced exactly as before.
+**What it does not check by default, and why.** The totals across the checked splits are reported, not required. The published 2,806 images / 188,282 instances / 15 classes describe DOTA-v1.0 *whole*, and R18 splits it as "half of the original images as the training set, 1/6 as validation set, and 1/3 as the testing set" while releasing ground truth for the first two only — so an annotated root holds about two thirds of that and can never sum to it. Requiring those totals by default is what the check did until [WP-097](work_packages/wp-097.md), which made it fail on every correct download. The line to read is now `NOTE totals across ...`; once the counts for a given provisioning are known they can be asserted with `--expected_images`, `--expected_instances` and `--expected_classes`, and are then enforced exactly as before.
 
 ### Then build the tiles
 
-The tier trains on 1024 px tiles, never on the original tree — DOTA images run to several thousand pixels a side in PNG, which has no random-access region decode, so cropping per sample would decode a whole image to yield one window (WP-094):
+The tier trains on 1024 px tiles, never on the original tree — DOTA images run to several thousand pixels a side in PNG, which has no random-access region decode, so cropping per sample would decode a whole image to yield one window ([WP-094](work_packages/wp-094.md)):
 
 ```bash
 lucid-data build-tiles --root <dota_root> --out <tiles_root> --splits train,val --overlap 512 --workers 8
@@ -159,7 +159,7 @@ DOTA-v1.0's own `images/` + `labelTxt/` layout, documented above under **DOTA-v1
 
 **Segment.** `segmentation` is a list of flat polygon rings; only the *first* ring of an ordinary (list-typed) annotation is kept, reshaped to `(P, 2)`, and only when it has at least three points (`_parse_ring`, `lucid_yolo/data/coco.py`). Any `iscrowd=1` annotation, and any `segmentation` value that is *present but unusable* — a run-length dict, an empty list, or a shorter ring — is always skipped entirely, in every mode: neither is ever a real countable instance. The same object as above, `"segmentation": [[10, 5, 30, 5, 30, 15, 10, 15]]`, parses to the ring `[[10, 5], [30, 5], [30, 15], [10, 15]]` — the envelope of that ring is the same box `bbox` gives above, though the (non-oriented) reader does not derive one from the other here; it does on the oriented reading below.
 
-A `segmentation` key that is **absent entirely** is different (WP-121b): it is fatal only for an oriented reading, which has no other source for the rotated box; a plain or keypoints reading keeps the box instead — when any instance in an image has no `segmentation` key at all, that image's `Targets.polygons` comes back empty (`[]`) rather than one instance being silently dropped, matching `Targets.polygons`'s "0 (no masks) or N" contract (`lucid_yolo/data/targets.py`). Requesting `mask_targets=True` against such an image still raises in `instance_mask_targets` (`lucid_yolo/ptl/seg_targets.py`), the same way it does for a genuinely maskless dataset — this reader relaxation does not weaken that guard.
+A `segmentation` key that is **absent entirely** is different ([WP-121b](work_packages/wp-121b.md)): it is fatal only for an oriented reading, which has no other source for the rotated box; a plain or keypoints reading keeps the box instead — when any instance in an image has no `segmentation` key at all, that image's `Targets.polygons` comes back empty (`[]`) rather than one instance being silently dropped, matching `Targets.polygons`'s "0 (no masks) or N" contract (`lucid_yolo/data/targets.py`). Requesting `mask_targets=True` against such an image still raises in `instance_mask_targets` (`lucid_yolo/ptl/seg_targets.py`), the same way it does for a genuinely maskless dataset — this reader relaxation does not weaken that guard.
 
 **Obb.** Under `oriented=True` the `segmentation` ring is read as a rotated box's quadrilateral rather than a free polygon: it must be exactly four points, fitted to a canonical long-edge box `(cx, cy, w, h, theta)` (`lucid_yolo/data/rotated_geom.py`), and `boxes` is recomputed as the **envelope of that same ring** rather than read from `bbox` — so `boxes[i]` and `rboxes[i]` describe one object by construction (`_oriented_targets`, `lucid_yolo/data/coco.py`). An annotation with no usable ring is skipped entirely under `oriented=True`, since there is no other source for the rotated box. The module's own worked example: the ring `[[3, 2], [7, 2], [7, 4], [3, 4]]` yields `boxes = [[3.0, 2.0, 7.0, 4.0]]` and `rboxes[0] = [5.0, 3.0, 4.0, 2.0, 0.0]` (`_oriented_targets`'s own doctest, `lucid_yolo/data/coco.py`).
 
@@ -211,7 +211,7 @@ A YOLO root's own `data.yaml` outranks this table for any split it names. `resol
 
 ### Resolving which format a bare root uses
 
-`lucid-data check` is the other caller. It named `--dataset coco` as its default until WP-099c, which is a pre-flight answering a different question than the run it precedes: a COCO-shaped verdict on a YOLO root reports a missing `train2017` for a tree that trains fine. With `--dataset` unstated it now probes, so the check dispatches exactly as `fit` does; `--dataset dota` still has to be named, because no run reads a DOTA root directly and no probe covers it. Both of the probe's undecidable states come back as report lines and exit 1 rather than a traceback (`_infer_dataset`, `lucid_yolo/data/check.py`).
+`lucid-data check` is the other caller. It named `--dataset coco` as its default until [WP-099c](work_packages/wp-099c.md), which is a pre-flight answering a different question than the run it precedes: a COCO-shaped verdict on a YOLO root reports a missing `train2017` for a tree that trains fine. With `--dataset` unstated it now probes, so the check dispatches exactly as `fit` does; `--dataset dota` still has to be named, because no run reads a DOTA root directly and no probe covers it. Both of the probe's undecidable states come back as report lines and exit 1 rather than a traceback (`_infer_dataset`, `lucid_yolo/data/check.py`).
 
 `detect_layout` is the one caller with no reader of its own to ask — `DetectionDataModule` is handed a bare `data_root` and has to decide which reader it calls for, which is the question neither table above answers on its own. It probes both layout tables in full — by directory and file existence only, per the *layout*/*format* distinction above — and raises if neither is satisfied, naming every path tried, or if **both** are, since across the two tables the loser is a different label space and a different image set, not another spelling of the same reader (A63; `detect_layout`, `lucid_yolo/data/layout.py`).
 
