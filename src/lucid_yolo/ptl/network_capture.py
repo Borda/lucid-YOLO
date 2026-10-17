@@ -10,10 +10,13 @@ bounded to one input signature and discarded at the fit boundary.
 Examples:
     Copying the transient holder starts with no recording, even without CUDA:
 
+    ```pycon
     >>> import copy
     >>> holder = _NetworkCapture()
     >>> copy.deepcopy(holder)._network is None
     True
+
+    ```
 """
 
 from __future__ import annotations
