@@ -91,12 +91,15 @@ def instance_mask_loss(mask_logits: Tensor, target_masks: Tensor, boxes: Tensor)
         dtype.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> logits = torch.zeros(1, 4, 4)
         >>> targets = torch.ones(1, 4, 4)
         >>> boxes = torch.tensor([[0.0, 0.0, 4.0, 4.0]])  # whole grid: loss is ln 2
         >>> instance_mask_loss(logits, targets, boxes).round(decimals=4)
         tensor(0.6931)
+
+        ```
     """
     per_pixel = F.binary_cross_entropy_with_logits(mask_logits, target_masks, reduction="none")  # (N, H, W)
 
@@ -134,11 +137,14 @@ def _box_areas(x1: Tensor, y1: Tensor, x2: Tensor, y2: Tensor) -> Tensor:
         ``(N,)`` areas, each at least :data:`_MIN_BOX_AREA`.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> corners = (torch.tensor([0.0, 4.0]), torch.tensor([0.0, 4.0]))
         >>> far = (torch.tensor([3.0, 1.0]), torch.tensor([2.0, 1.0]))
         >>> _box_areas(*corners, *far)  # a 3x2 box, then one inverted on both axes
         tensor([6., 1.])
+
+        ```
     """
     widths = (x2 - x1).clamp(min=0)
     heights = (y2 - y1).clamp(min=0)

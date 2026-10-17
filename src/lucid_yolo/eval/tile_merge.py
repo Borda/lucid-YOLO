@@ -191,8 +191,11 @@ class TileWindow:
             annotations and are distinct by id.
 
     Examples:
+        ```pycon
         >>> TileWindow("P0007.png", (824, 0), (1024, 1024), 7).origin
         (824, 0)
+
+        ```
     """
 
     source_image: str
@@ -230,8 +233,11 @@ class TileIndex:
             :func:`~lucid_yolo.eval.dota_eval.evaluate_rotated_map` consumes.
 
     Examples:
+        ```pycon
         >>> TileIndex((), ()).windows
         ()
+
+        ```
     """
 
     windows: tuple[TileWindow, ...]
@@ -259,8 +265,11 @@ def load_tile_index(ann_file: Path) -> TileIndex | None:
             half-annotated layout would silently merge part of a split and drop the rest.
 
     Examples:
+        ```pycon
         >>> load_tile_index  # doctest: +ELLIPSIS
         <function load_tile_index at ...>
+
+        ```
     """
     payload = json.loads(ann_file.read_text(encoding="utf-8"))
     records = sorted(payload["images"], key=lambda record: int(record["id"]))
@@ -314,6 +323,7 @@ def core_bounds(windows: Sequence[TileWindow]) -> Tensor:
             and are unaffected.
 
     Examples:
+        ```pycon
         >>> tiles = [
         ...     TileWindow("a.png", (0, 0), (6, 6), 1),
         ...     TileWindow("a.png", (4, 0), (6, 6), 2),
@@ -324,6 +334,8 @@ def core_bounds(windows: Sequence[TileWindow]) -> Tensor:
         [5.0, inf]
         >>> core_bounds(tiles[:1]).tolist()  # one tile owns the plane
         [[-inf, -inf, inf, inf]]
+
+        ```
     """
     if not windows:
         raise ValueError("core_bounds needs at least one window")
@@ -355,10 +367,13 @@ def in_core(centres: Tensor, core: Tensor) -> Tensor:
         ValueError: If ``core`` is not a ``(4,)`` tensor or ``centres`` not ``(N, 2)``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> core = torch.tensor([0.0, 0.0, 10.0, 10.0])
         >>> in_core(torch.tensor([[5.0, 5.0], [10.0, 5.0], [-1.0, 5.0]]), core).tolist()
         [True, False, False]
+
+        ```
     """
     if core.ndim != 1 or core.shape[0] != _CORE_VALUES:
         raise ValueError(f"core must be (4,) as (x_lo, y_lo, x_hi, y_hi); got shape {tuple(core.shape)}")
@@ -399,6 +414,7 @@ def tile_detections_to_source(
         ValueError: If ``detections`` is not a 2-D tensor.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> dets = torch.tensor([[2.0, 2.0, 4.0, 2.0, 0.3, 0.9, 1.0], [0.0] * 7])
         >>> window = TileWindow("a.png", (100, 200), (4, 4), 1)
@@ -407,6 +423,8 @@ def tile_detections_to_source(
         [[102.0, 202.0, 4.0, 2.0, 0.30000001192092896]]
         >>> merged["labels"].tolist()
         [1]
+
+        ```
     """
     if detections.ndim != 2:
         raise ValueError(f"detections must be (N, 7) for one tile; got shape {tuple(detections.shape)}")
@@ -448,6 +466,7 @@ def merge_whole_images(
         ValueError: If ``tile_predictions`` is longer than the index.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> box = torch.tensor([[3.0, 3.0, 2.0, 1.0, 0.0]])
         >>> index = TileIndex(
@@ -458,6 +477,8 @@ def merge_whole_images(
         >>> predictions, ground_truth, names = merge_whole_images(index, [prediction])
         >>> names, predictions[0]["rboxes"].shape, ground_truth[0]["labels"].tolist()
         (['a.png'], torch.Size([1, 5]), [0])
+
+        ```
     """
     if len(tile_predictions) > len(index.windows):
         raise ValueError(f"got {len(tile_predictions)} predictions for {len(index.windows)} tiles")
@@ -497,10 +518,13 @@ def _complete_prefix(index: TileIndex, scored: int) -> int:
         the last complete source image before it.
 
     Examples:
+        ```pycon
         >>> windows = (TileWindow("a.png", (0, 0), (4, 4), 1), TileWindow("b.png", (0, 0), (4, 4), 2))
         >>> index = TileIndex(windows, ({}, {}))
         >>> _complete_prefix(index, 2), _complete_prefix(index, 1)
         (2, 1)
+
+        ```
     """
     if scored == len(index.windows):
         return scored
@@ -523,10 +547,13 @@ def _own(entry: Mapping[str, Tensor], core: Tensor) -> dict[str, Tensor]:
         The same keys, restricted to the owned rows.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> entry = {"rboxes": torch.tensor([[1.0, 1.0, 2.0, 1.0, 0.0]]), "labels": torch.tensor([0])}
         >>> _own(entry, torch.tensor([0.0, 0.0, 10.0, 10.0]))["labels"].tolist()
         [0]
+
+        ```
     """
     keep = in_core(entry["rboxes"][:, :_POINT_STRIDE], core)
     return {key: value[keep] for key, value in entry.items()}
@@ -544,10 +571,13 @@ def _concatenate(entries: Sequence[Mapping[str, Tensor]], keys: tuple[str, ...])
         One dict per key, concatenated along the instance axis.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> parts = [{"labels": torch.tensor([1])}, {"labels": torch.tensor([2])}]
         >>> _concatenate(parts, ("labels",))["labels"].tolist()
         [1, 2]
+
+        ```
     """
     return {key: torch.cat([entry[key] for entry in entries], dim=0) for key in keys}
 
@@ -566,12 +596,15 @@ def _source_ground_truth(index: TileIndex, tile: int) -> dict[str, Tensor]:
         The tile's ground-truth dict with ``rboxes`` centres translated.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> box = torch.tensor([[1.0, 2.0, 4.0, 2.0, 0.0]])
         >>> target = {"rboxes": box, "labels": torch.tensor([0]), "difficult": torch.tensor([False])}
         >>> index = TileIndex((TileWindow("a.png", (10, 20), (4, 4), 1),), (target,))
         >>> _source_ground_truth(index, 0)["rboxes"][0, :2].tolist()
         [11.0, 22.0]
+
+        ```
     """
     target = index.ground_truth[tile]
     return {**target, "rboxes": _translate(target["rboxes"], index.windows[tile].origin)}
@@ -588,9 +621,12 @@ def _translate(rboxes: Tensor, origin: tuple[int, int]) -> Tensor:
         ``(N, 5)`` boxes with translated centres.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _translate(torch.tensor([[1.0, 1.0, 4.0, 2.0, 0.5]]), (10, 20)).tolist()
         [[11.0, 21.0, 4.0, 2.0, 0.5]]
+
+        ```
     """
     offset = torch.tensor([*origin, 0.0, 0.0, 0.0], dtype=rboxes.dtype, device=rboxes.device)
     return rboxes + offset
@@ -618,6 +654,7 @@ def _axis_cores(spans: Sequence[tuple[int, int]], axis: str) -> dict[int, tuple[
         ValueError: If two windows share a start on this axis but end differently.
 
     Examples:
+        ```pycon
         >>> _axis_cores([(0, 6), (4, 10)], "x")  # windows [0, 6) and [4, 10) overlap on [4, 6)
         {0: (-inf, 5.0), 4: (5.0, inf)}
         >>> _axis_cores([(0, 6), (0, 6)], "x")  # a shared strip is the uniform-tiler case
@@ -625,6 +662,8 @@ def _axis_cores(spans: Sequence[tuple[int, int]], axis: str) -> dict[int, tuple[
         >>> _axis_cores([(0, 6), (0, 9)], "x")
         Traceback (most recent call last):
         ValueError: two windows share the x origin 0 with different spans (end 6 and end 9); ...
+
+        ```
     """
     ends: dict[int, int] = {}
     for start, end in spans:
@@ -654,9 +693,12 @@ def _window(record: Mapping[str, object]) -> TileWindow:
         ValueError: If ``window`` is not four values.
 
     Examples:
+        ```pycon
         >>> record = {"id": 3, "source_image": "a.png", "window": [1, 2, 5, 6], "height": 4, "width": 4}
         >>> _window(record).origin, _window(record).tile_id
         ((1, 2), 3)
+
+        ```
     """
     window = record["window"]
     if not isinstance(window, list) or len(window) != _WINDOW_VALUES:
@@ -679,8 +721,11 @@ def _by_id(categories: Sequence[Mapping[str, object]]) -> list[Mapping[str, obje
         The same records, ascending by ``id``.
 
     Examples:
+        ```pycon
         >>> [record["id"] for record in _by_id([{"id": 3}, {"id": 1}])]
         [1, 3]
+
+        ```
     """
     return sorted(categories, key=lambda category: int(category["id"]))  # type: ignore[call-overload]
 
@@ -695,8 +740,11 @@ def _group_annotations(annotations: Sequence[Mapping[str, object]]) -> dict[int,
         Image id mapped to its annotations, in file order.
 
     Examples:
+        ```pycon
         >>> _group_annotations([{"image_id": 2}, {"image_id": 2}])[2]  # doctest: +ELLIPSIS
         [{'image_id': 2}, {'image_id': 2}]
+
+        ```
     """
     grouped: dict[int, list[Mapping[str, object]]] = {}
     for annotation in annotations:
@@ -721,10 +769,13 @@ def _tile_ground_truth(annotations: Sequence[Mapping[str, object]], labels: Mapp
         A ``{"rboxes", "labels", "difficult"}`` dict on one instance axis.
 
     Examples:
+        ```pycon
         >>> ring = [[3.0, 2.0, 7.0, 2.0, 7.0, 4.0, 3.0, 4.0]]
         >>> target = _tile_ground_truth([{"segmentation": ring, "category_id": 1}], {1: 0})
         >>> [round(v, 4) for v in target["rboxes"][0].tolist()], target["difficult"].tolist()
         ([5.0, 3.0, 4.0, 2.0, 0.0], [False])
+
+        ```
     """
     rings: list[Tensor] = []
     kept: list[int] = []
@@ -755,10 +806,13 @@ def _quad(segmentation: object) -> Tensor | None:
         not four points.
 
     Examples:
+        ```pycon
         >>> _quad([[0.0, 0.0, 2.0, 0.0, 2.0, 1.0, 0.0, 1.0]]).shape
         torch.Size([4, 2])
         >>> _quad({"counts": []}) is None
         True
+
+        ```
     """
     if not isinstance(segmentation, list) or not segmentation:
         return None

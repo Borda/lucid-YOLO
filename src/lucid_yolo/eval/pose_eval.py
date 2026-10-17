@@ -110,8 +110,11 @@ def run(
         ``0`` on success; ``1`` when the checkpoint's point count is not COCO's.
 
     Examples:
+        ```pycon
         >>> callable(run)
         True
+
+        ```
     """
     num_keypoints = int(module.hparams["num_keypoints"])
     if num_keypoints != _COCO_PERSON_POINTS:

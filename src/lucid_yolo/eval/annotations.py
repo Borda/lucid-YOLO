@@ -96,9 +96,12 @@ class EvalImage:
         width: Original pixel width, before letterboxing.
 
     Examples:
+        ```pycon
         >>> record = EvalImage(image_id=7, file_name="000007.jpg", height=480, width=640)
         >>> record.image_id, record.width
         (7, 640)
+
+        ```
     """
 
     image_id: int
@@ -128,6 +131,7 @@ def empty_target(image_size: tuple[int, int] | None = None, with_keypoints: bool
         is set.
 
     Examples:
+        ```pycon
         >>> target = empty_target()
         >>> tuple(target["boxes"].shape), target["labels"].dtype
         ((0, 4), torch.int64)
@@ -137,6 +141,8 @@ def empty_target(image_size: tuple[int, int] | None = None, with_keypoints: bool
         (0, 6, 8)
         >>> tuple(empty_target(with_keypoints=True)["keypoints"].shape)
         (0, 0, 2)
+
+        ```
     """
     target = {
         "boxes": torch.zeros((0, 4), dtype=torch.float32),
@@ -179,10 +185,13 @@ def _require_valid_metadata(annotation: dict[str, object], bbox: Sequence[float]
             annotation id, the field and the value.
 
     Examples:
+        ```pycon
         >>> _require_valid_metadata({"id": 3, "image_id": 7, "iscrowd": 1}, [1.0, 2.0, 3.0, 4.0])
         >>> _require_valid_metadata({"id": 3, "image_id": 7}, [float("nan"), 2.0, 3.0, 4.0])
         Traceback (most recent call last):
         ValueError: annotation 3 of image 7: bbox must be finite; got [nan, 2.0, 3.0, 4.0]
+
+        ```
     """
     where = f"annotation {annotation.get('id', '?')} of image {annotation.get('image_id', '?')}"
     if not all(math.isfinite(value) for value in bbox):
@@ -212,7 +221,10 @@ def _require_valid_annotations(annotations: Iterable[dict[str, object]]) -> None
         ValueError: From :func:`_require_valid_metadata`, on the first bad record.
 
     Examples:
+        ```pycon
         >>> _require_valid_annotations([{"id": 1, "image_id": 2, "bbox": [0.0, 0.0, 1.0, 1.0]}])
+
+        ```
     """
     for annotation in annotations:
         raw_bbox = annotation.get("bbox")
@@ -265,6 +277,7 @@ def annotations_to_target(
             above, which drops rather than refuses.
 
     Examples:
+        ```pycon
         >>> target = annotations_to_target([{"bbox": [1.0, 2.0, 3.0, 4.0], "category_id": 5}])
         >>> target["boxes"].tolist(), target["labels"].tolist()
         ([[1.0, 2.0, 4.0, 6.0]], [5])
@@ -278,6 +291,8 @@ def annotations_to_target(
         >>> target = annotations_to_target([posed], with_keypoints=True)
         >>> target["visibility"].tolist(), target["num_keypoints"].tolist()
         ([[2, 0]], [1])
+
+        ```
     """
     boxes: list[list[float]] = []
     labels: list[int] = []
@@ -355,6 +370,7 @@ def annotation_mask(segmentation: object, image_size: tuple[int, int]) -> Tensor
         A ``(height, width)`` bool tensor, ``True`` on the instance.
 
     Examples:
+        ```pycon
         >>> mask = annotation_mask([[1, 1, 4, 1, 4, 3, 1, 3]], image_size=(6, 6))
         >>> mask.shape, mask.dtype
         (torch.Size([6, 6]), torch.bool)
@@ -362,6 +378,8 @@ def annotation_mask(segmentation: object, image_size: tuple[int, int]) -> Tensor
         6
         >>> int(annotation_mask(None, image_size=(6, 6)).sum())  # no segmentation field
         0
+
+        ```
     """
     height, width = image_size
     if not segmentation:
@@ -398,6 +416,7 @@ class LazyTargets(Mapping[int, dict[str, Tensor]]):
             ``visibility`` and ``num_keypoints``.
 
     Examples:
+        ```pycon
         >>> polygon = {"bbox": [1.0, 2.0, 3.0, 4.0], "category_id": 5, "segmentation": [[1, 2, 4, 2, 4, 6, 1, 6]]}
         >>> targets = LazyTargets({7: [polygon]}, {7: (8, 8), 9: (8, 8)})
         >>> sorted(targets), tuple(targets[7]["masks"].shape)
@@ -410,6 +429,8 @@ class LazyTargets(Mapping[int, dict[str, Tensor]]):
         ['area', 'boxes', 'iscrowd', 'keypoints', 'labels', 'masks', 'num_keypoints', 'visibility']
         >>> sorted(both[9])  # and on an image with no annotations
         ['area', 'boxes', 'iscrowd', 'keypoints', 'labels', 'masks', 'num_keypoints', 'visibility']
+
+        ```
     """
 
     def __init__(
@@ -483,9 +504,12 @@ def load_eval_annotations(
             instead of part-way through a scoring run.
 
     Examples:
+        ```pycon
         >>> images, targets, label_map = load_eval_annotations(ann_file)  # needs a COCO file  # doctest: +SKIP
         >>> len(images) == len(targets)  # needs a COCO file  # doctest: +SKIP
         True
+
+        ```
     """
     payload = json.loads(ann_file.read_text())
     sorted_ids = sorted(int(category["id"]) for category in payload["categories"])
@@ -538,9 +562,12 @@ def read_letterboxed_image(path: Path, letterbox: Letterbox) -> tuple[Tensor, tu
         predictions back onto (A10).
 
     Examples:
+        ```pycon
         >>> image, orig_size = read_letterboxed_image(path, letterbox)  # needs an image file  # doctest: +SKIP
         >>> image.shape[0]  # needs an image file  # doctest: +SKIP
         3
+
+        ```
     """
     raw = read_image(str(path), ImageReadMode.RGB)
     orig_size = (int(raw.shape[-2]), int(raw.shape[-1]))
@@ -571,9 +598,12 @@ def letterboxed_batches(
         dataloader contract.
 
     Examples:
+        ```pycon
         >>> for batch, ids, sizes in letterboxed_batches(images, path, letterbox, 8):  # needs images  # doctest: +SKIP
         ...     batch.shape[0] == len(ids) == len(sizes)  # needs images  # doctest: +SKIP
         True
+
+        ```
     """
     for start in range(0, len(images), batch_size):
         chunk = images[start : start + batch_size]

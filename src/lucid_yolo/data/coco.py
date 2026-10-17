@@ -706,9 +706,12 @@ def parse_coco_keypoints(keypoints: object, file_name: str) -> tuple[Tensor, Ten
             positive multiple of three.
 
     Examples:
+        ```pycon
         >>> coords, visibility = parse_coco_keypoints([1.5, 2.0, 2, 3.5, 4.0, 0], "pose.jpg")
         >>> coords.tolist(), visibility.tolist()
         ([[1.5, 2.0], [3.5, 4.0]], [2, 0])
+
+        ```
     """
     if not isinstance(keypoints, list):
         raise ValueError(
@@ -810,11 +813,14 @@ def _oriented_targets(
         ValueError: If any ring does not have exactly four points.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> quad = torch.tensor([[3.0, 2.0], [7.0, 2.0], [7.0, 4.0], [3.0, 4.0]])
         >>> targets = _oriented_targets([quad], torch.tensor([1]), "img.jpg", torch.tensor([False]))
         >>> targets.boxes.tolist(), [round(v, 4) for v in targets.rboxes[0].tolist()]
         ([[3.0, 2.0, 7.0, 4.0]], [5.0, 3.0, 4.0, 2.0, 0.0])
+
+        ```
     """
     sides = {int(ring.shape[0]) for ring in rings}
     if sides != {_QUAD_CORNERS}:

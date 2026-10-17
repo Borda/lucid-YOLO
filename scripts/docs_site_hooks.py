@@ -19,12 +19,19 @@ rather than copying them. Three things are added to the built site:
   page by nav section with its description and markdown URL, the second the guide,
   method, results and model-card pages in full.
 
+One thing is taken away: autorefs' warning for a roadmap tag pair such as
+``[GPU][PRINCIPAL]``, which Markdown parses as a reference link to a target named
+``PRINCIPAL``. Unresolved, it renders as the literal text it was, so the page is right;
+the warning alone is wrong, and under ``--strict`` it fails the build. It is dropped for
+the tags in :data:`_ROADMAP_TAGS` only -- any other missing target still warns.
+
 Registered under ``hooks:`` in ``mkdocs.yml``; ``make docs`` exercises it on every build.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import posixpath
 import re
 import tomllib
@@ -45,6 +52,12 @@ _SECTION_MARKER = re.compile(r"^.*--8<-- \[(?:start|end):[\w-]+\].*\n?", re.M)
 _LINK = re.compile(r"(\]\()(?!https?:|mailto:|#)([^)\s#]+)(#[^)\s]*)?\)")
 _COMMIT_PREFIX = re.compile(r"^\w+(?:\([^)]*\))?!?:\s*")
 _ROW = re.compile(r"^\| (\d{3}[a-z]?) \|(.*)$", re.M)
+
+#: Bracketed roadmap tags; a pair of them reads as a Markdown reference link.
+_ROADMAP_TAGS = frozenset({"DATA", "GPU", "PRINCIPAL"})
+#: The logger autorefs reports an unresolved cross-reference on.
+_AUTOREFS_LOGGER = "mkdocs.plugins.mkdocs_autorefs._internal.plugin"
+_MISSING_TARGET = re.compile(r"Could not find cross-reference target '([^']+)'$")
 
 #: State carried between build events: one record per page, and the nav.
 _STATE: dict[str, Any] = {"pages": {}, "nav": None, "roadmap": {}}
@@ -248,8 +261,31 @@ def _json_ld(config: Any) -> str:
     ).replace("<", "\\u003c")  # inside <script>, a "</" in any value would end the element
 
 
+def is_roadmap_tag_miss(message: str) -> bool:
+    """Whether an autorefs warning is for a roadmap tag rather than a real missing target.
+
+    Examples:
+        >>> is_roadmap_tag_miss("ROADMAP.md: Could not find cross-reference target 'PRINCIPAL'")
+        True
+        >>> is_roadmap_tag_miss("api/data.md: Could not find cross-reference target 'lucid_yolo.data.Nope'")
+        False
+    """
+    match = _MISSING_TARGET.search(message)
+    return match is not None and match.group(1) in _ROADMAP_TAGS
+
+
+class _RoadmapTagFilter(logging.Filter):
+    """Drop autorefs' unresolved-target warning for a roadmap tag; pass every other record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not is_roadmap_tag_miss(record.getMessage())
+
+
 def on_config(config: Any) -> Any:
-    """Read the roadmap's scope cells once per build, for the work-package descriptions."""
+    """Read the roadmap's scope cells once per build, and quiet the roadmap-tag autorefs warning."""
+    autorefs = logging.getLogger(_AUTOREFS_LOGGER)
+    if not any(isinstance(item, _RoadmapTagFilter) for item in autorefs.filters):
+        autorefs.addFilter(_RoadmapTagFilter())
     roadmap = Path(config.docs_dir) / "ROADMAP.md"
     _STATE.update(pages={}, nav=None, roadmap=roadmap_scopes(roadmap.read_text(encoding="utf-8")))
     return config

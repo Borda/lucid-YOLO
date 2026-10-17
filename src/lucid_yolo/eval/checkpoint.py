@@ -87,10 +87,13 @@ def load_eval_module(checkpoint: Path, *, use_ema: bool) -> tuple[DetectionLitMo
             every floating-point parameter and buffer.
 
     Examples:
+        ```pycon
         >>> from pathlib import Path
         >>> load_eval_module(Path("/nonexistent.ckpt"), use_ema=False)  # doctest: +IGNORE_EXCEPTION_DETAIL
         Traceback (most recent call last):
         FileNotFoundError: ...
+
+        ```
     """
     # Restricted first, unconditionally: this read is the gate, not a second opinion.
     payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
@@ -131,11 +134,14 @@ def _required_int(payload: Mapping[str, Any], key: str, where: str) -> int:
         ValueError: If ``key`` is absent.
 
     Examples:
+        ```pycon
         >>> _required_int({"epoch": 3}, "epoch", "run.ckpt")
         3
         >>> _required_int({}, "epoch", "run.ckpt")
         Traceback (most recent call last):
         ValueError: run.ckpt carries no 'epoch'; it holds []...
+
+        ```
     """
     if key not in payload:
         raise ValueError(
@@ -166,10 +172,13 @@ def pick_device(requested: str) -> torch.device:
         ValueError: If ``requested`` names a backend this machine cannot run on.
 
     Examples:
+        ```pycon
         >>> pick_device("cpu")
         device(type='cpu')
         >>> pick_device("auto").type in available_devices()
         True
+
+        ```
     """
     if requested != "auto":
         device = torch.device(requested)
@@ -198,8 +207,11 @@ def available_devices() -> tuple[str, ...]:
         ``"auto"``, which is what a caller who does not want to know should pass.
 
     Examples:
+        ```pycon
         >>> available_devices()[-2:]
         ('cpu', 'auto')
+
+        ```
     """
     names = ["cuda"] if torch.cuda.is_available() else []
     if torch.backends.mps.is_available():
@@ -216,9 +228,12 @@ def _is_available(device: torch.device) -> bool:
     working configurations rather than protect any.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _is_available(torch.device("cpu"))
         True
+
+        ```
     """
     if device.type == "cuda":
         return bool(torch.cuda.is_available())

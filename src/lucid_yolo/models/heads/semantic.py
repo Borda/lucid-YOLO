@@ -54,12 +54,15 @@ class SemanticAux(nn.Module):
         classifier: The single 1x1 output convolution.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> semantic = SemanticAux(64, num_classes=80)
         >>> semantic.train()(torch.zeros(1, 64, 80, 80)).shape
         torch.Size([1, 80, 80, 80])
         >>> semantic.eval()(torch.zeros(1, 64, 80, 80)) is None
         True
+
+        ```
     """
 
     def __init__(self, in_channels: int, num_classes: int) -> None:

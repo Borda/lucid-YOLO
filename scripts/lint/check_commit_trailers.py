@@ -34,6 +34,10 @@ Examples:
     Validate every non-merge commit in a range::
 
         python scripts/lint/check_commit_trailers.py --range origin/main..HEAD
+
+    Validate local work not yet pushed (the ``commit-trailers-history`` hook)::
+
+        python scripts/lint/check_commit_trailers.py --unpushed
 """
 
 from __future__ import annotations
@@ -434,7 +438,7 @@ class UnresolvableRange(RuntimeError):
     """A git range this repository cannot resolve, such as one naming an absent base ref."""
 
 
-def _range_commits(commit_range: str) -> list[tuple[str, str]]:
+def _range_commits(*revisions: str) -> list[tuple[str, str]]:
     """Return ``(hash, author address)`` for each non-merge commit in a git range, newest first.
 
     The author address, not the committer's: a commit made through GitHub's web flow
@@ -442,7 +446,8 @@ def _range_commits(commit_range: str) -> list[tuple[str, str]]:
     it, so the committer says nothing about who the message belongs to.
 
     Args:
-        commit_range: A git range expression such as ``origin/main..HEAD``.
+        revisions: ``git log`` revision arguments -- one range expression such as
+            ``origin/main..HEAD``, or several such as ``HEAD --not --remotes``.
 
     Returns:
         Full commit hashes paired with their author address; empty when the range
@@ -457,7 +462,7 @@ def _range_commits(commit_range: str) -> list[tuple[str, str]]:
             here and is owed a sentence naming the fix rather than a stack trace.
     """
     result = subprocess.run(
-        ["git", "log", "--no-merges", "--format=%H%x1f%ae", commit_range],
+        ["git", "log", "--no-merges", "--format=%H%x1f%ae", *revisions],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -465,13 +470,43 @@ def _range_commits(commit_range: str) -> list[tuple[str, str]]:
     )
     if result.returncode != 0:
         detail = result.stderr.strip().splitlines()
-        raise UnresolvableRange(detail[0] if detail else f"git could not resolve {commit_range!r}")
+        raise UnresolvableRange(detail[0] if detail else f"git could not resolve {' '.join(revisions)!r}")
     commits = []
     for line in result.stdout.splitlines():
         if line:
             sha, _, author = line.partition("\x1f")
             commits.append((sha, author))
     return commits
+
+
+def _unpushed_revisions() -> tuple[str, ...]:
+    """Return the ``git log`` revisions selecting local commits not yet pushed.
+
+    ``@{upstream}..HEAD`` when the branch tracks a ref this checkout holds: only work
+    not yet on the tracked branch, so a published pull-request branch -- whose
+    messages a squash merge replaces -- is not rechecked. Two ordinary states have no
+    such ref, and ``@{upstream}`` then fails to resolve: a branch never pushed, which
+    is exactly the unpushed work this mode exists for, and a fork pull request checked
+    out by ``gh pr checkout``, whose ``branch.<name>.remote`` is a URL rather than a
+    named remote and so stores no remote-tracking branch. Both fall back to
+    ``HEAD --not --remotes``, every commit no remote-tracking ref already contains; on
+    the fork checkout that includes the contributor's own commits, which is the price
+    of not skipping the never-pushed case. A checkout with no remote at all selects its
+    whole history.
+
+    Returns:
+        The revision arguments for :func:`_range_commits`.
+    """
+    upstream = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "@{upstream}"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if upstream.returncode == 0:
+        return ("@{upstream}..HEAD",)
+    return ("HEAD", "--not", "--remotes")
 
 
 def _commit_message(sha: str) -> str:
@@ -532,11 +567,17 @@ def main(argv: list[str] | None = None) -> int:
 
             $ python scripts/lint/check_commit_trailers.py --file .git/COMMIT_EDITMSG
             $ python scripts/lint/check_commit_trailers.py --range origin/main..HEAD
+            $ python scripts/lint/check_commit_trailers.py --unpushed
     """
     parser = argparse.ArgumentParser(description="Validate provenance-carrying commit messages.")
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--file", type=Path, help="validate a single commit-message file")
     target.add_argument("--range", dest="commit_range", help="validate every non-merge commit in a git range")
+    target.add_argument(
+        "--unpushed",
+        action="store_true",
+        help="validate local commits not yet pushed: @{upstream}..HEAD, or HEAD --not --remotes without an upstream",
+    )
     parser.add_argument(
         "--provenance",
         type=Path,
@@ -558,12 +599,15 @@ def main(argv: list[str] | None = None) -> int:
         message = args.file.read_text(encoding="utf-8")
         reports.append((str(args.file), validate_message(message, registers)))
     else:
+        revisions = _unpushed_revisions() if args.unpushed else (args.commit_range,)
         try:
-            commits = _range_commits(args.commit_range)
+            commits = _range_commits(*revisions)
         except UnresolvableRange as unresolvable:
-            print(f"commit-trailer check FAILED: cannot resolve range {args.commit_range!r}: {unresolvable}")
+            print(f"commit-trailer check FAILED: cannot resolve range {' '.join(revisions)!r}: {unresolvable}")
             print("  fetch the base ref first -- a shallow clone has no origin/main to measure against")
             return 1
+        if args.unpushed:
+            print(f"commit-trailer check: unpushed range {' '.join(revisions)!r}")
         for sha, author in commits:
             if BOT_AUTHOR_RE.search(author):
                 print(f"COMMIT {sha[:12]}: SKIP (automation author {author})")

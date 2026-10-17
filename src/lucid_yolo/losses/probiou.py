@@ -156,12 +156,15 @@ def _check_min_side(min_side: float) -> None:
         ValueError: If ``min_side`` is not finite and strictly positive.
 
     Examples:
+        ```pycon
         >>> _check_min_side(1e-4)  # accepted: nothing returned
         >>> try:
         ...     _check_min_side(0.0)
         ... except ValueError as error:
         ...     print(error)
         min_side must be finite and > 0; got 0.0
+
+        ```
     """
     if not math.isfinite(min_side) or min_side <= 0.0:
         raise ValueError(f"min_side must be finite and > 0; got {min_side}")
@@ -194,11 +197,14 @@ def probiou_bhattacharyya_loss(pred: Tensor, target: Tensor, min_side: float = _
             is not finite and strictly positive.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> pred = torch.tensor([[3.0, 4.0, 9.0, 2.0, 0.4]])
         >>> target = torch.tensor([[5.0, 1.0, 7.0, 3.0, -0.2]])
         >>> probiou_bhattacharyya_loss(pred, target).round(decimals=4)
         tensor([1.8495])
+
+        ```
     """
     _check_rboxes(pred, "pred")
     _check_rboxes(target, "target")
@@ -254,6 +260,7 @@ def probabilistic_iou(pred: Tensor, target: Tensor, min_side: float = _MIN_SIDE)
             is not finite and strictly positive.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> box = torch.tensor([[3.0, 4.0, 9.0, 2.0, 0.4]])
         >>> probabilistic_iou(box, box)
@@ -261,6 +268,8 @@ def probabilistic_iou(pred: Tensor, target: Tensor, min_side: float = _MIN_SIDE)
         >>> other = torch.tensor([[5.0, 1.0, 7.0, 3.0, -0.2]])
         >>> probabilistic_iou(box, other).round(decimals=4)
         tensor([0.0820])
+
+        ```
     """
     return 1 - probiou_hellinger_loss(pred, target, min_side=min_side)
 
@@ -289,11 +298,14 @@ def probiou_hellinger_loss(pred: Tensor, target: Tensor, min_side: float = _MIN_
             is not finite and strictly positive.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> pred = torch.tensor([[3.0, 4.0, 9.0, 2.0, 0.4]])
         >>> target = torch.tensor([[5.0, 1.0, 7.0, 3.0, -0.2]])
         >>> probiou_hellinger_loss(pred, target).round(decimals=4)
         tensor([0.9180])
+
+        ```
     """
     # The promotion has to wrap the square root as well as the covariance arithmetic, not
     # just be inherited from the call below: the derivative of `sqrt` at _RADICAND_FLOOR is
@@ -324,11 +336,14 @@ def _working_dtype(dtype: torch.dtype) -> torch.dtype:
         The dtype the intermediate covariance and division work is carried out in.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _working_dtype(torch.float16), _working_dtype(torch.bfloat16)
         (torch.float32, torch.float32)
         >>> _working_dtype(torch.float32), _working_dtype(torch.float64)
         (torch.float32, torch.float64)
+
+        ```
     """
     return torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
 
@@ -359,11 +374,14 @@ def _centre_term(
         ``B1`` per pair, non-negative.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> one = (torch.tensor([0.0]), torch.tensor([3.0]), torch.tensor([1.0]))
         >>> zero, unit = torch.zeros(1), torch.ones(1)
         >>> _centre_term(unit, zero, one, one, unit, zero).round(decimals=4)
         tensor([0.0417])
+
+        ```
     """
     p_theta, p_var_w, p_var_h = pred_gaussian
     t_theta, t_var_w, t_var_h = target_gaussian
@@ -383,10 +401,13 @@ def _resolve(offset_x: Tensor, offset_y: Tensor, theta: Tensor) -> tuple[Tensor,
     """Project a centre offset onto a box's own axes, ``(along w, along h)``.
 
     Examples:
+        ```pycon
         >>> import math, torch
         >>> along, across = _resolve(torch.ones(1), 2 * torch.ones(1), torch.tensor([math.pi / 2]))
         >>> [round(float(v), 4) for v in (along, across)]
         [2.0, -1.0]
+
+        ```
     """
     cos, sin = torch.cos(theta), torch.sin(theta)
     return offset_x * cos + offset_y * sin, offset_y * cos - offset_x * sin
@@ -396,10 +417,13 @@ def _unpack(rboxes: Tensor, min_side: float) -> tuple[Tensor, Tensor, Tensor, Te
     """Split rotated boxes into their five columns, flooring the two side lengths (A41).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> flat = torch.tensor([[1.0, 2.0, 3.0, 0.0, 0.5]])
         >>> [round(float(v), 4) for v in _unpack(flat, 1e-4)]
         [1.0, 2.0, 3.0, 0.0001, 0.5]
+
+        ```
     """
     centre_x, centre_y, width, height, theta = rboxes.unbind(dim=-1)
     return centre_x, centre_y, width.clamp(min=min_side), height.clamp(min=min_side), theta
@@ -418,9 +442,12 @@ def _check_rboxes(rboxes: Tensor, name: str) -> None:
     than naming rows the function never counts.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _check_rboxes(torch.zeros((0, 5)), "pred")
         >>> _check_rboxes(torch.zeros((2, 3, 5)), "pred")
+
+        ```
     """
     if rboxes.ndim == 0 or rboxes.shape[-1] != _RBOX_DIM:
         raise ValueError(f"{name} must be (..., {_RBOX_DIM}); got shape {tuple(rboxes.shape)}")

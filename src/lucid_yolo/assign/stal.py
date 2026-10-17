@@ -76,10 +76,13 @@ def surrogate_boxes(gt_boxes: Tensor, s_min: float, s_ref: float) -> Tensor:
         dtype, device, and leading shape.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> boxes = torch.tensor([[[2.0, 5.0, 8.0, 25.0]]])  # 6 wide, 20 tall
         >>> surrogate_boxes(boxes, 8.0, 16.0)  # width -> 16, height kept, centre fixed
         tensor([[[-3.,  5., 13., 25.]]])
+
+        ```
     """
     x1, y1, x2, y2 = gt_boxes.unbind(-1)
     cx = (x1 + x2) * 0.5
@@ -127,11 +130,14 @@ def surrogate_rboxes(gt_rboxes: Tensor, s_min: float, s_ref: float) -> Tensor:
         ``gt_rboxes``'s dtype, device, and leading shape.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> boxes = torch.tensor([[[10.0, 10.0, 10.0, 4.0, 0.0]]])  # 10 long, 4 thin
         >>> # h -> 16 overtakes w, so the canonical answer swaps the pair: theta += pi/2
         >>> [round(v, 4) for v in surrogate_rboxes(boxes, 8.0, 16.0)[0, 0].tolist()]
         [10.0, 10.0, 16.0, 10.0, 1.5708]
+
+        ```
     """
     cx, cy, width, height, theta = gt_rboxes.unbind(-1)
     width_tilde = torch.where(width < s_min, torch.full_like(width, s_ref), width)
@@ -197,6 +203,7 @@ def _check_surrogate_sizes(s_min: float, s_ref: float) -> None:
             below ``s_min``. The message names the offending parameter and its value.
 
     Examples:
+        ```pycon
         >>> _check_surrogate_sizes(8.0, 16.0)
         >>> _check_surrogate_sizes(8.0, 8.0)  # the accepted boundary: still widens
         >>> _check_surrogate_sizes(0.0, 16.0)
@@ -205,6 +212,8 @@ def _check_surrogate_sizes(s_min: float, s_ref: float) -> None:
         >>> _check_surrogate_sizes(8.0, 4.0)
         Traceback (most recent call last):
         ValueError: s_ref must be >= s_min, got 4.0 < 8.0
+
+        ```
     """
     for name, size in (("s_min", s_min), ("s_ref", s_ref)):
         if not math.isfinite(size) or size <= 0.0:
@@ -253,6 +262,7 @@ class SmallTargetAssigner(TaskAlignedAssigner):
             or inverts the surrogate inflation (see :func:`_check_surrogate_sizes`).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.assign import make_anchor_points
         >>> assigner = SmallTargetAssigner(topk=4)
@@ -265,6 +275,8 @@ class SmallTargetAssigner(TaskAlignedAssigner):
         >>> out = assigner(scores, boxes, points, gt, labels, mask)
         >>> int(out.fg_mask.sum())  # vanilla TAL would yield 0 here
         4
+
+        ```
     """
 
     def __init__(

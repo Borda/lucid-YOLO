@@ -155,11 +155,14 @@ def wrap_angle_delta(delta: Tensor) -> Tensor:
         same shape and dtype.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> wrap_angle_delta(torch.tensor([0.3, 3.4416, -3.4416, 1.5708])).round(decimals=4)
         tensor([ 0.3000,  0.3000, -0.3000, -1.5708])
         >>> wrap_angle_delta(torch.tensor(1e8)).round(decimals=4)  # past the stated bound
         tensor(0.7307)
+
+        ```
     """
     in_range = (delta >= -_HALF_PI) & (delta < _HALF_PI)
     wrapped = torch.remainder(delta + _HALF_PI, _PI) - _HALF_PI
@@ -196,6 +199,7 @@ def aspect_ratio_weight(width: Tensor, height: Tensor, lam: float = _LAMBDA, min
         ValueError: If ``lam`` or ``min_side`` is not finite and strictly positive.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> ratios = torch.tensor([1.0, 2.0, 5.0, 10.0, 20.0])
         >>> aspect_ratio_weight(ratios, torch.ones(5)).round(decimals=4)
@@ -205,6 +209,8 @@ def aspect_ratio_weight(width: Tensor, height: Tensor, lam: float = _LAMBDA, min
         ... except ValueError as error:
         ...     print(error)
         min_side must be finite and > 0; got 0.0
+
+        ```
     """
     if not math.isfinite(lam) or lam <= 0:
         raise ValueError(f"lam must be finite and > 0; got {lam}")
@@ -263,6 +269,7 @@ def square_angle_loss(
         ValueError: If ``lam`` or ``min_side`` is not finite and strictly positive.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> pred = torch.tensor([0.10, 0.90, 0.30])
         >>> target = torch.tensor([0.05, 0.10, 0.30])  # third is already exact
@@ -272,6 +279,8 @@ def square_angle_loss(
         >>> empty = torch.zeros(0)
         >>> square_angle_loss(empty, empty, empty, empty, empty)
         tensor(0.)
+
+        ```
     """
     residual = _fold_quarter_turn(wrap_angle_delta(pred_theta - target_theta))
     penalty = torch.sin(2 * residual) ** 2
@@ -288,9 +297,12 @@ def _fold_quarter_turn(residual: Tensor) -> Tensor:
     seven digits (module docstring).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _fold_quarter_turn(torch.tensor([0.2, 1.0, -1.0])).round(decimals=4)
         tensor([ 0.2000, -0.5708,  0.5708])
+
+        ```
     """
     folded = torch.where(residual >= _QUARTER_PI, residual - _HALF_PI, residual)
     return torch.where(folded < -_QUARTER_PI, folded + _HALF_PI, folded)
@@ -304,9 +316,12 @@ def _greatest_below_half_pi(like: Tensor) -> Tensor:
     cannot be written as one literal.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> float(_greatest_below_half_pi(torch.zeros(1))) < math.pi / 2
         True
+
+        ```
     """
     high = torch.tensor(_HALF_PI, dtype=like.dtype, device=like.device)
     return torch.nextafter(high, torch.full_like(high, -math.inf))

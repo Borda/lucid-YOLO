@@ -117,9 +117,12 @@ def build_datamodule(
         A datamodule set up for the oriented val split.
 
     Examples:
+        ```pycon
         >>> datamodule = build_datamodule(Path("/data/tiles"), "val", img_size=1024, batch_size=8, variant="n")
         >>> type(datamodule).__name__
         'DetectionDataModule'
+
+        ```
     """
     images_dir, ann_file = resolve_split(data_root, split)
     return DetectionDataModule(
@@ -160,8 +163,11 @@ class SplitScoring:
             a host-dependent one.
 
     Examples:
+        ```pycon
         >>> SplitScoring({"map": 0.5}, tiles=4, instances=9).tiles
         4
+
+        ```
     """
 
     per_tile: dict[str, float]
@@ -231,11 +237,14 @@ def score_split(
             and in full.
 
     Examples:
+        ```pycon
         >>> from lucid_yolo.ptl.module import DetectionLitModule
         >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=1)
         >>> score_split(module, None, torch.device("cpu"), img_size=64)  # doctest: +IGNORE_EXCEPTION_DETAIL
         Traceback (most recent call last):
         ValueError: ...
+
+        ```
     """
     if module.task != "obb":
         raise ValueError(f"eval_obb needs an oriented checkpoint; this one has task={module.task!r}")
@@ -303,11 +312,14 @@ def _dataset_image_ids(loader: DataLoader[object]) -> tuple[int, ...] | None:
         One COCO image id per dataset position, or ``None`` when the reader has none.
 
     Examples:
+        ```pycon
         >>> from types import SimpleNamespace
         >>> _dataset_image_ids(SimpleNamespace(dataset=SimpleNamespace(image_ids=(3, 7))))
         (3, 7)
         >>> _dataset_image_ids(SimpleNamespace(dataset=[])) is None  # a reader with no ids
         True
+
+        ```
     """
     image_ids = getattr(loader.dataset, "image_ids", None)
     return None if image_ids is None else tuple(int(value) for value in image_ids)
@@ -367,8 +379,11 @@ def _require_matching_tile(
             the index's.
 
     Examples:
+        ```pycon
         >>> from lucid_yolo.data.targets import Targets
         >>> _require_matching_tile(Targets.empty(), None, None, 0)  # unchecked without an index
+
+        ```
     """
     if expected is None:
         return
@@ -412,7 +427,10 @@ def _require_matching_id(
             have translated that tile's detections by.
 
     Examples:
+        ```pycon
         >>> _require_matching_id(None, (1, 2), 0)  # nothing to compare without an index
+
+        ```
     """
     if windows is None or image_ids is None or position >= min(len(windows), len(image_ids)):
         return
@@ -439,11 +457,14 @@ def _where(windows: Sequence[TileWindow] | None, position: int) -> str:
         window to name.
 
     Examples:
+        ```pycon
         >>> from lucid_yolo.eval.tile_merge import TileWindow
         >>> _where((TileWindow("a.png", (4, 0), (6, 6), 2),), 0)
         ' (a.png at (4, 0))'
         >>> _where(None, 0)
         ''
+
+        ```
     """
     if windows is None or position >= len(windows):
         return ""
@@ -466,7 +487,10 @@ def _require_whole_split(scored: int, expected: Sequence[Mapping[str, Tensor]] |
         ValueError: If the counts differ.
 
     Examples:
+        ```pycon
         >>> _require_whole_split(3, None)  # unchecked without an index
+
+        ```
     """
     if expected is not None and scored != len(expected):
         raise ValueError(
@@ -491,9 +515,12 @@ def _to_source(
         ``windows`` is ``None``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _to_source(torch.zeros(2, 3, 7), None, 0, 64)
         []
+
+        ```
     """
     if windows is None:
         return []
@@ -527,12 +554,15 @@ def _keeps_low_startup_route(*, batches: int, workers: int) -> bool:
         ``True`` when :func:`run` should rebuild the datamodule on the low-startup route.
 
     Examples:
+        ```pycon
         >>> _keeps_low_startup_route(batches=1, workers=8)
         True
         >>> _keeps_low_startup_route(batches=1, workers=1)  # one worker is still a pool
         True
         >>> _keeps_low_startup_route(batches=9, workers=8)
         False
+
+        ```
     """
     return workers > 0 and batches <= workers
 
@@ -573,8 +603,11 @@ def run(
         ``0`` on success; ``1`` when the checkpoint is not an oriented one.
 
     Examples:
+        ```pycon
         >>> callable(run)
         True
+
+        ```
     """
     device = pick_device(device_name)
     _, ann_file = resolve_split(data_root, split)
@@ -655,9 +688,12 @@ def _whole_image(index: TileIndex, scoring: SplitScoring) -> tuple[dict[str, flo
         The whole-image metrics and how many source images they cover.
 
     Examples:
+        ```pycon
         >>> from lucid_yolo.eval.tile_merge import TileIndex
         >>> _whole_image(TileIndex((), ()), SplitScoring({}, 0, 0))[1]
         0
+
+        ```
     """
     predictions, ground_truth, names = merge_whole_images(index, scoring.source_predictions)
     return evaluate_rotated_map(predictions, ground_truth, max_detections=None), len(names)
@@ -693,10 +729,13 @@ def _report(
         The report payload.
 
     Examples:
+        ```pycon
         >>> _report({}, "val", 64, 1.0, SplitScoring({"map": 0.5}, 2, 3), None)["whole_image"] is None
         True
         >>> _report({}, "val", 64, 1.0, SplitScoring({"map": 0.5}, 2, 3), None)["info"]["workers"] is None
         True
+
+        ```
     """
     return {
         "info": {**info, "split": split, "img_size": img_size, "per_tile": True, "workers": scoring.workers},

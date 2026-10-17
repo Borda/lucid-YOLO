@@ -60,12 +60,9 @@ def _text_elements(svg: str) -> list[tuple[str, Glyphs]]:
     name travels with each one: two fonts number their glyphs independently.
 
     Examples:
-        ```pycon
         >>> svg = '<!-- hi -->\\n<g transform="x"><use xlink:href="#DejaVuSans-4b"/></g>'
         >>> _text_elements(svg)
         [('hi', (('DejaVuSans', 75),))]
-
-        ```
     """
     return [
         (match.group(1), tuple((font, int(index, 16)) for font, index in _GLYPH.findall(match.group(2))))

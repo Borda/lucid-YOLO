@@ -89,6 +89,7 @@ def decode_instance_masks(
         raising — see the note at the top of the body.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> prototypes = torch.full((1, 1, 2, 2), 10.0)  # one saturated prototype
         >>> coefficients = torch.ones(1, 1, 1)  # (B=1, N=1, K=1)
@@ -98,6 +99,8 @@ def decode_instance_masks(
         (torch.Size([1, 1, 4, 4]), torch.bool)
         >>> masks[0, 0, 0]  # only the boxed columns survive the crop
         tensor([ True,  True, False, False])
+
+        ```
     """
     if not coefficients.shape[1]:
         # `F.interpolate` treats the instance axis as channels and rejects a zero-length
@@ -167,6 +170,7 @@ def masks_to_original(masks: Tensor, letterbox: Letterbox, orig_size: tuple[int,
         coordinates, in ``masks``' own dtype.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.data.letterbox import Letterbox
         >>> # A 2x4 image letterboxed into a 4x4 canvas gains 1px top/bottom pads.
@@ -177,6 +181,8 @@ def masks_to_original(masks: Tensor, letterbox: Letterbox, orig_size: tuple[int,
         torch.Size([1, 2, 4])
         >>> bool(recovered.all())  # the padding is gone, the content survives
         True
+
+        ```
     """
     orig_h, orig_w = orig_size
     canvas_h, canvas_w = int(masks.shape[-2]), int(masks.shape[-1])

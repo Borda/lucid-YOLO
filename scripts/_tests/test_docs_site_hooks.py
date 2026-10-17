@@ -121,3 +121,25 @@ class TestTocEntries:
         """
         h2s = [SimpleNamespace(level=2, children=[]) for _ in range(h2_count)]
         assert hooks.toc_entries([SimpleNamespace(level=1, children=h2s)]) == entries
+
+
+class TestRoadmapTagFilter:
+    @pytest.mark.parametrize(
+        ("target", "dropped"),
+        [
+            ("PRINCIPAL", True),
+            ("GPU", True),
+            ("DATA", True),
+            ("lucid_yolo.data.Missing", False),
+            ("PRINCIPAL-ish", False),
+        ],
+    )
+    def test_drops_only_roadmap_tags(self, target: str, dropped: bool) -> None:
+        """Only an unresolved roadmap tag is quieted; any other missing target still warns.
+
+        `[GPU][PRINCIPAL]` is a reference link to nothing and renders as its own text, so its
+        warning is noise; a misspelt API identifier is a broken link and must fail `--strict`.
+        """
+        message = f"ROADMAP.md: Could not find cross-reference target '{target}'"
+
+        assert hooks.is_roadmap_tag_miss(message) is dropped

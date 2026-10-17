@@ -30,11 +30,14 @@ def _load_harness() -> ModuleType:
     """Load ``scripts/check_goldens.py`` as an importable module.
 
     Examples:
+        ```pycon
         >>> module = _load_harness()
         >>> module.__name__
         'check_goldens'
         >>> callable(module.check_all)
         True
+
+        ```
     """
     spec = importlib.util.spec_from_file_location("check_goldens", HARNESS_PATH)
     assert spec is not None and spec.loader is not None

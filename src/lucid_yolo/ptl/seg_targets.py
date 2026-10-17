@@ -86,10 +86,13 @@ def scale_boxes_to_grid(boxes: Tensor, image_size: tuple[int, int], grid_size: t
         ``grid_width / width`` and ``y`` columns by ``grid_height / height``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> boxes = torch.tensor([[0.0, 0.0, 32.0, 64.0]])
         >>> scale_boxes_to_grid(boxes, image_size=(128, 128), grid_size=(32, 32))
         tensor([[ 0.,  0.,  8., 16.]])
+
+        ```
     """
     x_scale, y_scale = _grid_scale(image_size, grid_size)
     scale = torch.tensor([x_scale, y_scale, x_scale, y_scale], dtype=boxes.dtype, device=boxes.device)
@@ -121,6 +124,7 @@ def instance_mask_targets(target: Targets, image_size: tuple[int, int], grid_siz
             skipping it would train the mask branches on a subset nobody chose.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.data.targets import Targets
         >>> ring = torch.tensor([[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]])
@@ -128,6 +132,8 @@ def instance_mask_targets(target: Targets, image_size: tuple[int, int], grid_siz
         >>> masks = instance_mask_targets(target, image_size=(16, 16), grid_size=(4, 4))
         >>> masks.shape, float(masks.sum())  # the 8x8 ring covers a 2x2 block of the 4x4 grid
         (torch.Size([1, 4, 4]), 4.0)
+
+        ```
     """
     count = int(target.boxes.shape[0])
     if len(target.polygons) != count:
@@ -163,6 +169,7 @@ def semantic_target(masks: Tensor, labels: Tensor, num_classes: int, grid_size: 
         ``masks``' device and dtype. An image with no instances yields all zeros.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> masks = torch.zeros(2, 4, 4)
         >>> masks[0, 0, 0] = 1.0  # class 1, one fine cell
@@ -172,6 +179,8 @@ def semantic_target(masks: Tensor, labels: Tensor, num_classes: int, grid_size: 
         torch.Size([3, 2, 2])
         >>> target[1, 0, 0], target[0, 1, 1]  # the single fine cell survives the pooling
         (tensor(1.), tensor(1.))
+
+        ```
     """
     grid_height, grid_width = grid_size
     if masks.shape[0] == 0:

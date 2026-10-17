@@ -25,8 +25,11 @@ def _load_module() -> ModuleType:
     """Load ``scripts/freeze_goldens.py`` as an importable module.
 
     Examples:
+        ```pycon
         >>> callable(_load_module().freeze)
         True
+
+        ```
     """
     spec = importlib.util.spec_from_file_location("freeze_goldens", SCRIPT_PATH)
     assert spec is not None and spec.loader is not None

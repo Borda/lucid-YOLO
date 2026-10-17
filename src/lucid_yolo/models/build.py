@@ -130,6 +130,7 @@ def build_detection_stages(
         channel counts.
 
     Examples:
+        ```pycon
         >>> backbone, neck, head = build_detection_stages(0.34, 0.25, 1024, num_classes=4)
         >>> backbone.channels, neck.channels
         ((128, 128, 256), (64, 128, 256))
@@ -139,6 +140,8 @@ def build_detection_stages(
         True
         >>> head.o2o.keypoint_stems is None  # and keypoint-free by default
         True
+
+        ```
     """
     backbone = DetectionBackbone(depth=depth, width=width, max_channels=max_channels)
     neck = DetectionNeck(backbone.channels, depth=depth, width=width, max_channels=max_channels)
@@ -181,11 +184,14 @@ def build_segmentation_stages(
         The ``(proto_fusion, protonet, semantic)`` triple.
 
     Examples:
+        ```pycon
         >>> fusion, protonet, semantic = build_segmentation_stages((64, 128, 256), 4, 32)
         >>> protonet.num_prototypes
         32
         >>> semantic.classifier.in_channels == fusion.out_channels
         True
+
+        ```
     """
     proto_fusion = ProtoFusion(neck_channels)
     protonet = ProtoNet(proto_fusion.out_channels, num_prototypes=num_coeffs)
@@ -207,12 +213,15 @@ class Detector(nn.Module):
         num_classes: Number of object classes the head predicts.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> model = Detector("n", num_classes=80).eval()
         >>> with torch.no_grad():
         ...     out = model(torch.zeros(1, 3, 640, 640))
         >>> out.o2o_cls.shape, out.o2o_box.shape
         (torch.Size([1, 8400, 80]), torch.Size([1, 8400, 4]))
+
+        ```
     """
 
     def __init__(self, variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> None:
@@ -253,12 +262,15 @@ class Detector(nn.Module):
             one-to-one branch's ``(cls_logits, ltrb)`` tensor pair.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> deployed = Detector("n").deploy().eval()
             >>> with torch.no_grad():
             ...     cls, box = deployed(torch.zeros(1, 3, 640, 640))
             >>> cls.shape, box.shape
             (torch.Size([1, 8400, 80]), torch.Size([1, 8400, 4]))
+
+            ```
         """
         return _DeployedDetector(self)
 
@@ -309,11 +321,14 @@ def build_detector(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> Det
         KeyError: If ``variant`` is not one of the five published names.
 
     Examples:
+        ```pycon
         >>> model = build_detector("s")
         >>> model.variant, model.num_classes
         ('s', 80)
         >>> model.backbone.width
         0.5
+
+        ```
     """
     return Detector(variant, num_classes)
 
@@ -342,12 +357,15 @@ class OrientedDetector(nn.Module):
             fidelity gate and the DOTA path pass 15 explicitly.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> model = OrientedDetector("n", num_classes=15).eval()
         >>> with torch.no_grad():
         ...     out = model(torch.zeros(1, 3, 128, 128))
         >>> out.o2o_cls.shape, out.o2o_box.shape, out.o2o_angle.shape
         (torch.Size([1, 336, 15]), torch.Size([1, 336, 4]), torch.Size([1, 336, 1]))
+
+        ```
     """
 
     def __init__(self, variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> None:
@@ -387,12 +405,15 @@ class OrientedDetector(nn.Module):
             one-to-one branch's ``(cls_logits, ltrb, angle)`` tensor triple.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> deployed = OrientedDetector("n", num_classes=15).deploy().eval()
             >>> with torch.no_grad():
             ...     cls, box, angle = deployed(torch.zeros(1, 3, 128, 128))
             >>> cls.shape, box.shape, angle.shape
             (torch.Size([1, 336, 15]), torch.Size([1, 336, 4]), torch.Size([1, 336, 1]))
+
+            ```
         """
         return _DeployedOrientedDetector(self)
 
@@ -450,11 +471,14 @@ def build_obb_detector(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) ->
         KeyError: If ``variant`` is not one of the five published names.
 
     Examples:
+        ```pycon
         >>> model = build_obb_detector("s", num_classes=15)
         >>> model.variant, model.num_classes
         ('s', 15)
         >>> model.head.predict_angle
         True
+
+        ```
     """
     return OrientedDetector(variant, num_classes)
 
@@ -496,6 +520,7 @@ class KeypointDetector(nn.Module):
             ``task="keypoints"``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> model = KeypointDetector("n", num_classes=4, num_keypoints=3).eval()
         >>> with torch.no_grad():
@@ -504,6 +529,8 @@ class KeypointDetector(nn.Module):
         (torch.Size([1, 336, 4]), torch.Size([1, 336, 3, 2]))
         >>> out.o2o_keypoint_sigma.shape  # raw per-axis uncertainty (A65)
         torch.Size([1, 336, 3, 2])
+
+        ```
     """
 
     def __init__(self, variant: str, num_classes: int = _DEFAULT_NUM_CLASSES, *, num_keypoints: int) -> None:
@@ -544,12 +571,15 @@ class KeypointDetector(nn.Module):
             one-to-one branch's ``(cls_logits, ltrb, keypoints)`` tensor triple.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> deployed = KeypointDetector("n", num_classes=4, num_keypoints=3).deploy().eval()
             >>> with torch.no_grad():
             ...     cls, box, keypoints = deployed(torch.zeros(1, 3, 128, 128))
             >>> cls.shape, box.shape, keypoints.shape
             (torch.Size([1, 336, 4]), torch.Size([1, 336, 4]), torch.Size([1, 336, 3, 2]))
+
+            ```
         """
         return _DeployedKeypointDetector(self)
 
@@ -620,11 +650,14 @@ def build_keypoint_detector(
         TypeError: If ``num_keypoints`` is omitted.
 
     Examples:
+        ```pycon
         >>> model = build_keypoint_detector("s", num_classes=1, num_keypoints=17)
         >>> model.variant, model.num_classes, model.num_keypoints
         ('s', 1, 17)
         >>> model.head.o2o.keypoint_stems is None
         False
+
+        ```
     """
     return KeypointDetector(variant, num_classes, num_keypoints=num_keypoints)
 
@@ -683,6 +716,7 @@ class Segmenter(nn.Module):
         num_coeffs: Mask-coefficient width ``K`` (A14), also the prototype count.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> model = Segmenter("n", num_classes=4).eval()
         >>> with torch.no_grad():
@@ -693,6 +727,8 @@ class Segmenter(nn.Module):
         torch.Size([1, 32, 32, 32])
         >>> out.semantic is None  # training-only branch (A17)
         True
+
+        ```
     """
 
     def __init__(
@@ -748,6 +784,7 @@ class Segmenter(nn.Module):
             ``(cls, box, coeff, prototypes)`` tuple needed to assemble masks.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> deployed = Segmenter("n", num_classes=4).deploy().eval()
             >>> with torch.no_grad():
@@ -756,6 +793,8 @@ class Segmenter(nn.Module):
             (torch.Size([1, 336, 4]), torch.Size([1, 336, 4]))
             >>> coeff.shape, prototypes.shape
             (torch.Size([1, 336, 32]), torch.Size([1, 32, 32, 32]))
+
+            ```
         """
         return _DeployedSegmenter(self)
 
@@ -837,17 +876,23 @@ def build_segmenter(
         KeyError: If ``variant`` is not one of the five published names.
 
     Examples:
+        ```pycon
         >>> model = build_segmenter("s")
         >>> model.variant, model.num_classes, model.num_coeffs
         ('s', 80, 32)
         >>> model.protonet.num_prototypes  # one prototype per coefficient
         32
 
+        ```
+
         A narrower coefficient width reaches both halves of Eq. 7 together:
 
+        ```pycon
         >>> narrow = build_segmenter("n", num_classes=4, num_coeffs=16)
         >>> narrow.num_coeffs, narrow.protonet.num_prototypes
         (16, 16)
+
+        ```
     """
     return Segmenter(variant, num_classes, num_coeffs)
 
@@ -862,8 +907,11 @@ def count_params(module: nn.Module) -> int:
         The exact total element count summed over ``module.parameters()``.
 
     Examples:
+        ```pycon
         >>> count_params(build_detector("n")) > 2_000_000
         True
+
+        ```
     """
     return sum(param.numel() for param in module.parameters())
 
@@ -898,11 +946,14 @@ def _tensor_fields(output: DualHeadOutput | SegmentOutput) -> tuple[Tensor, ...]
         The present tensors, in dataclass declaration order, depth first.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.models.heads import DualHeadOutput
         >>> out = DualHeadOutput(torch.zeros(1), torch.zeros(2), torch.zeros(3), torch.zeros(4))
         >>> [tensor.numel() for tensor in _tensor_fields(out)]  # optional fields dropped
         [1, 2, 3, 4]
+
+        ```
     """
     collected: list[Tensor] = []
     for field in fields(output):
@@ -995,8 +1046,11 @@ def count_flops(module: nn.Module, img_size: int = _DEFAULT_IMG_SIZE) -> float:
         The total forward GFLOPs (``2 x`` MACs) divided by 1e9.
 
     Examples:
+        ```pycon
         >>> round(count_flops(build_detector("n").deploy()), 1) > 0
         True
+
+        ```
     """
     modes = {name: submodule.training for name, submodule in module.named_modules()}
     module.eval()

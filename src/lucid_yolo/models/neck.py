@@ -65,12 +65,15 @@ def _attn_inner_factory(hidden_channels: int, shortcut: bool) -> nn.Module:
         An ``nn.Sequential`` of the ``C3k`` refinement followed by the ``PSABlock``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> unit = _attn_inner_factory(128, True).eval()
         >>> unit(torch.zeros(1, 128, 8, 8)).shape
         torch.Size([1, 128, 8, 8])
         >>> type(unit[1]).__name__  # attention layer on the C3k output
         'PSABlock'
+
+        ```
     """
     return nn.Sequential(
         C3k(hidden_channels, hidden_channels, n=2, shortcut=shortcut, expansion=0.5),
@@ -102,6 +105,7 @@ class DetectionNeck(nn.Module):
             the ``N5`` stage (base 1024) for the ``m``/``l``/``x`` variants (``mc=512``).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> neck = DetectionNeck(in_channels=(128, 128, 256), depth=0.5, width=0.25, max_channels=1024).eval()
         >>> neck.channels  # n-scale output widths (N3, N4, N5)
@@ -111,6 +115,8 @@ class DetectionNeck(nn.Module):
         ...     n3, n4, n5 = neck(feats)
         >>> n3.shape, n4.shape, n5.shape
         (torch.Size([1, 64, 80, 80]), torch.Size([1, 128, 40, 40]), torch.Size([1, 256, 20, 20]))
+
+        ```
     """
 
     def __init__(
@@ -162,8 +168,11 @@ class DetectionNeck(nn.Module):
             stride order (8, 16, 32).
 
         Examples:
+            ```pycon
             >>> DetectionNeck(in_channels=(256, 256, 512), depth=0.5, width=0.5, max_channels=1024).channels
             (128, 256, 512)
+
+            ```
         """
         return self._channels
 

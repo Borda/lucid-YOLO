@@ -470,9 +470,12 @@ def _wrap_theta(theta: Tensor) -> Tensor:
     stated because the signature accepts any tensor.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> [round(v, 4) for v in _wrap_theta(torch.tensor([3.5, -0.9, 0.3])).tolist()]
         [0.3584, 2.2416, 0.3]
+
+        ```
     """
     in_range = (theta >= _THETA_LOW) & (theta < _THETA_HIGH)
     wrapped = torch.remainder(theta - _THETA_LOW, _PI) + _THETA_LOW
@@ -491,9 +494,12 @@ def _greatest_below_high(like: Tensor) -> Tensor:
     which differs between float32 and float64 and cannot be written as one literal.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> float(_greatest_below_high(torch.zeros(1))) < 3 * math.pi / 4
         True
+
+        ```
     """
     high = torch.tensor(_THETA_HIGH, dtype=like.dtype, device=like.device)
     return torch.nextafter(high, torch.full_like(high, -math.inf))
@@ -508,9 +514,12 @@ def _check_2d(tensor: Tensor, columns: int, name: str) -> None:
     same, so a second letter in the rejection named a difference the check never tested.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _check_2d(torch.zeros((0, 5)), 5, "rboxes")
         >>> _check_2d(torch.zeros((0, 5)), 5, "boxes_a")
+
+        ```
     """
     if tensor.ndim != 2 or tensor.shape[1] != columns:
         raise ValueError(f"{name} must be (N, {columns}); got shape {tuple(tensor.shape)}")
@@ -520,8 +529,11 @@ def _check_polygons(polygons: Tensor) -> None:
     """Raise :class:`ValueError` unless ``polygons`` is a ``(M, 4, 2)`` quad tensor.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _check_polygons(torch.zeros((0, 4, 2)))
+
+        ```
     """
     if polygons.ndim != 3 or tuple(polygons.shape[1:]) != (_QUAD_CORNERS, _POINT_DIM):
         raise ValueError(f"polygons must be (M, 4, 2); got shape {tuple(polygons.shape)}")
@@ -544,10 +556,13 @@ def _local_polygons(pairs: Tensor, midpoint: Tensor) -> Tensor:
         ``(M, N, 4, 2)`` corner coordinates in the per-pair local frame.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> box = torch.tensor([[[10.0, 10.0, 4.0, 2.0, 0.0]]])
         >>> _local_polygons(box, torch.tensor([[[10.0, 10.0]]]))[0, 0].tolist()
         [[-2.0, -1.0], [2.0, -1.0], [2.0, 1.0], [-2.0, 1.0]]
+
+        ```
     """
     shifted = torch.cat([pairs[..., :2] - midpoint, pairs[..., 2:]], dim=-1)
     corners = rboxes_to_polygons(shifted.reshape(-1, _RBOX_DIM))
@@ -569,11 +584,14 @@ def _intersection_area(subject: Tensor, clip: Tensor) -> Tensor:
         ``(M, N)`` intersection area, never negative.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> unit = torch.tensor([[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]])
         >>> pair = unit[None, None]
         >>> float(_intersection_area(pair, pair))
         4.0
+
+        ```
     """
     polygon = subject
     valid = torch.ones(subject.shape[:-1], dtype=torch.bool, device=subject.device)
@@ -605,12 +623,15 @@ def _clip_by_edge(polygon: Tensor, valid: Tensor, start: Tensor, end: Tensor) ->
         ``(M, N, 2K, 2)`` vertices and their ``(M, N, 2K)`` validity mask.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> square = torch.tensor([[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]])[None, None]
         >>> live = torch.ones(square.shape[:-1], dtype=torch.bool)
         >>> _, mask = _clip_by_edge(square, live, torch.zeros(1, 1, 2), torch.tensor([[[1.0, 0.0]]]))
         >>> int(mask.sum())  # the whole square lies on the inside of the x axis
         4
+
+        ```
     """
     edge = (end - start)[..., None, :]
     offset = polygon - start[..., None, :]
@@ -644,11 +665,14 @@ def _successor(values: Tensor, valid: Tensor) -> Tensor:
         ``(M, N, K, C)`` values of each slot's successor.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> values = torch.tensor([[[[1.0], [2.0], [3.0]]]])
         >>> mask = torch.tensor([[[True, True, False]]])
         >>> _successor(values, mask).flatten().tolist()  # slot 1 wraps to slot 0
         [2.0, 1.0, 1.0]
+
+        ```
     """
     rolled = values.roll(-1, dims=-2)
     rolled_valid = valid.roll(-1, dims=-1)
@@ -670,12 +694,15 @@ def _compact(polygon: Tensor, valid: Tensor) -> tuple[Tensor, Tensor]:
         ``(M, N, 8, 2)`` compacted vertices and their ``(M, N, 8)`` prefix mask.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> pts = torch.tensor([[[[9.0, 9.0], [1.0, 1.0], [2.0, 2.0]]]])
         >>> mask = torch.tensor([[[False, True, True]]])
         >>> kept, live = _compact(pts, mask)
         >>> kept[0, 0, :3].tolist(), live[0, 0, :3].tolist()
         ([[1.0, 1.0], [2.0, 2.0], [1.0, 1.0]], [True, True, False])
+
+        ```
     """
     order = torch.argsort(valid.logical_not().to(torch.uint8), dim=-1, stable=True)[..., :_MAX_INTERSECTION_CORNERS]
     gathered = polygon.gather(-2, order[..., None].expand(*order.shape, polygon.shape[-1]))
@@ -696,10 +723,13 @@ def _shoelace(polygon: Tensor) -> Tensor:
         ``(...)`` signed area.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> square = torch.tensor([[0.0, 0.0], [3.0, 0.0], [3.0, 2.0], [0.0, 2.0]])
         >>> float(_shoelace(square))
         6.0
+
+        ```
     """
     successor = polygon.roll(-1, dims=-2)
     cross = polygon[..., 0] * successor[..., 1] - successor[..., 0] * polygon[..., 1]

@@ -123,8 +123,11 @@ def default_determinism() -> bool | str:
         ``True`` otherwise.
 
     Examples:
+        ```pycon
         >>> default_determinism() in (True, "warn_only")
         True
+
+        ```
     """
     return "warn_only" if torch.backends.mps.is_available() else True
 
@@ -166,8 +169,11 @@ def _checkpoint_filename(task: str, variant: str) -> str:
         :class:`~pytorch_lightning.callbacks.ModelCheckpoint` to fill in.
 
     Examples:
+        ```pycon
         >>> _checkpoint_filename("segment", "s")
         'segment_s_{epoch}-{step}'
+
+        ```
     """
     return f"{task}_{variant}_{{epoch}}-{{step}}"
 
@@ -329,8 +335,11 @@ def packaged_config(name: str) -> Path:
         file with its usual error.
 
     Examples:
+        ```pycon
         >>> packaged_config("det_nano_smoke").name
         'det_nano_smoke.yaml'
+
+        ```
     """
     if not name.endswith((".yaml", ".yml")):
         name = f"{name}.yaml"
@@ -398,9 +407,12 @@ def main(args: ArgsType = None) -> int:
         same reason.
 
     Examples:
+        ```pycon
         >>> from lucid_yolo.cli.train import main
         >>> main(["fit", "--config", "det_nano_smoke"])  # doctest: +SKIP
         0
+
+        ```
     """
     if args is None:
         # Rewrite sys.argv in place and keep args=None: passing an args list while
