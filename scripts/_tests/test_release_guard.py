@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -522,3 +523,40 @@ def test_no_release_step_interpolates_workflow_context_into_shell_source() -> No
     interpolating = [step.get("name", "<unnamed>") for step in _release_steps() if "${{" in step.get("run", "")]
 
     assert interpolating == []
+
+
+@pytest.mark.parametrize(
+    ("source", "passes"),
+    [
+        ("try:\n    import helper\nexcept ModuleNotFoundError:\n    pass\n", True),
+        ("try:\n    import helper\nexcept (OSError, ImportError):\n    pass\n", True),
+        ("import helper\n", False),
+        ("def use():\n    import helper\n", False),
+        ("try:\n    def use():\n        import helper\nexcept ImportError:\n    pass\n", False),
+        ("try:\n    import helper\nexcept ValueError:\n    pass\n", False),
+        ("try:\n    import helper\nexcept ImportError:\n    pass\nimport helper\n", False),
+    ],
+)
+def test_consumer_extra_requires_guarded_import(tmp_path: Path, source: str, passes: bool) -> None:
+    """An unavailable extra stays optional only when every import handles its absence."""
+    manifest = _write_manifest(tmp_path, "")
+    with manifest.open("a") as stream:
+        stream.write('[project.optional-dependencies]\ncuda = ["helper"]\n')
+    root = _write_package(tmp_path, source)
+    assert guard.check_dependency_tiers(manifest, root, {}).passed is passes
+
+
+def test_guarded_group_only_dependency_still_refused(tmp_path: Path) -> None:
+    """A development group never substitutes for an installable consumer extra."""
+    manifest = _write_manifest(tmp_path, "", '"helper"')
+    root = _write_package(tmp_path, "try:\n    import helper\nexcept ImportError:\n    pass\n")
+    assert not guard.check_dependency_tiers(manifest, root, {"helper": ["helper"]}).passed
+
+
+def test_guarded_extra_with_distribution_alias_passes(tmp_path: Path) -> None:
+    """Installed metadata can resolve a guarded module to its differently named extra."""
+    manifest = _write_manifest(tmp_path, "")
+    with manifest.open("a") as stream:
+        stream.write('[project.optional-dependencies]\ncuda = ["helper-lib"]\n')
+    root = _write_package(tmp_path, "try:\n    import helper\nexcept ImportError:\n    pass\n")
+    assert guard.check_dependency_tiers(manifest, root, {"helper": ["helper-lib"]}).passed

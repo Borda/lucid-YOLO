@@ -114,11 +114,13 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import cast
+from weakref import ref
 
 import torch
 from pytorch_lightning import LightningDataModule
 from pytorch_lightning.accelerators import CUDAAccelerator
 from pytorch_lightning.plugins.precision import Precision
+from pytorch_lightning.strategies import SingleDeviceStrategy
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, get_worker_info
 
@@ -790,8 +792,13 @@ def _quantize_images(images: Tensor) -> Tensor:
     return images.mul(_PIXEL_QUANT_MAX).round().clamp_(0, _PIXEL_QUANT_MAX).to(torch.uint8)
 
 
-def _restore_images(images: Tensor, packed: PackedTargets, dtype: torch.dtype) -> Tensor:
+def _restore_images(
+    images: Tensor, packed: PackedTargets, dtype: torch.dtype, *, channels_last: bool = False
+) -> Tensor:
     """Finish a deferred colour transform before restoring the consumer's image dtype.
+
+    Only the transfer hook requests ``channels_last`` and loads the optional CUDA
+    compiler there. Direct unpacking keeps the native expression and its layout.
 
     Raises:
         TypeError: If a deferred batch no longer carries float32 images and float64
@@ -805,6 +812,12 @@ def _restore_images(images: Tensor, packed: PackedTargets, dtype: torch.dtype) -
                 f"expected {_DEFERRED_IMAGE_DTYPE} and {_DEFERRED_GAIN_DTYPE}: the batch was cast before its "
                 "colour transform ran. Restore it before casting, or leave device_hsv off for this precision setup."
             )
+        if channels_last and dtype == torch.float32 and images.is_cuda:
+            from lucid_yolo.data._hsv_cuda import _restore_hsv_cuda  # noqa: PLC0415
+
+            restored = _restore_hsv_cuda(images, packed.hsv_gains)
+            if restored is not None:
+                return restored
         images = _quantize_images(_jitter_hsv_batch(images, packed.hsv_gains))
     return _dequantize_images(images, dtype)
 
@@ -1225,6 +1238,12 @@ class DetectionDataModule(LightningDataModule):
             the probe cannot see. Stating ``"coco"`` or ``"yolo"`` skips the probe entirely,
             so the reader — not this dispatch — names any path it then fails to open.
 
+        epoch_prefetch: Prepare the next complete training epoch during the last batch
+            and validation, using the existing persistent workers. Opt-in: queued
+            training inputs can remain resident during validation. Only full,
+            single-CUDA epochs with the module-owned sampler use the early reset;
+            limits, step bounds, overfit, reloads and distributed sampling stay native.
+
     Examples:
         ```pycon
         >>> DetectionDataModule  # doctest: +SKIP
@@ -1257,10 +1276,12 @@ class DetectionDataModule(LightningDataModule):
         keypoint_targets: bool = False,
         layout: str | None = None,
         device_hsv: bool = False,
+        epoch_prefetch: bool = False,
     ) -> None:
         super().__init__()
         self._mask_targets = bool(mask_targets)
         self._device_hsv = bool(device_hsv)
+        self._epoch_prefetch = bool(epoch_prefetch)
         self._warned_device_hsv = False
         self._rotated_targets = bool(rotated_targets)
         self._keypoint_targets = bool(keypoint_targets)
@@ -1706,7 +1727,7 @@ class DetectionDataModule(LightningDataModule):
         images, targets = batch
         dtype = self._consumer_dtype()
         images = (
-            _restore_images(images, targets, dtype)
+            _restore_images(images, targets, dtype, channels_last=images.is_cuda)
             if isinstance(targets, PackedTargets)
             else _dequantize_images(images, dtype)
         )
@@ -1781,12 +1802,47 @@ class DetectionDataModule(LightningDataModule):
             # worker start method can still pickle it.
             "collate_fn": partial(_collate_training, mask_targets=self._mask_targets),
         }
-        loader = DataLoader(
-            self._train,
-            shuffle=True,
-            generator=shuffle_generator,
-            **kwargs,  # type: ignore[arg-type]
-        )
+        trainer = self.trainer
+        loader: DataLoader[object]
+        if (
+            self._epoch_prefetch
+            and self._persistent_workers
+            and self._num_workers > 0
+            and trainer is not None
+            and trainer.world_size == 1
+            and isinstance(trainer.strategy, SingleDeviceStrategy)
+            and isinstance(trainer.accelerator, CUDAAccelerator)
+            and isinstance(trainer.limit_train_batches, float)
+            and trainer.limit_train_batches == 1.0
+            and trainer.max_steps == -1
+            and not getattr(trainer, "overfit_batches", 1)
+            and not getattr(trainer, "reload_dataloaders_every_n_epochs", 1)
+            and trainer.max_epochs is not None
+            and trainer.max_epochs > 0
+        ):
+            from lucid_yolo.ptl._epoch_loader import _EpochPrefetchLoader  # noqa: PLC0415
+
+            max_epochs = trainer.max_epochs
+            weak_trainer = ref(trainer)
+
+            def prepare_next() -> bool:
+                owner = weak_trainer()
+                return owner is not None and owner.current_epoch + 1 < max_epochs and not owner.should_stop
+
+            loader = _EpochPrefetchLoader(
+                self._train,
+                shuffle=True,
+                generator=shuffle_generator,
+                prepare_next=prepare_next,
+                **kwargs,
+            )
+        else:
+            loader = DataLoader(
+                self._train,
+                shuffle=True,
+                generator=shuffle_generator,
+                **kwargs,  # type: ignore[arg-type]
+            )
         return cast("DataLoader[tuple[Tensor, PackedTargets]]", loader)
 
     def val_dataloader(self) -> DataLoader[tuple[Tensor, PackedTargets]]:
