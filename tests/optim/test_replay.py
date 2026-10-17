@@ -195,6 +195,40 @@ class TestCUDAReplay:
             actual = orthogonalize(value)
         assert_bytes(actual, orthogonalize(value))
 
+    @pytest.mark.parametrize("shape", [(32, 64), (2, 32, 64)])
+    @pytest.mark.parametrize("setting", ["global", "cuda"])
+    def test_new_precision_api_invalidates_recordings_without_legacy_getter(
+        self, shape: tuple[int, ...], setting: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        if not hasattr(torch.backends.cuda.matmul, "fp32_precision"):
+            pytest.skip("Per-backend precision settings require newer PyTorch")
+        previous_global = torch.backends.fp32_precision
+        previous_cuda = torch.backends.cuda.matmul.fp32_precision
+        function = orthogonalize if len(shape) == 2 else _orthogonalize_batched
+        owner = _OrthogonalizationReplay(2)
+        value = torch.randn(shape, device="cuda")
+
+        def fail_legacy_getter() -> str:
+            raise AssertionError("Replay must not query legacy precision with the new API")
+
+        monkeypatch.setattr(torch, "get_float32_matmul_precision", fail_legacy_getter)
+        try:
+            torch.backends.fp32_precision = "ieee"
+            torch.backends.cuda.matmul.fp32_precision = "none"
+            backend = torch.backends if setting == "global" else torch.backends.cuda.matmul
+            for index, precision in enumerate(("tf32", "ieee", "tf32")):
+                backend.fp32_precision = precision
+                current = value * (index + 1)
+                with torch.no_grad():
+                    expected = function(current, steps=2)
+                    with owner.activate():
+                        actual = function(current, steps=2)
+                assert_bytes(actual, expected)
+                assert len(owner.entries) == min(index + 1, 2)
+        finally:
+            torch.backends.fp32_precision = previous_global
+            torch.backends.cuda.matmul.fp32_precision = previous_cuda
+
     def test_cached_integer_steps_preserve_float_rejection(self) -> None:
         owner = _OrthogonalizationReplay(1)
         value = torch.randn(8, 16, device="cuda")

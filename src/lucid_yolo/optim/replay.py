@@ -71,7 +71,11 @@ class _OrthogonalizationReplay:
         self.entries.clear()
 
     def run(self, function: _Orthogonalize, value: Tensor, steps: int, eps: float) -> Tensor:
-        """Replay one supported signature, or keep the eager function's contract."""
+        """Replay one supported signature, or keep the eager function's contract.
+
+        Query per-backend precision when available: the legacy getter can reject
+        configurations set through the new API.
+        """
         if (
             type(value) is not Tensor
             or type(steps) is not int
@@ -96,7 +100,7 @@ class _OrthogonalizationReplay:
             value.stride(),
             steps,
             eps,
-            torch.get_float32_matmul_precision(),
+            torch.get_float32_matmul_precision() if not hasattr(torch.backends.cuda.matmul, "fp32_precision") else None,
             getattr(torch.backends, "fp32_precision", None),
             getattr(torch.backends.cuda.matmul, "fp32_precision", None),
             torch.backends.cuda.preferred_blas_library(),
