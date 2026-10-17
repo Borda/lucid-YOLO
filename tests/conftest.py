@@ -17,11 +17,16 @@ package.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+
+# cuBLAS reads this before creating CUDA handles; retain an explicit caller setting.
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 import torch
 
 _FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
