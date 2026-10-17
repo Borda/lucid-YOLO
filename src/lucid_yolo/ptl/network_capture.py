@@ -142,7 +142,8 @@ class _NetworkCapture:
     The holder is an ordinary Python object, so Lightning checkpoints keep the original
     parameter names. Pickle and deepcopy discard its recording too. An input-size change
     takes the eager route; a change to model storage, modes, hooks or precision retires
-    the recording for the rest of the fit instead of replaying stale work.
+    the recording for the rest of the fit instead of replaying stale work. Anomaly
+    detection stays eager so its backward NaN checks remain observable.
     """
 
     def __init__(self) -> None:
@@ -175,7 +176,7 @@ class _NetworkCapture:
         self.clear()
         self._disabled = True
         warnings.warn(
-            "capture_network=True stays eager: network storage, modes, hooks or precision "
+            "capture_network=True stays eager: network storage, modes, hooks, precision or anomaly detection "
             "do not match the recording contract",
             UserWarning,
             stacklevel=3,
@@ -193,7 +194,7 @@ class _NetworkCapture:
         if self._disabled:
             return eager(images)
         precision = _precision_signature()
-        if precision is None or images.requires_grad:
+        if precision is None or images.requires_grad or torch.is_anomaly_enabled():
             self.retire()
             return eager(images)
         if not _BF16_REPLAY_SUPPORTED and (

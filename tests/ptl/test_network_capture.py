@@ -296,6 +296,57 @@ def test_public_forward_never_records() -> None:
 
 @pytest.mark.gpu
 @_cuda
+def test_anomaly_detection_trainer_stays_eager() -> None:
+    """The public debug flag keeps backward NaN checks outside CUDA recordings."""
+    model = _module(capture_network=True)
+    initial = next(model.parameters()).detach().clone()
+    images = torch.rand(2, 3, 64, 64)
+    targets = [Targets(boxes=torch.tensor([[8.0, 8.0, 40.0, 40.0]]), labels=torch.tensor([1])) for _ in range(2)]
+    loader = DataLoader([(images, targets)] * 2, batch_size=None, num_workers=0)
+    trainer = Trainer(
+        accelerator="cuda",
+        devices=1,
+        detect_anomaly=True,
+        max_epochs=1,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        num_sanity_val_steps=0,
+    )
+    with (
+        patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("anomaly detection must stay eager")),
+        pytest.warns(UserWarning, match="stays eager"),
+    ):
+        trainer.fit(model, train_dataloaders=loader)
+    assert trainer.global_step == 2
+    assert trainer.optimizers[0].state
+    assert not torch.equal(initial, next(model.parameters()).detach().cpu())
+    assert all(torch.isfinite(value).all() for value in model.state_dict().values())
+    assert model._network_capture._network is None
+
+
+@pytest.mark.gpu
+@_cuda
+def test_anomaly_detection_retires_existing_recording() -> None:
+    """Enabling debug checks after capture releases the graph before the next call."""
+    model = _module().cuda()
+    holder = _NetworkCapture()
+    images = torch.randn(2, 3, 64, 64, device="cuda")
+    with patch("torch.cuda.make_graphed_callables", wraps=torch.cuda.make_graphed_callables) as record:
+        _run(holder, model, images).o2m_cls.sum().backward()
+        model.zero_grad(set_to_none=True)
+        with torch.autograd.set_detect_anomaly(True), pytest.warns(UserWarning, match="stays eager"):
+            _run(holder, model, images).o2m_cls.sum().backward()
+        assert record.call_count == 1
+    assert holder._disabled
+    assert holder._network is None
+    assert any(parameter.grad is not None for parameter in model.parameters())
+    assert all(torch.isfinite(parameter.grad).all() for parameter in model.parameters() if parameter.grad is not None)
+
+
+@pytest.mark.gpu
+@_cuda
 @pytest.mark.parametrize("precision", ["bf16-mixed", "16-mixed"])
 @pytest.mark.parametrize("accumulation", [1, 2])
 def test_trainer_activates_once_per_fit_and_cleans_up(
