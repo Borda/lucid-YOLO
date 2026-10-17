@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Replay the optimizer's pure orthogonalizations without changing their arithmetic (WP-197).
+"""Replay the optimizer's pure orthogonalizations without changing their arithmetic (WP-197b).
 
 The optimizer owns this optional cache, not the parameters or their momentum.
 Only the two Newton--Schulz functions opt into it. Their input is copied before

@@ -34,7 +34,7 @@ sec. 6-7); no optimizer implementation is consulted.
 from __future__ import annotations
 
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict, deque
 from typing import TYPE_CHECKING, Any, NamedTuple, overload
 
 import torch
@@ -45,15 +45,17 @@ from lucid_yolo.optim.newton_schulz import _orthogonalize_batched, orthogonalize
 from lucid_yolo.optim.replay import _OrthogonalizationReplay
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from torch.optim.optimizer import ParamsT
 
 #: Update-RMS scaling constant for the Muon branch (R7 Eq. 4: ``0.2 * O_t``).
 _MUON_RMS_SCALE: float = 0.2
 
-#: Device types on which :meth:`MuSGD._step_group` stacks equal-shape matrices and
-#: updates each stack with one native batched call instead of one call per parameter.
+#: Device types on which :meth:`MuSGD._step_group` batches compatible matrices and
+#: updates each stack with one native batched call instead of one call per parameter,
+#: and on which :meth:`MuSGD._foreach_nesterov` advances the momentum buffers with
+#: foreach operations. Both read this one constant so a test can widen the gate to CPU.
 #: Batching trades many small kernel launches for one large one, so it pays exactly
 #: where launch overhead dominates. The gate was set on the production n-scale detector
 #: while the stack was updated through :func:`torch.vmap`: CUDA (L4) is where the win was
@@ -64,25 +66,23 @@ _MUON_RMS_SCALE: float = 0.2
 #: keeps the loop, which is also the arithmetic the tests pin.
 _BATCHED_DEVICE_TYPES: frozenset[str] = frozenset({"cuda"})
 
+#: Largest smaller dimension in the measured n-scale workload. Padding above this
+#: region regressed the x-scale L4 optimizer screen; those matrices keep exact shapes.
+_PADDED_MAX_ROWS = 256
+
+#: Subclasses may implement tensor arithmetic without exposing ordinary storage.
+_STORAGE_TYPES = (Tensor, torch.nn.Parameter)
+
 
 class _BucketKey(NamedTuple):
-    """The identity two matrix parameters must share to be stacked into one batch.
+    """Matrix geometry, both dtypes and device defining one CUDA launch group.
 
-    Every operation inside :meth:`MuSGD._batched_parameter_update` is elementwise
-    or acts on the final two matrix axes through a native batched product, so a
-    leading batch axis cannot mix parameters that agree on these four fields.
-
-    The gradient dtype is one of the four because :func:`torch.stack` is applied
-    to the Nesterov-adjusted gradients as well as to the parameters, and those
-    two dtypes are not the same field. :meth:`MuSGD._nesterov_grad` returns
-    ``grad.add(buffer)``, which promotes, so a parameter whose ``.grad`` carries
-    a wider dtype than itself -- reachable once ``param.grad_dtype`` is relaxed
-    from its default, which is what a mixed-precision setup does -- yields a
-    wider Nesterov gradient than its same-shape, same-dtype neighbour. Stacking
-    the two promotes silently rather than raising, and the neighbour would then
-    be computed at a precision its own path never chose. Keying on it puts them
-    in separate buckets instead, which is the answer the per-parameter path gives
-    anyway.
+    ``shape`` is a one-element smaller-dimension key for independent nonempty
+    matrices within the measured row region, or the original parameter shape for
+    larger matrices, tensor subclasses, shared storage and empty views.
+    The latter retain exact-shape batching. Parameter and adjusted-gradient dtypes
+    remain separate: a restored or mixed-precision gradient can promote the
+    Nesterov expression, and another matrix must not inherit that precision.
     """
 
     shape: torch.Size
@@ -96,6 +96,64 @@ class _PendingUpdate(NamedTuple):
 
     param: Tensor
     nesterov_grad: Tensor
+
+
+def _memory_overlaps(tensors: list[Tensor]) -> bool:
+    """Whether any two non-empty tensors reach the same bytes, whatever storage wraps them.
+
+    Compares the address range each strided tensor can touch instead of its storage's
+    base pointer: ``torch.from_dlpack`` and similar imports wrap one buffer in distinct
+    storage objects whose base pointers differ while their ranges intersect.
+    """
+    spans = sorted(
+        (
+            tensor.data_ptr(),
+            tensor.data_ptr()
+            + (sum((size - 1) * stride for size, stride in zip(tensor.shape, tensor.stride(), strict=True)) + 1)
+            * tensor.element_size(),
+        )
+        for tensor in tensors
+        if tensor.numel() > 0
+    )
+    reach = 0
+    for start, stop in spans:
+        if start < reach:
+            return True
+        reach = max(reach, stop)
+    return False
+
+
+def _matrix_shape(gradient: Tensor) -> tuple[int, int]:
+    """Return the wide orientation used by both Newton--Schulz implementations."""
+    rows, columns = gradient.shape[0], math.prod(gradient.shape[1:])
+    return min(rows, columns), max(rows, columns)
+
+
+def _padding_batches(bucket: list[_PendingUpdate]) -> Iterator[list[_PendingUpdate]]:
+    """Group widths while keeping each padded gradient stack within its members' own bytes.
+
+    A batch may hold padded gradients no larger than the parameter and gradient bytes
+    of the matrices in that batch, the amount an exact-shape stack of the same
+    matrices would hold. Only the gradients are padded, so that per-batch sum supplies
+    the byte budget rather than an arbitrary aspect-ratio limit; it does not compare
+    with any stack the exact-shape path builds for singletons or mixed shapes. Sorting
+    by width makes each extension pay for the smallest remaining width; a width that
+    exceeds the budget starts another batch. No tensor value is read on the host.
+    """
+    batch: list[_PendingUpdate] = []
+    budget = 0
+    for pending in sorted(bucket, key=lambda item: _matrix_shape(item.nesterov_grad)[1]):
+        gradient = pending.nesterov_grad
+        rows, columns = _matrix_shape(gradient)
+        cost = pending.param.numel() * pending.param.element_size() + gradient.numel() * gradient.element_size()
+        padded_bytes = (len(batch) + 1) * rows * columns * gradient.element_size()
+        if batch and padded_bytes > budget + cost:
+            yield batch
+            batch, budget = [], 0
+        batch.append(pending)
+        budget += cost
+    if batch:
+        yield batch
 
 
 class MuSGD(Optimizer):
@@ -231,62 +289,175 @@ class MuSGD(Optimizer):
             replay.clear()
 
     def _step_group(self, group: dict[str, Any]) -> None:
-        """Apply one MuSGD update, batching matrix parameters with the same exact shape.
+        """Apply the update with CUDA matrices grouped by their smaller matrix dimension.
 
-        The n-scale detector carries 127 matrix parameters but only 41 exact
-        :class:`_BucketKey` values. Native batched matrix products once per key
-        replace the :func:`torch.vmap` layer, which had already lowered each product
-        to one batched multiply, and fold the scale-and-add into
-        :func:`torch.baddbmm`, while keeping the same normalization, requested iteration count, branch
-        weights and decay.
-        Vector parameters and the ``w_muon == 0`` arm stay on their scalar path;
-        :meth:`_is_batchable_matrix` is what says which parameters those are, and
-        it says it for :meth:`_parameter_update` too.
+        For a wide matrix ``X``, appending zero columns preserves its Frobenius norm
+        and ``X @ X.T``. Every quintic iterate therefore retains those zero columns;
+        removing them recovers the same mathematical update. The scale still uses
+        each matrix's original dimensions. This reduces the n detector's 41 exact
+        shapes to fewer launch groups without changing the iteration itself.
 
-        The batched path is taken only where it pays (:data:`_BATCHED_DEVICE_TYPES`). One
-        large kernel launch in place of many is a win where launch overhead
-        dominates the step and a loss where it does not, and the measurement says
-        which is which per backend rather than per shape: MPS ran the
-        :func:`torch.vmap` path this native batch replaced at 108.45 ms per optimizer
-        step against 60.99 ms for the per-parameter loop. The native batch has not
-        been re-measured on MPS or CPU, so the CUDA-only gate is inherited from that
-        measurement. Every parameter on a device outside that set keeps the loop.
-
-        A bucket holding one parameter is called directly rather than batched. There
-        is nothing to combine, the stack-batch-unbind round trip costs more than the
-        call it wraps, and the direct call is the one that stays bit-for-bit what an
-        unbatched run produced -- a single-element batch ``(4, 21, 1, 1)`` differed from it
-        by 4.77e-7. Ten of the n-scale detector's buckets hold one parameter.
-
-        Each update is applied where it resolves rather than collected for a final
-        pass. Every update reads its own parameter and nothing else, so the order is
-        free, while holding one update per parameter alive alongside one gradient per
-        parameter is a transient peak that grows with the model.
+        ``_padding_batches`` bounds each padded gradient stack by the parameter and
+        gradient bytes of the matrices in its own batch. A singleton, or a batch whose
+        matrices all share one shape, keeps the original implementation; equal-shape
+        matrices that share a smaller dimension with a matrix of another width join
+        the padded batch. Parameters whose memory overlaps, shared storage included,
+        keep exact-shape keys too: reordering overlapping updates could change
+        decoupled decay.
+        CPU and MPS retain their existing route. CUDA momentum uses three foreach
+        operations when storage is independent; vectors and the zero-Muon arm keep
+        their original SGD update formula.
         """
         momentum = group["momentum"]
         lr = group["lr"]
         matrix_buckets: dict[_BucketKey, list[_PendingUpdate]] = defaultdict(list)
-        for param in group["params"]:
+        inspectable = [
+            param
+            for param in group["params"]
+            if type(param) in _STORAGE_TYPES
+            and param.layout == torch.strided
+            and param.device.type in _BATCHED_DEVICE_TYPES
+        ]
+        storage_counts = Counter(param.untyped_storage().data_ptr() for param in inspectable)
+        independent_storage = len(storage_counts) == len(group["params"]) and not _memory_overlaps(inspectable)
+        active = [param for param in group["params"] if param.grad is not None]
+        adjusted = self._foreach_nesterov(active, momentum, storage_counts)
+        for param in active:
             grad = param.grad
-            if grad is None:
-                continue
-            nesterov_grad = self._nesterov_grad(param, grad, momentum)
+            assert grad is not None
+            nesterov_grad = self._nesterov_grad(param, grad, momentum) if adjusted is None else adjusted.popleft()
             if self._is_batchable_matrix(param, group) and param.device.type in _BATCHED_DEVICE_TYPES:
-                key = _BucketKey(param.shape, param.dtype, nesterov_grad.dtype, param.device)
+                rows, _ = _matrix_shape(nesterov_grad)
+                shape = param.shape
+                if (
+                    independent_storage
+                    and type(param) in _STORAGE_TYPES
+                    and type(nesterov_grad) in _STORAGE_TYPES
+                    and 0 < rows <= _PADDED_MAX_ROWS
+                    and storage_counts[param.untyped_storage().data_ptr()] == 1
+                ):
+                    shape = torch.Size((rows,))
+                key = _BucketKey(shape, param.dtype, nesterov_grad.dtype, param.device)
                 matrix_buckets[key].append(_PendingUpdate(param, nesterov_grad))
             else:
                 param.add_(self._parameter_update(param, nesterov_grad, group), alpha=-lr)
 
         for bucket in matrix_buckets.values():
-            if len(bucket) == 1:
-                lone = bucket[0]
-                lone.param.add_(self._parameter_update(lone.param, lone.nesterov_grad, group), alpha=-lr)
-                continue
-            params = torch.stack([pending.param for pending in bucket])
-            grads = torch.stack([pending.nesterov_grad for pending in bucket])
-            batched = self._batched_parameter_update(params, grads, group)
-            for pending, bucket_update in zip(bucket, batched.unbind(), strict=True):
-                pending.param.add_(bucket_update, alpha=-lr)
+            for batch in _padding_batches(bucket):
+                if len(batch) == 1:
+                    lone = batch[0]
+                    lone.param.add_(self._parameter_update(lone.param, lone.nesterov_grad, group), alpha=-lr)
+                elif all(pending.param.shape == batch[0].param.shape for pending in batch):
+                    params = torch.stack([pending.param for pending in batch])
+                    grads = torch.stack([pending.nesterov_grad for pending in batch])
+                    batched = self._batched_parameter_update(params, grads, group)
+                    for pending, bucket_update in zip(batch, batched.unbind(), strict=True):
+                        pending.param.add_(bucket_update, alpha=-lr)
+                else:
+                    for pending, update in zip(batch, self._padded_parameter_updates(batch, group), strict=True):
+                        pending.param.add_(update, alpha=-lr)
+
+    def _foreach_nesterov(
+        self, params: list[Tensor], momentum: float, storage_counts: Counter[int]
+    ) -> deque[Tensor] | None:
+        """Batch the same three momentum operations when their storage is independent.
+
+        ``buffer.mul_(momentum).add_(grad)`` stays two rounded operations, followed
+        by ``grad.add(buffer, alpha=momentum)``. No interpolation or reassociation
+        enters the recurrence. Devices outside ``_BATCHED_DEVICE_TYPES`` (CPU and
+        MPS by default) and unusual restored state keep the scalar method; shared
+        parameter, gradient or buffer storage does too, because advancing one
+        buffer could otherwise change another operation's input.
+
+        The adjusted gradients come back in parameter order as a queue the caller
+        pops from, so each one is released once its update has consumed it instead
+        of living until the whole group is done.
+        """
+        on_gated_device = all(
+            type(param) in _STORAGE_TYPES and param.device.type in _BATCHED_DEVICE_TYPES for param in params
+        )
+        if len(params) < 2 or not on_gated_device or any(count > 1 for count in storage_counts.values()):
+            return None
+        gradients: list[Tensor] = []
+        buffers: list[Tensor] = []
+        buffer_storage: set[int] = set()
+        gradient_storage: set[int] = set()
+        buckets: dict[tuple[torch.device, torch.dtype], list[int]] = defaultdict(list)
+        for index, param in enumerate(params):
+            gradient = param.grad
+            if (
+                gradient is None
+                or type(gradient) not in _STORAGE_TYPES
+                or gradient.layout != torch.strided
+                or gradient.dtype != param.dtype
+            ):
+                return None
+            state = self.state[param]
+            buffer = state.get("momentum_buffer")
+            if buffer is None:
+                buffer = torch.zeros_like(param)
+                state["momentum_buffer"] = buffer
+            if (
+                type(buffer) not in _STORAGE_TYPES
+                or buffer.layout != torch.strided
+                or buffer.shape != param.shape
+                or buffer.dtype != gradient.dtype
+                or buffer.device != gradient.device
+            ):
+                return None
+            pointer = buffer.untyped_storage().data_ptr()
+            if pointer in storage_counts or pointer in buffer_storage:
+                return None
+            buffer_storage.add(pointer)
+            gradient_storage.add(gradient.untyped_storage().data_ptr())
+            gradients.append(gradient)
+            buffers.append(buffer)
+            buckets[(gradient.device, gradient.dtype)].append(index)
+        if gradient_storage.intersection(buffer_storage) or gradient_storage.intersection(storage_counts):
+            return None
+        adjusted: dict[int, Tensor] = {}
+        for indices in buckets.values():
+            group_buffers = [buffers[index] for index in indices]
+            group_gradients = [gradients[index] for index in indices]
+            torch._foreach_mul_(group_buffers, momentum)
+            torch._foreach_add_(group_buffers, group_gradients)
+            results = torch._foreach_add(group_gradients, group_buffers, alpha=momentum)
+            adjusted.update(zip(indices, results, strict=True))
+        return deque(adjusted[index] for index in range(len(params)))
+
+    @staticmethod
+    def _padded_parameter_updates(bucket: list[_PendingUpdate], group: dict[str, Any]) -> Iterator[Tensor]:
+        """Run the existing quintic over zero-extended, independently normalized matrices.
+
+        Only the common wide orientation is stacked. Each result is cropped back
+        before its original ``0.2 * sqrt(max(rows, columns))`` scale, gains and decay
+        are applied. Padding is zero work mathematically, but GEMM and reduction
+        schedules can differ in floating point; the scalar path remains the oracle.
+
+        The scale, gains and decay here are the third copy of the Muon arm of
+        :meth:`_parameter_update`; :meth:`_batched_parameter_update` lists all three copies
+        and the tests that hold them together.
+        """
+        rows = _matrix_shape(bucket[0].nesterov_grad)[0]
+        columns = max(_matrix_shape(pending.nesterov_grad)[1] for pending in bucket)
+        padded = bucket[0].nesterov_grad.new_zeros((len(bucket), rows, columns))
+        for index, pending in enumerate(bucket):
+            gradient = pending.nesterov_grad
+            matrix = gradient.reshape(gradient.shape[0], -1)
+            wide = matrix.T if matrix.shape[0] > matrix.shape[1] else matrix
+            padded[index, :, : wide.shape[1]] = wide
+        orthogonal = _orthogonalize_batched(padded, steps=group["ns_steps"])
+        for index, pending in enumerate(bucket):
+            gradient = pending.nesterov_grad
+            _, original_columns = _matrix_shape(gradient)
+            matrix = orthogonal[index, :, :original_columns]
+            if gradient.shape[0] > math.prod(gradient.shape[1:]):
+                matrix = matrix.T
+            muon = matrix.reshape_as(gradient).mul(_MUON_RMS_SCALE * math.sqrt(original_columns))
+            update = muon.mul(group["w_muon"]).add(gradient, alpha=group["w_sgd"])
+            if group["weight_decay"] != 0.0:
+                update = update.add(pending.param, alpha=group["weight_decay"])
+            yield update
 
     @staticmethod
     def _batched_parameter_update(params: Tensor, grads: Tensor, group: dict[str, Any]) -> Tensor:
@@ -297,19 +468,24 @@ class MuSGD(Optimizer):
         each product is a native batched product rather than a scalar product inside
         ``vmap``.
 
-        This is a second copy of the Muon arm of :meth:`_parameter_update`, kept beside
-        it instead of factored out so that the scalar path stays the untouched reference.
+        This is the second of three copies of the Muon arm of :meth:`_parameter_update`, kept
+        beside it instead of factored out so that the scalar path stays the untouched reference.
         It mirrors :meth:`_muon_branch` (the 2D view and the ``0.2 * sqrt(max(rows, cols))``
         rescale) with :func:`~lucid_yolo.optim.newton_schulz._orthogonalize_batched` in place
         of :func:`~lucid_yolo.optim.newton_schulz.orthogonalize`, then repeats the
         ``w_muon``/``w_sgd`` weighting and the decoupled decay of :meth:`_parameter_update`.
-        A change to the formula made in one place has to be made in the other. Two tests hold
-        the copies together: the first compares this path with :meth:`_parameter_update` over
-        40 optimizer steps, the second compares the orthogonalization alone with the scalar loop.
+        The third copy is :meth:`_padded_parameter_updates`, which repeats the same scale,
+        gains and decay after cropping each padded result. A change to the formula made in one
+        place has to be made in all three. Three tests hold the copies together: the first
+        compares this path with :meth:`_parameter_update` over 40 optimizer steps, the second
+        compares the orthogonalization alone with the scalar loop, the third compares the padded
+        path with the scalar formula for mixed widths.
 
             ``tests/optim/test_musgd.py::TestExactShapeBatching::test_batched_trajectory_matches_unbatched_reference_over_many_steps``
 
             ``tests/optim/test_newton_schulz.py::TestNativeBatch::test_matches_per_matrix_loop``
+
+            ``tests/optim/test_padded_musgd.py::test_mixed_width_update_matches_scalar_oracle``
         """
         matrices = grads.reshape(grads.shape[0], grads.shape[1], -1)
         rows, cols = matrices.shape[-2:]
@@ -325,8 +501,8 @@ class MuSGD(Optimizer):
         """Whether ``param`` reaches the orthogonalizing arm of :meth:`_parameter_update`.
 
         That arm is the only one carrying a Newton--Schulz product, which makes it
-        the only one with anything to batch -- so "takes the Muon branch" and "may
-        be stacked with another parameter" are one question with one answer, and
+        the only one eligible for a matrix batch -- so "takes the Muon branch" and
+        "may join another orthogonalization" are one question with one answer, and
         this is where it is answered. A vector parameter returns before the branch
         and a zero ``w_muon`` takes the arm beside it; neither has a product, so
         neither joins a bucket.
@@ -381,7 +557,7 @@ class MuSGD(Optimizer):
         the work rather than merely discarding it. The expression inside this
         function remains untouched. Before exact-shape batching, this paragraph
         also promised that a ``w_muon > 0`` run was bit-for-bit the run it was.
-        :meth:`_step_group` now batches the expression over equal-shape matrices, so
+        :meth:`_step_group` now batches compatible matrices, padding with zeros when needed, so
         that scheduling promise no longer holds even though the formula does.
 
         One of the remaining behavioural differences is confined to the arm that
