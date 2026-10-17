@@ -172,8 +172,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import torch
-from pytorch_lightning import LightningModule
+from pytorch_lightning import Callback, LightningModule
 from pytorch_lightning.accelerators import CUDAAccelerator
+from pytorch_lightning.strategies import SingleDeviceStrategy
 from torch import Tensor
 
 from lucid_yolo.assign import make_anchor_points
@@ -215,6 +216,7 @@ from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
 from lucid_yolo.ptl.coco_backend import build_mean_average_precision
+from lucid_yolo.ptl.network_capture import _NetworkCapture, _NetworkCaptureLifecycle
 from lucid_yolo.ptl.seg_targets import instance_mask_targets, scale_boxes_to_grid, semantic_target
 
 if TYPE_CHECKING:
@@ -885,10 +887,20 @@ class DetectionLitModule(LightningModule):
             the state dict, EMA, checkpoints and export are untouched. Whether the
             compiled objective trains to the same mAP as eager is A78, still open —
             which is why the default is off.
+        capture_network: Replay the existing detection network's CUDA forward and backward
+            with :func:`torch.cuda.make_graphed_callables`. Defaults to ``False`` because
+            capture pays setup and retains a graph pool. Requires ``task="detect"``,
+            ``compile_step=False`` and single-device CUDA automatic optimization.
+            Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
+            One image signature is recorded per fit; partial batches stay eager and
+            changed storage, modes, hooks or precision retire the recording. Warmup
+            restores buffers and RNG, and the fit callbacks discard recordings on
+            completion or failure. Higher-order differentiation is unsupported.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
             ``"keypoints"``, if ``rotated_iou_form`` is not a known rotated-IoU form,
+            if ``capture_network`` is combined with a non-detection task or ``compile_step``,
             if ``keypoint_loss`` is not a known keypoint objective, if
             ``task="keypoints"`` was asked for without a ``num_keypoints``, or if a
             ``num_keypoints`` was given for a task that builds no point stem.
@@ -934,10 +946,15 @@ class DetectionLitModule(LightningModule):
         keypoint_loss: str = "rle",
         oks_gain: float = 0.0,
         compile_step: bool = False,
+        capture_network: bool = False,
     ) -> None:
         super().__init__()
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
+        if capture_network and (task != "detect" or compile_step):
+            raise ValueError("capture_network=True requires task='detect' and compile_step=False")
         self.save_hyperparameters()
+        self._capture_network, self._capture_network_active = capture_network, False
+        self._network_capture = _NetworkCapture()
         self._task = task
         self._num_keypoints = num_keypoints
         self._compile_step: bool = compile_step
@@ -1170,6 +1187,19 @@ class DetectionLitModule(LightningModule):
         on_cuda = self._trainer is not None and isinstance(self._trainer.accelerator, CUDAAccelerator)
         if on_cuda:
             self.to(memory_format=torch.channels_last)
+        self._capture_network_active = (
+            self._capture_network
+            and on_cuda
+            and self._trainer is not None
+            and isinstance(self.trainer.strategy, SingleDeviceStrategy)
+            and self.automatic_optimization
+        )
+        if self._capture_network and not self._capture_network_active and stage == "fit":
+            warnings.warn(
+                "capture_network=True is ignored outside single-device CUDA automatic optimization",
+                UserWarning,
+                stacklevel=2,
+            )
         if self._compile_step and not self._compile_step_resolved:
             self._compile_objective(on_cuda)
         if stage == "predict" or self.task not in _RANK_LOCAL_VAL_TASKS:
@@ -1187,6 +1217,10 @@ class DetectionLitModule(LightningModule):
                 "per-rank values. Re-run with devices=1 (and no distributed strategy), or use "
                 "task='detect'/'segment', whose metrics synchronise across ranks."
             )
+
+    def configure_callbacks(self) -> list[Callback]:
+        """Keep an opted-in network recording scoped to one fit."""
+        return [_NetworkCaptureLifecycle()] if self._capture_network else []
 
     def _compile_objective(self, on_cuda: bool) -> None:
         """Swap the compiled detection objective in, or warn once and stay eager (WP-184, D24).
@@ -1264,7 +1298,36 @@ class DetectionLitModule(LightningModule):
         Returns:
             The dense head output and the dual loss output.
         """
-        head_out = self(images)
+        if (
+            self._capture_network_active
+            and self._trainer is not None
+            and self._trainer.training
+            and self.training
+            and self.automatic_optimization
+            and torch.is_grad_enabled()
+            and images.is_cuda
+        ):
+            root_hooks = any(
+                (self._forward_hooks, self._forward_pre_hooks, self._backward_hooks, self._backward_pre_hooks)
+            )
+            custom_forward = type(self).forward is not _EAGER_NETWORK_FORWARD or "forward" in vars(self)
+            if root_hooks or custom_forward or self._compiled_call_impl is not None:
+                self._network_capture.retire()
+                head_out = self(images)
+            else:
+                eager = cast("Callable[[Tensor], DualHeadOutput]", self)
+                preserve_gradients = (
+                    self.trainer.accumulate_grad_batches > 1
+                    or type(self).optimizer_zero_grad is not _EAGER_ZERO_GRAD
+                    or "optimizer_zero_grad" in vars(self)
+                    or type(self).configure_optimizers is not _EAGER_OPTIMIZERS
+                    or "configure_optimizers" in vars(self)
+                )
+                head_out = self._network_capture.run(
+                    images, (self.backbone, self.neck, self.head), eager, preserve_gradients=preserve_gradients
+                )
+        else:
+            head_out = self(images)
         o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)
         o2o_boxes = decode_ltrb(head_out.o2o_box, anchor_points, strides)
         out = self.loss(
@@ -2504,3 +2567,9 @@ class DetectionLitModule(LightningModule):
             self._anchor_cache[key] = cached
         points, strides = cached
         return points.to(device), strides.to(device)
+
+
+#: The unmodified public forward; instance/class overrides retain their eager dispatch.
+_EAGER_NETWORK_FORWARD = DetectionLitModule.forward
+_EAGER_ZERO_GRAD = LightningModule.optimizer_zero_grad
+_EAGER_OPTIMIZERS = DetectionLitModule.configure_optimizers

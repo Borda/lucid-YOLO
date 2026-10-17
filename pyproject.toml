@@ -25,6 +25,10 @@ classifiers = [
 dependencies = [
   "torch>=2.4",
   "pytorch-lightning[extra]>=2.4",
+  # The optional CUDA replay checks its verified BF16 runtime boundary. Lightning
+  # already requires packaging; a source import still declares it directly. The
+  # licence-audit tooling keeps using the same dependency (R34).
+  "packaging>=24.0",
   # Declared directly, not leaned on transitively: LightningCLI brings it, but all three
   # console scripts parse with it now (WP-096), and `[signatures]` is what reads the
   # docstrings the help text is built from.
@@ -93,14 +97,6 @@ dev = [
   "shapely>=2.0",
   "pre-commit>=3.7",
   "build>=1.2",
-  # `scripts/lint/audit_licenses.py` imports it directly for marker and extras evaluation:
-  # attributing a distribution to a dependency tier means walking the requirement graph
-  # the way an installer would, and a hand-rolled marker evaluator would be a second,
-  # worse implementation of a solved problem. Arrived transitively before WP-115 (pytest
-  # and mkdocs both require it, which is why the docs CI job has it without this line);
-  # declared here because a direct import is not a transitive dependency. Apache-2.0 OR
-  # BSD-2-Clause, read from the installed distribution's own `License-Expression`.
-  "packaging>=24.0",
   # `fuse-augmentations` was declared here until WP-159 promoted it to a runtime
   # dependency, and `matplotlib` until WP-189 did the same; the reasoning for each
   # moved with it to `[project].dependencies`.
