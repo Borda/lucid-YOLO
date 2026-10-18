@@ -209,6 +209,7 @@ def rotated_detections_to_predictions(detections: Tensor, score_floor: float = 0
         ValueError: If ``detections`` is not a 3-D ``(B, N, 7)`` tensor.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> dets = torch.tensor(
         ...     [
@@ -223,6 +224,8 @@ def rotated_detections_to_predictions(detections: Tensor, score_floor: float = 0
         (1, (1, 5))
         >>> preds[0]["labels"].tolist(), preds[0]["scores"].tolist()
         ([1], [0.8999999761581421])
+
+        ```
     """
     if detections.ndim != 3 or detections.shape[2] != _DETECTION_WIDTH:
         raise ValueError(f"detections must be (B, N, {_DETECTION_WIDTH}); got shape {tuple(detections.shape)}")
@@ -250,6 +253,7 @@ def tiled_targets_to_ground_truth(tiled: TiledTargets) -> dict[str, Tensor]:
         :func:`evaluate_rotated_map` consumes.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.data.targets import Targets
         >>> from lucid_yolo.data.tiling import TiledTargets
@@ -262,6 +266,8 @@ def tiled_targets_to_ground_truth(tiled: TiledTargets) -> dict[str, Tensor]:
         >>> ground_truth = tiled_targets_to_ground_truth(tiled)
         >>> ground_truth["labels"].tolist(), ground_truth["difficult"].tolist()
         ([3], [True])
+
+        ```
     """
     return {
         "rboxes": tiled.targets.rboxes.detach().cpu(),
@@ -316,6 +322,7 @@ def evaluate_rotated_map(
         ValueError: If ``preds`` and ``targets`` differ in length.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> box = torch.tensor([[10.0, 10.0, 4.0, 2.0, 0.3]])
         >>> preds = [{"rboxes": box, "scores": torch.tensor([0.9]), "labels": torch.tensor([2])}]
@@ -326,6 +333,8 @@ def evaluate_rotated_map(
         >>> miss = [{"rboxes": box, "labels": torch.tensor([2]), "difficult": torch.tensor([True])}]
         >>> evaluate_rotated_map(preds, miss)["map"]  # the only class is all-difficult
         0.0
+
+        ```
     """
     if len(preds) != len(targets):
         raise ValueError(f"preds and targets must align by position; got {len(preds)} and {len(targets)}")
@@ -366,10 +375,13 @@ def _image_to_prediction(detections: Tensor, score_floor: float) -> dict[str, Te
     """Convert one image's ``(N, 7)`` oriented detections into a prediction dict.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> rows = torch.tensor([[1.0, 2.0, 4.0, 2.0, 0.1, 0.5, 3.0], [0.0] * 7])
         >>> _image_to_prediction(rows, 0.0)["labels"].tolist()
         [3]
+
+        ```
     """
     kept = detections[detections[:, _SCORE_COLUMN] > score_floor]
     return {
@@ -387,6 +399,7 @@ def _cap_detections(prediction: Mapping[str, Tensor], cap: int | None) -> Mappin
     disables it for an evaluation unit whose detections were already capped at emission.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> many = {
         ...     "rboxes": torch.zeros(400, 5),
@@ -397,6 +410,8 @@ def _cap_detections(prediction: Mapping[str, Tensor], cap: int | None) -> Mappin
         (300,)
         >>> tuple(_cap_detections(many, None)["scores"].shape)
         (400,)
+
+        ```
     """
     scores = prediction["scores"]
     if cap is None or scores.shape[0] <= cap:
@@ -409,9 +424,12 @@ def _difficult_flags(target: Mapping[str, Tensor]) -> Tensor:
     """Return a target's difficult flags, defaulting to all-false when it carries none.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _difficult_flags({"labels": torch.tensor([1, 2])}).tolist()
         [False, False]
+
+        ```
     """
     flags = target.get("difficult")
     if flags is None:
@@ -427,10 +445,13 @@ def _scorable_labels(targets: Sequence[Mapping[str, Tensor]]) -> list[int]:
     the ground truth entirely and the class whose every instance is flagged difficult.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> targets = [{"labels": torch.tensor([4, 7]), "difficult": torch.tensor([False, True])}]
         >>> _scorable_labels(targets)  # class 7 is all-difficult
         [4]
+
+        ```
     """
     labels: set[int] = set()
     for target in targets:
@@ -450,6 +471,7 @@ def _split_class(
     per-threshold matching: the order is a property of the image, not of the threshold.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> box = torch.tensor([[0.0, 0.0, 4.0, 2.0, 0.0]])
         >>> prediction = {"rboxes": box, "scores": torch.tensor([0.7]), "labels": torch.tensor([1])}
@@ -457,6 +479,8 @@ def _split_class(
         >>> split = _split_class(prediction, target, 1)
         >>> tuple(split.iou.shape), float(split.iou[0, 0])
         ((1, 1), 1.0)
+
+        ```
     """
     keep = prediction["labels"] == label
     scores = prediction["scores"][keep]
@@ -479,11 +503,14 @@ def _class_curves(splits: Sequence[_ImageSplit]) -> tuple[Tensor, Tensor]:
     and carries at least one non-difficult ground truth between them.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> split = _ImageSplit(torch.tensor([0.9]), torch.ones(1, 1), torch.tensor([False]))
         >>> precision, recall = _class_curves([split])
         >>> float(precision[0]), float(recall[0])
         (1.0, 1.0)
+
+        ```
     """
     positives = sum(int((~split.difficult).sum()) for split in splits)
     scores = torch.cat([split.scores for split in splits])
@@ -506,10 +533,13 @@ def _threshold_curve(true_positive: Tensor, false_positive: Tensor, positives: i
         positives: The class's non-difficult ground-truth count.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> miss = torch.tensor([False])
         >>> _threshold_curve(miss, ~miss, 1)  # the only detection missed
         (0.0, 0.0)
+
+        ```
     """
     scored = true_positive | false_positive
     return _average_precision(true_positive[scored], false_positive[scored], positives)
@@ -546,6 +576,7 @@ def _match_image(split: _ImageSplit) -> tuple[Tensor, Tensor]:
         :data:`IOU_THRESHOLDS` entry, in the split's own descending-score order.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> iou = torch.tensor([[0.9, 0.0], [0.8, 0.0]])  # two detections, one good target
         >>> split = _ImageSplit(torch.tensor([0.9, 0.5]), iou, torch.tensor([False, False]))
@@ -554,6 +585,8 @@ def _match_image(split: _ImageSplit) -> tuple[Tensor, Tensor]:
         ([True, False], [False, True])
         >>> true_positive[-1].tolist()  # at 0.95 neither overlap is enough
         [False, False]
+
+        ```
     """
     thresholds = torch.tensor(IOU_THRESHOLDS, dtype=split.iou.dtype)
     detections, ground_truths = split.iou.shape
@@ -613,6 +646,7 @@ def _average_precision(true_positive: Tensor, false_positive: Tensor, positives:
     exception. A guard against a silently corrupted metric is worth its line.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> hit = torch.tensor([True])
         >>> _average_precision(hit, ~hit, 1)
@@ -623,6 +657,8 @@ def _average_precision(true_positive: Tensor, false_positive: Tensor, positives:
         >>> average, attained = _average_precision(hit, ~hit, 2)
         >>> round(average, 4), attained
         (0.505, 0.5)
+
+        ```
     """
     if positives == 0 or true_positive.numel() == 0:
         return 0.0, 0.0

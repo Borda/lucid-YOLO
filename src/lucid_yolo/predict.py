@@ -210,6 +210,7 @@ def _wrong_task_message(handled: str, found: str) -> str:
         The refusal text, ready to hand to :class:`ValueError`.
 
     Examples:
+        ```pycon
         >>> print(_wrong_task_message("detect", "keypoints"))  # doctest: +NORMALIZE_WHITESPACE
         predict_image handles task='detect'; this checkpoint's task is 'keypoints'.
         Each task has its own entry point: a 'segment' checkpoint goes through
@@ -217,6 +218,8 @@ def _wrong_task_message(handled: str, found: str) -> str:
         a 'obb' checkpoint goes through predict_oriented, which returns rotated boxes,
         a centre and two extents and an angle; a 'keypoints' checkpoint goes through
         predict_keypoints, which returns a point set row-aligned with each box.
+
+        ```
     """
     own_function = _TASK_ENTRY_POINTS[handled][0]
     siblings = "; ".join(
@@ -257,11 +260,14 @@ def _check_predict_arguments(decoder: DecodePath, conf_threshold: float, img_siz
             multiple of every head stride.
 
     Examples:
+        ```pycon
         >>> _check_predict_arguments("e2e", 0.25, 640)  # a usable trio: returns nothing
         >>> _check_predict_arguments("E2E", 0.25, 640)
         Traceback (most recent call last):
             ...
         ValueError: decoder must be one of ('e2e', 'nms'); got 'E2E'
+
+        ```
     """
     require_one_of("decoder", decoder, DECODE_PATHS)
     require_in_range("conf_threshold", conf_threshold, 0.0, 1.0)
@@ -288,8 +294,11 @@ def _branch_for(decoder: DecodePath) -> BranchName:
         The name of the branch that path's decoder reads.
 
     Examples:
+        ```pycon
         >>> _branch_for("e2e"), _branch_for("nms")
         ('o2o', 'o2m')
+
+        ```
     """
     return "o2o" if decoder == "e2e" else "o2m"
 
@@ -335,8 +344,11 @@ def predict_image(
             :func:`_check_predict_arguments`.
 
     Examples:
+        ```pycon
         >>> callable(predict_image)  # a real call needs a checkpoint and an image file
         True
+
+        ```
     """
     if module.task != _DETECT_TASK:
         raise ValueError(_wrong_task_message(_DETECT_TASK, module.task))
@@ -390,10 +402,13 @@ class SegmentedPrediction:
             to its own detection's box (A11) and binarized at the A37 threshold.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> prediction = SegmentedPrediction(torch.zeros(0, 6), torch.zeros(0, 4, 4, dtype=torch.bool))
         >>> prediction.detections.shape[0] == prediction.masks.shape[0]  # always row-aligned
         True
+
+        ```
     """
 
     detections: Tensor
@@ -452,8 +467,11 @@ def predict_segmentation(
             :func:`_check_predict_arguments`.
 
     Examples:
+        ```pycon
         >>> callable(predict_segmentation)  # a real call needs a checkpoint and an image file
         True
+
+        ```
     """
     if module.task != _SEGMENT_TASK:
         raise ValueError(_wrong_task_message(_SEGMENT_TASK, module.task))
@@ -642,8 +660,11 @@ def predict_oriented(
             domain, per :func:`_check_predict_arguments`.
 
     Examples:
+        ```pycon
         >>> callable(predict_oriented)  # a real call needs a checkpoint and an image file
         True
+
+        ```
     """
     if module.task != _OBB_TASK:
         raise ValueError(_wrong_task_message(_OBB_TASK, module.task))

@@ -477,8 +477,11 @@ def _current_tag() -> str | None:
     tag, and the hook has nothing to check for them.
 
     Examples:
+        ```pycon
         >>> _current_tag() is None or isinstance(_current_tag(), str)
         True
+
+        ```
     """
     completed = subprocess.run(
         ["git", "describe", "--tags", "--exact-match", "HEAD"],

@@ -96,10 +96,29 @@ plugins:
       execute: false
       include_source: true
       ignore_h1_titles: true
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+            show_source: false
+            heading_level: 3
 
 # Wider grid and a right-hand table of contents that slides in from the edge (WP-196).
 extra_css:
   - stylesheets/extra.css
+
+# Strips `>>>`/`...` prompts and output lines when a ```pycon example is copied.
+extra_javascript:
+  - javascripts/pycon_copy.js
 
 # Per-page titles and descriptions, a markdown copy of every page at <page>/index.md, and
 # llms.txt / llms-full.txt at the site root -- all derived at build time (WP-196).
@@ -124,6 +143,8 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.highlight:
       anchor_linenums: true
+      # `language-pycon` on each block is what javascripts/pycon_copy.js keys on.
+      pygments_lang_class: true
   - pymdownx.superfences:
       # Material renders a fence tagged mermaid as a diagram only when superfences
       # hands it through as a div of that class; the format callable is what does
@@ -213,6 +234,11 @@ nav:
           - Instance segmentation on COCO 2017: notebooks/demo_segment.ipynb
           - Oriented detection on DOTA tiles: notebooks/demo_obb.ipynb
           - Keypoints on COCO person_keypoints: notebooks/demo_keypoints.ipynb
+  - API:
+      - Models: api/models.md
+      - Data: api/data.md
+      - Training: api/training.md
+      - Inference: api/inference.md
   - Project:
       - Roadmap: ROADMAP.md
       - Logs:

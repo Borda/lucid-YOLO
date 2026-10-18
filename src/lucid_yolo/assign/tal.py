@@ -99,11 +99,14 @@ def _box_iou_cross(gt_boxes: Tensor, pred_boxes: Tensor, eps: float) -> Tensor:
         ``(B, N, A)`` IoU tensor.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> gt = torch.tensor([[[0.0, 0.0, 2.0, 2.0]]])
         >>> pred = torch.tensor([[[0.0, 0.0, 2.0, 2.0], [1.0, 1.0, 3.0, 3.0]]])
         >>> _box_iou_cross(gt, pred, 1e-9).round(decimals=4)
         tensor([[[1.0000, 0.1429]]])
+
+        ```
     """
     gt = gt_boxes.unsqueeze(2)  # (B, N, 1, 4)
     pred = pred_boxes.unsqueeze(1)  # (B, 1, A, 4)
@@ -135,11 +138,14 @@ def _rotated_inside(anchor_points: Tensor, gt_rboxes: Tensor) -> Tensor:
         exactly on the boundary of the rotated ground truth.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> points = torch.tensor([[0.0, 0.0], [4.0, 0.0]])
         >>> rboxes = torch.tensor([[[0.0, 0.0, 6.0, 2.0, 0.0]]])  # 6x2 box at the origin
         >>> _rotated_inside(points, rboxes).tolist()  # (1, 1, 2): the second point is out
         [[[True, False]]]
+
+        ```
     """
     per_image = [points_in_rboxes(anchor_points, rboxes) for rboxes in gt_rboxes]  # each (A, N)
     return torch.stack(per_image).transpose(1, 2)  # (B, A, N) -> (B, N, A)
@@ -153,8 +159,11 @@ def _check_rbox_batch(gt_rboxes: Tensor, gt_boxes: Tensor) -> None:
     and the axis-aligned one everything downstream.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _check_rbox_batch(torch.zeros((2, 3, 5)), torch.zeros((2, 3, 4)))
+
+        ```
     """
     expected = (*gt_boxes.shape[:2], _RBOX_DIM)
     if tuple(gt_rboxes.shape) != expected:
@@ -191,6 +200,7 @@ def _check_hyperparameters(alpha: float, beta: float, eps: float) -> None:
             message names the offending parameter and the value it was given.
 
     Examples:
+        ```pycon
         >>> _check_hyperparameters(1.0, 6.0, 1e-9)
         >>> _check_hyperparameters(1.0, 6.0, 0.0)
         Traceback (most recent call last):
@@ -198,6 +208,8 @@ def _check_hyperparameters(alpha: float, beta: float, eps: float) -> None:
         >>> _check_hyperparameters(1.0, -6.0, 1e-9)
         Traceback (most recent call last):
         ValueError: beta must be finite and >= 0, got -6.0
+
+        ```
     """
     for name, exponent in (("alpha", alpha), ("beta", beta)):
         if not math.isfinite(exponent) or exponent < 0.0:
@@ -240,6 +252,7 @@ def _check_labels(gt_labels: Tensor, gt_mask: Tensor, num_classes: int) -> None:
             ground truth carries a negative one.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> labels = torch.tensor([[0, -1]])  # -1 is a padding slot's leftover
         >>> _check_labels(labels, torch.tensor([[True, False]]), num_classes=3)
@@ -249,6 +262,8 @@ def _check_labels(gt_labels: Tensor, gt_mask: Tensor, num_classes: int) -> None:
         >>> _check_labels(torch.tensor([[0, 7]]), torch.tensor([[True, False]]), num_classes=3)
         Traceback (most recent call last):
         ValueError: gt_labels must be < 3 at every slot, padding included; got [7]
+
+        ```
     """
     too_large = gt_labels >= num_classes
     if bool(too_large.any()):
@@ -290,6 +305,7 @@ class TaskAlignedAssigner:
             (see :func:`_check_hyperparameters`).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> assigner = TaskAlignedAssigner(topk=1)
         >>> scores = torch.tensor([[[0.9], [0.1]]])  # (B=1, A=2, C=1)
@@ -301,6 +317,8 @@ class TaskAlignedAssigner:
         >>> out = assigner(scores, boxes, points, gt_boxes, gt_labels, gt_mask)
         >>> out.fg_mask
         tensor([[ True, False]])
+
+        ```
     """
 
     def __init__(self, topk: int, alpha: float = 1.0, beta: float = 6.0, eps: float = 1e-9) -> None:
@@ -352,6 +370,7 @@ class TaskAlignedAssigner:
             alignment weights.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> assigner = TaskAlignedAssigner(topk=1)
             >>> scores = torch.zeros(1, 4, 1)  # no ground truth -> all background
@@ -364,8 +383,11 @@ class TaskAlignedAssigner:
             >>> bool(out.fg_mask.any())
             False
 
+            ```
+
             Rotated candidacy drops an anchor the axis-aligned box would have kept:
 
+            ```pycon
             >>> two = TaskAlignedAssigner(topk=2)
             >>> points = torch.tensor([[0.0, 0.0], [3.0, 3.0]])
             >>> gt = torch.tensor([[[-4.0, -4.0, 4.0, 4.0]]])  # 8x8, both anchors inside
@@ -376,6 +398,8 @@ class TaskAlignedAssigner:
             tensor([[True, True]])
             >>> two(scores, preds, points, gt, labels, mask, rotated).fg_mask
             tensor([[ True, False]])
+
+            ```
         """
         with torch.no_grad():
             batch, num_anchors = pred_scores.shape[0], pred_scores.shape[1]

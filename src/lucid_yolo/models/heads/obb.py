@@ -108,6 +108,7 @@ def decode_rboxes(distances: Tensor, angles: Tensor, anchor_points: Tensor, stri
         ``[-pi/4, 3*pi/4)``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> distances = torch.tensor([[[3.0, 1.0, 4.0, 2.0]]])  # (1, 1, 4)
         >>> anchor_points = torch.tensor([[10.0, 10.0]])
@@ -120,6 +121,8 @@ def decode_rboxes(distances: Tensor, angles: Tensor, anchor_points: Tensor, stri
         >>> theta = float(decode_rboxes(distances, wild, anchor_points, strides)[0, 0, 4])
         >>> -torch.pi / 4 <= theta < 3 * torch.pi / 4
         True
+
+        ```
     """
     boxes = decode_ltrb(distances, anchor_points, strides)
     x1, y1, x2, y2 = boxes.unbind(dim=-1)
@@ -157,6 +160,7 @@ def o2o_rotated_topk(scores: Tensor, rboxes: Tensor, k: int = _DEFAULT_TOPK) -> 
         ``class`` holds the integral class index as a float.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> scores = torch.tensor([[[2.0, -1.0], [-3.0, 0.5]]])  # (1, 2, 2)
         >>> rboxes = torch.tensor([[[0.0, 0.0, 4.0, 2.0, 0.3], [9.0, 9.0, 2.0, 1.0, -0.2]]])
@@ -167,6 +171,8 @@ def o2o_rotated_topk(scores: Tensor, rboxes: Tensor, k: int = _DEFAULT_TOPK) -> 
         tensor([0.0000, 0.0000, 4.0000, 2.0000, 0.3000])
         >>> int(detections[0, 0, 6])  # class index of the top detection
         0
+
+        ```
     """
     partial, anchor_index = o2o_topk_with_indices(scores, rboxes[..., :4], k=k)
     theta = rboxes[..., 4].gather(1, anchor_index).unsqueeze(-1)

@@ -584,9 +584,12 @@ def _check_pair(items: list[tuple[Tensor, Targets]]) -> None:
         ValueError: If ``items`` does not hold exactly two pairs.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.data.targets import Targets
         >>> _check_pair([(torch.zeros(3, 2, 2), Targets.empty())] * 2)
+
+        ```
     """
     if len(items) != _PAIR_IMAGE_COUNT:
         raise ValueError(f"expected exactly {_PAIR_IMAGE_COUNT} items; got {len(items)}")
@@ -602,9 +605,12 @@ def _reject_rboxes(items: list[tuple[Tensor, Targets]]) -> None:
         NotImplementedError: If either input carries a non-empty ``rboxes``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.data.targets import Targets
         >>> _reject_rboxes([(torch.zeros(3, 2, 2), Targets.empty())] * 2)
+
+        ```
     """
     for _image, targets in items:
         if targets.rboxes.shape[0] > 0:

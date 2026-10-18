@@ -63,6 +63,7 @@ def decode_keypoints(raw_coords: Tensor, anchor_points: Tensor, strides: Tensor)
         Absolute point coordinates of shape ``(B, A, K, 2)`` in input pixels.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> raw = torch.tensor([[[[1.0, 2.0], [-1.0, 0.5]], [[0.25, -0.5], [2.0, 1.0]]]])
         >>> anchors = torch.tensor([[10.0, 20.0], [30.0, 40.0]])
@@ -73,6 +74,8 @@ def decode_keypoints(raw_coords: Tensor, anchor_points: Tensor, strides: Tensor)
         <BLANKLINE>
                  [[31., 38.],
                   [38., 44.]]]])
+
+        ```
     """
     centres = anchor_points.view(1, anchor_points.shape[0], 1, 2)
     scales = strides.view(1, strides.shape[0], 1, 1)

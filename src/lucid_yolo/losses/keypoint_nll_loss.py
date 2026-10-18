@@ -141,6 +141,7 @@ def _select_visible(mu_hat: Tensor, sigma_raw: Tensor, mu_gt: Tensor, visibility
         stay attached to their arguments' graphs.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> mu_hat = torch.zeros(1, 2, 2)
         >>> mu_gt = torch.tensor([[[0.5, 0.25], [float("inf"), float("inf")]]])
@@ -151,6 +152,8 @@ def _select_visible(mu_hat: Tensor, sigma_raw: Tensor, mu_gt: Tensor, visibility
         [[0.5, 0.5]]
         >>> _select_visible(mu_hat, torch.zeros(1, 2, 2), mu_gt, torch.tensor([[0, 0]]))[0].shape
         torch.Size([0, 2])
+
+        ```
     """
     visible = (visibility > 0).reshape(-1)
     sigma_hat = torch.sigmoid(sigma_raw.reshape(-1, 2)[visible]).clamp(min=_MIN_SIGMA)
@@ -173,11 +176,14 @@ def _reduce_selected(per_point: Tensor) -> Tensor:
         A scalar (zero-dimensional) tensor.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _reduce_selected(torch.tensor([2.0, 6.0]))
         tensor(4.)
         >>> _reduce_selected(torch.zeros(0))
         tensor(0.)
+
+        ```
     """
     return per_point.sum() / max(per_point.numel(), 1)
 
@@ -194,6 +200,7 @@ class LaplaceNLLLoss(nn.Module):
     residual density is fixed rather than learned.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> loss_fn = LaplaceNLLLoss()
         >>> list(loss_fn.parameters())  # no flow, hence no weights of its own
@@ -207,6 +214,8 @@ class LaplaceNLLLoss(nn.Module):
         0
         >>> bool(loss.requires_grad)
         True
+
+        ```
     """
 
     def forward(self, mu_hat: Tensor, sigma_raw: Tensor, mu_gt: Tensor, visibility: Tensor) -> Tensor:

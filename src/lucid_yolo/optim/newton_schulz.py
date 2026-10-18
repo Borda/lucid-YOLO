@@ -18,11 +18,14 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
+from lucid_yolo.optim.replay import _replay_orthogonalization
+
 #: Quintic Newton-Schulz coefficient triple ``(a, b, c)`` from the public
 #: write-up (R8). The step is ``X <- a*X + (b*A + c*A@A) @ X`` with ``A = X@X^T``.
 _COEFFS: tuple[float, float, float] = (3.4445, -4.7750, 2.0315)
 
 
+@_replay_orthogonalization
 def _orthogonalize_batched(matrices: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
     """Orthogonalize an exact-shape leading batch with native batched products.
 
@@ -62,6 +65,7 @@ def _orthogonalize_batched(matrices: Tensor, steps: int = 5, eps: float = 1e-7) 
         Each slice orthogonalizes independently, matching :func:`orthogonalize`'s
         own guarantee that no singular value is left blown up:
 
+        ```pycon
         >>> import torch
         >>> _ = torch.manual_seed(0)
         >>> q = _orthogonalize_batched(torch.randn(3, 64, 64))
@@ -70,12 +74,17 @@ def _orthogonalize_batched(matrices: Tensor, steps: int = 5, eps: float = 1e-7) 
         >>> bool(torch.linalg.svdvals(q).max() < 1.5)  # never blown up, any slice
         True
 
+        ```
+
         A 2D input is refused -- the leading batch axis is mandatory:
 
+        ```pycon
         >>> _orthogonalize_batched(torch.randn(4, 4))
         Traceback (most recent call last):
             ...
         ValueError: _orthogonalize_batched expects a 3D tensor, got a 2D tensor
+
+        ```
     """
     if matrices.ndim != 3:
         msg = f"_orthogonalize_batched expects a 3D tensor, got a {matrices.ndim}D tensor"
@@ -100,6 +109,7 @@ def _orthogonalize_batched(matrices: Tensor, steps: int = 5, eps: float = 1e-7) 
     return x.to(in_dtype)
 
 
+@_replay_orthogonalization
 def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
     """Approximate the orthogonal factor ``U V^T`` of a 2D matrix.
 
@@ -161,6 +171,7 @@ def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
         records — so what it guarantees is that no singular value is expanded and
         the well-conditioned ones are pulled toward 1:
 
+        ```pycon
         >>> import torch
         >>> _ = torch.manual_seed(0)
         >>> q = orthogonalize(torch.randn(64, 64))
@@ -169,20 +180,28 @@ def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
         >>> bool(torch.linalg.svdvals(q).max() < 1.5)  # never blown up
         True
 
+        ```
+
         A step count below one runs no iteration at all, so it is refused rather than
         answering with a normalized copy of the input:
 
+        ```pycon
         >>> orthogonalize(torch.randn(4, 4), steps=0)
         Traceback (most recent call last):
             ...
         ValueError: orthogonalize needs steps >= 1 to iterate, got steps=0
 
+        ```
+
         A float64 caller keeps float64 arithmetic, so a magnitude fp32 cannot hold
         survives the iteration instead of overflowing to NaN:
 
+        ```pycon
         >>> big = torch.eye(4, dtype=torch.float64) * 1e200
         >>> bool(torch.isfinite(orthogonalize(big)).all())
         True
+
+        ```
     """
     if matrix.ndim != 2:
         msg = f"orthogonalize expects a 2D matrix, got a {matrix.ndim}D tensor"

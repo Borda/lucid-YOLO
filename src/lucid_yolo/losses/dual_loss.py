@@ -129,6 +129,7 @@ class DualBranchLoss:
             (the next stride, ``16.0`` at 640 input).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.assign import make_anchor_points
         >>> loss = DualBranchLoss()
@@ -141,6 +142,8 @@ class DualBranchLoss:
         >>> out = loss(logits, boxes, logits, boxes, points, empty_boxes, empty_labels, empty_mask)
         >>> bool(torch.isfinite(out.total))  # no ground truth: finite, cls-only
         True
+
+        ```
     """
 
     def __init__(
@@ -218,6 +221,7 @@ class DualBranchLoss:
             supervise exactly these positives instead of assigning again).
 
         Examples:
+            ```pycon
             >>> import torch
             >>> from lucid_yolo.assign import make_anchor_points
             >>> loss = DualBranchLoss()
@@ -230,6 +234,8 @@ class DualBranchLoss:
             >>> out.total.backward()
             >>> bool(torch.isfinite(logits.grad).all())
             True
+
+            ```
         """
         o2m_assign = self.o2m_assigner(
             o2m_logits.sigmoid(), o2m_boxes, anchor_points, gt_boxes, gt_labels, gt_mask, gt_rboxes

@@ -44,6 +44,7 @@ class ProtoFusion(nn.Module):
         projections: Independent 1x1 P4 and P5 projections into ``N3`` channels.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> fusion = ProtoFusion((64, 128, 256)).eval()
         >>> features = (
@@ -53,6 +54,8 @@ class ProtoFusion(nn.Module):
         ... )
         >>> fusion(features).shape
         torch.Size([1, 64, 80, 80])
+
+        ```
     """
 
     def __init__(self, in_channels: tuple[int, int, int]) -> None:
@@ -110,10 +113,13 @@ class ProtoNet(nn.Module):
         layers: Ordered convolution, upsample, and raw-output stack.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> protonet = ProtoNet(64).eval()
         >>> protonet(torch.zeros(1, 64, 80, 80)).shape
         torch.Size([1, 32, 160, 160])
+
+        ```
     """
 
     def __init__(
@@ -178,6 +184,7 @@ def assemble_masks(prototypes: Tensor, coefficients: Tensor) -> Tensor:
         Raw per-instance mask logits with shape ``(B, N, H, W)``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> prototypes = torch.stack([torch.full((1, 2, 3), 1.0), torch.full((1, 2, 3), 10.0)], dim=1)
         >>> prototypes.shape  # (B=1, K=2, H=2, W=3)
@@ -185,5 +192,7 @@ def assemble_masks(prototypes: Tensor, coefficients: Tensor) -> Tensor:
         >>> coefficients = torch.tensor([[[1.0, 0.0], [0.5, 0.5]]])  # (B=1, N=2, K=2)
         >>> assemble_masks(prototypes, coefficients)[0, :, 0, 0]
         tensor([1.0000, 5.5000])
+
+        ```
     """
     return torch.einsum("bnk,bkhw->bnhw", coefficients, prototypes)

@@ -85,6 +85,7 @@ class _SegmentationForward(nn.Module):
         module: A checkpoint-loaded module whose ``task`` is ``"segment"``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.ptl.module import DetectionLitModule
         >>> module = DetectionLitModule(
@@ -94,6 +95,8 @@ class _SegmentationForward(nn.Module):
         ...     out = _SegmentationForward(module)(torch.zeros(1, 3, 160, 160))
         >>> out.prototypes.shape[1]
         32
+
+        ```
     """
 
     def __init__(self, module: DetectionLitModule) -> None:
@@ -138,8 +141,11 @@ def run(
         ``0``; a failure here raises rather than returning a code.
 
     Examples:
+        ```pycon
         >>> callable(run)
         True
+
+        ```
     """
     ann_file = data_root / "annotations" / "instances_val2017.json"
     images_dir = data_root / "val2017"

@@ -400,8 +400,10 @@ def test_trainer_activates_once_per_fit_and_cleans_up(
                         assert tensor == actual
 
 
-def test_cli_accepts_network_capture_option() -> None:
-    """The documented flag reaches the model through the public packaged recipe."""
+@pytest.mark.parametrize("capture_network", [False, True])
+@pytest.mark.parametrize("capture_orthogonalization", [False, True])
+def test_cli_accepts_network_capture_option(capture_network: bool, capture_orthogonalization: bool) -> None:
+    """The two replay flags independently reach the model and optimizer through the public recipe."""
     cli = DetectionCLI(
         DetectionLitModule,
         DetectionDataModule,
@@ -410,15 +412,24 @@ def test_cli_accepts_network_capture_option() -> None:
             "--config",
             str(packaged_config("det_nano_smoke")),
             "--model.capture_network",
-            "true",
+            str(capture_network).lower(),
+            "--model.capture_orthogonalization",
+            str(capture_orthogonalization).lower(),
             "--trainer.accelerator",
             "cpu",
             "--trainer.logger",
             "false",
         ],
     )
-    assert cli.model.hparams.capture_network is True
-    assert isinstance(cli.model.configure_callbacks()[0], _NetworkCaptureLifecycle)
+    assert cli.model.hparams.capture_network is capture_network
+    assert cli.model.hparams.capture_orthogonalization is capture_orthogonalization
+    callbacks = cli.model.configure_callbacks()
+    if capture_network:
+        assert isinstance(callbacks[0], _NetworkCaptureLifecycle)
+    else:
+        assert callbacks == []
+    optimizer = cli.model.configure_optimizers()
+    assert all(group["capture_orthogonalization"] is capture_orthogonalization for group in optimizer.param_groups)
 
 
 class _OverflowModule(DetectionLitModule):

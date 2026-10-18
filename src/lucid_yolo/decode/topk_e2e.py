@@ -58,6 +58,7 @@ class TopKDecoder(nn.Module):
             fixed). Defaults to ``0.0`` — pure top-k, nothing zeroed.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.assign.grid import make_anchor_points
         >>> points, strides = make_anchor_points([(2, 2)], [8])
@@ -70,6 +71,8 @@ class TopKDecoder(nn.Module):
         torch.Size([1, 2, 6])
         >>> int(detections[0, 0, 5])  # class of the top detection
         2
+
+        ```
     """
 
     def __init__(self, k: int = _DEFAULT_TOPK, conf_threshold: float = 0.0) -> None:
@@ -96,6 +99,7 @@ class TopKDecoder(nn.Module):
             score-zero padding rows filling any shortfall below ``k``.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> from lucid_yolo.assign.grid import make_anchor_points
             >>> points, strides = make_anchor_points([(1, 2)], [8])
@@ -103,6 +107,8 @@ class TopKDecoder(nn.Module):
             >>> raw_ltrb = torch.zeros(1, 2, 4)
             >>> TopKDecoder(k=5)(cls_logits, raw_ltrb, points, strides).shape
             torch.Size([1, 5, 6])
+
+            ```
         """
         detections, _ = self.decode_with_indices(cls_logits, raw_ltrb, anchor_points, strides)
         return detections
@@ -138,6 +144,7 @@ class TopKDecoder(nn.Module):
             :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX` on the padding rows.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> from lucid_yolo.assign.grid import make_anchor_points
             >>> points, strides = make_anchor_points([(1, 2)], [8])
@@ -150,6 +157,8 @@ class TopKDecoder(nn.Module):
             torch.Size([1, 3, 6])
             >>> anchors  # anchor 1 ranks first; the third row is padding
             tensor([[ 1,  0, -1]])
+
+            ```
         """
         boxes = decode_ltrb(raw_ltrb, anchor_points, strides)
         detections, anchor_indices = o2o_topk_with_indices(cls_logits, boxes, k=self.k)

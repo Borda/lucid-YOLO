@@ -116,8 +116,11 @@ class SplitReport:
         difficult: How many of those annotations carry R18's flag.
 
     Examples:
+        ```pycon
         >>> SplitReport("val", 1, 4, 1, 6, 2).empty_tiles
         1
+
+        ```
     """
 
     split: str
@@ -135,9 +138,12 @@ def dota_categories() -> list[dict[str, object]]:
         One ``{"id", "name", "supercategory"}`` entry per class, ids ``1..15``.
 
     Examples:
+        ```pycon
         >>> categories = dota_categories()
         >>> len(categories), categories[0]["id"], categories[0]["name"]
         (15, 1, 'plane')
+
+        ```
     """
     return [{"id": index + 1, "name": name, "supercategory": "dota"} for index, name in enumerate(DOTA_CLASSES)]
 
@@ -154,9 +160,12 @@ def tile_file_name(stem: str, window: torch.Tensor, suffix: str = ".png") -> str
         A file name of the form ``<stem>__<x0>_<y0><suffix>``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> tile_file_name("P0007", torch.tensor([824, 0, 1848, 1024]))
         'P0007__824_0.png'
+
+        ```
     """
     x0, y0 = int(window[0]), int(window[1])
     return f"{stem}{TILE_SEPARATOR}{x0}_{y0}{suffix}"
@@ -179,6 +188,7 @@ def annotation_records(image_id: int, first_id: int, tiled: TiledTargets) -> lis
         One record per instance, in instance order.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.data.targets import Targets
         >>> from lucid_yolo.data.tiling import TiledTargets
@@ -191,6 +201,8 @@ def annotation_records(image_id: int, first_id: int, tiled: TiledTargets) -> lis
         >>> record = annotation_records(7, 1, tiled)[0]
         >>> record["bbox"], record["area"], record["difficult"], record["category_id"]
         ([1.0, 1.0, 2.0, 2.0], 4.0, 1, 1)
+
+        ```
     """
     targets = tiled.targets
     if targets.boxes.shape[0] == 0:
@@ -229,9 +241,12 @@ def source_images(split_dir: Path) -> list[Path]:
         FileNotFoundError: If ``images/`` or ``labelTxt/`` is absent.
 
     Examples:
+        ```pycon
         >>> source_images(Path("/nonexistent"))  # doctest: +IGNORE_EXCEPTION_DETAIL
         Traceback (most recent call last):
         FileNotFoundError: ...
+
+        ```
     """
     for name in ("images", "labelTxt"):
         if not (split_dir / name).is_dir():
@@ -251,9 +266,12 @@ def write_tile(tile: torch.Tensor, path: Path, quality: int = JPEG_QUALITY) -> N
         ValueError: If the suffix is not one of :data:`TILE_SUFFIXES`.
 
     Examples:
+        ```pycon
         >>> write_tile(torch.zeros(3, 2, 2, dtype=torch.uint8), Path("/tmp/t.gif"))
         Traceback (most recent call last):
         ValueError: ...
+
+        ```
     """
     suffix = path.suffix.lower()
     if suffix not in TILE_SUFFIXES:
@@ -302,6 +320,7 @@ def tile_source_image(
         tile written, in window order, and how many windows carried no annotation.
 
     Examples:
+        ```pycon
         >>> tile_source_image(  # doctest: +IGNORE_EXCEPTION_DETAIL
         ...     Path("/nonexistent.png"),
         ...     labels_dir=Path("/nonexistent"),
@@ -312,6 +331,8 @@ def tile_source_image(
         ... )
         Traceback (most recent call last):
         FileNotFoundError: ...
+
+        ```
     """
     targets = load_dota_targets(labels_dir / f"{path.stem}.txt", keep_difficult=True)
     image = read_image(str(path), ImageReadMode.RGB)
@@ -424,9 +445,12 @@ def convert_split(
         The split's :class:`SplitReport`.
 
     Examples:
+        ```pycon
         >>> convert_split(Path("/nonexistent"), Path("/tmp/out"), "val")  # doctest: +IGNORE_EXCEPTION_DETAIL
         Traceback (most recent call last):
         FileNotFoundError: ...
+
+        ```
     """
     paths = source_images(split_dir)[:limit]
     images_out = out_dir / split
@@ -541,9 +565,12 @@ def build_tiles(
             tile format.
 
     Examples:
+        ```pycon
         >>> build_tiles(Path("/nonexistent"), Path("/tmp/tiles"), splits="val")  # doctest: +ELLIPSIS
         FAIL: ...
         1
+
+        ```
     """
     if source not in SOURCES:
         raise ValueError(f"unknown source {source!r}; known readers are {list(SOURCES)}")

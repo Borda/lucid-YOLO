@@ -46,12 +46,15 @@ def _same_padding(kernel_size: int, dilation: int = 1) -> int:
         The per-side padding amount ``dilation * (kernel_size - 1) // 2``.
 
     Examples:
+        ```pycon
         >>> _same_padding(3)
         1
         >>> _same_padding(5)
         2
         >>> _same_padding(3, dilation=2)
         2
+
+        ```
     """
     return dilation * (kernel_size - 1) // 2
 
@@ -77,12 +80,15 @@ def _conv_bn(in_channels: int, out_channels: int, kernel_size: int, groups: int 
         :class:`~torch.nn.BatchNorm2d`.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> unit = _conv_bn(16, 16, 3, groups=16).eval()
         >>> unit(torch.zeros(1, 16, 8, 8)).shape
         torch.Size([1, 16, 8, 8])
         >>> len(unit)  # conv + batchnorm, no activation
         2
+
+        ```
     """
     return nn.Sequential(
         nn.Conv2d(
@@ -115,10 +121,13 @@ class ConvBNAct(nn.Module):
         dilation: Convolution dilation factor. Defaults to 1.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> block = ConvBNAct(3, 16, kernel_size=3, stride=2).eval()
         >>> block(torch.zeros(1, 3, 32, 32)).shape
         torch.Size([1, 16, 16, 16])
+
+        ```
     """
 
     def __init__(
@@ -173,12 +182,15 @@ class DepthwiseConv(nn.Module):
         dilation: Convolution dilation factor. Defaults to 1.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> block = DepthwiseConv(16, 16, kernel_size=5).eval()
         >>> block(torch.zeros(1, 16, 8, 8)).shape
         torch.Size([1, 16, 8, 8])
         >>> block.conv.conv.groups
         16
+
+        ```
     """
 
     def __init__(
@@ -229,12 +241,15 @@ class Bottleneck(nn.Module):
             Defaults to ``0.5``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> block = Bottleneck(32, 32).eval()
         >>> block(torch.zeros(1, 32, 8, 8)).shape
         torch.Size([1, 32, 8, 8])
         >>> block.cv1.conv.out_channels  # hidden = int(32 * 0.5)
         16
+
+        ```
     """
 
     def __init__(
@@ -285,12 +300,15 @@ class C3k(nn.Module):
             two split streams. Defaults to ``0.5``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> block = C3k(64, 64, n=2).eval()
         >>> block(torch.zeros(1, 64, 8, 8)).shape
         torch.Size([1, 64, 8, 8])
         >>> len(block.blocks)  # n inner bottlenecks
         2
+
+        ```
     """
 
     def __init__(
@@ -360,12 +378,15 @@ class C3k2(nn.Module):
             unit. Defaults to ``None`` (use the built-in selection).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> block = C3k2(64, 128, n=2, c3k=False).eval()
         >>> block(torch.zeros(1, 64, 8, 8)).shape
         torch.Size([1, 128, 8, 8])
         >>> block.cv2.conv.in_channels  # (2 + n) * hidden, hidden = int(128 * 0.5)
         256
+
+        ```
     """
 
     def __init__(
@@ -398,9 +419,12 @@ class C3k2(nn.Module):
             A ``(hidden_channels, shortcut) -> Module`` factory.
 
         Examples:
+            ```pycon
             >>> factory = C3k2._default_inner_factory(c3k=False)
             >>> type(factory(32, True)).__name__
             'Bottleneck'
+
+            ```
         """
 
         def factory(hidden_channels: int, shortcut: bool) -> nn.Module:
@@ -450,6 +474,7 @@ class SPPF(nn.Module):
         pool_kernel: Kernel size of the repeated max-pool. Defaults to 5.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> block = SPPF(64, 64).eval()
         >>> block(torch.zeros(1, 64, 8, 8)).shape
@@ -458,6 +483,8 @@ class SPPF(nn.Module):
         32
         >>> block.add_shortcut
         True
+
+        ```
     """
 
     def __init__(self, in_channels: int, out_channels: int, pool_kernel: int = 5) -> None:
@@ -511,12 +538,15 @@ class SpatialAttention(nn.Module):
         channels: Number of input and output channels ``C``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> attn = SpatialAttention(128).eval()
         >>> attn.num_heads  # max(1, 128 // 64)
         2
         >>> attn(torch.zeros(1, 128, 8, 8)).shape
         torch.Size([1, 128, 8, 8])
+
+        ```
     """
 
     def __init__(self, channels: int) -> None:
@@ -575,10 +605,13 @@ class PSABlock(nn.Module):
         channels: Number of input and output channels ``C``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> block = PSABlock(128).eval()
         >>> block(torch.zeros(1, 128, 8, 8)).shape
         torch.Size([1, 128, 8, 8])
+
+        ```
     """
 
     def __init__(self, channels: int) -> None:
@@ -622,12 +655,15 @@ class C2PSA(nn.Module):
             Defaults to ``0.5``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> block = C2PSA(256, 256, n=2).eval()
         >>> block(torch.zeros(1, 256, 8, 8)).shape
         torch.Size([1, 256, 8, 8])
         >>> len(block.blocks)  # n stacked PSABlocks
         2
+
+        ```
     """
 
     def __init__(self, in_channels: int, out_channels: int, n: int = 1, e: float = 0.5) -> None:

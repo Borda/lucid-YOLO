@@ -99,6 +99,7 @@ class DetectionBranchLoss:
             field in the DFL-free head (A13 default ``6.0``).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.assign.tal import AssignResult
         >>> loss = DetectionBranchLoss()
@@ -114,6 +115,8 @@ class DetectionBranchLoss:
         >>> out = loss(logits, boxes, assign)  # no positives: box and l1 vanish
         >>> float(out.box), float(out.l1)
         (0.0, 0.0)
+
+        ```
     """
 
     def __init__(self, box_gain: float = 7.5, cls_gain: float = 0.5, l1_gain: float = 6.0) -> None:
@@ -155,6 +158,7 @@ class DetectionBranchLoss:
             gain-weighted ``total``.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> from lucid_yolo.assign.tal import AssignResult
             >>> loss = DetectionBranchLoss(box_gain=7.5, cls_gain=0.5, l1_gain=6.0)
@@ -171,6 +175,8 @@ class DetectionBranchLoss:
             >>> out.total.backward()
             >>> bool(torch.isfinite(boxes.grad).all())
             True
+
+            ```
         """
         weight_sum = assign.align_weights.sum().clamp(min=1.0)
         l_cls = self._classification_loss(pred_logits, assign, weight_sum)

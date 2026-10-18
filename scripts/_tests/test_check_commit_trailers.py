@@ -513,6 +513,90 @@ class TestContributorRange:
         assert "cannot resolve range" in out
         assert "shallow clone" in out
 
+    @staticmethod
+    def _git_config(*pairs: tuple[str, str]) -> None:
+        """Write branch and remote configuration into the throwaway repository."""
+        for key, value in pairs:
+            subprocess.run(["git", "config", key, value], cwd=validator.REPO_ROOT, capture_output=True, check=True)
+
+    def test_unpushed_fork_checkout_falls_back_to_remotes(
+        self, capsys: pytest.CaptureFixture[str], throwaway_repository: Callable[[Sequence[str]], list[str]]
+    ) -> None:
+        """A URL upstream, as ``gh pr checkout`` writes for a fork, is checked rather than refused.
+
+        ``branch.<name>.remote`` set to a URL stores no remote-tracking branch, so
+        ``@{upstream}`` cannot resolve; the hook used to exit 1 there on every commit.
+        """
+        throwaway_repository(
+            [
+                RANGE_MESSAGE_TEMPLATE.format(subject="chore: seed the range"),
+                RANGE_MESSAGE_TEMPLATE.format(subject="fix(data): correct the pad value"),
+            ]
+        )
+        self._git_config(
+            ("branch.main.remote", "https://example.invalid/fork/repository.git"),
+            ("branch.main.merge", "refs/heads/main"),
+        )
+
+        status = validator.main(["--unpushed"])
+
+        out = capsys.readouterr().out
+        assert status == 0
+        assert "'HEAD --not --remotes'" in out
+        assert "2 message(s) validated" in out
+
+    def test_unpushed_never_pushed_branch_refuses_invalid_message(
+        self, capsys: pytest.CaptureFixture[str], throwaway_repository: Callable[[Sequence[str]], list[str]]
+    ) -> None:
+        """A branch with no upstream at all is the unpushed work the mode exists for, so it is validated."""
+        shas = throwaway_repository(
+            [
+                RANGE_MESSAGE_TEMPLATE.format(subject="chore: seed the range"),
+                "no conventional type on this subject\n\nWP: 144\nProvenance: R1\nAssumptions: none\nGate: t.py::x\n",
+            ]
+        )
+
+        status = validator.main(["--unpushed"])
+
+        out = capsys.readouterr().out
+        assert status == 1
+        assert "1 of 2 message(s) invalid" in out
+        assert shas[-1][:12] in out
+
+    def test_unpushed_tracking_branch_checks_only_commits_ahead(
+        self, capsys: pytest.CaptureFixture[str], throwaway_repository: Callable[[Sequence[str]], list[str]]
+    ) -> None:
+        """With a resolvable upstream, commits the tracked branch already holds are not rechecked.
+
+        The pushed commit carries an invalid message on purpose: a squash merge replaces
+        it, so reaching it would refuse a published branch for a message that never lands.
+        """
+        shas = throwaway_repository(
+            [
+                "no conventional type on this subject\n\nWP: 144\nProvenance: R1\nAssumptions: none\nGate: t.py::x\n",
+                RANGE_MESSAGE_TEMPLATE.format(subject="fix(data): correct the pad value"),
+            ]
+        )
+        self._git_config(
+            ("remote.origin.url", "https://example.invalid/upstream/repository.git"),
+            ("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"),
+            ("branch.main.remote", "origin"),
+            ("branch.main.merge", "refs/heads/main"),
+        )
+        subprocess.run(
+            ["git", "update-ref", "refs/remotes/origin/main", shas[0]],
+            cwd=validator.REPO_ROOT,
+            capture_output=True,
+            check=True,
+        )
+
+        status = validator.main(["--unpushed"])
+
+        out = capsys.readouterr().out
+        assert status == 0
+        assert "'@{upstream}..HEAD'" in out
+        assert "1 message(s) validated" in out
+
     def test_range_mode_refuses_invalid_message_in_range(
         self, capsys: pytest.CaptureFixture[str], throwaway_repository: Callable[[Sequence[str]], list[str]]
     ) -> None:

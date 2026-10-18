@@ -58,6 +58,7 @@ def make_anchor_points(
         ValueError: If ``feature_sizes`` and ``strides`` differ in length.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> points, strides = make_anchor_points([(2, 2)], [4])
         >>> points
@@ -67,6 +68,8 @@ def make_anchor_points(
                 [6., 6.]])
         >>> strides
         tensor([4., 4., 4., 4.])
+
+        ```
     """
     if len(feature_sizes) != len(strides):
         raise ValueError(
@@ -99,10 +102,13 @@ def _fits_strides(side: int, strides: tuple[int, ...]) -> bool:
     canvas and a negative one.
 
     Examples:
+        ```pycon
         >>> _fits_strides(640, HEAD_STRIDES), _fits_strides(641, HEAD_STRIDES)
         (True, False)
         >>> _fits_strides(0, HEAD_STRIDES)
         False
+
+        ```
     """
     return side >= 1 and not any(side % stride for stride in strides)
 
@@ -129,11 +135,14 @@ def require_grid_side(name: str, side: int, strides: tuple[int, ...] = HEAD_STRI
         ValueError: If ``side`` is not positive and divisible by every stride.
 
     Examples:
+        ```pycon
         >>> require_grid_side("img_size", 640)  # a usable canvas: returns nothing
         >>> require_grid_side("img_size", 641)
         Traceback (most recent call last):
             ...
         ValueError: img_size must be positive and divisible by every head stride (8, 16, 32); got 641
+
+        ```
     """
     if not _fits_strides(side, strides):
         raise ValueError(f"{name} must be positive and divisible by every head stride {strides}; got {side}")
@@ -155,11 +164,14 @@ def require_grid_canvas(canvas: tuple[int, int], strides: tuple[int, ...] = HEAD
         ValueError: If either side is not positive and divisible by every stride.
 
     Examples:
+        ```pycon
         >>> require_grid_canvas((640, 640))  # a usable canvas: returns nothing
         >>> require_grid_canvas((100, 100))
         Traceback (most recent call last):
             ...
         ValueError: canvas must be positive (height, width) divisible by every head stride (8, 16, 32); got (100, 100)
+
+        ```
     """
     height, width = canvas
     if not (_fits_strides(height, strides) and _fits_strides(width, strides)):
@@ -209,6 +221,7 @@ def anchor_grid(
             per :func:`require_grid_canvas`.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> points, strides = anchor_grid((64, 64), torch.device("cpu"))
         >>> points.shape  # 8x8 + 4x4 + 2x2 cells
@@ -219,6 +232,8 @@ def anchor_grid(
         Traceback (most recent call last):
             ...
         ValueError: canvas must be positive (height, width) divisible by every head stride (8, 16, 32); got (641, 641)
+
+        ```
     """
     require_grid_canvas(canvas, strides)
     height, width = canvas

@@ -88,6 +88,7 @@ def progressive_alpha(
         ValueError: If ``total_epochs`` is less than ``1``.
 
     Examples:
+        ```pycon
         >>> progressive_alpha(0, 100)  # first epoch: dense o2m dominates
         0.8
         >>> round(progressive_alpha(99, 100), 4)  # last epoch: o2o takes over
@@ -103,6 +104,8 @@ def progressive_alpha(
         ... except ValueError as error:
         ...     print(error)
         total_epochs must be >= 1; got 0
+
+        ```
     """
     if total_epochs < 1:
         raise ValueError(f"total_epochs must be >= 1; got {total_epochs}")
@@ -126,11 +129,14 @@ class ProgressiveLossSchedule:
         alpha_final: One-to-many weight at the final epoch. Defaults to ``0.1``.
 
     Examples:
+        ```pycon
         >>> schedule = ProgressiveLossSchedule()
         >>> schedule.alpha_at(0, 10)
         0.8
         >>> round(schedule.alpha_at(9, 10), 4)
         0.1
+
+        ```
     """
 
     alpha_init: float = _DEFAULT_ALPHA_INIT
@@ -151,7 +157,10 @@ class ProgressiveLossSchedule:
             ValueError: If ``total_epochs`` is less than ``1``.
 
         Examples:
+            ```pycon
             >>> round(ProgressiveLossSchedule().alpha_at(5, 11), 4)
             0.45
+
+            ```
         """
         return progressive_alpha(epoch, total_epochs, self.alpha_init, self.alpha_final)

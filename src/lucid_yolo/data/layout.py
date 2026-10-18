@@ -114,8 +114,11 @@ class DatasetLayout(StrEnum):
             (:data:`YOLO_CANDIDATES`, read by :class:`~lucid_yolo.data.yolo.YoloDetectionDataset`).
 
     Examples:
+        ```pycon
         >>> DatasetLayout("yolo") is DatasetLayout.YOLO
         True
+
+        ```
     """
 
     COCO = "coco"
@@ -136,12 +139,16 @@ def resolve_split(data_root: Path, split: str) -> tuple[Path, Path]:
     Examples:
         A root matching no layout resolves to the COCO 2017 names, unchanged::
 
+            ```pycon
             >>> images, annotations = resolve_split(Path("/nonexistent"), "val")
             >>> images.name, annotations.name
             ('val2017', 'instances_val2017.json')
 
+            ```
+
         A tiled root built by ``lucid-data build-tiles`` resolves to its own::
 
+            ```pycon
             >>> import tempfile
             >>> with tempfile.TemporaryDirectory() as tmp:
             ...     root = Path(tmp)
@@ -151,6 +158,8 @@ def resolve_split(data_root: Path, split: str) -> tuple[Path, Path]:
             ...     images, annotations = resolve_split(root, "val")
             ...     (images.name, annotations.name)
             ('val', 'instances_val.json')
+
+            ```
 
     """
     candidates = [
@@ -184,12 +193,16 @@ def resolve_yolo_split(data_root: Path, split: str) -> tuple[Path, Path]:
     Examples:
         A root matching no convention resolves to the per-split names, unchanged::
 
+            ```pycon
             >>> images, labels = resolve_yolo_split(Path("/nonexistent"), "train")
             >>> (images.parent.name, images.name), labels.name
             (('train', 'images'), 'labels')
 
+            ```
+
         A root written in the split-subdirectory spelling resolves to its own::
 
+            ```pycon
             >>> import tempfile
             >>> with tempfile.TemporaryDirectory() as tmp:
             ...     root = Path(tmp)
@@ -198,6 +211,8 @@ def resolve_yolo_split(data_root: Path, split: str) -> tuple[Path, Path]:
             ...     images, labels = resolve_yolo_split(root, "val")
             ...     (images.parent.name, labels.parent.name)
             ('images', 'labels')
+
+            ```
 
     """
     candidates = [
@@ -241,6 +256,7 @@ def detect_layout(data_root: Path, splits: Sequence[str] = _PROBE_SPLITS) -> Dat
     Examples:
         A root written in a COCO spelling resolves to the COCO reader::
 
+            ```pycon
             >>> import tempfile
             >>> with tempfile.TemporaryDirectory() as tmp:
             ...     root = Path(tmp)
@@ -250,8 +266,11 @@ def detect_layout(data_root: Path, splits: Sequence[str] = _PROBE_SPLITS) -> Dat
             ...     detect_layout(root)
             <DatasetLayout.COCO: 'coco'>
 
+            ```
+
         A ``data.yaml`` beside an images/labels pair resolves to the YOLO one::
 
+            ```pycon
             >>> with tempfile.TemporaryDirectory() as tmp:
             ...     root = Path(tmp)
             ...     (root / "train" / "images").mkdir(parents=True)
@@ -259,6 +278,8 @@ def detect_layout(data_root: Path, splits: Sequence[str] = _PROBE_SPLITS) -> Dat
             ...     _ = (root / DATA_YAML_NAME).write_text("names: [car]\\n")
             ...     detect_layout(root)
             <DatasetLayout.YOLO: 'yolo'>
+
+            ```
 
     """
     coco_matched, coco_tried = _probe_coco(data_root, splits)
@@ -293,9 +314,12 @@ def _probe_coco(data_root: Path, splits: Sequence[str]) -> tuple[bool, list[str]
         Whether any split matched a row outright, and every ``images + annotations`` pair tried.
 
     Examples:
+        ```pycon
         >>> matched, tried = _probe_coco(Path("/nonexistent"), ["val"])
         >>> matched, len(tried) == len(CANDIDATES)
         (False, True)
+
+        ```
     """
     matched = False
     tried: list[str] = []
@@ -324,9 +348,12 @@ def _probe_yolo(data_root: Path, splits: Sequence[str]) -> tuple[bool, list[str]
         tried — the ``data.yaml`` first, then each ``images + labels`` pair.
 
     Examples:
+        ```pycon
         >>> matched, tried = _probe_yolo(Path("/nonexistent"), ["val"])
         >>> matched, tried[0]
         (False, '/nonexistent/data.yaml')
+
+        ```
     """
     data_yaml = data_root / DATA_YAML_NAME
     matched = False
@@ -350,7 +377,10 @@ def _listed(tried: Sequence[str]) -> str:
         The paths separated by ``; ``.
 
     Examples:
+        ```pycon
         >>> _listed(["a", "b"])
         'a; b'
+
+        ```
     """
     return "; ".join(tried)

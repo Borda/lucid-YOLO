@@ -307,9 +307,12 @@ def predict(
             direct library call refuse the same values with the same message.
 
     Examples:
+        ```pycon
         >>> predict(Path("/nonexistent.ckpt"), Path("/none.jpg"))  # doctest: +IGNORE_EXCEPTION_DETAIL
         Traceback (most recent call last):
         FileNotFoundError: ...
+
+        ```
     """
     module, info = load_eval_module(checkpoint, use_ema=ema)
     task = str(module.task)
@@ -424,11 +427,14 @@ def _refuse_non_finite(value: object, where: str) -> None:
         ValueError: If ``value`` is, or contains, a non-finite float.
 
     Examples:
+        ```pycon
         >>> _refuse_non_finite({"detections": [{"score": 0.9}]}, "report")  # finite: returns nothing
         >>> _refuse_non_finite({"detections": [{"score": float("nan")}]}, "report")
         Traceback (most recent call last):
             ...
         ValueError: report.detections[0].score is nan, which JSON cannot represent...
+
+        ```
     """
     if isinstance(value, float):
         if not math.isfinite(value):
@@ -473,11 +479,14 @@ def _report_json(payload: dict[str, object]) -> str:
         ValueError: If any numeric field in ``payload`` is ``NaN`` or an infinity.
 
     Examples:
+        ```pycon
         >>> print(_report_json({"image": "a.jpg", "detections": []}), end="")
         {
           "image": "a.jpg",
           "detections": []
         }
+
+        ```
     """
     _refuse_non_finite(payload, "report")
     return json.dumps(payload, indent=2, allow_nan=False) + "\n"
@@ -636,8 +645,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         The command's exit code.
 
     Examples:
+        ```pycon
         >>> main(["--help"])  # argparse exits the process on --help  # doctest: +SKIP
         0
+
+        ```
     """
     return int(auto_cli(predict, args=None if argv is None else list(argv), as_positional=False))
 
