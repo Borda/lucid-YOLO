@@ -1937,6 +1937,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#lucid_yolo.ptl.DetectionLitModule.configure_callbacks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        configure_callbacks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#lucid_yolo.ptl.DetectionLitModule.on_train_epoch_start" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4527,6 +4538,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#lucid_yolo.ptl.DetectionLitModule.configure_callbacks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        configure_callbacks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#lucid_yolo.ptl.DetectionLitModule.on_train_epoch_start" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5524,6 +5546,30 @@ Extra workspace and setup can outweigh the saving on short runs.</p>
                   <code>False</code>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>capture_network</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Replay the existing detection network's CUDA forward and backward
+with :func:<code>torch.cuda.make_graphed_callables</code>. Defaults to <code>False</code> because
+capture pays setup and retains a graph pool. Requires <code>task="detect"</code>,
+<code>compile_step=False</code> and single-device CUDA automatic optimization.
+Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
+One image signature is recorded per fit; partial batches stay eager and
+changed storage, modes, hooks or precision retire the recording. Warmup
+restores buffers and RNG, and the fit callbacks discard recordings on
+completion or failure. Higher-order differentiation is unsupported.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -5545,6 +5591,7 @@ Extra workspace and setup can outweigh the saving on short runs.</p>
               <div class="doc-md-description">
                 <p>If <code>task</code> is not one of <code>"detect"</code>, <code>"segment"</code>, <code>"obb"</code>,
 <code>"keypoints"</code>, if <code>rotated_iou_form</code> is not a known rotated-IoU form,
+if <code>capture_network</code> is combined with a non-detection task or <code>compile_step</code>,
 if <code>keypoint_loss</code> is not a known keypoint objective, if
 <code>task="keypoints"</code> was asked for without a <code>num_keypoints</code>, or if a
 <code>num_keypoints</code> was given for a task that builds no point stem.</p>
@@ -5819,6 +5866,26 @@ more than one process.</p>
     <div class="language-pycon highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">module</span> <span class="o">=</span> <span class="n">DetectionLitModule</span><span class="p">(</span><span class="n">depth</span><span class="o">=</span><span class="mf">0.34</span><span class="p">,</span> <span class="n">width</span><span class="o">=</span><span class="mf">0.25</span><span class="p">,</span> <span class="n">max_channels</span><span class="o">=</span><span class="mi">1024</span><span class="p">,</span> <span class="n">num_classes</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">module</span><span class="o">.</span><span class="n">setup</span><span class="p">(</span><span class="s2">"fit"</span><span class="p">)</span>  <span class="c1"># "detect" scales freely; no trainer attachment needed</span>
 </code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="lucid_yolo.ptl.DetectionLitModule.configure_callbacks" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">configure_callbacks</span>
+
+
+<a href="#lucid_yolo.ptl.DetectionLitModule.configure_callbacks" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">configure_callbacks</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Callback</span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Keep an opted-in network recording scoped to one fit.</p>
 
 
     </div>

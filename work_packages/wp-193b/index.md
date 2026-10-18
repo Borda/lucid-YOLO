@@ -2,9 +2,9 @@
 
 > Engineering log · [Phase 17 — R1 pose-objective parity](https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/)
 >
-> 🔗 Depends on [WP-193](https://borda.github.io/lucid-YOLO/work_packages/wp-193/) · Needed by none
+> 🔗 Depends on [WP-193](https://borda.github.io/lucid-YOLO/work_packages/wp-193/) · Needed by [WP-193c](https://borda.github.io/lucid-YOLO/work_packages/wp-193c/)
 >
-> ⬅️ [WP-193](https://borda.github.io/lucid-YOLO/work_packages/wp-193/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/) ➡️
+> ⬅️ [WP-193](https://borda.github.io/lucid-YOLO/work_packages/wp-193/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-193c](https://borda.github.io/lucid-YOLO/work_packages/wp-193c/) ➡️
 
 
 ## WP-193b — compatible matrix batches and momentum dispatch

@@ -819,6 +819,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#opt-in-cuda-network-replay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opt-in CUDA network replay
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cuda-graph-replay-of-orthogonalization-is-opt-in" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4302,6 +4313,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#opt-in-cuda-network-replay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opt-in CUDA network replay
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cuda-graph-replay-of-orthogonalization-is-opt-in" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4470,6 +4492,10 @@
 <p><code>--data.cache_train_images true</code> decodes each distinct training file name during datamodule setup and keeps the RGB <code>uint8</code> tensor in host RAM. Mosaic, affine, colour and flip augmentation still run on fresh float storage for every draw; only the repeated JPEG/PNG decode disappears. COCO and YOLO training readers support the flag, and validation is deliberately not cached.</p>
 <p>Budget the option from the uncompressed images, not their files: approximately <code>sum(3 * height * width)</code> bytes for 8-bit sources, before Python/tensor metadata — a 16-bit PNG decodes to <code>uint16</code> and costs two bytes per channel, so twice that — and once per device: a multi-GPU run spawns one process per rank, each building its own <code>DetectionDataModule</code> and therefore its own cache, so the single-process budget above multiplies by <code>trainer.devices</code>. The cache is keyed by file name (by path for the YOLO reader), so two records naming one file share an entry, while the same picture stored under two names is decoded and held twice. It defaults off.</p>
 <p>Whether DataLoader workers share the cache depends on the multiprocessing start method, not on the operating system, and the data module leaves the start method at the platform default. Under <code>fork</code> the workers read the parent's cache through copy-on-write pages, so it costs one copy of RAM however many workers there are. Under <code>spawn</code> and <code>forkserver</code> — the default on macOS and Windows, and on Linux from Python 3.14 — the cache is pickled to every worker, torch moves each cached tensor into shared memory to do it (one segment or file descriptor per image), and with <code>--data.persistent_workers false</code>, the default, the hand-over repeats every epoch. The values are identical either way; a non-fork start method does not promise the one-copy cost or the speedup, and a large split can meet file-descriptor or <code>/dev/shm</code> limits at a size nobody has measured. The pipeline never writes to the cache — every draw converts into fresh float storage. Leave it off when the split does not fit comfortably beside the loader queue, model, optimizer and operating-system cache.</p>
+<h2 id="opt-in-cuda-network-replay">Opt-in CUDA network replay<a class="headerlink" href="#opt-in-cuda-network-replay" title="Permanent link">&para;</a></h2>
+<p><code>--model.capture_network true</code> records the detection backbone, neck and dual head with PyTorch's <code>make_graphed_callables</code>, including their backward pass. Assignment, losses, optimizer, LR/alpha schedules and EMA keep the ordinary loop. It is separate from <code>compile_step</code> and cannot be combined with that flag. The default is <code>false</code>. The measured speed-up is limited to a small-batch workload (batch 4); batch-32 screens changed direction, so check throughput on your own batch size before enabling it.</p>
+<p>This path requires single-device CUDA automatic optimisation and <code>task: detect</code>. BF16 replay requires a final PyTorch 2.9 or newer release; 2.9 pre-release and NGC <code>a0</code> builds are excluded by design. 2.9 is the first verified runtime: older BF16 runs warn and stay eager because the 2.4 comparison did not meet the exact eager oracle. FP32 and FP16 replay are checked on 2.4 as well. CPU, MPS and other strategies warn and stay eager; another task or <code>compile_step</code> raises at construction. One image signature is recorded per fit. A partial batch uses eager execution without growing a graph cache. Changes to parameter/buffer storage, module modes, hooks or precision retire replay for the rest of that fit. The supplied network must keep its ordinary stage implementations and static Python configuration. Root forward overrides, stage instance-forward overrides and registered hooks use the eager path. Anomaly detection (<code>--trainer.detect_anomaly true</code>) also stays eager so backward NaN checks run normally. A failure while recording raises instead of falling back to eager (RNG state and buffers are restored first), so disable <code>--model.capture_network</code> if recording fails on your model. Higher-order differentiation is not supported.</p>
+<p>Recording warmup restores RNG and BatchNorm buffers before the first real batch. Accumulation or custom optimiser/zero-grad hooks preserve live gradients outside the graph-owned backward buffers before they can be overwritten. AMP uses an uncached autocast scope as the PyTorch API requires. Validation, prediction and public <code>forward</code> calls stay eager. Checkpoints retain the ordinary parameter names and the flag, with no graph state. Each fit records afresh and drops its recording on completion or an exception. CUDA graph pools can increase reserved memory even when peak allocated memory falls; measure both on the intended workload. The measured scope and remaining validation gaps are in <a href="../work_packages/wp-193c/">WP-193c</a>.</p>
 <h2 id="cuda-graph-replay-of-orthogonalization-is-opt-in">📼 CUDA graph replay of orthogonalization is opt-in<a class="headerlink" href="#cuda-graph-replay-of-orthogonalization-is-opt-in" title="Permanent link">&para;</a></h2>
 <p><code>--model.capture_orthogonalization true</code> records MuSGD's existing Newton--Schulz matrix calls and replays them with each new gradient. The default is <code>false</code>: private graph pools retain extra device workspace, and setup may outweigh the gain on short or compute-bound runs. Momentum, parameter updates and the learning-rate schedule remain eager. CPU and MPS keep the original functions. <a href="../work_packages/wp-197b/">WP-197b</a> records the measured workload and compatibility envelope.</p>
 <h2 id="torchcompile-is-opt-in-cuda-detect">⚡ torch.compile is opt-in (CUDA, detect)<a class="headerlink" href="#torchcompile-is-opt-in-cuda-detect" title="Permanent link">&para;</a></h2>

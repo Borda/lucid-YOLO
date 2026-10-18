@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-194, WP-195…">
+        <meta name="description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-193c, WP-194…">
       
       
         <meta name="author" content="Jirka Borovec">
@@ -70,7 +70,7 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="lucid-yolo">
   <meta property="og:title" content="Phase 17 — R1 pose-objective parity — engineering log">
-  <meta property="og:description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-194, WP-195…">
+  <meta property="og:description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-193c, WP-194…">
   <meta property="og:url" content="https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/"><meta property="og:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -78,7 +78,7 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta name="twitter:title" content="Phase 17 — R1 pose-objective parity — engineering log">
-  <meta name="twitter:description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-194, WP-195…">
+  <meta name="twitter:description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-193c, WP-194…">
   
     <link rel="alternate" type="text/markdown" href="index.md" title="Markdown copy of this page">
   
@@ -4061,6 +4061,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#wp-193c-replay-the-network-keep-the-dynamic-objective-eager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-193c — replay the network, keep the dynamic objective eager
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#wp-194-static-checks-leave-pytest-test-names-lose-their-filler-words" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4279,6 +4290,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#wp-193c-replay-the-network-keep-the-dynamic-objective-eager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-193c — replay the network, keep the dynamic objective eager
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#wp-194-static-checks-leave-pytest-test-names-lose-their-filler-words" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4410,6 +4432,17 @@
 <p><strong>The padding region is measured, not universal.</strong> A five-repeat optimizer-only crossover screen found the unguarded x scale slower: 111.26 to 119.37 ms per step on the L4. Padding is therefore restricted to a smaller dimension of at most 256, the largest present in the measured nano workload; larger matrices retain exact-shape batches. The guarded screen improved the optimizer in all five scales, but those stage numbers are not the training claim. Parameter subclasses may legitimately refuse storage inspection: a baseline-compatible vector subclass exposed that regression before handoff. Such groups now keep their original keys and scalar momentum, including mixed groups where opaque storage may alias an ordinary parameter.</p>
 <p><strong>The final claim includes the complete short fit.</strong> Five alternating paired <code>Trainer.fit</code> runs on an isolated NVIDIA L4 (driver 580.178.04, torch 2.9.1+cu129, Python 3.11.17), after two discarded warm-up fits, used detection n, batch 4, 640 px, BF16 and four workers over 256 real COCO val2017 images. Each six-epoch / 384-step fit included cache setup, augmentation, forward/backward, the default three-epoch LR warmup and decay, alpha scheduling, EMA, mosaic closure, four validation batches each epoch and checkpoints. Baseline median 89.448 s (88.765–89.646); candidate 79.183 s (77.799–79.660). The paired reduction median is 11.19% (10.88–13.22%), with the same 809.9 MiB peak allocated. Timing brackets are synchronized and contain no profiler. This is a complete short fit, not a full-COCO or final-accuracy measurement. The author reports that the code measured here passed 65 focused tests on the L4 with two newer-runtime skips, and that those cases passed separately on CUDA. The pytest selection and the revision of that run were not recorded, so the count is not reproducible from this tree; the two optimizer test files collected 71 tests at the reviewed head <code>b060de4</code>. Full <code>make gate</code> and accelerator goldens were not run.</p>
 <p><strong>Why the row is lettered 193b.</strong> <a href="../../work_packages/wp-193/">WP-193</a> had already merged (<code>e8d632c</code>) when this change arrived, and its row stays open on the accelerator-golden check, so the follow-up carries its own row, scope and gate instead of extending the merged one. The commit trailer check accepts digits only, so the commits keep the <code>WP: 193</code> trailer, as the commits of <a href="../../work_packages/wp-192b/">WP-192b</a> keep <code>WP: 192</code>.</p>
+<h2 id="wp-193c-replay-the-network-keep-the-dynamic-objective-eager">WP-193c — replay the network, keep the dynamic objective eager<a class="headerlink" href="#wp-193c-replay-the-network-keep-the-dynamic-objective-eager" title="Permanent link">&para;</a></h2>
+<p><a id="wp-193c"></a></p>
+<p><strong>The source is the current training loop and R43's general-purpose API.</strong> This follow-up was profiled from <code>01b4d4c</code> after compatible MuSGD batching merged, then rebased and remeasured on <code>50c2092</code> after the augmentation contribution merged. It changes how existing network work is dispatched, without rewriting any model, assignment, loss or optimizer arithmetic. <code>capture_network=False</code> is the default. Unlike the Inductor objective option, the recording contains only the detection network's forward and backward work; targets, loss, schedules, optimizer and EMA remain eager. Unlike the orthogonalization replay (<a href="../../work_packages/wp-197b/">WP-197b</a>, already on main), it records no optimizer work.</p>
+<p><strong>One fit owns one recording.</strong> A private tensor-tuple view composes the same backbone, neck and head. PyTorch supplies the autograd bridge. Recording restores RNG and all buffers after warmup, and mixed precision disables the autocast cache. A partial batch stays eager. Changed storage, modes, hooks or precision retire the recording. Public forward, validation and prediction remain ordinary calls. The holder registers no parameters and serializes no CUDA state; fit completion and exceptions clear it. CUDA single-device automatic optimisation and detection are the measured scope; higher-order differentiation and <code>compile_step</code> are excluded.</p>
+<p><strong>BF16 has a measured runtime boundary.</strong> FP32 and FP16 replay pass the exact eager comparisons on torch 2.4.1. BF16 does not, so BF16 replay starts at the verified 2.9 runtime and older BF16 fits remain eager. This avoids choosing a tolerance to hide the failed exact oracle; it does not claim that every intervening release was tested.</p>
+<p><strong>Accumulation retains its own gradients.</strong> The CUDA recorder reuses backward gradient storage. If a later backward must add to live gradients, the holder first clones those values out of that storage. This also covers custom optimiser or zero-grad hooks. An analytic scalar probe and independent eager-network regressions expose the unprotected alias: two microbatches can otherwise produce 6 where the derivative is 4. Ordinary one-step optimisation keeps the uncopied route.</p>
+<p><strong>The claim is the complete short fit.</strong> Five alternating paired, fresh-process <code>Trainer.fit</code> runs after two discarded warm-up fits used detection n (depth 0.50, width 0.25, max channels 1024), batch 4, 640 px, BF16 mixed precision, four workers, persistent workers and decoded-image caching on 256 real COCO val2017 images. Each six-epoch / 384-step fit included cache setup, augmentation, network and loss, backward, MuSGD, LR warmup/decay, alpha scheduling, EMA, eight validation batches per epoch and checkpoints. The validation images are a 32-image subset of the training subset: this is throughput and trajectory evidence, never held-out accuracy. Persistent workers retain their augmentation state, so the mosaic-close callback is not evidence that worker-side mosaic actually closed.</p>
+<p>On an isolated NVIDIA L4, driver 580.178.04, torch 2.9.1+cu129, Lightning 2.6.6, Python 3.12.3, synchronized fit time fell from median <strong>92.589 s</strong> (91.614-93.691) to <strong>77.330 s</strong> (76.234-78.265): <strong>16.48%</strong> by the ratio of medians. Recording setup is inside each fit; imports and model construction are outside both arms. Baseline-against-itself and every paired arm produced identical SHA256 digests over the raw tensor bytes of losses, model, optimizer, scheduler, EMA and metrics. This certifies those deterministic short trajectories, not all precisions, devices or long-run accuracy.</p>
+<p><strong>Memory has two directions.</strong> Median peak allocated memory fell from 828.5 MiB (822.0-831.4) to 711.3 MiB (711.3-711.3), while median peak reserved memory rose from 1022.0 MiB (1022.0-1038.0) to 1260.0 MiB (1260.0-1262.0). The graph pool is a cost of the opt-in path; no avoided-OOM or batch-capacity improvement is claimed. Fit callbacks drop the holder's recording, rather than promising that every outstanding autograd reference or allocator reservation vanishes immediately.</p>
+<p><strong>The speed claim is limited to this small-batch workload.</strong> Batch-32 screens changed direction relative to the batch-4 result, so the gain above is not a general claim; the shipped detection recipes train at batch 16, which was not measured here.</p>
+<p><strong>Validation remains explicitly bounded.</strong> Full <code>make gate</code>, accelerator goldens and final accuracy have not been run; this row stays open on those checks. Focused regression tests and timing logs are retained with the contribution's review evidence.</p>
 <h2 id="wp-194-static-checks-leave-pytest-test-names-lose-their-filler-words">WP-194 — static checks leave pytest, test names lose their filler words<a class="headerlink" href="#wp-194-static-checks-leave-pytest-test-names-lose-their-filler-words" title="Permanent link">&para;</a></h2>
 <p><a id="wp-194"></a></p>
 <p><strong>Pytest owns behaviour; hooks own file content.</strong> A scan of <code>tests/</code> and <code>scripts/_tests/</code> found four tests in <code>tests/</code> that read a file as text and exercised no code, and fourteen in <code>scripts/_tests/</code> that asserted a hook passes on the live tree. The second group repeated what <code>lint.yml</code> and <code>make gate</code> already run, since both call <code>pre-commit run --all-files</code>, so those tests are deleted rather than moved. The first group moved: the matplotlib and <code>_viz</code> import boundary under <code>src/</code> is ruff <code>TID251</code> banned-api with per-file ignores for <code>_viz</code>, <code>scripts/</code>, <code>tests/</code> and <code>notebooks/</code>. A probe module holding two function-local imports showed the rule fires on both, which is the case the regex test existed for. The top-k decoder's no-suppression text pin and the two packaged-recipe pins (no <code>deterministic:</code>, <code>task:</code> outside <code>det_*</code>) became the <code>content-pins</code> hook, <code>scripts/lint/audit_content_pins.py</code>, with its functional core in <code>scripts/_tests/test_audit_content_pins.py</code>. The runtime <code>sys.modules</code> probes in <code>tests/viz/test_import_surface.py</code> stay in pytest because they import code. Two kept groups in <code>test_check_commit_trailers.py</code> also read the real register, <code>TestPlaceholderRows</code> and <code>TestAssumptionRegister</code>; they stay because they test how the parser reads that register. Removed alongside: the register-contiguity assertion, which <code>docs-present</code> already checks, and the docstring-path assertion on the trailer script.</p>

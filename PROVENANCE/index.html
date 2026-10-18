@@ -906,6 +906,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#cuda-execution-tooling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CUDA execution tooling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#review-process-documentation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4232,6 +4243,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#cuda-execution-tooling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CUDA execution tooling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#review-process-documentation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4513,7 +4535,7 @@
 <tr>
 <td>R34</td>
 <td><code>packaging</code>, github.com/pypa/packaging, dual Apache-2.0 OR BSD-2-Clause</td>
-<td>Requirement, marker and extras parsing for the dependency-tier walk in <code>scripts/lint/audit_licenses.py</code> (<a href="../work_packages/wp-115/">WP-115</a>; the script sat at <code>scripts/audit_licenses.py</code> when this row was written and moved in <a href="../work_packages/wp-129/">WP-129</a>). A <code>dev</code> dependency-group package only -- <code>src/</code> never imports it, and it arrived transitively (pytest and mkdocs both require it) before it was declared. Licence verified 2026-08-16 from the installed distribution's own <code>License-Expression</code> field, <code>Apache-2.0 OR BSD-2-Clause</code>, with both texts shipped as <code>LICENSE.APACHE</code> and <code>LICENSE.BSD</code>; GitHub's licence detector reports NOASSERTION for the dual grant, which is why the wheel rather than the API is what this row cites</td>
+<td>Requirement, marker and extras parsing for the dependency-tier walk in <code>scripts/lint/audit_licenses.py</code> (<a href="../work_packages/wp-115/">WP-115</a>; the script sat at <code>scripts/audit_licenses.py</code> when this row was written and moved in <a href="../work_packages/wp-129/">WP-129</a>). A <code>dev</code> dependency-group package only -- <code>src/</code> never imports it, and it arrived transitively (pytest and mkdocs both require it) before it was declared. Licence verified 2026-08-16 from the installed distribution's own <code>License-Expression</code> field, <code>Apache-2.0 OR BSD-2-Clause</code>, with both texts shipped as <code>LICENSE.APACHE</code> and <code>LICENSE.BSD</code>; GitHub's licence detector reports NOASSERTION for the dual grant, which is why the wheel rather than the API is what this row cites. <strong>2026-10-16:</strong> CUDA replay now uses <code>Version</code> for its measured BF16 runtime boundary; the same <code>&gt;=24.0</code> declaration moves from dev to runtime, with Lightning already requiring the package. This supersedes the earlier dev-only/source-import description; the licence evidence is unchanged</td>
 </tr>
 <tr>
 <td>R35</td>
@@ -4557,6 +4579,23 @@
 <td>R37</td>
 <td>The governing blueprint, v1.5 (2026-07-10), authored by this project's principal (Jirka Borovec, the copyright holder <code>NOTICE</code> names). <strong>Unpublished and non-public</strong>, held outside this repository and never distributed with it; it carries no licence grant, so no part of it is redistributable and nothing in it may be quoted here beyond what a decision record already restates.</td>
 <td>The project's own specification, not a method source. It states the layout (sec. 7), the variant table (sec. 5.1, itself sourced from R3 Fig. 1), the block stack (sec. 5.2, 5.3), the loss composition (sec. 5.7), the augmentation recipe (sec. 5.9), the dataset layout (sec. 14.3) and D1–D11, which <code>docs/DECISIONS.md</code> transcribes. Cited from code by section: 133 <code>blueprint</code> references across 36 files under <code>src/</code>, 107 of them in the <code>blueprint sec. N</code> form (measured 2026-09-05). <strong>Every method claim it carries is downstream of R1–R36</strong> — where a blueprint section and a paper disagree the paper governs, and where the blueprint is the only source the choice is an assumption and belongs in <code>ASSUMPTIONS.md</code>. Registered by <a href="../work_packages/wp-175/">WP-175</a>; the amendments made after it are D12.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="cuda-execution-tooling">CUDA execution tooling<a class="headerlink" href="#cuda-execution-tooling" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Reference</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R43</td>
+<td>PyTorch <code>torch.cuda.make_graphed_callables</code>, <a href="https://docs.pytorch.org/docs/2.4/generated/torch.cuda.make_graphed_callables.html">2.4 API documentation</a>, <a href="https://github.com/pytorch/pytorch/blob/v2.4.0/LICENSE">v2.4.0 LICENSE</a>, BSD-3-Clause</td>
+<td>General-purpose forward/backward CUDA replay API and its tensor-only, first-order, hook and uncached-AMP constraints. Licence verified 2026-10-16 from that exact tag. The implementation calls the existing dependency API; no detection code is copied.</td>
 </tr>
 </tbody>
 </table>
@@ -4744,6 +4783,11 @@
 <td>2026-10-16</td>
 <td>R42</td>
 <td>CUDA graph scheduling for <a href="../work_packages/wp-197b/">WP-197b</a>: side-stream warmup, stable input/output buffers, independent pools and replay of this repository's unchanged scalar and batched matrix calls. The candidate follows our own L4 profiler; no external optimizer implementation consulted.</td>
+</tr>
+<tr>
+<td>2026-10-16</td>
+<td>R43</td>
+<td>First read of the PyTorch 2.4 CUDA graphed-callable contract and exact-tag licence for <a href="../work_packages/wp-193c/">WP-193c</a>; network arithmetic comes from this repository and the opportunity from its own L4 profiles.</td>
 </tr>
 </tbody>
 </table>

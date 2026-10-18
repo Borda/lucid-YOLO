@@ -6608,6 +6608,14 @@
 <td>🔄</td>
 </tr>
 <tr>
+<td>193c</td>
+<td><code>perf(ptl): replay detection network CUDA graphs</code> [DATA][GPU]</td>
+<td>Opt-in forward/backward replay of the existing backbone, neck and head, leaving dynamic targets, losses, schedules, optimizer and EMA eager. One recording per fit; default off, no arithmetic changes · <a href="../work_packages/wp-193c/#wp-193c">log</a></td>
+<td>Focused CUDA trajectory, buffer, precision, fallback and lifecycle regressions; five paired isolated-L4 complete fits above 8%; full <code>make gate</code>, accelerator goldens and final accuracy remain outstanding</td>
+<td>193b</td>
+<td>🔄</td>
+</tr>
+<tr>
 <td>194</td>
 <td><code>refine(tests): static checks to hooks, plain test names</code></td>
 <td>File-content tests leave pytest: the <code>_viz</code>/matplotlib import boundary becomes ruff <code>TID251</code>, the top-k and packaged-recipe text pins the <code>content-pins</code> hook, and live-tree "hook passes" copies are dropped. Test names lose <code>a an the its their is are does that</code> · <a href="../work_packages/wp-194/#wp-194">log</a></td>
