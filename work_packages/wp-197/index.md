@@ -4,7 +4,7 @@
 >
 > 🔗 Depends on WP-196 · Needed by none
 >
-> ⬅️ [WP-195](https://borda.github.io/lucid-YOLO/work_packages/wp-195/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/)
+> ⬅️ [WP-195](https://borda.github.io/lucid-YOLO/work_packages/wp-195/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-197b](https://borda.github.io/lucid-YOLO/work_packages/wp-197b/) ➡️
 
 
 ## WP-197 — the input workers sample colour and CUDA applies it in a batch

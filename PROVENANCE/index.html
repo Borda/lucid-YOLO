@@ -4535,6 +4535,11 @@
 <td>Lightning 2.6.6, github.com/Lightning-AI/pytorch-lightning, Apache-2.0</td>
 <td>Existing runtime dependency, consulted diagnostically for precision input conversion and batch transfer ordering in <a href="../work_packages/wp-197/">WP-197</a>. The precision guard follows that ordering. Apache-2.0 verified from the installed wheel’s <code>licenses/LICENSE</code>; no framework code copied.</td>
 </tr>
+<tr>
+<td>R42</td>
+<td>PyTorch CUDA semantics, <a href="https://docs.pytorch.org/docs/2.9/notes/cuda.html#cuda-graphs">CUDA graphs</a>, versions 2.4 and 2.9; BSD-3-Clause</td>
+<td>API contract for warmup, side-stream capture, stable buffers, replay and private pools in optional optimizer scheduling. The existing matrix expressions are recorded unchanged; no optimizer implementation was consulted. Licence verified 2026-10-16 from pytorch/pytorch v2.9.1 <code>LICENSE</code>.</td>
+</tr>
 </tbody>
 </table>
 <h3 id="project-internal-governing-documents">Project-internal governing documents<a class="headerlink" href="#project-internal-governing-documents" title="Permanent link">&para;</a></h3>
@@ -4734,6 +4739,11 @@
 <td>2026-10-16</td>
 <td>R41</td>
 <td>Training-loop precision conversion ordering for the deferred-colour eligibility guard in <a href="../work_packages/wp-197/">WP-197</a>.</td>
+</tr>
+<tr>
+<td>2026-10-16</td>
+<td>R42</td>
+<td>CUDA graph scheduling for <a href="../work_packages/wp-197b/">WP-197b</a>: side-stream warmup, stable input/output buffers, independent pools and replay of this repository's unchanged scalar and batched matrix calls. The candidate follows our own L4 profiler; no external optimizer implementation consulted.</td>
 </tr>
 </tbody>
 </table>

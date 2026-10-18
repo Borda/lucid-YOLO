@@ -5504,6 +5504,26 @@ which is why the default is off.</p>
                   <code>False</code>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>capture_orthogonalization</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Enable MuSGD's optional CUDA graph replay of
+its existing Newton--Schulz calls. Defaults to <code>False</code>. Shapes,
+strides, dtype, device, step count and precision select each recording;
+learning rates, momentum and parameters remain outside the graphs.
+Extra workspace and setup can outweigh the saving on short runs.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
       </tbody>
     </table>
 

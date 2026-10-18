@@ -6639,6 +6639,14 @@
 <td>196</td>
 <td>🔄</td>
 </tr>
+<tr>
+<td>197b</td>
+<td><code>perf(optim): replay CUDA orthogonalization graphs</code> [DATA][GPU]</td>
+<td>Opt-in CUDA graph replay records the existing pure scalar and batched matrix iterations; gradient values are copied in, results copied out, and optimizer state stays eager. The optimizer owns a bounded workspace; other execution contracts retain the original calls (D29) · <a href="../work_packages/wp-197b/#wp-197b">log</a></td>
+<td><code>tests/optim/test_replay.py</code>; <code>test_cli.py::test_capture_orthogonalization_flag_reaches_module</code>; repeated public-COCO fits, byte parity and focused CPU/CUDA checks; full <code>make gate</code> not run</td>
+<td>196</td>
+<td>🔄</td>
+</tr>
 </tbody>
 </table>
 <h2 id="critical-path-and-parallelism">⛓️ Critical path and parallelism<a class="headerlink" href="#critical-path-and-parallelism" title="Permanent link">&para;</a></h2>
