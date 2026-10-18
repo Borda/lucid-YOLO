@@ -21,6 +21,7 @@ import pytest
 import torch
 
 from lucid_yolo.data import RandomAffine, Targets, boxes_from_polygons
+from lucid_yolo.data.affine import _DEFAULT_PAD_VALUE
 
 #: Square canvas used across the suite.
 _CANVAS = 64
@@ -524,3 +525,82 @@ class TestGateStreamSeeding:
         affine = RandomAffine()
 
         assert affine._gate_stream.initial_seed() == torch.Generator().initial_seed()
+
+
+class TestCenteredInput:
+    """Prepared training feeds the same centred pixels to a fixed-canvas resample.
+
+    The letterbox route retains byte parity even for identity parameters. Without
+    letterboxing the dependency can bypass resampling for an identity transform;
+    restoring an already-centred float then retains its subtraction round-off.
+    The boundary test checks both routes and uses an absolute float32 bound,
+    without a relative tolerance that could hide a larger difference.
+    """
+
+    def test_matches_the_plain_warp_including_the_exposed_pad(self) -> None:
+        """A centred source reproduces the plain warp byte-for-byte, pad region included.
+
+        ``scale=0.4`` and ``translate=0.3`` are large enough that the sampled transform
+        reliably zooms out and shifts the canvas, exposing padding — exactly where a wrong
+        fill would show and an interior-only comparison would miss it. The caller only
+        centres the input; ``centered_input=True`` owns restoring the fill on return, so a
+        test that re-added the pad itself would double it and fail for the wrong reason.
+        """
+        image = _image()
+        plain = RandomAffine(degrees=15.0, translate=0.3, scale=0.4, shear=5.0, generator=_generator(99))
+        centered = RandomAffine(
+            degrees=15.0, translate=0.3, scale=0.4, shear=5.0, generator=_generator(99), centered_input=True
+        )
+
+        out_plain, _ = plain(image.clone(), Targets.empty())
+        out_centered, _ = centered(image.clone() - _DEFAULT_PAD_VALUE, Targets.empty())
+
+        assert torch.equal(out_centered, out_plain)
+
+    @pytest.mark.parametrize("letterbox", [None, _CANVAS, 2 * _CANVAS])
+    def test_identity_roundoff_boundary(self, letterbox: int | None) -> None:
+        """Identity stays byte-exact with letterbox and within absolute epsilon otherwise.
+
+        The RGB codes cover values whose centring round trip loses low bits. A
+        fixed canvas follows the training route and must retain exact byte parity;
+        the standalone identity may bypass the dependency's fill subtraction.
+        """
+        image = torch.arange(3 * _CANVAS * _CANVAS, dtype=torch.float32).reshape(3, _CANVAS, _CANVAS)
+        image = image.remainder(256).div(255)
+        plain = RandomAffine(
+            degrees=0.0, translate=0.0, scale=0.0, shear=0.0, letterbox=letterbox, generator=_generator(7)
+        )
+        centered = RandomAffine(
+            degrees=0.0,
+            translate=0.0,
+            scale=0.0,
+            shear=0.0,
+            letterbox=letterbox,
+            generator=_generator(7),
+            centered_input=True,
+        )
+        out_plain, _ = plain(image.clone(), Targets.empty())
+        out_centered, _ = centered(image.clone() - _DEFAULT_PAD_VALUE, Targets.empty())
+        if letterbox is None:
+            assert torch.equal(out_plain, image)
+            torch.testing.assert_close(out_centered, out_plain, rtol=0, atol=torch.finfo(torch.float32).eps)
+        else:
+            assert torch.equal(out_centered.contiguous().view(torch.uint8), out_plain.contiguous().view(torch.uint8))
+
+    def test_fuses_with_no_fill_only_when_centered(self) -> None:
+        """The fused segment omits ``fill`` for a centred source and keeps it otherwise.
+
+        This is the construction-time half of the identity above. A centred source that
+        still filled with the pad value would double-count it once the round trip restores
+        the shift — the plausible regression the byte-identity test above also catches, less
+        directly than reading the wiring itself.
+        """
+        plain = RandomAffine(translate=0.3, generator=_generator(1))
+        centered = RandomAffine(translate=0.3, generator=_generator(1), centered_input=True)
+
+        plain(_image(), Targets.empty())
+        centered(_image(), Targets.empty())
+
+        assert plain.last_params is not None and centered.last_params is not None
+        assert plain._segment(plain.last_params).fill is not None
+        assert centered._segment(centered.last_params).fill is None

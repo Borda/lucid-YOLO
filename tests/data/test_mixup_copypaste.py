@@ -448,6 +448,60 @@ class TestCopyPasteModalitiesThroughApply:
         assert out.difficult.tolist() == [True, False]
 
 
+class TestCopyPasteUnion:
+    """Overlapping rings copy one immutable source once without losing selected instances."""
+
+    @pytest.mark.parametrize("selected", [(), (0,), (0, 1), (1, 0, 1), (0, 1, 2)])
+    @pytest.mark.parametrize("transposed", [False, True])
+    def test_matches_sequential_pixel_bytes_and_target_order(self, selected: tuple[int, ...], transposed: bool) -> None:
+        """The original per-ring assignments are an independent oracle, including overlap."""
+        rings = [_square_ring(0.0, 0.0, 5.0, 5.0), _square_ring(3.0, 2.0, 8.0, 7.0), _square_ring(9.0, 9.0, 12.0, 12.0)]
+        targets = Targets(
+            boxes=torch.tensor([[0.0, 0.0, 5.0, 5.0], [3.0, 2.0, 8.0, 7.0], [9.0, 9.0, 12.0, 12.0]]),
+            labels=torch.tensor([1, 3, 7]),
+            polygons=rings,
+        )
+        source = torch.arange(3 * _SIDE * _SIDE, dtype=torch.float32).reshape(3, _SIDE, _SIDE)
+        source[0, 0, 0] = -0.0
+        if transposed:
+            source = source.transpose(-1, -2)
+        destination = torch.full_like(source, -1.0)
+        expected = destination.clone()
+        for index in selected:
+            mask = _rasterize_polygon(rings[index], _SIDE, _SIDE)
+            expected[:, mask] = source[:, mask]
+        source_before = source.clone()
+        got, got_targets = CopyPaste(p=1.0).apply(
+            [(destination, Targets.empty()), (source, targets)], CopyPasteParams(selected=selected)
+        )
+        assert torch.equal(got.contiguous().view(torch.uint8), expected.contiguous().view(torch.uint8))
+        assert got_targets.labels.tolist() == [int(targets.labels[index]) for index in selected]
+        assert torch.equal(source.contiguous().view(torch.uint8), source_before.contiguous().view(torch.uint8))
+        assert torch.equal(destination, torch.full_like(destination, -1.0))
+
+    def test_multiple_rings_issue_one_image_assignment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Returning silently to a copy per ring fails on the observable removed operation."""
+        source = torch.ones(3, _SIDE, _SIDE)
+        destination = torch.zeros_like(source)
+        ring = _square_ring(1.0, 1.0, 6.0, 6.0)
+        targets = Targets(
+            boxes=torch.tensor([[1.0, 1.0, 6.0, 6.0]] * 3),
+            labels=torch.zeros(3, dtype=torch.long),
+            polygons=[ring, ring.clone(), ring.clone()],
+        )
+        calls: list[object] = []
+        incumbent = torch.Tensor.__setitem__
+
+        def counted(tensor: torch.Tensor, key: object, value: object) -> None:
+            if tensor is destination:
+                calls.append(key)
+            incumbent(tensor, key, value)
+
+        monkeypatch.setattr(torch.Tensor, "__setitem__", counted)
+        CopyPaste._paste_selected(destination, source, targets, [0, 1, 2])
+        assert len(calls) == 1
+
+
 class TestRasterizer:
     """The polygon rasteriser fills the expected pixel block for an axis-aligned square."""
 

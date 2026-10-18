@@ -476,6 +476,10 @@ class RandomAffine:
         allow_upscale: Whether ``letterbox`` may enlarge content past its native size
             when the output canvas is larger than the source. Defaults to ``True``;
             ignored without ``letterbox``.
+        centered_input: The caller has already subtracted ``114 / 255`` from every
+            input pixel, including any mosaic fill. Skip that same subtraction in
+            the fused segment and restore the fill after resampling. Defaults to
+            ``False``; only a prepared training source supplies centred pixels.
 
     Attributes:
         last_params: The :class:`AffineParams` sampled on the most recent call, or
@@ -526,7 +530,9 @@ class RandomAffine:
         min_visibility: float = 0.1,
         letterbox: int | tuple[int, int] | None = None,
         allow_upscale: bool = True,
+        centered_input: bool = False,
     ) -> None:
+        self.centered_input = bool(centered_input)
         self.degrees = float(degrees)
         self.translate = float(translate)
         self.scale = float(scale)
@@ -722,7 +728,7 @@ class RandomAffine:
             adapter=_ADAPTER,
             interpolation="bilinear",
             padding_mode="zeros",
-            fill=_FILL,
+            fill=None if self.centered_input else _FILL,
             # Upstream draws a per-transform activation gate even at `prob = 1.0`. It
             # changes nothing here (the gate always passes), but it draws from *some*
             # stream, and neither the caller's generator nor the global one may be it.
@@ -757,7 +763,8 @@ class RandomAffine:
         # and dropped around the one call. `forward` is called rather than the module, as
         # upstream's own pipeline does, since there are no hooks to dispatch.
         warped = segment.forward(image.unsqueeze(0), None)
-        return cast("Tensor", warped).squeeze(0)
+        result = cast("Tensor", warped).squeeze(0)
+        return result + _DEFAULT_PAD_VALUE if self.centered_input else result
 
     def _warp_targets(self, targets: Targets, matrix: Tensor, height: int, width: int) -> Targets:
         """Warp, clip and filter every modality; dispatch on rotated-box/polygon presence."""

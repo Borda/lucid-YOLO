@@ -30,7 +30,13 @@ from lucid_yolo.data import yolo as yolo_data
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.layout import DATA_YAML_NAME, DatasetLayout
 from lucid_yolo.data.yolo import YoloDetectionDataset
-from lucid_yolo.ptl.datamodule import DetectionDataModule, PackedTargets, unpack_batch
+from lucid_yolo.ptl.datamodule import (
+    DetectionDataModule,
+    PackedTargets,
+    _PreparedTrainingSource,
+    pack_targets,
+    unpack_batch,
+)
 
 #: Fixture image size, deliberately non-square so an x/y transposition cannot pass unnoticed.
 _WIDTH = 64
@@ -921,3 +927,144 @@ class TestTrainingDeterminism:
         assert len(uncached[0]) == len(cached[0]) == len(_IMAGE_STEMS)
         for left, right in zip(uncached[0], cached[0], strict=True):
             _assert_batches_identical(left, right)
+
+
+@pytest.mark.filterwarnings("ignore:prepared image cache:UserWarning")
+class TestPreparedTrainingCache:
+    """Moving the affine subtraction to immutable sources preserves every output byte."""
+
+    @pytest.mark.parametrize("layout", ["coco", "yolo"])
+    @pytest.mark.parametrize("mosaic_prob", [0.0, 1.0])
+    def test_float_pixels_targets_and_draws_match(self, tmp_path: Path, layout: str, mosaic_prob: float) -> None:
+        """Compare before transport quantization, with mixed-source blending enabled."""
+        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
+        root = write_root(tmp_path, distinct=True)
+        baseline = _fit_datamodule(root, 0, cache_train_images=True)
+        prepared = _fit_datamodule(root, 0, cache_prepared_train_images=True)
+        baseline.set_mosaic_prob(mosaic_prob)
+        prepared.set_mosaic_prob(mosaic_prob)
+        assert baseline._train is not None and prepared._train is not None
+        source = prepared._prepared_train
+        assert source is not None
+        saved = [image.clone() for image, _ in source]
+        for index in range(32):
+            left, left_targets = baseline._train[index % len(baseline._train)]
+            right, right_targets = prepared._train[index % len(prepared._train)]
+            assert torch.equal(left.contiguous().view(torch.uint8), right.contiguous().view(torch.uint8))
+            _assert_batches_identical((left, pack_targets([left_targets])), (right, pack_targets([right_targets])))
+        assert torch.equal(baseline._train._generator.get_state(), prepared._train._generator.get_state())
+        for (image, _), original in zip(source, saved, strict=True):
+            assert torch.equal(image.contiguous().view(torch.uint8), original.contiguous().view(torch.uint8))
+
+    @pytest.mark.parametrize("layout", ["coco", "yolo"])
+    def test_reuses_prepared_storage_and_releases_it_outside_fit(
+        self, tmp_path: Path, layout: str, decode_calls: list[str]
+    ) -> None:
+        """Repeated setup keeps one float cache; enabling both flags keeps no byte copy."""
+        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
+        module = _datamodule(write_root(tmp_path), cache_train_images=True, cache_prepared_train_images=True)
+        module.setup("fit")
+        first = module._prepared_train
+        assert first is not None
+        assert first.base._image_cache is None
+        calls = len(decode_calls)
+        module.set_mosaic_prob(0.0)
+        module.setup("fit")
+        assert module._prepared_train is first
+        assert len(decode_calls) == calls == len(_IMAGE_STEMS)
+        assert module.mosaic_prob > 0.0
+        module.setup("validate")
+        assert module._prepared_train is None
+        assert module._cached_train_base is None
+        assert module._train is not None and not isinstance(module._train._base, _PreparedTrainingSource)
+
+    def test_spawn_worker_reads_prepared_pixels(self, tmp_path: Path) -> None:
+        """The source is ordinary picklable state, including under a spawned worker."""
+        root = _write_coco_root(tmp_path, distinct=True)
+        expected = _train_epochs(root, 0, epochs=1, num_workers=1)
+        module = _fit_datamodule(root, 0, num_workers=1, cache_prepared_train_images=True)
+        loader = module.train_dataloader()
+        loader.multiprocessing_context = "spawn"
+        strategy = torch.multiprocessing.get_sharing_strategy()
+        try:
+            # file_descriptor spawn also fails in the baseline on torch 2.14.
+            # Exercise prepared-source pickling independently with file_system.
+            torch.multiprocessing.set_sharing_strategy("file_system")
+            actual = list(loader)
+        finally:
+            torch.multiprocessing.set_sharing_strategy(strategy)
+        for left, right in zip(expected[0], actual, strict=True):
+            _assert_batches_identical(left, right)
+
+    def test_failed_preparation_installs_no_partial_cache(self, tmp_path: Path) -> None:
+        """A failed decode leaves setup retryable after the missing file is restored."""
+        root = _write_coco_root(tmp_path, distinct=True)
+        missing = root / "train" / "frame1.png"
+        missing.unlink()
+        module = _datamodule(root, cache_prepared_train_images=True)
+        with pytest.raises(OSError, match="failed to read image"):
+            module.setup("fit")
+        assert module._prepared_train is None
+        assert module._cached_train_base is None
+        _write_image(missing, seed=1)
+        module.setup("fit")
+        assert module._prepared_train is not None and len(module._prepared_train) == len(_IMAGE_STEMS)
+
+    def test_draws_reuse_sources_and_do_not_center_the_mosaic_again(
+        self, tmp_path: Path, decode_calls: list[str]
+    ) -> None:
+        """A silent return to per-draw reads or a fill-bearing warp must fail this gate."""
+        module = _datamodule(_write_coco_root(tmp_path), cache_prepared_train_images=True)
+        module.setup("fit")
+        assert module._train is not None
+        decoded = len(decode_calls)
+        for _ in range(8):
+            module._train[0]
+        assert len(decode_calls) == decoded == len(_IMAGE_STEMS)
+        affine = module._train._affine
+        assert affine.last_params is not None
+        assert affine._segment(affine.last_params).fill is None
+
+    @pytest.mark.parametrize("modality", ["masks", "keypoints", "oriented"])
+    def test_preserves_modality_targets_over_repeated_draws(self, tmp_path: Path, modality: str) -> None:
+        """Cached targets retain mask geometry, rotated boxes and schema-defined point flips."""
+        if modality == "oriented":
+            root = _write_yolo_root(tmp_path, row=_ORIENTED_ROW, distinct=True)
+        else:
+            root = _write_coco_root(tmp_path, distinct=True)
+        if modality == "keypoints":
+            for split in ("train", "val"):
+                path = root / "annotations" / f"instances_{split}.json"
+                payload = json.loads(path.read_text())
+                payload["categories"][0]["keypoints"] = ["base_left", "base_right"]
+                for annotation in payload["annotations"]:
+                    annotation["keypoints"] = [20.0, 16.0, 2, 40.0, 20.0, 2]
+                    annotation["num_keypoints"] = 2
+                path.write_text(json.dumps(payload))
+        flags = dict(
+            mask_targets=modality == "masks",
+            keypoint_targets=modality == "keypoints",
+            rotated_targets=modality == "oriented",
+            variant="x",
+            seed=_DETERMINISM_SEED,
+        )
+        baseline = _datamodule(root, cache_train_images=True, **flags)
+        cached = _datamodule(root, cache_prepared_train_images=True, **flags)
+        baseline.setup("fit")
+        cached.setup("fit")
+        assert baseline._train is not None and cached._train is not None
+        left_collate = baseline.train_dataloader().collate_fn
+        right_collate = cached.train_dataloader().collate_fn
+        for index in range(32):
+            left = baseline._train[index % len(baseline._train)]
+            right = cached._train[index % len(cached._train)]
+            assert torch.equal(left[0].contiguous().view(torch.uint8), right[0].contiguous().view(torch.uint8))
+            left_batch, right_batch = left_collate([left]), right_collate([right])
+            _assert_batches_identical(left_batch, right_batch)
+            for field in dataclasses.fields(left_batch[1]):
+                a, b = getattr(left_batch[1], field.name), getattr(right_batch[1], field.name)
+                if a is not None and b is not None:
+                    assert a.shape == b.shape
+                    assert torch.equal(
+                        a.contiguous().reshape(-1).view(torch.uint8), b.contiguous().reshape(-1).view(torch.uint8)
+                    )
