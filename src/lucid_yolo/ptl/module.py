@@ -912,8 +912,13 @@ class DetectionLitModule(LightningModule):
         capture_orthogonalization: Enable MuSGD's optional CUDA graph replay of
             its existing Newton--Schulz calls. Defaults to ``False``. Shapes,
             strides, dtype, device, step count and precision select each recording;
-            learning rates, momentum and parameters remain outside the graphs.
+            this flag alone leaves learning rates, momentum and parameters outside the graphs.
             Extra workspace and setup can outweigh the saving on short runs.
+        capture_updates: Enable MuSGD's optional replay of the existing update preparation,
+            including momentum, followed by a native batched parameter write at the current
+            learning rate. Defaults to ``False``. Uses private gradient storage and live
+            parameters and momentum; unsupported signatures stay native. Like
+            ``capture_orthogonalization``, this has setup and retained-workspace costs.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
@@ -967,6 +972,7 @@ class DetectionLitModule(LightningModule):
         oks_gain: float = 0.0,
         compile_step: bool = False,
         capture_orthogonalization: bool = False,
+        capture_updates: bool = False,
     ) -> None:
         super().__init__()
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
@@ -975,6 +981,7 @@ class DetectionLitModule(LightningModule):
         self._num_keypoints = num_keypoints
         self._compile_step: bool = compile_step
         self._capture_orthogonalization = capture_orthogonalization
+        self._capture_updates = capture_updates
         #: The detection objective `_shared_step` calls: the bare bound method until
         #: `setup` swaps in its `torch.compile` wrapper (WP-184), and the bare method
         #: for good on every backend and task the wrapper is refused for. Function-level
@@ -1996,6 +2003,7 @@ class DetectionLitModule(LightningModule):
             w_muon=self._w_muon,
             w_sgd=self._w_sgd,
             capture_orthogonalization=self._capture_orthogonalization,
+            capture_updates=self._capture_updates,
         )
         schedule_off = self._lrf >= 1.0 and self._warmup_epochs <= 0
         trainer = self._trainer

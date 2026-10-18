@@ -180,6 +180,16 @@ def test_capture_orthogonalization_flag_reaches_module(flags: tuple[str, ...], e
     assert cli.model.hparams.capture_orthogonalization is expected
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_capture_updates_flag_reaches_optimizer(enabled: bool) -> None:
+    """The shipped CLI forwards the flag through the module into the optimizer."""
+    cli = _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", "--model.capture_updates", str(enabled).lower())
+    assert cli.model.hparams.capture_updates is enabled
+    configured = cli.model.configure_optimizers()
+    optimizer = configured["optimizer"] if isinstance(configured, dict) else configured
+    assert optimizer.param_groups[0]["capture_updates"] is enabled
+
+
 @pytest.mark.parametrize(
     ("flags", "expected"),
     [
