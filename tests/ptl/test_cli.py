@@ -171,6 +171,19 @@ def test_compile_step_flag_reaches_module(flags: tuple[str, ...], expected: bool
     ("flags", "expected"),
     [
         pytest.param((), False, id="default-off"),
+        pytest.param(("--model.capture_orthogonalization", "true"), True, id="flag-on"),
+    ],
+)
+def test_capture_orthogonalization_flag_reaches_module(flags: tuple[str, ...], expected: bool) -> None:
+    """``--model.capture_orthogonalization`` parses onto the module's hyperparameters, and defaults to off (WP-197)."""
+    cli = _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", *flags)
+    assert cli.model.hparams.capture_orthogonalization is expected
+
+
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [
+        pytest.param((), False, id="default-off"),
         pytest.param(("--data.cache_train_images", "true"), True, id="flag-on"),
     ],
 )

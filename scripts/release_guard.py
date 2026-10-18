@@ -348,7 +348,9 @@ def _optional_top_levels(package_root: Path) -> set[str]:
 
     A try around a function definition does not protect the function's later
     calls. Stop at that scope boundary; only a try inside the function can
-    make its import optional.
+    make its import optional. A matching handler containing a ``raise`` is
+    conservatively treated as required: catching absence and aborting the import
+    does not provide a fallback, even when another handler would continue.
 
     Examples:
         ```pycon
@@ -380,11 +382,17 @@ def _optional_top_levels(package_root: Path) -> set[str]:
                 if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
                     break
                 if isinstance(parent, ast.Try) and child in parent.body:
-                    handled = {
-                        n.id for h in parent.handlers if h.type for n in ast.walk(h.type) if isinstance(n, ast.Name)
-                    }
-                    if handled & {"ImportError", "ModuleNotFoundError"}:
-                        guarded = True
+                    handlers = [
+                        h
+                        for h in parent.handlers
+                        if h.type
+                        and any(
+                            isinstance(n, ast.Name) and n.id in {"ImportError", "ModuleNotFoundError"}
+                            for n in ast.walk(h.type)
+                        )
+                    ]
+                    if handlers:
+                        guarded = not any(isinstance(n, ast.Raise) for h in handlers for n in ast.walk(h))
                         break
                 child = parent
             (optional if guarded else required).update(tops)

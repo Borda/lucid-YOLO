@@ -909,6 +909,11 @@ class DetectionLitModule(LightningModule):
             the state dict, EMA, checkpoints and export are untouched. Whether the
             compiled objective trains to the same mAP as eager is A78, still open —
             which is why the default is off.
+        capture_orthogonalization: Enable MuSGD's optional CUDA graph replay of
+            its existing Newton--Schulz calls. Defaults to ``False``. Shapes,
+            strides, dtype, device, step count and precision select each recording;
+            learning rates, momentum and parameters remain outside the graphs.
+            Extra workspace and setup can outweigh the saving on short runs.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
@@ -961,6 +966,7 @@ class DetectionLitModule(LightningModule):
         keypoint_loss: str = "rle",
         oks_gain: float = 0.0,
         compile_step: bool = False,
+        capture_orthogonalization: bool = False,
     ) -> None:
         super().__init__()
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
@@ -968,6 +974,7 @@ class DetectionLitModule(LightningModule):
         self._task = task
         self._num_keypoints = num_keypoints
         self._compile_step: bool = compile_step
+        self._capture_orthogonalization = capture_orthogonalization
         #: The detection objective `_shared_step` calls: the bare bound method until
         #: `setup` swaps in its `torch.compile` wrapper (WP-184), and the bare method
         #: for good on every backend and task the wrapper is refused for. Function-level
@@ -1988,6 +1995,7 @@ class DetectionLitModule(LightningModule):
             weight_decay=self._weight_decay,
             w_muon=self._w_muon,
             w_sgd=self._w_sgd,
+            capture_orthogonalization=self._capture_orthogonalization,
         )
         schedule_off = self._lrf >= 1.0 and self._warmup_epochs <= 0
         trainer = self._trainer

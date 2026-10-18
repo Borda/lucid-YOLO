@@ -36,7 +36,7 @@ _WP_FLOOR = 198
 #: Lowest decision count DECISIONS.md is allowed to hold. A ratchet, not a target:
 #: contiguity alone would not notice the last row being deleted, since what remains
 #: stays contiguous. Raise it when adding a decision; never lower it.
-_DECISION_FLOOR = 28
+_DECISION_FLOOR = 29
 
 #: Lowest assumption count ASSUMPTIONS.md is allowed to hold, for the same ratchet
 #: reason as the two floors above.

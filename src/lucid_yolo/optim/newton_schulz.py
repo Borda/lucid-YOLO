@@ -18,11 +18,14 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
+from lucid_yolo.optim.replay import _replay_orthogonalization
+
 #: Quintic Newton-Schulz coefficient triple ``(a, b, c)`` from the public
 #: write-up (R8). The step is ``X <- a*X + (b*A + c*A@A) @ X`` with ``A = X@X^T``.
 _COEFFS: tuple[float, float, float] = (3.4445, -4.7750, 2.0315)
 
 
+@_replay_orthogonalization
 def _orthogonalize_batched(matrices: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
     """Orthogonalize an exact-shape leading batch with native batched products.
 
@@ -106,6 +109,7 @@ def _orthogonalize_batched(matrices: Tensor, steps: int = 5, eps: float = 1e-7) 
     return x.to(in_dtype)
 
 
+@_replay_orthogonalization
 def orthogonalize(matrix: Tensor, steps: int = 5, eps: float = 1e-7) -> Tensor:
     """Approximate the orthogonal factor ``U V^T`` of a 2D matrix.
 

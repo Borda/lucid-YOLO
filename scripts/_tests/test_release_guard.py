@@ -530,6 +530,18 @@ def test_no_release_step_interpolates_workflow_context_into_shell_source() -> No
     [
         ("try:\n    import helper\nexcept ModuleNotFoundError:\n    pass\n", True),
         ("try:\n    import helper\nexcept (OSError, ImportError):\n    pass\n", True),
+        ("try:\n    import helper\nexcept ImportError:\n    raise\n", False),
+        ("try:\n    import helper\nexcept ImportError:\n    raise RuntimeError('missing helper')\n", False),
+        ("try:\n    import helper\nexcept (OSError, ImportError):\n    raise\n", False),
+        ("try:\n    import helper\nexcept ImportError:\n    if unavailable:\n        raise RuntimeError()\n", False),
+        ("try:\n    import helper\nexcept ImportError:\n    raise\nexcept ModuleNotFoundError:\n    pass\n", False),
+        ("try:\n    import helper\nexcept ImportError:\n    helper = None\n", True),
+        ("try:\n    import helper\nexcept ValueError:\n    raise\nexcept ImportError:\n    pass\n", True),
+        (
+            "try:\n    try:\n        import helper\n    except ImportError:\n"
+            "        raise RuntimeError()\nexcept ImportError:\n    pass\n",
+            False,
+        ),
         ("import helper\n", False),
         ("def use():\n    import helper\n", False),
         ("try:\n    def use():\n        import helper\nexcept ImportError:\n    pass\n", False),
