@@ -72,7 +72,7 @@ Not an external source and not admissible as one: this row exists because the re
 
 | ID | Reference | Role |
 | -- | -- | -- |
-| R43 | PyTorch `torch.cuda.make_graphed_callables`, [2.4 API documentation](https://docs.pytorch.org/docs/2.4/generated/torch.cuda.make_graphed_callables.html), [v2.4.0 LICENSE](https://github.com/pytorch/pytorch/blob/v2.4.0/LICENSE), BSD-3-Clause | General-purpose forward/backward CUDA replay API and its tensor-only, first-order, hook and uncached-AMP constraints. Licence verified 2026-10-16 from that exact tag. The implementation calls the existing dependency API; no detection code is copied. R40-R42 are left available to the two contributions already under review when this row was prepared. |
+| R43 | PyTorch `torch.cuda.make_graphed_callables`, [2.4 API documentation](https://docs.pytorch.org/docs/2.4/generated/torch.cuda.make_graphed_callables.html), [v2.4.0 LICENSE](https://github.com/pytorch/pytorch/blob/v2.4.0/LICENSE), BSD-3-Clause | General-purpose forward/backward CUDA replay API and its tensor-only, first-order, hook and uncached-AMP constraints. Licence verified 2026-10-16 from that exact tag. The implementation calls the existing dependency API; no detection code is copied. |
 
 ### Review-process documentation
 
