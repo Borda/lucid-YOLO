@@ -286,10 +286,18 @@ class MuSGD(Optimizer):
         return loss
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Restore optimizer state and discard recordings from the previous session."""
+        """Restore optimizer state and discard recordings from the previous session.
+
+        ``capture_orthogonalization`` chooses how this run executes rather than what it has
+        learned, so each group keeps the value it holds now. A checkpoint written with the
+        flag on cannot switch replay on for a launch that turned it off, nor the reverse; a
+        checkpoint without the key (an older one) needs no separate default for the same reason.
+        """
+        default = self.defaults.get("capture_orthogonalization", False)
+        launch_flags = [group.get("capture_orthogonalization", default) for group in self.param_groups]
         super().load_state_dict(state_dict)
-        for group in self.param_groups:
-            group.setdefault("capture_orthogonalization", self.defaults.get("capture_orthogonalization", False))
+        for group, flag in zip(self.param_groups, launch_flags, strict=True):
+            group["capture_orthogonalization"] = flag
         replay = getattr(self, "_orthogonalization_replay", None)
         if replay is not None:
             replay.clear()

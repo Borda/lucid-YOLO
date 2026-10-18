@@ -35,6 +35,20 @@ class _Recorded:
     graph: torch.cuda.CUDAGraph
 
 
+def _capture_open(device: torch.device) -> bool:
+    """Whether a CUDA graph capture is open on the current stream of this call's device or of ``device``.
+
+    :func:`torch.cuda.is_current_stream_capturing` reads the current device's current stream,
+    while the replay key and the recording work on the tensor's own device. When the two devices
+    differ, a capture open on the tensor's device would go unseen by that query alone and a new
+    recording would start its synchronize inside it, so the stream is also read under ``device``.
+    """
+    if torch.cuda.is_current_stream_capturing():
+        return True
+    with torch.cuda.device(device):
+        return torch.cuda.is_current_stream_capturing()
+
+
 class _OrthogonalizationReplay:
     """Own a bounded set of optional CUDA orthogonalization recordings.
 
@@ -89,7 +103,7 @@ class _OrthogonalizationReplay:
             or not value.is_contiguous()
             or value.storage_offset() != 0
             or value.numel() == 0
-            or torch.cuda.is_current_stream_capturing()
+            or _capture_open(value.device)
         ):
             return function(value, steps, eps)
         key = (
