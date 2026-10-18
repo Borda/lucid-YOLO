@@ -85,6 +85,7 @@ def scale_spec(variant: str) -> ScaleSpec:
             message lists the valid names.
 
     Examples:
+        ```pycon
         >>> scale_spec("s")
         ScaleSpec(depth=0.5, width=0.5, max_channels=1024)
         >>> scale_spec("m").max_channels
@@ -93,6 +94,8 @@ def scale_spec(variant: str) -> ScaleSpec:
         Traceback (most recent call last):
             ...
         KeyError: "unknown variant 'z'; expected one of n, s, m, l, x"
+
+        ```
     """
     try:
         return VARIANTS[variant]

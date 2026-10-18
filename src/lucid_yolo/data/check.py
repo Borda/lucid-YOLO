@@ -301,11 +301,14 @@ def check_split(name: str, images_dir: Path, annotation_file: Path, expected_ima
         A :class:`SplitCheck` capturing the counts and any problems found.
 
     Examples:
+        ```pycon
         >>> check = check_split("val", Path("/no/such/images"), Path("/no/such/ann.json"), 2)
         >>> check.ok, check.found_images, check.annotation_images
         (False, -1, -1)
         >>> check.problems[0]
         'images directory missing: /no/such/images'
+
+        ```
     """
     problems: list[str] = []
     found = _count_images(images_dir)
@@ -370,9 +373,12 @@ def _stems(directory: Path, suffixes: tuple[str, ...]) -> set[str] | None:
         not exist.
 
     Examples:
+        ```pycon
         >>> from pathlib import Path
         >>> _stems(Path("/nonexistent"), (".txt",)) is None
         True
+
+        ```
     """
     if not directory.is_dir():
         return None
@@ -392,8 +398,11 @@ def _pairing_problems(name: str, image_stems: set[str], label_stems: set[str]) -
         the two sets are equal.
 
     Examples:
+        ```pycon
         >>> _pairing_problems("train", {"P0001"}, set())
         ["train: 1 image(s) without a label file: ['P0001']"]
+
+        ```
     """
     problems = []
     for missing, message in (
@@ -419,9 +428,12 @@ def _scan_labels(labels_dir: Path) -> tuple[int, frozenset[int], list[str]]:
         than raised.
 
     Examples:
+        ```pycon
         >>> from pathlib import Path
         >>> _scan_labels(Path("/nonexistent"))
         (0, frozenset(), [])
+
+        ```
     """
     instances = 0
     classes: set[int] = set()
@@ -463,8 +475,11 @@ def _check_paired_split(
         A :class:`PairedSplitCheck` capturing the counts and any problems found.
 
     Examples:
+        ```pycon
         >>> _check_paired_split("train", Path("/no/images"), Path("/no/labels"), (".png",), _scan_labels).ok
         False
+
+        ```
     """
     image_stems = _stems(images_dir, image_suffixes)
     label_stems = _stems(labels_dir, _LABEL_SUFFIXES)
@@ -587,8 +602,11 @@ def _require_splits(splits: tuple[str, ...]) -> None:
         ValueError: If ``splits`` is empty.
 
     Examples:
+        ```pycon
         >>> _require_splits(("train",)) is None
         True
+
+        ```
     """
     if not splits:
         raise ValueError(
@@ -623,8 +641,11 @@ def _totals(
         the observed totals.
 
     Examples:
+        ```pycon
         >>> _totals([], ("train",), 1, None, None)
         (["expected 1 images across ['train'], found 0"], ["totals across ['train']: 0 images, 0 instances, 0 classes"])
+
+        ```
     """
     images = sum(max(check.found_images, 0) for check in checks)
     instances = sum(max(check.instances, 0) for check in checks)
@@ -657,8 +678,11 @@ def _scan_yolo_labels(labels_dir: Path, num_classes: int, oriented: bool) -> tup
         to parse — the reader's own message, so the file and the 1-based line are named.
 
     Examples:
+        ```pycon
         >>> _scan_yolo_labels(Path("/nonexistent"), 1, False)
         (0, frozenset(), [])
+
+        ```
     """
     instances = 0
     classes: set[int] = set()
@@ -793,8 +817,11 @@ def _declared_classes_note(config: YoloDataConfig) -> str:
         label space I meant", and an 80-name COCO-sized list buries the rest of the report.
 
     Examples:
+        ```pycon
         >>> _declared_classes_note(YoloDataConfig(root=Path("."), names=("car", "truck"), splits={}))
         'data.yaml declares 2 classes: car, truck'
+
+        ```
     """
     names = config.names
     listed = ", ".join(names) if len(names) <= _MAX_LISTED_CLASSES else f"{', '.join(names[:_MAX_LISTED_CLASSES])}, ..."
@@ -812,6 +839,7 @@ def format_report(result: DataCheck, data_root: Path) -> str:
         A multi-line report string ending in an overall PASS/FAIL verdict.
 
     Examples:
+        ```pycon
         >>> print(format_report(DataCheck(splits=[]), Path("/data/coco")))
         check-data: /data/coco
         PASS: dataset layout valid
@@ -820,6 +848,8 @@ def format_report(result: DataCheck, data_root: Path) -> str:
         check-data: /data/coco
           FAIL train2017: 0 images on disk
         FAIL: dataset layout invalid
+
+        ```
     """
     lines = [f"check-data: {data_root}"]
     for split in result.splits:
@@ -894,6 +924,7 @@ def check_dataset(
             no split at all yields a clean PASS about nothing.
 
     Examples:
+        ```pycon
         >>> code = check_dataset(Path("/nonexistent"))  # doctest: +ELLIPSIS
         check-data: /nonexistent
         ...
@@ -901,15 +932,20 @@ def check_dataset(
         >>> code
         1
 
+        ```
+
         Naming a subset narrows what is checked, and the totals note says which splits it
         summed:
 
+        ```pycon
         >>> code = check_dataset(Path("/nonexistent"), dataset="dota", splits=("train",))
         check-data: /nonexistent
           FAIL images directory missing: /nonexistent/train/images
           FAIL labelTxt directory missing: /nonexistent/train/labelTxt
           NOTE totals across ['train']: 0 images, 0 instances, 0 classes
         FAIL: dataset layout invalid
+
+        ```
     """
     if dataset is not None and dataset not in DATASETS:
         raise ValueError(f"unknown dataset {dataset!r}; known layouts are {list(DATASETS)}")
@@ -951,9 +987,12 @@ def _infer_dataset(data_root: Path) -> tuple[str | None, list[str]]:
         with the layout the probe cannot see.
 
     Examples:
+        ```pycon
         >>> layout, problems = _infer_dataset(Path("/nonexistent"))
         >>> layout is None, len(problems)
         (True, 1)
+
+        ```
     """
     try:
         return detect_layout(data_root).value, []
@@ -986,8 +1025,11 @@ def _check_flags_apply(
             :func:`check_coco_root` has no ``splits`` to narrow.
 
     Examples:
+        ```pycon
         >>> _check_flags_apply("yolo", True, ("train",), (None, None, None)) is None
         True
+
+        ```
     """
     if dataset == DatasetLayout.COCO.value and any(expectation is not None for expectation in expectations):
         raise ValueError(
@@ -1033,6 +1075,7 @@ def _check_root(
         That layout's :class:`DataCheck`.
 
     Examples:
+        ```pycon
         >>> _check_root(
         ...     Path("/nonexistent"),
         ...     "coco",
@@ -1043,6 +1086,8 @@ def _check_root(
         ...     expected_classes=None,
         ... ).ok
         False
+
+        ```
     """
     if dataset == DatasetLayout.COCO.value:
         return check_coco_root(data_root)

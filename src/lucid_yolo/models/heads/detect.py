@@ -143,12 +143,15 @@ def init_cls_prior_bias(conv: nn.Conv2d) -> None:
         conv: The output convolution whose bias is initialized. Must have a bias.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from torch import nn
         >>> conv = nn.Conv2d(4, 3, 1)
         >>> init_cls_prior_bias(conv)
         >>> round(float(conv.bias.sigmoid()[0]), 4)  # ~pi
         0.01
+
+        ```
     """
     assert conv.bias is not None  # nn.Conv2d default; narrows the Optional for mypy
     nn.init.constant_(conv.bias, -math.log((1.0 - CLS_PRIOR_PROB) / CLS_PRIOR_PROB))
@@ -172,10 +175,13 @@ def _stem_width(channels: int) -> int:
         The stem hidden channel width.
 
     Examples:
+        ```pycon
         >>> _stem_width(64)
         21
         >>> _stem_width(256)
         85
+
+        ```
     """
     return max(16, channels // 3)
 
@@ -195,10 +201,13 @@ def _depthwise_separable(in_channels: int, out_channels: int) -> nn.Sequential:
         The depthwise-separable unit mapping ``in_channels`` -> ``out_channels``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> unit = _depthwise_separable(64, 80).eval()
         >>> unit(torch.zeros(1, 64, 8, 8)).shape
         torch.Size([1, 80, 8, 8])
+
+        ```
     """
     return nn.Sequential(
         DepthwiseConv(in_channels, in_channels, 3),
@@ -222,10 +231,13 @@ def _build_box_stem(channels: int) -> nn.Sequential:
         The box-regression stem for a single level, emitting ``(B, 4, H, W)``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> stem = _build_box_stem(64).eval()
         >>> stem(torch.zeros(1, 64, 8, 8)).shape
         torch.Size([1, 4, 8, 8])
+
+        ```
     """
     hidden = _stem_width(channels)
     return nn.Sequential(
@@ -259,12 +271,15 @@ def _build_cls_stem(channels: int, num_classes: int) -> nn.Sequential:
     trainable magnitude instead of exploding on the first batch.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> stem = _build_cls_stem(64, 80).eval()
         >>> stem(torch.zeros(1, 64, 8, 8)).shape
         torch.Size([1, 80, 8, 8])
         >>> round(float(stem(torch.zeros(1, 64, 8, 8)).sigmoid().mean().detach()), 4)  # ~pi
         0.01
+
+        ```
     """
     hidden = _stem_width(channels)
     output = nn.Conv2d(hidden, num_classes, 1)
@@ -294,10 +309,13 @@ def _build_coeff_stem(channels: int, num_coeffs: int) -> nn.Sequential:
         The coefficient stem for one level, emitting ``(B, num_coeffs, H, W)``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> stem = _build_coeff_stem(64, 32).eval()
         >>> stem(torch.zeros(1, 64, 8, 8)).shape
         torch.Size([1, 32, 8, 8])
+
+        ```
     """
     hidden = _stem_width(channels)
     return nn.Sequential(
@@ -354,10 +372,13 @@ def _angle_stem_width(channels: int) -> int:
         The orientation stem's hidden channel width.
 
     Examples:
+        ```pycon
         >>> _angle_stem_width(64), _stem_width(64)  # wider than the box/class stems
         (32, 21)
         >>> _angle_stem_width(16)  # floored, as the shared convention floors
         16
+
+        ```
     """
     return max(16, channels // 2)
 
@@ -390,12 +411,15 @@ def _build_angle_stem(channels: int) -> nn.Sequential:
         The orientation stem for one level, emitting ``(B, 1, H, W)``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> stem = _build_angle_stem(64).eval()
         >>> stem(torch.zeros(1, 64, 8, 8)).shape
         torch.Size([1, 1, 8, 8])
         >>> sum(p.numel() for p in stem.parameters())  # 11c + c*h + 2h, twice, + h + 1
         4289
+
+        ```
     """
     hidden = _angle_stem_width(channels)
     return nn.Sequential(
@@ -434,10 +458,13 @@ def _build_keypoint_stem(channels: int, num_keypoints: int) -> nn.Sequential:
         W)``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> stem = _build_keypoint_stem(64, 3).eval()
         >>> stem(torch.zeros(1, 64, 8, 8)).shape
         torch.Size([1, 12, 8, 8])
+
+        ```
     """
     hidden = _stem_width(channels)
     outputs = (_KEYPOINT_COORD_OUTPUTS + _KEYPOINT_SIGMA_OUTPUTS) * num_keypoints
@@ -462,9 +489,12 @@ def _flatten_level(feature_map: Tensor) -> Tensor:
         The tensor reshaped to ``(B, H * W, C)``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _flatten_level(torch.zeros(2, 4, 8, 8)).shape
         torch.Size([2, 64, 4])
+
+        ```
     """
     return feature_map.flatten(2).transpose(1, 2)
 
@@ -765,6 +795,7 @@ class DualDetectionHead(nn.Module):
             stems on both branches.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> head = DualDetectionHead(in_channels=(64, 128, 256), num_classes=80).eval()
         >>> feats = (torch.zeros(1, 64, 80, 80), torch.zeros(1, 128, 40, 40), torch.zeros(1, 256, 20, 20))
@@ -774,6 +805,8 @@ class DualDetectionHead(nn.Module):
         (torch.Size([1, 8400, 80]), torch.Size([1, 8400, 4]))
         >>> out.o2o_angle is None  # the angle branch is opt-in
         True
+
+        ```
     """
 
     def __init__(
@@ -833,6 +866,7 @@ class DualDetectionHead(nn.Module):
             ValueError: If ``branch`` is not one of :data:`BRANCH_NAMES`.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> head = DualDetectionHead((8, 16, 32), num_classes=3).eval()
             >>> maps = (torch.zeros(1, 8, 4, 4), torch.zeros(1, 16, 2, 2), torch.zeros(1, 32, 1, 1))
@@ -844,6 +878,8 @@ class DualDetectionHead(nn.Module):
             Traceback (most recent call last):
                 ...
             ValueError: branch must be one of ('o2o', 'o2m'); got 'O2O'
+
+            ```
         """
         require_one_of("branch", branch, BRANCH_NAMES)
         selected = self.o2o if branch == "o2o" else self.o2m
@@ -904,12 +940,15 @@ def decode_ltrb(distances: Tensor, anchor_points: Tensor, strides: Tensor) -> Te
         Boxes of shape ``(B, A, 4)`` in ``xyxy`` input-pixel coordinates.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> distances = torch.tensor([[[1.0, 2.0, 3.0, 4.0]]])  # (1, 1, 4)
         >>> anchor_points = torch.tensor([[10.0, 10.0]])  # (1, 2)
         >>> strides = torch.tensor([2.0])  # (1,)
         >>> decode_ltrb(distances, anchor_points, strides)
         tensor([[[ 8.,  6., 16., 18.]]])
+
+        ```
     """
     centre_x = anchor_points[:, 0]
     centre_y = anchor_points[:, 1]
@@ -947,6 +986,7 @@ def o2o_topk_with_indices(scores: Tensor, boxes: Tensor, k: int = _DEFAULT_TOPK)
         detections themselves.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> scores = torch.tensor([[[2.0, -1.0], [-3.0, 0.5]]])  # (1, 2, 2)
         >>> boxes = torch.tensor([[[0.0, 0.0, 4.0, 4.0], [1.0, 1.0, 2.0, 2.0]]])
@@ -955,6 +995,8 @@ def o2o_topk_with_indices(scores: Tensor, boxes: Tensor, k: int = _DEFAULT_TOPK)
         tensor([[0]])
         >>> torch.equal(det[..., :4], boxes[:, anchor_index[0]])
         True
+
+        ```
     """
     _, num_anchors, _ = scores.shape
     confidence = scores.sigmoid()
@@ -993,6 +1035,7 @@ def o2o_topk(scores: Tensor, boxes: Tensor, k: int = _DEFAULT_TOPK) -> Tensor:
         ``class`` holds the integral class index as a float.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> scores = torch.tensor([[[2.0, -1.0], [-3.0, 0.5]]])  # (1, 2, 2)
         >>> boxes = torch.tensor([[[0.0, 0.0, 4.0, 4.0], [1.0, 1.0, 2.0, 2.0]]])
@@ -1001,5 +1044,7 @@ def o2o_topk(scores: Tensor, boxes: Tensor, k: int = _DEFAULT_TOPK) -> Tensor:
         torch.Size([1, 1, 6])
         >>> det[0, 0, 5]  # class index of the top detection
         tensor(0.)
+
+        ```
     """
     return o2o_topk_with_indices(scores, boxes, k)[0]

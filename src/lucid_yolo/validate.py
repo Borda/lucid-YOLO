@@ -54,11 +54,14 @@ def require_at_least(name: str, value: float, minimum: float) -> None:
         ValueError: If ``value`` is NaN or below ``minimum``.
 
     Examples:
+        ```pycon
         >>> require_at_least("batch_size", 32, 1)  # in range: returns nothing
         >>> require_at_least("batch_size", 0, 1)
         Traceback (most recent call last):
             ...
         ValueError: batch_size must be a number >= 1; got 0
+
+        ```
     """
     if math.isnan(value) or value < minimum:
         raise ValueError(f"{name} must be a number >= {minimum}; got {value}")
@@ -77,11 +80,14 @@ def require_in_range(name: str, value: float, low: float, high: float) -> None:
         ValueError: If ``value`` is NaN or outside ``[low, high]``.
 
     Examples:
+        ```pycon
         >>> require_in_range("conf_threshold", 0.25, 0.0, 1.0)  # in range: returns nothing
         >>> require_in_range("conf_threshold", -0.1, 0.0, 1.0)
         Traceback (most recent call last):
             ...
         ValueError: conf_threshold must be in [0.0, 1.0]; got -0.1
+
+        ```
     """
     if math.isnan(value) or not low <= value <= high:
         raise ValueError(f"{name} must be in [{low}, {high}]; got {value}")
@@ -103,11 +109,14 @@ def require_one_of(name: str, value: object, allowed: Sequence[object]) -> None:
         ValueError: If ``value`` equals no member of ``allowed``.
 
     Examples:
+        ```pycon
         >>> require_one_of("decoder", "nms", ("e2e", "nms"))  # known: returns nothing
         >>> require_one_of("decoder", "E2E", ("e2e", "nms"))
         Traceback (most recent call last):
             ...
         ValueError: decoder must be one of ('e2e', 'nms'); got 'E2E'
+
+        ```
     """
     if value not in allowed:
         raise ValueError(f"{name} must be one of {tuple(allowed)}; got {value!r}")

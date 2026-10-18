@@ -267,12 +267,15 @@ def _keypoint_oks_sigmas(num_keypoints: int | None) -> tuple[float, ...]:
         A length-``K`` tuple of sigmas.
 
     Examples:
+        ```pycon
         >>> _keypoint_oks_sigmas(3)
         (0.072, 0.072, 0.072)
         >>> len(_keypoint_oks_sigmas(17)), _keypoint_oks_sigmas(17)[0]
         (17, 0.026)
         >>> _keypoint_oks_sigmas(None)
         ()
+
+        ```
     """
     if num_keypoints == len(COCO_KEYPOINT_OKS_SIGMAS):
         return COCO_KEYPOINT_OKS_SIGMAS
@@ -338,6 +341,7 @@ def pad_targets(targets: list[Targets]) -> tuple[Tensor, Tensor, Tensor]:
         bool mask. Padding rows are zero boxes / zero labels / ``False`` mask.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.data.targets import Targets
         >>> a = Targets(boxes=torch.tensor([[0.0, 0.0, 4.0, 4.0]]), labels=torch.tensor([3]))
@@ -347,6 +351,8 @@ def pad_targets(targets: list[Targets]) -> tuple[Tensor, Tensor, Tensor]:
         (torch.Size([2, 1, 4]), torch.Size([2, 1]), torch.Size([2, 1]))
         >>> mask.tolist()
         [[True], [False]]
+
+        ```
     """
     batch_size = len(targets)
     counts = [int(target.boxes.shape[0]) for target in targets]
@@ -392,6 +398,7 @@ def pad_rboxes(targets: list[Targets]) -> Tensor:
             which is what a detection loader hands an oriented run.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.data.targets import Targets
         >>> one = Targets(
@@ -405,6 +412,8 @@ def pad_rboxes(targets: list[Targets]) -> Tensor:
         Traceback (most recent call last):
         ...
         ValueError: image 0 carries 1 instances but 0 rotated boxes; task='obb' needs one per instance
+
+        ```
     """
     counts = [int(target.boxes.shape[0]) for target in targets]
     for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
@@ -459,6 +468,7 @@ def pad_keypoints(targets: list[Targets]) -> tuple[Tensor, Tensor]:
             images disagree on ``K``, which no single head could predict for both.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.data.targets import Targets
         >>> one = Targets(
@@ -476,6 +486,8 @@ def pad_keypoints(targets: list[Targets]) -> tuple[Tensor, Tensor]:
         Traceback (most recent call last):
         ...
         ValueError: image 0 carries 1 instances but 0 keypoint sets; task='keypoints' needs one per instance
+
+        ```
     """
     counts = [int(target.boxes.shape[0]) for target in targets]
     for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
@@ -543,12 +555,15 @@ def normalize_keypoints_to_box(points: Tensor, boxes: Tensor) -> Tensor:
         finite annotation.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> points = torch.tensor([[[10.0, 20.0], [30.0, 40.0]]])
         >>> boxes = torch.tensor([[10.0, 20.0, 30.0, 40.0]])
         >>> normalize_keypoints_to_box(points, boxes)  # corner to corner
         tensor([[[0., 0.],
                  [1., 1.]]])
+
+        ```
     """
     origin = boxes[..., :2].unsqueeze(-2)
     extent = (boxes[..., 2:] - boxes[..., :2]).clamp(min=_MIN_BOX_EXTENT).unsqueeze(-2)
@@ -580,10 +595,13 @@ def _host_split(tensors: list[Tensor]) -> tuple[Tensor, ...]:
         The same tensors, on the host, in the order given.
 
     Examples:
+        ```pycon
         >>> _host_split([torch.tensor([[1.0, 2.0]]), torch.zeros(0, 2)])
         (tensor([[1., 2.]]), tensor([], size=(0, 2)))
         >>> _host_split([])
         ()
+
+        ```
     """
     if not tensors:
         return ()
@@ -615,10 +633,13 @@ def _split_batch(batch: StepBatch) -> tuple[Tensor, list[Targets], list[Tensor] 
         batch carried none.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> images, targets, masks = _split_batch((torch.zeros(1, 3, 4, 4), []))
         >>> masks is None
         True
+
+        ```
     """
     images, targets, *rest = batch
     return images, targets, rest[0] if rest else None
@@ -708,11 +729,14 @@ def _validate_task_arguments(task: str, num_keypoints: int | None, rotated_iou_f
         ValueError: On any of the five rejections the class docstring lists.
 
     Examples:
+        ```pycon
         >>> _validate_task_arguments("detect", None, "hellinger", "rle")
         >>> _validate_task_arguments("keypoints", None, "hellinger", "rle")
         Traceback (most recent call last):
             ...
         ValueError: task='keypoints' needs an explicit num_keypoints: ...
+
+        ```
     """
     if task not in _TASKS:
         raise ValueError(f"task must be one of {_TASKS}, got {task!r}")
@@ -896,6 +920,11 @@ class DetectionLitModule(LightningModule):
             changed storage, modes, hooks or precision retire the recording. Warmup
             restores buffers and RNG, and the fit callbacks discard recordings on
             completion or failure. Higher-order differentiation is unsupported.
+        capture_orthogonalization: Enable MuSGD's optional CUDA graph replay of
+            its existing Newton--Schulz calls. Defaults to ``False``. Shapes,
+            strides, dtype, device, step count and precision select each recording;
+            learning rates, momentum and parameters remain outside the graphs.
+            Extra workspace and setup can outweigh the saving on short runs.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
@@ -906,6 +935,7 @@ class DetectionLitModule(LightningModule):
             ``num_keypoints`` was given for a task that builds no point stem.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.data.targets import Targets
         >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4)
@@ -914,6 +944,8 @@ class DetectionLitModule(LightningModule):
         >>> loss = module.training_step((images, targets), 0)  # doctest: +SKIP
         >>> bool(torch.isfinite(loss))  # doctest: +SKIP
         True
+
+        ```
     """
 
     def __init__(  # noqa: PLR0913 — flat hyperparameter surface is deliberate: WP-038 LightningCLI configures each knob directly from YAML (only 4 are required positionals)
@@ -947,6 +979,7 @@ class DetectionLitModule(LightningModule):
         oks_gain: float = 0.0,
         compile_step: bool = False,
         capture_network: bool = False,
+        capture_orthogonalization: bool = False,
     ) -> None:
         super().__init__()
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
@@ -955,9 +988,9 @@ class DetectionLitModule(LightningModule):
         self.save_hyperparameters()
         self._capture_network, self._capture_network_active = capture_network, False
         self._network_capture = _NetworkCapture()
-        self._task = task
-        self._num_keypoints = num_keypoints
+        self._task, self._num_keypoints = task, num_keypoints
         self._compile_step: bool = compile_step
+        self._capture_orthogonalization = capture_orthogonalization
         #: The detection objective `_shared_step` calls: the bare bound method until
         #: `setup` swaps in its `torch.compile` wrapper (WP-184), and the bare method
         #: for good on every backend and task the wrapper is refused for. Function-level
@@ -1129,9 +1162,12 @@ class DetectionLitModule(LightningModule):
             The task string given at construction.
 
         Examples:
+            ```pycon
             >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4)
             >>> module.task
             'detect'
+
+            ```
         """
         return self._task
 
@@ -1179,8 +1215,11 @@ class DetectionLitModule(LightningModule):
                 more than one process.
 
         Examples:
+            ```pycon
             >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4)
             >>> module.setup("fit")  # "detect" scales freely; no trainer attachment needed
+
+            ```
         """
         # `_trainer` rather than the `trainer` property: the property raises when nothing
         # is attached, and a bare module (every direct-call test) must stay set-up-able.
@@ -1364,10 +1403,13 @@ class DetectionLitModule(LightningModule):
             no compiled region is involved (the compiled step is CUDA-only).
 
         Examples:
+            ```pycon
             >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4)
             >>> module.alpha = 0.8
             >>> module._alpha_tensor(torch.device("cpu"))
             tensor(0.8000, dtype=torch.float64)
+
+            ```
         """
         host = torch.device("cpu") if device.type == "mps" else device
         return torch.tensor(self.loss.alpha, dtype=torch.float64, device=host)
@@ -1398,10 +1440,13 @@ class DetectionLitModule(LightningModule):
             underlying loss attribute so a scheduler can update the ramp per epoch.
 
         Examples:
+            ```pycon
             >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4)
             >>> module.alpha = 0.8
             >>> module.loss.alpha
             0.8
+
+            ```
         """
         return self.loss.alpha
 
@@ -1421,9 +1466,12 @@ class DetectionLitModule(LightningModule):
         so ``alpha`` is left at its seeded value.
 
         Examples:
+            ```pycon
             >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4)
             >>> module.alpha  # seeded value before any epoch starts
             0.5
+
+            ```
         """
         max_epochs = self.trainer.max_epochs
         if max_epochs is None or max_epochs <= 0:
@@ -1443,12 +1491,15 @@ class DetectionLitModule(LightningModule):
             branches.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4).eval()
             >>> with torch.no_grad():
             ...     out = module(torch.zeros(1, 3, 160, 160))
             >>> out.o2o_cls.shape[-1]
             4
+
+            ```
         """
         return cast("DualHeadOutput", self.head(self.neck(self.backbone(images))))
 
@@ -1482,6 +1533,7 @@ class DetectionLitModule(LightningModule):
                 prototypes to return.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> module = DetectionLitModule(
             ...     depth=0.34, width=0.25, max_channels=256, num_classes=4, task="segment"
@@ -1492,6 +1544,8 @@ class DetectionLitModule(LightningModule):
             torch.Size([1, 32, 16, 16])
             >>> out.detect.o2o_coeff.shape[-1], out.semantic is None  # aux is training-only (A17)
             (32, True)
+
+            ```
         """
         if self._task != "segment":
             raise ValueError(f"forward_segmentation requires task='segment'; this module's task is {self._task!r}")
@@ -1527,12 +1581,15 @@ class DetectionLitModule(LightningModule):
             ValueError: If ``branch`` is not a known branch name.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=1024, num_classes=4).eval()
             >>> with torch.no_grad():
             ...     one_to_one = module.forward_branch(torch.zeros(1, 3, 160, 160), "o2o")
             >>> one_to_one.cls.shape[-1]
             4
+
+            ```
         """
         return self.head.forward_branch(self.neck(self.backbone(images)), branch)
 
@@ -1565,6 +1622,7 @@ class DetectionLitModule(LightningModule):
                 return; or if ``branch`` is not a known branch name.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> module = DetectionLitModule(
             ...     depth=0.34, width=0.25, max_channels=256, num_classes=4, task="segment"
@@ -1575,6 +1633,8 @@ class DetectionLitModule(LightningModule):
             torch.Size([1, 32, 16, 16])
             >>> one_to_one.coeff.shape[-1]
             32
+
+            ```
         """
         if self._task != "segment":
             raise ValueError(
@@ -1997,6 +2057,7 @@ class DetectionLitModule(LightningModule):
             weight_decay=self._weight_decay,
             w_muon=self._w_muon,
             w_sgd=self._w_sgd,
+            capture_orthogonalization=self._capture_orthogonalization,
         )
         schedule_off = self._lrf >= 1.0 and self._warmup_epochs <= 0
         trainer = self._trainer

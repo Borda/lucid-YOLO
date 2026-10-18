@@ -701,10 +701,13 @@ def _parse_names(raw: object, source: str) -> tuple[str, ...]:
         ValueError: If ``names`` is missing, empty, or a mapping that is not index-keyed.
 
     Examples:
+        ```pycon
         >>> _parse_names(["car", "truck"], "mem")
         ('car', 'truck')
         >>> _parse_names({1: "ship", 0: "plane"}, "mem")
         ('plane', 'ship')
+
+        ```
     """
     if isinstance(raw, list):
         names = [str(name) for name in raw]
@@ -732,8 +735,11 @@ def _check_class_count(raw: object, names: tuple[str, ...], source: str) -> None
         ValueError: If ``nc`` is present and differs from ``len(names)``.
 
     Examples:
+        ```pycon
         >>> _check_class_count(2, ("car", "truck"), "mem") is None
         True
+
+        ```
     """
     if raw is None:
         return
@@ -754,10 +760,13 @@ def _split_candidates(root: Path, entry: str) -> list[Path]:
         that says something different.
 
     Examples:
+        ```pycon
         >>> [str(p) for p in _split_candidates(Path("/data/set"), "../train/images")]
         ['/data/train/images', '/data/set/train/images']
         >>> [str(p) for p in _split_candidates(Path("/data/set"), "train/images")]
         ['/data/set/train/images']
+
+        ```
     """
     written = Path(entry)
     if written.is_absolute():
@@ -777,8 +786,11 @@ def _leading_parents(written: Path) -> int:
         How many ``..`` components the path opens with.
 
     Examples:
+        ```pycon
         >>> _leading_parents(Path("../../train/images"))
         2
+
+        ```
     """
     count = 0
     for part in written.parts:
@@ -807,10 +819,13 @@ def _labels_dir_for(images_dir: Path) -> Path:
         ValueError: If no component is ``images``, leaving nothing to derive from.
 
     Examples:
+        ```pycon
         >>> _labels_dir_for(Path("/data/set/train/images"))
         PosixPath('/data/set/train/labels')
         >>> _labels_dir_for(Path("/data/set/images/train"))
         PosixPath('/data/set/labels/train')
+
+        ```
     """
     parts = list(images_dir.parts)
     if _IMAGES_COMPONENT not in parts:
@@ -835,8 +850,11 @@ def _parse_rows(lines: Sequence[str], source: str, *, num_classes: int, oriented
         One :class:`_Row` per object line, in file order.
 
     Examples:
+        ```pycon
         >>> _parse_rows(["", "0 0.5 0.5 0.2 0.2"], "mem", num_classes=1, oriented=False)[0].label
         0
+
+        ```
     """
     rows: list[_Row] = []
     for number, line in enumerate(lines, start=1):
@@ -864,8 +882,11 @@ def _parse_row(line: str, source: str, number: int, *, num_classes: int, oriente
         ValueError: If the field count is wrong for the variant, or any field fails to parse.
 
     Examples:
+        ```pycon
         >>> _parse_row("2 0.1 0.2 0.3 0.4", "mem", 1, num_classes=3, oriented=False).coords
         (0.1, 0.2, 0.3, 0.4)
+
+        ```
     """
     expected = _ORIENTED_FIELDS if oriented else _DETECTION_FIELDS
     fields = line.split()
@@ -897,8 +918,11 @@ def _parse_class(raw: str, source: str, number: int, num_classes: int) -> int:
         ValueError: If the field is not an integer, or is outside ``0..num_classes-1``.
 
     Examples:
+        ```pycon
         >>> _parse_class("2", "mem", 1, 3)
         2
+
+        ```
     """
     try:
         label = int(raw)
@@ -925,8 +949,11 @@ def _parse_normalized(fields: Sequence[str], source: str, number: int) -> tuple[
             was never normalized, not that it is slightly off.
 
     Examples:
+        ```pycon
         >>> _parse_normalized(["0.0", "1.0"], "mem", 1)
         (0.0, 1.0)
+
+        ```
     """
     try:
         coords = tuple(float(value) for value in fields)
@@ -953,8 +980,11 @@ def _detection_boxes(rows: Sequence[_Row], *, height: int, width: int) -> Tensor
         An ``(N, 4)`` float32 tensor of ``xyxy`` boxes.
 
     Examples:
+        ```pycon
         >>> _detection_boxes([_Row(0, (0.5, 0.5, 1.0, 1.0))], height=20, width=10).tolist()
         [[0.0, 0.0, 10.0, 20.0]]
+
+        ```
     """
     boxes = []
     for row in rows:
@@ -989,11 +1019,14 @@ def _oriented_targets(rows: Sequence[_Row], labels: Tensor, *, height: int, widt
         Targets whose ``boxes``, ``labels`` and ``rboxes`` share one instance axis.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> row = _Row(0, (0.1, 0.1, 0.5, 0.1, 0.5, 0.3, 0.1, 0.3))
         >>> targets = _oriented_targets([row], torch.tensor([0]), height=10, width=10)
         >>> targets.boxes.tolist(), [round(v, 4) for v in targets.rboxes[0].tolist()]
         ([[1.0, 1.0, 5.0, 3.0]], [3.0, 2.0, 4.0, 2.0, 0.0])
+
+        ```
     """
     scale = torch.tensor([width, height], dtype=torch.float32)
     rings = [torch.tensor(row.coords, dtype=torch.float32).reshape(_QUAD_CORNERS, _POINT_DIM) * scale for row in rows]

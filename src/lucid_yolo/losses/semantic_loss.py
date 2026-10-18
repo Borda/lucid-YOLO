@@ -72,10 +72,13 @@ class SemanticAuxOutput:
         dice: Soft-Dice term on sigmoid probabilities.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> out = SemanticAuxOutput(total=torch.tensor(1.5), bce=torch.tensor(1.0), dice=torch.tensor(0.5))
         >>> float(out.total)
         1.5
+
+        ```
     """
 
     total: Tensor
@@ -107,6 +110,7 @@ def semantic_aux_loss(logits: Tensor, targets: Tensor) -> SemanticAuxOutput:
         assembled an empty branch input, not that the loss had nothing to say.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> logits = torch.full((1, 1, 2, 2), 20.0)  # confidently positive
         >>> targets = torch.ones(1, 1, 2, 2)
@@ -118,6 +122,8 @@ def semantic_aux_loss(logits: Tensor, targets: Tensor) -> SemanticAuxOutput:
         >>> empty = semantic_aux_loss(torch.zeros(0, 3, 4, 4), torch.zeros(0, 3, 4, 4))
         >>> float(empty.total), float(empty.bce), float(empty.dice)
         (0.0, 0.0, 0.0)
+
+        ```
     """
     if logits.numel() == 0:
         # An exact zero that is still a function of `logits`, so an empty batch needs

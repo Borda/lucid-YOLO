@@ -12,8 +12,9 @@ default_install_hook_types: [pre-commit, commit-msg]
 # the service is the half it can run unaided -- the hooks whose environments it
 # builds itself.
 #
-# `commit-trailers-history` would fail there even with an interpreter: its range is
-# `origin/main..HEAD`, and the service's checkout carries no `refs/remotes/origin/main`.
+# `commit-trailers-history` would mislead there even with an interpreter: the service's
+# checkout tracks no upstream and holds no remote-tracking ref, so `--unpushed` falls back
+# to `HEAD --not --remotes` and re-validates the whole history the checkout carries.
 ci:
   autofix_prs: true
   autoupdate_commit_msg: "[pre-commit.ci] bump ⬆ suggestions"
@@ -22,6 +23,7 @@ ci:
     - mypy
     - license-audit
     - test-doctest-audit
+    - doctest-fences
     - flat-test-group-audit
     - docs-present
     - wp-links
@@ -160,6 +162,16 @@ repos:
         language: system
         pass_filenames: false
         files: ^(tests/.*/test_[^/]+\.py|scripts/_tests/test_[^/]+\.py|src/.*\.py)$
+      # Every docstring doctest under src/ sits in a ```pycon block
+      # closed after exactly one blank line. Doctest runs either form, so this
+      # holds one convention rather than a correctness property; it is gated
+      # because a convention left to review drifted into 14 modules mixing both.
+      - id: doctest-fences
+        name: "🧱 doctest examples fenced as ```pycon"
+        entry: .venv/bin/python scripts/lint/audit_doctest_fences.py
+        language: system
+        types: [python]
+        files: ^src/
       # A confirmed mechanical group (shared name prefix that also names a call
       # target in the file, three or more members) must sit under a
       # `class Test<Subject>:`, tests/eval/test_tile_merge.py's own established
@@ -272,9 +284,13 @@ repos:
       # --all-files-reachable half, re-validating every commit not yet on
       # origin/main.
       #
-      # `@{upstream}..HEAD` checks only local work not yet on the tracked branch;
-      # comparing a published PR branch with origin/main would recheck commits
-      # whose messages are replaced by the squash merge. This hook is not the
+      # `--unpushed` is `@{upstream}..HEAD`: only local work not yet on the tracked
+      # branch; comparing a published PR branch with origin/main would recheck
+      # commits whose messages are replaced by the squash merge. Without a
+      # resolvable upstream -- a never-pushed branch, or a fork PR checked out by
+      # `gh pr checkout`, whose upstream is a URL with no remote-tracking ref -- it
+      # falls back to `HEAD --not --remotes` rather than failing to resolve the
+      # range. This hook is not the
       # enforcing owner of the contract. The range is empty whenever the branch
       # is already pushed, which is the normal state of a clean tree, so a green
       # run here usually means zero commits were examined rather than that all of
@@ -285,7 +301,7 @@ repos:
       # request's title and description -- the message a squash merge lands.
       - id: commit-trailers-history
         name: "📜 provenance commit trailers (unpushed history)"
-        entry: .venv/bin/python scripts/lint/check_commit_trailers.py --range @{upstream}..HEAD
+        entry: .venv/bin/python scripts/lint/check_commit_trailers.py --unpushed
         language: system
         pass_filenames: false
         stages: [pre-commit, manual]

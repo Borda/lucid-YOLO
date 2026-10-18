@@ -48,10 +48,13 @@ def _scale_channels(base_channels: int, width: float, max_channels: int) -> int:
         is the A3-consistent rounding validated by the WP-023 parameter gate.
 
     Examples:
+        ```pycon
         >>> _scale_channels(512, 0.5, 1024)  # s-scale, below the cap
         256
         >>> _scale_channels(1024, 1.0, 512)  # m-scale, cap bites
         512
+
+        ```
     """
     return int(min(base_channels, max_channels) * width)
 
@@ -80,17 +83,23 @@ def _scale_repeats(base_repeats: int, depth: float) -> int:
         survives so no stage degenerates to a bare fusion.
 
     Examples:
+        ```pycon
         >>> _scale_repeats(2, 0.5)  # n/s/m-scale
         1
         >>> _scale_repeats(2, 1.0)  # l/x-scale
         2
 
+        ```
+
         Both halves of the tie rule, on multipliers no published variant uses:
 
+        ```pycon
         >>> _scale_repeats(2, 0.75)  # 1.5 ties to the even 2
         2
         >>> _scale_repeats(2, 1.25)  # 2.5 ties to the even 2, not up to 3
         2
+
+        ```
     """
     return max(1, round(base_repeats * depth))
 
@@ -111,6 +120,7 @@ class DetectionBackbone(nn.Module):
             at the P5 stage for the ``m``/``l``/``x`` variants (``mc=512``).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> backbone = DetectionBackbone(depth=0.5, width=0.25, max_channels=1024).eval()
         >>> backbone.channels  # n-scale tap widths (P3, P4, P5)
@@ -119,6 +129,8 @@ class DetectionBackbone(nn.Module):
         ...     p3, p4, p5 = backbone(torch.zeros(1, 3, 640, 640))
         >>> p3.shape, p4.shape, p5.shape
         (torch.Size([1, 128, 80, 80]), torch.Size([1, 128, 40, 40]), torch.Size([1, 256, 20, 20]))
+
+        ```
     """
 
     def __init__(self, depth: float, width: float, max_channels: int) -> None:
@@ -157,8 +169,11 @@ class DetectionBackbone(nn.Module):
             stride order (8, 16, 32).
 
         Examples:
+            ```pycon
             >>> DetectionBackbone(depth=0.5, width=0.5, max_channels=1024).channels
             (256, 256, 512)
+
+            ```
         """
         return self._channels
 

@@ -77,12 +77,15 @@ def build_parser() -> ArgumentParser:
         The configured parser.
 
     Examples:
+        ```pycon
         >>> parser = build_parser()
         >>> config = parser.parse_args(["check", "--data_root", "/data/coco"])
         >>> config.check.dataset is None  # unstated: the root's layout is inferred (WP-099c)
         True
         >>> parser.parse_args(["check", "--data_root", "/data/dota", "--dataset", "dota"]).check.dataset
         'dota'
+
+        ```
     """
     parser = ArgumentParser(prog="lucid-data", description="Download, validate and tile datasets.")
     subcommands = parser.add_subcommands(dest="command", required=True)
@@ -112,10 +115,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         The subcommand's exit code.
 
     Examples:
+        ```pycon
         >>> main(["check", "--data_root", "/nonexistent"])  # doctest: +ELLIPSIS
         check-data: /nonexistent
         ...
         1
+
+        ```
     """
     config = build_parser().parse_args(argv)
     command = str(config.command)

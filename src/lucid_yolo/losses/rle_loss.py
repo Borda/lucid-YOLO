@@ -157,11 +157,14 @@ class _CouplingConditioner(nn.Module):
     is not mistaken for an accident and quietly deleted.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> conditioner = _CouplingConditioner()
         >>> log_scale, shift = conditioner(torch.zeros(5, 1))
         >>> log_scale.shape, shift.shape
         (torch.Size([5]), torch.Size([5]))
+
+        ```
     """
 
     def __init__(self) -> None:
@@ -220,6 +223,7 @@ class _AffineCoupling(nn.Module):
             coordinates overall (standard RealNVP construction).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _ = torch.manual_seed(0)
         >>> layer = _AffineCoupling(transform_index=1)
@@ -232,6 +236,8 @@ class _AffineCoupling(nn.Module):
         True
         >>> torch.allclose(log_det, -inv_log_det)  # synthesis and its inverse have opposite log-determinants
         True
+
+        ```
     """
 
     def __init__(self, transform_index: int) -> None:
@@ -297,12 +303,15 @@ class _RealNVPFlow(nn.Module):
     plus the standard-normal base log-density at the recovered latent.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _ = torch.manual_seed(0)
         >>> flow = _RealNVPFlow()
         >>> x = torch.randn(4, 2)
         >>> flow.log_density(x).shape
         torch.Size([4])
+
+        ```
     """
 
     def __init__(self, num_layers: int = _FLOW_COUPLING_LAYERS) -> None:
@@ -320,11 +329,14 @@ class _RealNVPFlow(nn.Module):
             forward log-determinant, shape ``(...,)``.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> flow = _RealNVPFlow()
             >>> x, log_det = flow.synthesize(torch.zeros(3, 2))
             >>> x.shape, log_det.shape
             (torch.Size([3, 2]), torch.Size([3]))
+
+            ```
         """
         log_det = torch.zeros(z.shape[:-1], device=z.device, dtype=z.dtype)
         x = z
@@ -349,6 +361,7 @@ class _RealNVPFlow(nn.Module):
             inverse log-determinant, shape ``(...,)``.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> _ = torch.manual_seed(0)
             >>> flow = _RealNVPFlow()
@@ -357,6 +370,8 @@ class _RealNVPFlow(nn.Module):
             >>> z_back, _ = flow.invert(x)
             >>> torch.allclose(z_back, z, atol=1e-5)
             True
+
+            ```
         """
         log_det = torch.zeros(x.shape[:-1], device=x.device, dtype=x.dtype)
         z = x
@@ -412,6 +427,7 @@ def _select_visible(mu_hat: Tensor, sigma_raw: Tensor, mu_gt: Tensor, visibility
         stay attached to their arguments' graphs.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> mu_hat = torch.zeros(1, 2, 2)
         >>> mu_gt = torch.tensor([[[0.5, 0.25], [float("inf"), float("inf")]]])
@@ -422,6 +438,8 @@ def _select_visible(mu_hat: Tensor, sigma_raw: Tensor, mu_gt: Tensor, visibility
         [[0.5, 0.5]]
         >>> _select_visible(mu_hat, torch.zeros(1, 2, 2), mu_gt, torch.tensor([[0, 0]]))[0].shape
         torch.Size([0, 2])
+
+        ```
     """
     visible = (visibility > 0).reshape(-1)
     sigma_hat = torch.sigmoid(sigma_raw.reshape(-1, 2)[visible]).clamp(min=_MIN_SIGMA)
@@ -444,11 +462,14 @@ def _reduce_selected(per_point: Tensor) -> Tensor:
         A scalar (zero-dimensional) tensor.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _reduce_selected(torch.tensor([2.0, 6.0]))
         tensor(4.)
         >>> _reduce_selected(torch.zeros(0))
         tensor(0.)
+
+        ```
     """
     return per_point.sum() / max(per_point.numel(), 1)
 
@@ -470,6 +491,7 @@ class RLELoss(nn.Module):
     state.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _ = torch.manual_seed(0)
         >>> loss_fn = RLELoss()
@@ -482,6 +504,8 @@ class RLELoss(nn.Module):
         0
         >>> bool(loss.requires_grad)
         True
+
+        ```
     """
 
     def __init__(self) -> None:

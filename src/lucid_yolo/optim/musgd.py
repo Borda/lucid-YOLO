@@ -42,6 +42,7 @@ from torch import Tensor
 from torch.optim.optimizer import Optimizer
 
 from lucid_yolo.optim.newton_schulz import _orthogonalize_batched, orthogonalize
+from lucid_yolo.optim.replay import _OrthogonalizationReplay
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -178,6 +179,10 @@ class MuSGD(Optimizer):
             to 0.5.
         ns_steps: Newton-Schulz iteration count for the orthogonalization
             (A5). Must be positive. Defaults to 5.
+        capture_orthogonalization: Record and replay the existing CUDA matrix
+            iterations. Defaults to ``False`` because capture retains device
+            workspace and pays setup per signature; CPU, MPS, autograd and
+            autocast calls stay eager. No momentum or parameter update is captured.
 
     Raises:
         ValueError: If ``lr``, ``weight_decay``, ``w_muon``, ``w_sgd`` or
@@ -188,6 +193,7 @@ class MuSGD(Optimizer):
             matrix parameter it touches into NaN on the first step (A7).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> weight = torch.nn.Parameter(torch.randn(8, 4))
         >>> bias = torch.nn.Parameter(torch.zeros(8))
@@ -195,6 +201,8 @@ class MuSGD(Optimizer):
         >>> (weight.sum() + bias.sum()).backward()
         >>> opt.step()
         >>> opt.zero_grad()
+
+        ```
     """
 
     def __init__(
@@ -206,6 +214,8 @@ class MuSGD(Optimizer):
         w_muon: float = 0.5,
         w_sgd: float = 0.5,
         ns_steps: int = 5,
+        *,
+        capture_orthogonalization: bool = False,
     ) -> None:
         if lr < 0.0:
             raise ValueError(f"lr must be non-negative, got {lr}")
@@ -226,8 +236,10 @@ class MuSGD(Optimizer):
             "w_muon": w_muon,
             "w_sgd": w_sgd,
             "ns_steps": ns_steps,
+            "capture_orthogonalization": capture_orthogonalization,
         }
         super().__init__(params, defaults)
+        self._orthogonalization_replay: _OrthogonalizationReplay | None = None
 
     @overload
     def step(self, closure: None = None) -> None: ...
@@ -248,19 +260,47 @@ class MuSGD(Optimizer):
             given.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> param = torch.nn.Parameter(torch.randn(4, 4))
             >>> opt = MuSGD([param], lr=0.1)
             >>> param.grad = torch.ones_like(param)
             >>> _ = opt.step()
+
+            ```
         """
         loss: float | None = None
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
         for group in self.param_groups:
-            self._step_group(group)
+            if group.get("capture_orthogonalization", False) and not torch.compiler.is_compiling():
+                if getattr(self, "_orthogonalization_replay", None) is None:
+                    capacity = sum(param.ndim >= 2 for item in self.param_groups for param in item["params"])
+                    self._orthogonalization_replay = _OrthogonalizationReplay(capacity)
+                assert self._orthogonalization_replay is not None
+                with self._orthogonalization_replay.activate():
+                    self._step_group(group)
+            else:
+                self._step_group(group)
         return loss
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Restore optimizer state and discard recordings from the previous session.
+
+        ``capture_orthogonalization`` chooses how this run executes rather than what it has
+        learned, so each group keeps the value it holds now. A checkpoint written with the
+        flag on cannot switch replay on for a launch that turned it off, nor the reverse; a
+        checkpoint without the key (an older one) needs no separate default for the same reason.
+        """
+        default = self.defaults.get("capture_orthogonalization", False)
+        launch_flags = [group.get("capture_orthogonalization", default) for group in self.param_groups]
+        super().load_state_dict(state_dict)
+        for group, flag in zip(self.param_groups, launch_flags, strict=True):
+            group["capture_orthogonalization"] = flag
+        replay = getattr(self, "_orthogonalization_replay", None)
+        if replay is not None:
+            replay.clear()
 
     def _step_group(self, group: dict[str, Any]) -> None:
         """Apply the update with CUDA matrices grouped by their smaller matrix dimension.

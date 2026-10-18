@@ -273,8 +273,11 @@ def _parse_lines(lines: Sequence[str], source: str) -> list[DotaObject]:
         One :class:`DotaObject` per object line, in order.
 
     Examples:
+        ```pycon
         >>> _parse_lines(["gsd:0.1", "", "0 0 2 0 2 1 0 1 plane 1"], "mem")[0].difficult
         True
+
+        ```
     """
     objects: list[DotaObject] = []
     for number, line in enumerate(lines, start=1):
@@ -300,8 +303,11 @@ def _parse_object_line(line: str, source: str, number: int) -> DotaObject:
         ValueError: If the field count is wrong or any field fails to parse.
 
     Examples:
+        ```pycon
         >>> _parse_object_line("0 0 2 0 2 1 0 1 swimming-pool 0", "mem", 1).label
         14
+
+        ```
     """
     fields = line.split()
     if len(fields) != _FIELDS_PER_OBJECT:
@@ -331,8 +337,11 @@ def _parse_polygon(fields: Sequence[str], source: str, number: int) -> Tensor:
         ValueError: If any coordinate is not a number.
 
     Examples:
+        ```pycon
         >>> _parse_polygon(["0", "0", "2", "0", "2", "1", "0", "1"], "mem", 1).shape
         torch.Size([4, 2])
+
+        ```
     """
     try:
         coordinates = [float(value) for value in fields]
@@ -356,8 +365,11 @@ def _resolve_category(raw: str, source: str, number: int) -> int:
         ValueError: If the normalized name is not a DOTA-v1.0 category.
 
     Examples:
+        ```pycon
         >>> _resolve_category("Ground_Track_Field", "mem", 1)
         6
+
+        ```
     """
     normalized = _normalize_category(raw)
     label = _LABEL_BY_NAME.get(normalized)
@@ -373,8 +385,11 @@ def _normalize_category(raw: str) -> str:
     """Lower-case a category name and treat ``-``/``_`` and whitespace runs as one space.
 
     Examples:
+        ```pycon
         >>> _normalize_category("Soccer-ball_field")
         'soccer ball field'
+
+        ```
     """
     return " ".join(raw.lower().replace("-", " ").replace("_", " ").split())
 
@@ -394,8 +409,11 @@ def _parse_difficult(raw: str, source: str, number: int) -> bool:
         ValueError: For any other value.
 
     Examples:
+        ```pycon
         >>> _parse_difficult("1", "mem", 1)
         True
+
+        ```
     """
     difficult = _DIFFICULT_VALUES.get(raw)
     if difficult is None:

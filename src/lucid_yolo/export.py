@@ -145,12 +145,15 @@ class E2EExportGraph(nn.Module):
             96 px worth of anchors and pair every prediction with the wrong pixel.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.models.build import Detector
         >>> deployed = Detector("n", num_classes=4).eval().deploy().eval()
         >>> graph = E2EExportGraph(deployed, canvas=(128, 128))
         >>> graph.anchor_points.shape, graph.strides.shape  # 16^2 + 8^2 + 4^2 = 336
         (torch.Size([336, 2]), torch.Size([336]))
+
+        ```
     """
 
     anchor_points: Tensor
@@ -177,6 +180,7 @@ class DetectExportGraph(E2EExportGraph):
     concerns a batched, fixed-shape graph does not have.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.models.build import Detector
         >>> deployed = Detector("n", num_classes=4).eval().deploy().eval()
@@ -185,6 +189,8 @@ class DetectExportGraph(E2EExportGraph):
         ...     detections = graph(torch.zeros(1, 3, 128, 128))
         >>> detections.shape  # (B, k, 6): the A9 tuple, k = 300 (A9)
         torch.Size([1, 300, 6])
+
+        ```
     """
 
     def forward(self, image: Tensor) -> Tensor:
@@ -237,6 +243,7 @@ class SegmentExportGraph(E2EExportGraph):
             requirement, or yields fewer anchors than the decoder's ``k``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.models.build import Segmenter
         >>> deployed = Segmenter("n", num_classes=4).eval().deploy().eval()
@@ -249,6 +256,8 @@ class SegmentExportGraph(E2EExportGraph):
         Traceback (most recent call last):
             ...
         ValueError: canvas (64, 64) yields 84 anchors, below the 300-detection cap; padding rows have no coefficients
+
+        ```
     """
 
     def __init__(self, deployed: nn.Module, canvas: tuple[int, int], device: torch.device | None = None) -> None:
@@ -293,6 +302,7 @@ class OrientedExportGraph(E2EExportGraph):
     the same argument order.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.models.build import OrientedDetector
         >>> deployed = OrientedDetector("n", num_classes=4).eval().deploy().eval()
@@ -301,6 +311,8 @@ class OrientedExportGraph(E2EExportGraph):
         ...     detections = graph(torch.zeros(1, 3, 128, 128))
         >>> detections.shape  # (B, k, 7): the A45 tuple, k = 300 (A9)
         torch.Size([1, 300, 7])
+
+        ```
     """
 
     def forward(self, image: Tensor) -> Tensor:
@@ -349,6 +361,7 @@ class KeypointExportGraph(E2EExportGraph):
     drop rows, and this task's gather is defined on them.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.models.build import KeypointDetector
         >>> deployed = KeypointDetector("n", num_classes=4, num_keypoints=3).eval().deploy().eval()
@@ -357,6 +370,8 @@ class KeypointExportGraph(E2EExportGraph):
         ...     detections, keypoints = graph(torch.zeros(1, 3, 128, 128))
         >>> detections.shape, keypoints.shape  # (B, k, 6) beside (B, k, K, 2)
         (torch.Size([1, 300, 6]), torch.Size([1, 300, 3, 2]))
+
+        ```
     """
 
     def forward(self, image: Tensor) -> tuple[Tensor, Tensor]:
@@ -415,6 +430,7 @@ def export_graph(
         The written path.
 
     Examples:
+        ```pycon
         >>> import tempfile
         >>> import torch
         >>> from pathlib import Path
@@ -425,6 +441,8 @@ def export_graph(
         ...     written = export_graph(graph, Path(tmp) / "detect.onnx")
         ...     written.is_file()
         True
+
+        ```
     """
     destination = Path(path)
     traced_on = torch.zeros(1, 3, *graph.canvas, device=graph.anchor_points.device) if example is None else example

@@ -191,6 +191,7 @@ def oriented_branch_terms(
         ValueError: If ``form`` is not a known rotated-IoU form.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.assign.tal import AssignResult
         >>> assign = AssignResult(
@@ -213,6 +214,8 @@ def oriented_branch_terms(
         ... )
         >>> float(zeroed.rbox), float(zeroed.angle)  # no ground truth: finite, not NaN
         (0.0, 0.0)
+
+        ```
     """
     rotated_iou_loss = _resolve_form(form)
     if gt_rboxes.shape[1] == 0:
@@ -249,10 +252,13 @@ def _no_ground_truth(pred_rboxes: Tensor, pred_theta: Tensor) -> OrientedLossOut
     needs no special case downstream.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> terms = _no_ground_truth(torch.zeros(1, 3, 5), torch.zeros(1, 3))
         >>> float(terms.rbox), float(terms.rl1), float(terms.angle)
         (0.0, 0.0, 0.0)
+
+        ```
     """
     box_zero = pred_rboxes.reshape(-1, _RBOX_DIM)[:0].sum()
     return OrientedLossOutput(rbox=box_zero, rl1=box_zero, angle=pred_theta.reshape(-1)[:0].sum())
@@ -262,8 +268,11 @@ def _resolve_form(form: str) -> Callable[[Tensor, Tensor], Tensor]:
     """Look up a rotated-IoU loss by name, naming the alternatives when it is unknown.
 
     Examples:
+        ```pycon
         >>> _resolve_form("hellinger").__name__
         'probiou_hellinger_loss'
+
+        ```
     """
     loss = ROTATED_IOU_FORMS.get(form)
     if loss is None:

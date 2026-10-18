@@ -99,6 +99,7 @@ class _HoistedScoreBackend(CocoBackend):
                 what upstream refuses is not the same document.
 
         Examples:
+            ```pycon
             >>> import torch
             >>> backend = _HoistedScoreBackend("faster_coco_eval")
             >>> document = backend._get_coco_format(
@@ -109,6 +110,8 @@ class _HoistedScoreBackend(CocoBackend):
             ... )
             >>> [annotation["score"] for annotation in document["annotations"]]
             [0.75, 0.25]
+
+            ```
         """
         document: dict[str, Any] = super()._get_coco_format(
             labels=labels,
@@ -175,11 +178,14 @@ def build_mean_average_precision(**kwargs: Any) -> MeanAveragePrecision:
             ``CocoBackend._get_coco_format``, the method this module overrides.
 
     Examples:
+        ```pycon
         >>> metric = build_mean_average_precision(backend="faster_coco_eval", box_format="xyxy")
         >>> type(metric).__name__, type(metric._coco_backend).__name__
         ('MeanAveragePrecision', '_HoistedScoreBackend')
         >>> metric._coco_backend.backend  # the requested backend is preserved
         'faster_coco_eval'
+
+        ```
     """
     if not hasattr(CocoBackend, "_get_coco_format"):
         raise RuntimeError(

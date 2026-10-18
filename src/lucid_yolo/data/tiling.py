@@ -390,9 +390,12 @@ class _Part:
         fraction: R18's ``U_i`` for this part.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _Part(torch.zeros(5), torch.zeros(4), label=3, difficult=True, fraction=0.5).label
         3
+
+        ```
     """
 
     rbox: Tensor
@@ -412,8 +415,11 @@ def _assemble(parts: list[_Part]) -> TiledTargets:
         The window's targets; correctly-shaped empties when ``parts`` is empty.
 
     Examples:
+        ```pycon
         >>> _assemble([]).targets.rboxes.shape
         torch.Size([0, 5])
+
+        ```
     """
     if not parts:
         return TiledTargets(
@@ -458,12 +464,15 @@ def _fit_part(clipped: Tensor, rbox: Tensor, box: Tensor, origin: Tensor, fracti
         window-local.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> rb = torch.tensor([5.0, 1.0, 4.0, 2.0, 0.0], dtype=torch.float64)
         >>> quad = torch.tensor([[3.0, 0.0], [7.0, 0.0], [7.0, 2.0], [3.0, 2.0]], dtype=torch.float64)
         >>> whole = _fit_part(quad, rb, torch.tensor([3.0, 0.0, 7.0, 2.0]), torch.zeros(2, dtype=torch.float64), 1.0)
         >>> whole[0].tolist()
         [5.0, 1.0, 4.0, 2.0, 0.0]
+
+        ```
     """
     if fraction >= DIFFICULT_AREA_FRACTION:
         kept = rbox.clone()
@@ -497,11 +506,14 @@ def _fit_corners(ring: Tensor, rbox: Tensor) -> Tensor:
         ``(4, 2)`` float64 corners of the fitted rectangle, in source-image pixels.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> rb = torch.tensor([0.0, 0.0, 4.0, 2.0, 0.0], dtype=torch.float64)
         >>> half = torch.tensor([[-2.0, -1.0], [0.0, -1.0], [0.0, 1.0], [-2.0, 1.0]], dtype=torch.float64)
         >>> _fit_corners(half, rb).tolist()
         [[-2.0, -1.0], [0.0, -1.0], [0.0, 1.0], [-2.0, 1.0]]
+
+        ```
     """
     cos, sin = torch.cos(rbox[4]), torch.sin(rbox[4])
     along_w = torch.stack([cos, sin])
@@ -534,11 +546,14 @@ def _visible_fraction(clipped: Tensor, rbox: Tensor) -> float:
         degenerate (zero-area boxes cannot be scored and are dropped).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> rb = torch.tensor([0.0, 0.0, 4.0, 2.0, 0.0], dtype=torch.float64)
         >>> half = torch.tensor([[-2.0, -1.0], [0.0, -1.0], [0.0, 1.0], [-2.0, 1.0]], dtype=torch.float64)
         >>> _visible_fraction(half, rb)
         0.5
+
+        ```
     """
     original = float(rbox[2] * rbox[3])
     if original <= 0.0:
@@ -556,9 +571,12 @@ def _polygon_area(ring: Tensor) -> Tensor:
         The scalar absolute area; zero for a ring too short to enclose any.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _polygon_area(torch.tensor([[0.0, 0.0], [2.0, 0.0], [2.0, 3.0], [0.0, 3.0]])).item()
         6.0
+
+        ```
     """
     if ring.shape[0] < _MIN_AREA_CORNERS:
         return ring.new_zeros(())
@@ -584,10 +602,13 @@ def _clip_to_window(ring: Tensor, x0: float, y0: float, x1: float, y1: float) ->
         The clipped ring, ``(0, 2)`` when the polygon lies wholly outside.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> quad = torch.tensor([[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
         >>> _clip_to_window(quad, 2.0, 0.0, 6.0, 4.0).tolist()
         [[2.0, 0.0], [4.0, 0.0], [4.0, 4.0], [2.0, 4.0]]
+
+        ```
     """
     for axis, bound, keep_upper in ((0, x0, True), (0, x1, False), (1, y0, True), (1, y1, False)):
         if ring.shape[0] == 0:
@@ -616,9 +637,12 @@ def _clip_to_window_batch(rings: Tensor, x0: float, y0: float, x1: float, y1: fl
         One clipped ring per input, in input order. Empty rings stay empty.
 
     Examples:
+        ```pycon
         >>> squares = torch.tensor([[[0., 0.], [4., 0.], [4., 4.], [0., 4.]]], dtype=torch.float64)
         >>> _clip_to_window_batch(squares, 0., 0., 2., 4.)[0].tolist()
         [[0.0, 0.0], [2.0, 0.0], [2.0, 4.0], [0.0, 4.0]]
+
+        ```
     """
     parts = list(rings.unbind(0))
     for axis, bound, keep_upper in ((0, x0, True), (0, x1, False), (1, y0, True), (1, y1, False)):
@@ -663,10 +687,13 @@ def _clip_halfplane(ring: Tensor, axis: int, bound: float, keep_upper: bool) -> 
         The clipped ring.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> square = torch.tensor([[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
         >>> _clip_halfplane(square, axis=0, bound=2.0, keep_upper=False).tolist()
         [[0.0, 0.0], [2.0, 0.0], [2.0, 4.0], [0.0, 4.0]]
+
+        ```
     """
     coordinate = ring[:, axis]
     inside = coordinate >= bound if keep_upper else coordinate <= bound
@@ -695,8 +722,11 @@ def _axis_starts(length: int, patch: int, overlap: int) -> list[int]:
         patch.
 
     Examples:
+        ```pycon
         >>> _axis_starts(10, 6, 2), _axis_starts(11, 6, 2), _axis_starts(4, 6, 2)
         ([0, 4], [0, 4, 5], [0])
+
+        ```
     """
     if length <= patch:
         return [0]
@@ -720,9 +750,12 @@ def _window_bounds(window: Tensor) -> tuple[float, float, float, float]:
         ValueError: If the shape is wrong or either extent is not positive.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> _window_bounds(torch.tensor([0, 1, 4, 5]))
         (0.0, 1.0, 4.0, 5.0)
+
+        ```
     """
     if window.ndim != 1 or window.shape[0] != _WINDOW_DIM:
         raise ValueError(f"window must be (4,) as (x0, y0, x1, y1); got shape {tuple(window.shape)}")
@@ -745,9 +778,12 @@ def _validate_inputs(targets: Targets, difficult: Tensor) -> None:
             or ``difficult`` has the wrong shape.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> from lucid_yolo.data.targets import Targets
         >>> _validate_inputs(Targets.empty(), torch.zeros(0, dtype=torch.bool))
+
+        ```
     """
     count = targets.boxes.shape[0]
     if targets.polygons:

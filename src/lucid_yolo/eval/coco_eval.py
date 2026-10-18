@@ -326,6 +326,7 @@ def detections_to_predictions(
         (``(M, K, 2)``) when ``keypoints`` is given.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> dets = torch.tensor(
         ...     [[[0.0, 0.0, 4.0, 4.0, 0.9, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]]
@@ -344,6 +345,8 @@ def detections_to_predictions(
         >>> posed = detections_to_predictions(dets, {1: 42}, keypoints=points)
         >>> tuple(posed[0]["keypoints"].shape)  # the padding row's points went with it
         (1, 3, 2)
+
+        ```
     """
     dense = detections.detach().to(device="cpu", dtype=torch.float32)
     image_masks: Sequence[Tensor | None] = [None] * dense.shape[0] if masks is None else list(masks)
@@ -388,6 +391,7 @@ def keypoints_to_predictions(
         long, original COCO category ids).
 
     Examples:
+        ```pycon
         >>> import torch
         >>> points = torch.tensor(
         ...     [[[[10.0, 12.0], [20.0, 22.0]], [[0.0, 0.0], [0.0, 0.0]]]]
@@ -397,6 +401,8 @@ def keypoints_to_predictions(
         >>> preds = keypoints_to_predictions(points, scores, labels, {1: 42, 0: 1})
         >>> tuple(preds[0]["keypoints"].shape), preds[0]["labels"].tolist()
         ((1, 2, 2), [42])
+
+        ```
     """
     dense_keypoints = keypoints.detach().to(device="cpu", dtype=torch.float32)
     dense_scores = scores.detach().to(device="cpu", dtype=torch.float32)
@@ -471,6 +477,7 @@ def evaluate_bbox(
         average-recall (``mar_*``) entries.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> box = torch.tensor([[10.0, 12.0, 30.0, 42.0]])
         >>> preds = [{"boxes": box, "scores": torch.tensor([1.0]), "labels": torch.tensor([5])}]
@@ -478,6 +485,8 @@ def evaluate_bbox(
         >>> stats = evaluate_bbox(preds, targets)
         >>> round(stats["map"], 3), round(stats["map_50"], 3)
         (1.0, 1.0)
+
+        ```
     """
     if not preds:
         return dict.fromkeys(_METRIC_KEYS, 0.0)
@@ -675,6 +684,7 @@ def evaluate_keypoints(
         COCO keypoint evaluation defines no small-area bucket.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> points = torch.tensor([[[10.0, 10.0], [50.0, 50.0]]])
         >>> preds = [{"keypoints": points, "scores": torch.tensor([1.0]), "labels": torch.tensor([1])}]
@@ -682,6 +692,8 @@ def evaluate_keypoints(
         >>> stats = evaluate_keypoints(preds, targets, sigmas=[1.0, 1.0])
         >>> round(stats["AP_all"], 3), round(stats["AP_50"], 3)
         (1.0, 1.0)
+
+        ```
     """
     if not preds:
         return dict.fromkeys(_KEYPOINT_METRIC_KEYS, 0.0)
@@ -749,6 +761,7 @@ def evaluate_segm(
         over mask overlap.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> box = torch.tensor([[1.0, 1.0, 3.0, 3.0]])
         >>> mask = torch.zeros(1, 4, 4, dtype=torch.bool)
@@ -757,6 +770,8 @@ def evaluate_segm(
         >>> targets = [{"boxes": box, "labels": torch.tensor([5]), "masks": mask}]
         >>> round(evaluate_segm(preds, targets)["map"], 3)
         1.0
+
+        ```
     """
     if not preds:
         return dict.fromkeys(_METRIC_KEYS, 0.0)
@@ -795,6 +810,7 @@ def evaluate_bbox_and_segm(
         yields the same key set with every value ``0.0``.
 
     Examples:
+        ```pycon
         >>> import torch
         >>> box = torch.tensor([[1.0, 1.0, 3.0, 3.0]])
         >>> mask = torch.zeros(1, 4, 4, dtype=torch.bool)
@@ -804,6 +820,8 @@ def evaluate_bbox_and_segm(
         >>> stats = evaluate_bbox_and_segm(preds, targets)
         >>> round(stats["map"], 3), round(stats["segm_map"], 3)
         (1.0, 1.0)
+
+        ```
     """
     if not preds:
         return dict.fromkeys([*_METRIC_KEYS, *(_SEGM_PREFIX + key for key in _METRIC_KEYS)], 0.0)
@@ -958,9 +976,12 @@ def hotcoco_available() -> tuple[bool, str | None]:
         missing Rust toolchain is an expected environment shape (R36), not a defect.
 
     Examples:
+        ```pycon
         >>> available, reason = hotcoco_available()
         >>> isinstance(available, bool)
         True
+
+        ```
     """
     try:
         import hotcoco  # noqa: PLC0415 - optional dependency, probed lazily rather than required at import
@@ -1385,6 +1406,7 @@ def gather_keypoints(keypoints: Tensor, anchor_index: Tensor) -> Tensor:
         Point coordinates of shape ``(B, N, K, 2)``, padding rows all zero.
 
     Examples:
+        ```pycon
         >>> keypoints = torch.arange(12.0).reshape(1, 3, 2, 2)
         >>> gathered = gather_keypoints(keypoints, torch.tensor([[2, -1]]))
         >>> gathered.shape
@@ -1395,6 +1417,8 @@ def gather_keypoints(keypoints: Tensor, anchor_index: Tensor) -> Tensor:
         >>> gathered[0, 1]
         tensor([[0., 0.],
                 [0., 0.]])
+
+        ```
     """
     real = anchor_index >= 0
     trailing = keypoints.shape[-2:]
@@ -1487,12 +1511,15 @@ class DualPathEvaluator:
             17-point person table and therefore wrong for any other ``K``.
 
     Examples:
+        ```pycon
         >>> evaluator = DualPathEvaluator(  # doctest: +SKIP
         ...     model, TopKDecoder(), NMSDecoder(), dataset.label_to_category_id, letterbox
         ... )
         >>> report = evaluator.evaluate(val_loader, targets, torch.device("cpu"))  # doctest: +SKIP
         >>> sorted(report)  # doctest: +SKIP
         ['e2e', 'nms']
+
+        ```
     """
 
     def __init__(

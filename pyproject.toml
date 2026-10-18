@@ -177,11 +177,16 @@ typing = [
 # (BSD-3-Clause) is the one shipping a native binary the audit's binary scan walked.
 # Licence audit clean at both counts; nothing copyleft entered. The `docs.yml` build job
 # is where CI sees this tree, and its audit step runs before the build for that reason.
+#
+# `mkdocstrings[python]` renders the API tab from the `src/` docstrings. It adds four
+# distributions -- mkdocstrings, mkdocstrings-python, griffelib and mkdocs-autorefs --
+# all ISC; licence audit clean with them installed.
 docs = [
   "mkdocs>=1.6,<2",
   "mkdocs-material>=9.5",
   "jupytext>=1.16",
   "mkdocs-jupyter>=0.25",
+  "mkdocstrings[python]>=1.0",
 ]
 
 [project.scripts]
