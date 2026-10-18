@@ -74,7 +74,7 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     )
     _write(
         docs_dir / "DECISIONS.md",
-        "".join(f"| D{i} | t |\n" for i in range(1, 29))
+        "".join(f"| D{i} | t |\n" for i in range(1, 30))
         + "".join(
             f"## Decision D{i} — {adr}\n"
             for i, adr in enumerate(("ADR-001", "ADR-002", "ADR-003", "ADR-004", "ADR-005"), 1)
@@ -435,7 +435,7 @@ class TestCheckDecisionsIds:
     def test_flags_missing_adr(self, tmp_path: Path) -> None:
         """A missing ADR section heading is reported even when ids are contiguous."""
         _write_required_docs(tmp_path / "docs", tmp_path)
-        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 29)))
+        _write(tmp_path / "docs" / "DECISIONS.md", "".join(f"| D{i} | t |\n" for i in range(1, 30)))
 
         violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
 
@@ -455,7 +455,7 @@ class TestCheckDecisionsIds:
 
         violations = audit.check_decisions_ids(tmp_path / "docs", tmp_path)
 
-        assert any("decisions shrank below 28 rows: 27" in violation for violation in violations)
+        assert any("decisions shrank below 29 rows: 28" in violation for violation in violations)
 
     def test_clean_for_full_register(self, tmp_path: Path) -> None:
         """A contiguous register at the floor with every ADR section reports no violation."""
