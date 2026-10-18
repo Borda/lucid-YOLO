@@ -911,6 +911,11 @@ class DetectionLitModule(LightningModule):
             the state dict, EMA, checkpoints and export are untouched. Whether the
             compiled objective trains to the same mAP as eager is A78, still open —
             which is why the default is off.
+        capture_orthogonalization: Enable MuSGD's optional CUDA graph replay of
+            its existing Newton--Schulz calls. Defaults to ``False``. Shapes,
+            strides, dtype, device, step count and precision select each recording;
+            learning rates, momentum and parameters remain outside the graphs.
+            Extra workspace and setup can outweigh the saving on short runs.
         capture_network: Replay the existing detection network's CUDA forward and backward
             with :func:`torch.cuda.make_graphed_callables`. Defaults to ``False`` because
             capture pays setup and retains a graph pool. Requires ``task="detect"``,
@@ -920,11 +925,6 @@ class DetectionLitModule(LightningModule):
             changed storage, modes, hooks or precision retire the recording. Warmup
             restores buffers and RNG, and the fit callbacks discard recordings on
             completion or failure. Higher-order differentiation is unsupported.
-        capture_orthogonalization: Enable MuSGD's optional CUDA graph replay of
-            its existing Newton--Schulz calls. Defaults to ``False``. Shapes,
-            strides, dtype, device, step count and precision select each recording;
-            learning rates, momentum and parameters remain outside the graphs.
-            Extra workspace and setup can outweigh the saving on short runs.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
@@ -978,8 +978,8 @@ class DetectionLitModule(LightningModule):
         keypoint_loss: str = "rle",
         oks_gain: float = 0.0,
         compile_step: bool = False,
-        capture_network: bool = False,
         capture_orthogonalization: bool = False,
+        capture_network: bool = False,
     ) -> None:
         super().__init__()
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
