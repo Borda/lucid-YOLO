@@ -117,7 +117,7 @@ Budget the option from the uncompressed images, not their files: approximately `
 
 Whether DataLoader workers share the cache depends on the multiprocessing start method, not on the operating system, and the data module leaves the start method at the platform default. Under `fork` the workers read the parent's cache through copy-on-write pages, so it costs one copy of RAM however many workers there are. Under `spawn` and `forkserver` — the default on macOS and Windows, and on Linux from Python 3.14 — the cache is pickled to every worker, torch moves each cached tensor into shared memory to do it (one segment or file descriptor per image), and with `--data.persistent_workers false`, the default, the hand-over repeats every epoch. The values are identical either way; a non-fork start method does not promise the one-copy cost or the speedup, and a large split can meet file-descriptor or `/dev/shm` limits at a size nobody has measured. The pipeline never writes to the cache — every draw converts into fresh float storage. Leave it off when the split does not fit comfortably beside the loader queue, model, optimizer and operating-system cache.
 
-## CUDA graph replay of orthogonalization is opt-in
+## 📼 CUDA graph replay of orthogonalization is opt-in
 
 `--model.capture_orthogonalization true` records MuSGD's existing Newton--Schulz matrix calls and replays them with each new gradient. The default is `false`: private graph pools retain extra device workspace, and setup may outweigh the gain on short or compute-bound runs. Momentum, parameter updates and the learning-rate schedule remain eager. CPU and MPS keep the original functions. [WP-197b](work_packages/wp-197b.md) records the measured workload and compatibility envelope.
 
