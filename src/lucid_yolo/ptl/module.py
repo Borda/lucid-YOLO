@@ -216,7 +216,7 @@ from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
 from lucid_yolo.ptl.coco_backend import build_mean_average_precision
-from lucid_yolo.ptl.network_capture import _NetworkCapture, _NetworkCaptureLifecycle
+from lucid_yolo.ptl.network_capture import _detection_stages, _NetworkCapture, _NetworkCaptureLifecycle
 from lucid_yolo.ptl.seg_targets import instance_mask_targets, scale_boxes_to_grid, semantic_target
 
 if TYPE_CHECKING:
@@ -1351,20 +1351,17 @@ class DetectionLitModule(LightningModule):
             )
             custom_forward = type(self).forward is not _EAGER_NETWORK_FORWARD or "forward" in vars(self)
             if root_hooks or custom_forward or self._compiled_call_impl is not None:
-                self._network_capture.retire()
+                if root_hooks:
+                    reason = "the LightningModule carries a forward or backward hook"
+                elif custom_forward:
+                    reason = "the LightningModule overrides forward"
+                else:
+                    reason = "the LightningModule call is compiled"
+                self._network_capture.retire(reason)
                 head_out = self(images)
             else:
                 eager = cast("Callable[[Tensor], DualHeadOutput]", self)
-                preserve_gradients = (
-                    self.trainer.accumulate_grad_batches > 1
-                    or type(self).optimizer_zero_grad is not _EAGER_ZERO_GRAD
-                    or "optimizer_zero_grad" in vars(self)
-                    or type(self).configure_optimizers is not _EAGER_OPTIMIZERS
-                    or "configure_optimizers" in vars(self)
-                )
-                head_out = self._network_capture.run(
-                    images, (self.backbone, self.neck, self.head), eager, preserve_gradients=preserve_gradients
-                )
+                head_out = self._network_capture.run(images, (self.backbone, self.neck, self.head), eager)
         else:
             head_out = self(images)
         o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)
@@ -1501,7 +1498,7 @@ class DetectionLitModule(LightningModule):
 
             ```
         """
-        return cast("DualHeadOutput", self.head(self.neck(self.backbone(images))))
+        return _detection_stages(self.backbone, self.neck, self.head, images)
 
     def forward_segmentation(self, images: Tensor) -> SegmentOutput:
         """Run the detection **and** mask branches over an image batch (WP-087).
@@ -2632,5 +2629,3 @@ class DetectionLitModule(LightningModule):
 
 #: The unmodified public forward; instance/class overrides retain their eager dispatch.
 _EAGER_NETWORK_FORWARD = DetectionLitModule.forward
-_EAGER_ZERO_GRAD = LightningModule.optimizer_zero_grad
-_EAGER_OPTIMIZERS = DetectionLitModule.configure_optimizers

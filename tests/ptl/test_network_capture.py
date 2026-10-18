@@ -54,9 +54,7 @@ def _module(**kwargs: object) -> DetectionLitModule:
     return DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=4, **kwargs)
 
 
-def _run(
-    holder: _NetworkCapture, model: DetectionLitModule, images: torch.Tensor, *, preserve_gradients: bool = False
-) -> object:
+def _run(holder: _NetworkCapture, model: DetectionLitModule, images: torch.Tensor) -> object:
     """Exercise the same stages and eager fallback the training objective uses.
 
     Examples:
@@ -66,7 +64,7 @@ def _run(
         >>> result.o2m_cls.shape[0]
         2
     """
-    return holder.run(images, (model.backbone, model.neck, model.head), model, preserve_gradients=preserve_gradients)
+    return holder.run(images, (model.backbone, model.neck, model.head), model)
 
 
 def test_default_has_no_callback_or_registered_state() -> None:
@@ -136,11 +134,7 @@ def test_cuda_replay_matches_eager_updates_and_buffers(dtype: torch.dtype | None
                 images = torch.randn(2, 3, 64, 64, device="cuda").contiguous(memory_format=torch.channels_last)
                 for model, capture in ((eager, False), (replay, True)):
                     with torch.autocast("cuda", enabled=dtype is not None, dtype=dtype, cache_enabled=False):
-                        output = (
-                            _run(holder, model, images, preserve_gradients=accumulation > 1)
-                            if capture
-                            else model(images)
-                        )
+                        output = _run(holder, model, images) if capture else model(images)
                         loss = (
                             sum(
                                 t.float().square().mean()
