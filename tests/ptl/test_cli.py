@@ -180,6 +180,17 @@ def test_capture_orthogonalization_flag_reaches_module(flags: tuple[str, ...], e
     assert cli.model.hparams.capture_orthogonalization is expected
 
 
+def test_capture_updates_default_off() -> None:
+    """With no replay flag on the command line, every optimizer group keeps update replay off (WP-197c)."""
+    cli = _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml")
+    assert cli.model.hparams.capture_updates is False
+    configured = cli.model.configure_optimizers()
+    optimizer = configured["optimizer"] if isinstance(configured, dict) else configured
+    assert optimizer.param_groups
+    assert all(group["capture_updates"] is False for group in optimizer.param_groups)
+    assert optimizer._update_replay is None
+
+
 @pytest.mark.parametrize("enabled", [False, True])
 @pytest.mark.parametrize("capture_network", [False, True])
 @pytest.mark.parametrize("capture_orthogonalization", [False, True])
