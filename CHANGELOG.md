@@ -6,6 +6,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Added
 
+- **Opt-in detection network CUDA replay.** `--model.capture_network true` records the existing backbone, neck and head forward/backward work while assignment, losses and state updates remain in the normal training loop. One signature is retained per fit; unsupported configurations stay eager, but a failure while recording raises (RNG state and buffers are restored first). BF16 replay requires a final torch 2.9 or newer release. Default off, separate from `compile_step`, and no graph state is checkpointed. The speed claim is limited to a small-batch workload: batch-32 screens changed direction. See [WP-193c](docs/work_packages/wp-193c.md) for measurements and validation limits.
+
 - **Opt-in CUDA replay of MuSGD update preparation.** `--model.capture_updates true` records the existing preparation and momentum work; changing learning rates and parameter writes stay outside capture. Warmup restores state, loading invalidates recordings, and unsupported inputs keep the native route. The default stays off because setup and device workspace have a cost.
 
 - **Opt-in CUDA graph replay of MuSGD orthogonalization.** `--model.capture_orthogonalization true` replays the existing matrix iterations with fresh gradients while momentum, learning rates and parameter updates stay eager. The default stays off because recordings retain device workspace; unsupported execution contexts keep the original calls.

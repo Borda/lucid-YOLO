@@ -181,13 +181,29 @@ def test_capture_orthogonalization_flag_reaches_module(flags: tuple[str, ...], e
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_capture_updates_flag_reaches_optimizer(enabled: bool) -> None:
-    """The shipped CLI forwards the flag through the module into the optimizer."""
-    cli = _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", "--model.capture_updates", str(enabled).lower())
+@pytest.mark.parametrize("capture_network", [False, True])
+@pytest.mark.parametrize("capture_orthogonalization", [False, True])
+def test_capture_updates_flag_reaches_optimizer(
+    enabled: bool, capture_network: bool, capture_orthogonalization: bool
+) -> None:
+    """The shipped CLI independently forwards all three replay flags to their owners."""
+    cli = _config_cli(
+        _CONFIGS_DIR / "det_nano_smoke.yaml",
+        "--model.capture_updates",
+        str(enabled).lower(),
+        "--model.capture_network",
+        str(capture_network).lower(),
+        "--model.capture_orthogonalization",
+        str(capture_orthogonalization).lower(),
+    )
     assert cli.model.hparams.capture_updates is enabled
+    assert cli.model.hparams.capture_network is capture_network
+    assert cli.model.hparams.capture_orthogonalization is capture_orthogonalization
     configured = cli.model.configure_optimizers()
     optimizer = configured["optimizer"] if isinstance(configured, dict) else configured
-    assert optimizer.param_groups[0]["capture_updates"] is enabled
+    assert optimizer.param_groups
+    assert all(group["capture_updates"] is enabled for group in optimizer.param_groups)
+    assert all(group["capture_orthogonalization"] is capture_orthogonalization for group in optimizer.param_groups)
 
 
 @pytest.mark.parametrize(
