@@ -49,6 +49,25 @@ def _capture_open(device: torch.device) -> bool:
         return torch.cuda.is_current_stream_capturing()
 
 
+def _runtime_key(device: torch.device) -> tuple[Any, ...]:
+    """Tie a recording to the arithmetic settings and submission stream it was captured under.
+
+    Both replay owners key their recordings with this tuple, so a new setting is added
+    in one place. A setting belongs here only when it can change replayed results or
+    graph validity for correct code. Per-backend precision is queried when available:
+    the legacy getter can reject configurations set through the new API.
+    """
+    return (
+        torch.get_float32_matmul_precision() if not hasattr(torch.backends.cuda.matmul, "fp32_precision") else None,
+        getattr(torch.backends, "fp32_precision", None),
+        getattr(torch.backends.cuda.matmul, "fp32_precision", None),
+        torch.backends.cuda.preferred_blas_library(),
+        torch.are_deterministic_algorithms_enabled(),
+        torch.is_deterministic_algorithms_warn_only_enabled(),
+        torch.cuda.current_stream(device).cuda_stream,
+    )
+
+
 class _OrthogonalizationReplay:
     """Own a bounded set of optional CUDA orthogonalization recordings.
 
@@ -85,11 +104,7 @@ class _OrthogonalizationReplay:
         self.entries.clear()
 
     def run(self, function: _Orthogonalize, value: Tensor, steps: int, eps: float) -> Tensor:
-        """Replay one supported signature, or keep the eager function's contract.
-
-        Query per-backend precision when available: the legacy getter can reject
-        configurations set through the new API.
-        """
+        """Replay one supported signature, or keep the eager function's contract."""
         if (
             type(value) is not Tensor
             or type(steps) is not int
@@ -114,13 +129,7 @@ class _OrthogonalizationReplay:
             value.stride(),
             steps,
             eps,
-            torch.get_float32_matmul_precision() if not hasattr(torch.backends.cuda.matmul, "fp32_precision") else None,
-            getattr(torch.backends, "fp32_precision", None),
-            getattr(torch.backends.cuda.matmul, "fp32_precision", None),
-            torch.backends.cuda.preferred_blas_library(),
-            torch.are_deterministic_algorithms_enabled(),
-            torch.is_deterministic_algorithms_warn_only_enabled(),
-            torch.cuda.current_stream(value.device).cuda_stream,
+            *_runtime_key(value.device),
         )
         recorded = self.entries.get(key)
         if recorded is None:

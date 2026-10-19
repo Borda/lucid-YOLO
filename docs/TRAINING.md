@@ -143,7 +143,7 @@ Recording warmup restores RNG and BatchNorm buffers before the first real batch.
 
 ## 📼 CUDA update preparation replay is opt-in
 
-`--model.capture_updates true` additionally records MuSGD's update preparation, including momentum, for eligible dense float32 CUDA groups. Learning-rate changes and parameter writes remain outside capture. This option can be used with or without `capture_orthogonalization`; the two recordings do not nest. CPU, MPS and unsupported CUDA layouts or execution contexts retain the native step. Loading optimizer state discards old recordings. The default is `false` because capture adds setup and retains workspace. [WP-197c](work_packages/wp-197c.md) reports five complete public-data fits, numerical checks and measured memory cost; other workloads need their own measurement.
+`--model.capture_updates true` additionally records MuSGD's update preparation, including momentum, for eligible dense float32 CUDA groups. Learning-rate changes and parameter writes remain outside capture. This option can be used with or without `capture_orthogonalization`; the two recordings do not nest. CPU, MPS and unsupported CUDA layouts or execution contexts retain the native step. A failure while recording raises instead of falling back to the native step (gradients and momentum are restored first), so disable `--model.capture_updates` if recording fails on your model. Loading optimizer state discards old recordings. The default is `false` because capture adds setup and retains workspace. [WP-197c](work_packages/wp-197c.md) reports five complete public-data fits, numerical checks and measured memory cost; other workloads need their own measurement.
 
 ## ⚡ torch.compile is opt-in (CUDA, detect)
 
