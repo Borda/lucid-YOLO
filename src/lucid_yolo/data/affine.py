@@ -481,6 +481,9 @@ class RandomAffine:
             the fused segment and restore the fill after resampling. Defaults to
             ``False``; only a prepared training source supplies centred pixels.
 
+    Raises:
+        ValueError: If ``pad_value`` is not finite.
+
     Attributes:
         last_params: The :class:`AffineParams` sampled on the most recent call, or
             ``None`` before the first call.
@@ -533,6 +536,8 @@ class RandomAffine:
         pad_value: float = _DEFAULT_PAD_VALUE,
         centered_input: bool = False,
     ) -> None:
+        if not math.isfinite(pad_value):
+            raise ValueError(f"pad_value must be finite, got {pad_value}")
         self.pad_value = float(pad_value)
         self.centered_input = bool(centered_input)
         self.degrees = float(degrees)

@@ -540,6 +540,12 @@ class TestCenteredInput:
     without a relative tolerance that could hide a larger difference.
     """
 
+    @pytest.mark.parametrize("pad_value", [float("nan"), float("inf"), float("-inf")])
+    def test_rejects_non_finite_pad_value(self, pad_value: float) -> None:
+        """A non-finite fill would poison every exposed pixel and, centred, every content pixel too."""
+        with pytest.raises(ValueError, match="pad_value must be finite"):
+            RandomAffine(pad_value=pad_value)
+
     @pytest.mark.parametrize("pad_value", [_DEFAULT_PAD_VALUE, _STATED_PAD])
     def test_matches_plain_warp_including_exposed_pad(self, pad_value: float) -> None:
         """A centred source reproduces the plain warp byte-for-byte, pad region included.

@@ -30,6 +30,7 @@ from lucid_yolo.data import coco as coco_data
 from lucid_yolo.data import yolo as yolo_data
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.layout import DATA_YAML_NAME, DatasetLayout
+from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.yolo import YoloDetectionDataset
 from lucid_yolo.ptl.datamodule import (
     DetectionDataModule,
@@ -1075,6 +1076,27 @@ class TestPreparedTrainingCache:
         assert decoded_before_rebuild == len(_IMAGE_STEMS)
         assert len(decode_calls) == 2 * len(_IMAGE_STEMS)
         assert module._prepared_train is not None
+
+    @pytest.mark.parametrize("layout", ["coco", "yolo"])
+    def test_stage_none_builds_prepared_cache(self, tmp_path: Path, layout: str) -> None:
+        """``setup(None)`` covers every stage, training included, so it builds the cache as ``"fit"`` does."""
+        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
+        module = _datamodule(write_root(tmp_path), cache_prepared_train_images=True)
+
+        module.setup(None)
+
+        assert module._prepared_train is not None
+        assert module._train is not None and module._train._base is module._prepared_train
+
+    def test_rejects_reader_with_transforms(self, tmp_path: Path) -> None:
+        """A reader that already transforms its output would be cached transformed, then warped a second time."""
+        root = _write_coco_root(tmp_path)
+        reader = CocoDetectionDataset(
+            root / "train", root / "annotations" / "instances_train.json", transforms=Letterbox(16)
+        )
+
+        with pytest.raises(ValueError, match="without transforms"):
+            _PreparedTrainingSource(reader)
 
     def test_failed_prepared_fit_after_validate_setup_leaves_no_train_pipeline(self, tmp_path: Path) -> None:
         """A failed prepared build after a validate setup must not leave the validate pipeline serving training.

@@ -121,7 +121,7 @@ from pytorch_lightning import LightningDataModule, Trainer
 from pytorch_lightning.accelerators import CUDAAccelerator
 from pytorch_lightning.plugins.precision import Precision
 from pytorch_lightning.strategies import SingleDeviceStrategy
-from pytorch_lightning.utilities import rank_zero_warn
+from pytorch_lightning.utilities import rank_zero_only, rank_zero_warn
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, get_worker_info
 from tqdm.auto import tqdm
@@ -932,35 +932,42 @@ class _PreparedTrainingSource(Dataset[tuple[Tensor, Targets]]):
     The fill is restored after the same resample, before any colour or blending.
     This costs four bytes per source pixel channel instead of the byte cache's one.
     ``base`` must be a raw reader without ``transforms``: its pixels are retained as
-    the source canvas the training geometry starts from.
+    the source canvas the training geometry starts from. The memory reports and the
+    progress bar come from rank zero only, so a multi-process run states them once.
+
+    Raises:
+        ValueError: If ``base`` carries ``transforms``; their output would be retained
+            and then transformed again by the training geometry.
     """
 
     def __init__(self, base: _DetectionSource) -> None:
+        if base._transforms is not None:
+            raise ValueError(
+                "prepared image cache needs a raw reader without transforms; "
+                "the training geometry would apply them a second time"
+            )
         self.base = base
         self.keypoint_flip_pairs = base.keypoint_flip_pairs
         estimate = ""
         if isinstance(base, CocoDetectionDataset):
             expected = _RGB_FLOAT_PIXEL_BYTES * sum(record.height * record.width for record in base._images)
             estimate = f"about {expected / 1e9:.1f} GB ({expected:,} bytes) from the annotation sizes; "
-        warnings.warn(
+        rank_zero_warn(
             f"prepared image cache: {estimate}retaining float32 source images costs four times "
-            "an 8-bit decoded image cache in host RAM per training process",
-            UserWarning,
-            stacklevel=3,
+            "an 8-bit decoded image cache in host RAM per training process"
         )
         self._items: list[tuple[Tensor, Targets]] = []
-        for index in tqdm(range(len(base)), desc="Preparing images", unit="img"):
+        progress = tqdm(range(len(base)), desc="Preparing images", unit="img", disable=rank_zero_only.rank != 0)
+        for index in progress:
             image, targets = base[index]
             # Subtract out of place: the reader's tensor is never written, so nothing
             # here depends on whether a reader hands out fresh or shared storage. The
             # cost is one transient image per record, released on the next iteration.
             self._items.append((image - _DEFAULT_PAD_VALUE, targets))
         retained = sum(image.nbytes for image, _ in self._items)
-        warnings.warn(
+        rank_zero_warn(
             f"prepared image cache: holding {retained:,} bytes of float32 pixels "
-            f"for {len(self._items)} training records",
-            UserWarning,
-            stacklevel=3,
+            f"for {len(self._items)} training records"
         )
 
     def __len__(self) -> int:
