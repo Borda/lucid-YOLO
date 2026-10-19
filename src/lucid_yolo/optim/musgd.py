@@ -187,10 +187,23 @@ class MuSGD(Optimizer):
         capture_updates: Record the existing update preparation on independent dense
             float32 CUDA parameters after momentum initialization. Defaults to ``False``.
             Momentum is live optimizer state, while private gradient buffers receive each
-            new step. Learning rates and parameter writes stay outside the graph. Changed
-            signatures, shared storage, missing gradients, other devices, autograd,
-            autocast and inference mode stay native, the same guards ``capture_orthogonalization``
-            already keeps.
+            new step. Learning rates and parameter writes stay outside the graph. A group
+            steps natively, recording nothing, when a parameter is not a plain
+            ``torch.nn.Parameter`` on CUDA, a gradient or momentum buffer is missing, a
+            tensor is not dense float32 or differs in shape from its parameter, parameters,
+            momentum or gradients share or overlap storage, a hyperparameter is not a plain
+            ``int`` or ``float`` (``ns_steps`` an ``int``), or the step runs under autograd,
+            autocast, inference mode, compilation or another open capture. Unlike
+            ``capture_orthogonalization``, which records each further signature up to its
+            capacity, a group holds one recording: a step whose tensors, scalar
+            hyperparameters other than ``lr`` or arithmetic settings differ from it runs
+            natively, and a change lasting several consecutive steps replaces the
+            recording, up to a small replacement budget after which the group stays
+            native until state is loaded. A failure while recording raises instead of
+            falling back to the native step, after gradients and momentum are restored, so
+            disable this flag if recording fails on your model. Only an exact ``MuSGD``
+            records: a subclass steps natively whatever this flag says, without a warning,
+            because an overriding iterator could write parameters during recording.
 
     Raises:
         ValueError: If ``lr``, ``weight_decay``, ``w_muon``, ``w_sgd`` or
