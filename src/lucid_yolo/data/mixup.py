@@ -481,11 +481,20 @@ class CopyPaste:
 
     @staticmethod
     def _paste_selected(out_image: Tensor, source: Tensor, targets_b: Targets, selected: list[int]) -> None:
-        """Rasterise each selected ring and copy its source pixels onto ``out_image`` in place."""
+        """Union the selected rings, then copy their pixels from one immutable source.
+
+        Every ring copies the same source coordinate to the same destination
+        coordinate. Repeated writes over an overlap are therefore idempotent.
+        ``apply`` owns a fresh destination clone, so these writes cannot change
+        the source another ring reads. Instance ordering stays in ``_merge``.
+        """
+        if not selected:
+            return
         height, width = out_image.shape[1], out_image.shape[2]
-        for index in selected:
-            mask = _rasterize_polygon(targets_b.polygons[index], height, width)
-            out_image[:, mask] = source[:, mask]
+        mask = _rasterize_polygon(targets_b.polygons[selected[0]], height, width)
+        for index in selected[1:]:
+            mask.logical_or_(_rasterize_polygon(targets_b.polygons[index], height, width))
+        out_image[:, mask] = source[:, mask]
 
     @staticmethod
     def _merge(targets_a: Targets, targets_b: Targets, selected: list[int]) -> Targets:

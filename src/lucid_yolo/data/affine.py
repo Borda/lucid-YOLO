@@ -118,9 +118,6 @@ _DEFAULT_PAD_VALUE = 114.0 / 255.0
 _MIN_SCALE = 1e-3
 #: Reused axis-size guards.
 _POINT_DIM = 2
-#: Fill in the validated form ``build_segments`` takes: a tuple, length one for a scalar
-#: broadcast across channels. Requires ``padding_mode="zeros"`` (WP-154b).
-_FILL = (_DEFAULT_PAD_VALUE,)
 #: XOR salt separating the discarded-gate stream's seed from the caller's own, so the two
 #: streams are decorrelated while both remain a function of the one seed the caller set.
 #: An arbitrary constant -- nothing downstream reads a gate value (L-32).
@@ -441,9 +438,9 @@ class RandomAffine:
     above zero) and a translation of ``[-translate, translate]`` times the canvas
     size on each axis — R1 Table S3's ranges, which is what this class still owns —
     and states them to one ``fuse-augmentations`` segment, which resamples the image
-    once (bilinear, grey ``114/255`` fill). Every target modality rides the same
-    composed matrix. Boxes/polygons are clipped to the canvas and filtered by
-    ``min_box_size`` and ``min_visibility``.
+    once (bilinear, ``pad_value`` fill, mid-grey ``114/255`` by default). Every
+    target modality rides the same composed matrix. Boxes/polygons are clipped to
+    the canvas and filtered by ``min_box_size`` and ``min_visibility``.
 
     With ``letterbox`` set, upstream's aspect-preserving fit joins the same segment,
     so the source canvas reaches the letterboxed one in a single resample rather than
@@ -476,6 +473,16 @@ class RandomAffine:
         allow_upscale: Whether ``letterbox`` may enlarge content past its native size
             when the output canvas is larger than the source. Defaults to ``True``;
             ignored without ``letterbox``.
+        pad_value: Constant fill for canvas the warp exposes, in the image's value
+            range. Defaults to ``114/255`` (mid-grey, the YOLO-lineage convention,
+            matching :class:`~lucid_yolo.data.letterbox.Letterbox`).
+        centered_input: The caller has already subtracted ``pad_value`` from every
+            input pixel, including any mosaic fill. Skip that same subtraction in
+            the fused segment and restore the fill after resampling. Defaults to
+            ``False``; only a prepared training source supplies centred pixels.
+
+    Raises:
+        ValueError: If ``pad_value`` is not finite.
 
     Attributes:
         last_params: The :class:`AffineParams` sampled on the most recent call, or
@@ -526,7 +533,13 @@ class RandomAffine:
         min_visibility: float = 0.1,
         letterbox: int | tuple[int, int] | None = None,
         allow_upscale: bool = True,
+        pad_value: float = _DEFAULT_PAD_VALUE,
+        centered_input: bool = False,
     ) -> None:
+        if not math.isfinite(pad_value):
+            raise ValueError(f"pad_value must be finite, got {pad_value}")
+        self.pad_value = float(pad_value)
+        self.centered_input = bool(centered_input)
         self.degrees = float(degrees)
         self.translate = float(translate)
         self.scale = float(scale)
@@ -558,7 +571,8 @@ class RandomAffine:
 
         Args:
             image: CHW image tensor (float, in the same value range as the grey
-                fill, i.e. ``[0, 1]``).
+                fill, i.e. ``[0, 1]``; with ``centered_input`` set, already shifted
+                down by ``pad_value``, so ``[-114/255, 141/255]`` at the default).
             targets: Geometry to warp alongside the image. Non-empty ``rboxes`` must
                 share the instance axis with ``boxes`` and carry no polygons.
 
@@ -637,7 +651,8 @@ class RandomAffine:
 
         Args:
             image: CHW image tensor (float, in the same value range as the grey
-                fill, i.e. ``[0, 1]``).
+                fill, i.e. ``[0, 1]``; with ``centered_input`` set, already shifted
+                down by ``pad_value``, so ``[-114/255, 141/255]`` at the default).
             targets: Geometry to warp alongside the image. Non-empty ``rboxes`` must
                 share the instance axis with ``boxes`` and carry no polygons.
             params: The affine to apply.
@@ -722,7 +737,9 @@ class RandomAffine:
             adapter=_ADAPTER,
             interpolation="bilinear",
             padding_mode="zeros",
-            fill=_FILL,
+            # The validated form `build_segments` takes: a tuple, length one for a scalar
+            # broadcast across channels. Requires `padding_mode="zeros"` (WP-154b).
+            fill=None if self.centered_input else (self.pad_value,),
             # Upstream draws a per-transform activation gate even at `prob = 1.0`. It
             # changes nothing here (the gate always passes), but it draws from *some*
             # stream, and neither the caller's generator nor the global one may be it.
@@ -742,7 +759,8 @@ class RandomAffine:
         """Warp ``image`` through the upstream segment in a single pass.
 
         Args:
-            image: CHW image tensor (float, in the grey-fill value range ``[0, 1]``).
+            image: CHW image tensor (float, in the grey-fill value range ``[0, 1]``,
+                or that range shifted down by ``pad_value`` under ``centered_input``).
             params: The affine to apply.
 
         Returns:
@@ -757,7 +775,8 @@ class RandomAffine:
         # and dropped around the one call. `forward` is called rather than the module, as
         # upstream's own pipeline does, since there are no hooks to dispatch.
         warped = segment.forward(image.unsqueeze(0), None)
-        return cast("Tensor", warped).squeeze(0)
+        result = cast("Tensor", warped).squeeze(0)
+        return result + self.pad_value if self.centered_input else result
 
     def _warp_targets(self, targets: Targets, matrix: Tensor, height: int, width: int) -> Targets:
         """Warp, clip and filter every modality; dispatch on rotated-box/polygon presence."""

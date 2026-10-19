@@ -18,6 +18,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+import warnings
 from pathlib import Path
 
 import pytest
@@ -29,8 +30,15 @@ from lucid_yolo.data import coco as coco_data
 from lucid_yolo.data import yolo as yolo_data
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.layout import DATA_YAML_NAME, DatasetLayout
+from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.yolo import YoloDetectionDataset
-from lucid_yolo.ptl.datamodule import DetectionDataModule, PackedTargets, unpack_batch
+from lucid_yolo.ptl.datamodule import (
+    DetectionDataModule,
+    PackedTargets,
+    _PreparedTrainingSource,
+    pack_targets,
+    unpack_batch,
+)
 
 #: Fixture image size, deliberately non-square so an x/y transposition cannot pass unnoticed.
 _WIDTH = 64
@@ -921,3 +929,308 @@ class TestTrainingDeterminism:
         assert len(uncached[0]) == len(cached[0]) == len(_IMAGE_STEMS)
         for left, right in zip(uncached[0], cached[0], strict=True):
             _assert_batches_identical(left, right)
+
+
+class TestPreparedCacheMemoryReport:
+    """The prepared cache tells the user what it will cost in host RAM, before and after the build.
+
+    Lives outside ``TestPreparedTrainingCache``: that class silences these very warnings so its
+    parity tests stay quiet, and a warning asserted under a blanket ignore is not asserted.
+    """
+
+    def test_coco_estimate_states_twelve_bytes_per_source_pixel(self, tmp_path: Path) -> None:
+        """A COCO root's pre-build estimate is 12 bytes (3 float32 channels) per annotated pixel.
+
+        The annotation sizes are known before a single image is decoded, so the user sees the
+        number while they can still abort a run that would not fit.
+        """
+        expected_bytes = 12 * len(_IMAGE_STEMS) * _WIDTH * _HEIGHT
+        module = _datamodule(_write_coco_root(tmp_path), cache_prepared_train_images=True)
+
+        with pytest.warns(
+            UserWarning,
+            match=re.escape(
+                f"prepared image cache: about 0.0 GB ({expected_bytes:,} bytes) from the annotation sizes;"
+            ),
+        ):
+            module.setup("fit")
+
+    def test_yolo_estimate_omits_annotation_size_claim(self, tmp_path: Path) -> None:
+        """A YOLO root carries no image sizes in its labels, so the estimate states none.
+
+        Inventing a figure there would be a number the reader cannot trust; the message still
+        warns of the four-times cost.
+        """
+        module = _datamodule(_write_yolo_root(tmp_path), cache_prepared_train_images=True)
+
+        with pytest.warns(UserWarning, match=r"prepared image cache: retaining float32 source images") as record:
+            module.setup("fit")
+
+        assert not any("from the annotation sizes" in str(warning.message) for warning in record)
+
+    @pytest.mark.parametrize("layout", ["coco", "yolo"])
+    def test_report_after_build_states_retained_bytes_and_record_count(self, tmp_path: Path, layout: str) -> None:
+        """The post-build report names the bytes the float cache holds and how many records hold them."""
+        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
+        module = _datamodule(write_root(tmp_path), cache_prepared_train_images=True)
+
+        with pytest.warns(UserWarning, match=r"prepared image cache: holding") as record:
+            module.setup("fit")
+
+        source = module._prepared_train
+        assert source is not None
+        retained = sum(image.nbytes for image, _ in source)
+        expected = (
+            f"prepared image cache: holding {retained:,} bytes of float32 pixels for {len(source)} training records"
+        )
+        assert expected in {str(warning.message) for warning in record}
+
+    def test_both_cache_flags_warn_at_construction_naming_precedence(self, tmp_path: Path) -> None:
+        """Setting both train-cache flags warns once, at the caller's line, that the prepared cache wins.
+
+        The flags are alternatives; a config setting both silently builds only one of them, and
+        the user who expected the 8-bit cache to be in force should hear which one is.
+        """
+        root = _write_coco_root(tmp_path)
+
+        with pytest.warns(UserWarning, match=r"both set; the prepared float32 cache takes precedence") as record:
+            _datamodule(root, cache_train_images=True, cache_prepared_train_images=True)
+
+        assert [warning.filename for warning in record] == [__file__]
+
+    @pytest.mark.parametrize("flag", ["cache_train_images", "cache_prepared_train_images"])
+    def test_single_cache_flag_does_not_warn_about_both(self, tmp_path: Path, flag: str) -> None:
+        """Either cache flag alone is a legitimate configuration and raises no precedence warning."""
+        root = _write_coco_root(tmp_path)
+
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("always")
+            _datamodule(root, **{flag: True})
+
+        assert not any("both set" in str(warning.message) for warning in record)
+
+
+@pytest.mark.filterwarnings("ignore:prepared image cache:UserWarning")
+class TestPreparedTrainingCache:
+    """Moving the affine subtraction to immutable sources preserves every output byte."""
+
+    @pytest.mark.parametrize("layout", ["coco", "yolo"])
+    @pytest.mark.parametrize("mosaic_prob", [0.0, 1.0])
+    def test_float_pixels_targets_and_draws_match(self, tmp_path: Path, layout: str, mosaic_prob: float) -> None:
+        """Compare before transport quantization, with mixed-source blending enabled."""
+        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
+        root = write_root(tmp_path, distinct=True)
+        baseline = _fit_datamodule(root, 0, cache_train_images=True)
+        prepared = _fit_datamodule(root, 0, cache_prepared_train_images=True)
+        baseline.set_mosaic_prob(mosaic_prob)
+        prepared.set_mosaic_prob(mosaic_prob)
+        assert baseline._train is not None and prepared._train is not None
+        source = prepared._prepared_train
+        assert source is not None
+        saved = [image.clone() for image, _ in source]
+        for index in range(32):
+            left, left_targets = baseline._train[index % len(baseline._train)]
+            right, right_targets = prepared._train[index % len(prepared._train)]
+            assert torch.equal(left.contiguous().view(torch.uint8), right.contiguous().view(torch.uint8))
+            _assert_batches_identical((left, pack_targets([left_targets])), (right, pack_targets([right_targets])))
+        assert torch.equal(baseline._train._generator.get_state(), prepared._train._generator.get_state())
+        for (image, _), original in zip(source, saved, strict=True):
+            assert torch.equal(image.contiguous().view(torch.uint8), original.contiguous().view(torch.uint8))
+
+    @pytest.mark.parametrize("layout", ["coco", "yolo"])
+    @pytest.mark.parametrize("stage", ["validate", "test", "predict"])
+    def test_reuses_prepared_storage_and_releases_it_outside_fit(
+        self, tmp_path: Path, layout: str, stage: str, decode_calls: list[str]
+    ) -> None:
+        """Repeated setup keeps one float cache; enabling both flags keeps no byte copy."""
+        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
+        module = _datamodule(write_root(tmp_path), cache_train_images=True, cache_prepared_train_images=True)
+        module.setup("fit")
+        first = module._prepared_train
+        assert first is not None
+        assert first.base._image_cache is None
+        calls = len(decode_calls)
+        module.set_mosaic_prob(0.0)
+        module.setup("fit")
+        assert module._prepared_train is first
+        assert len(decode_calls) == calls == len(_IMAGE_STEMS)
+        assert module.mosaic_prob > 0.0
+        module.setup(stage)
+        assert module._prepared_train is None
+        assert module._cached_train_base is None
+        assert module._train is not None and not isinstance(module._train._base, _PreparedTrainingSource)
+
+    @pytest.mark.parametrize("layout", ["coco", "yolo"])
+    def test_fit_after_release_rebuilds_prepared_cache_by_decoding_again(
+        self, tmp_path: Path, layout: str, decode_calls: list[str]
+    ) -> None:
+        """A fit setup following a release pays the decode again: the cache was dropped, not kept hidden."""
+        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
+        module = _datamodule(write_root(tmp_path), cache_prepared_train_images=True)
+        module.setup("fit")
+        module.setup("validate")
+        decoded_before_rebuild = len(decode_calls)
+
+        module.setup("fit")
+
+        assert decoded_before_rebuild == len(_IMAGE_STEMS)
+        assert len(decode_calls) == 2 * len(_IMAGE_STEMS)
+        assert module._prepared_train is not None
+
+    @pytest.mark.parametrize("layout", ["coco", "yolo"])
+    def test_stage_none_builds_prepared_cache(self, tmp_path: Path, layout: str) -> None:
+        """``setup(None)`` covers every stage, training included, so it builds the cache as ``"fit"`` does."""
+        write_root = _write_coco_root if layout == "coco" else _write_yolo_root
+        module = _datamodule(write_root(tmp_path), cache_prepared_train_images=True)
+
+        module.setup(None)
+
+        assert module._prepared_train is not None
+        assert module._train is not None and module._train._base is module._prepared_train
+
+    def test_rejects_reader_with_transforms(self, tmp_path: Path) -> None:
+        """A reader that already transforms its output would be cached transformed, then warped a second time."""
+        root = _write_coco_root(tmp_path)
+        reader = CocoDetectionDataset(
+            root / "train", root / "annotations" / "instances_train.json", transforms=Letterbox(16)
+        )
+
+        with pytest.raises(ValueError, match="without transforms"):
+            _PreparedTrainingSource(reader)
+
+    def test_failed_prepared_fit_after_validate_setup_leaves_no_train_pipeline(self, tmp_path: Path) -> None:
+        """A failed prepared build after a validate setup must not leave the validate pipeline serving training.
+
+        ``setup("validate")`` builds a plain train pipeline for idempotency. When the next fit setup
+        fails mid-build, ``train_dataloader`` has to refuse rather than quietly train on that
+        uncached, wrong-stage pipeline; the validation split stays the one already built.
+        """
+        root = _write_coco_root(tmp_path, distinct=True)
+        module = _datamodule(root, cache_prepared_train_images=True)
+        module.setup("validate")
+        validation_before = module._val
+        (root / "train" / "frame1.png").unlink()
+
+        with pytest.raises(OSError, match="failed to read image"):
+            module.setup("fit")
+
+        assert module._train is None
+        assert module._val is validation_before
+        with pytest.raises(RuntimeError, match="setup"):
+            module.train_dataloader()
+
+    @pytest.mark.parametrize(
+        ("context", "persistent_workers", "epochs"),
+        [
+            pytest.param("spawn", False, 1, id="spawn-recycled-one-epoch"),
+            pytest.param(
+                "fork",
+                True,
+                3,
+                id="fork-persistent-three-epochs",
+                marks=pytest.mark.skipif(
+                    "fork" not in torch.multiprocessing.get_all_start_methods(),
+                    reason="fork start method unavailable on this platform",
+                ),
+            ),
+        ],
+    )
+    def test_worker_reads_prepared_pixels(
+        self, tmp_path: Path, context: str, persistent_workers: bool, epochs: int
+    ) -> None:
+        """The source is ordinary picklable state under a spawned worker and shared copy-on-write under a forked one.
+
+        Persistent workers keep one pipeline copy across epochs while recycled ones rebuild it, so
+        the multi-epoch fork case also pins that a worker holding the float cache stays byte-equal
+        to the decoded-cache run over repeated passes.
+        """
+        root = _write_coco_root(tmp_path, distinct=True)
+        expected = _train_epochs(root, 0, epochs=epochs, num_workers=1, persistent_workers=persistent_workers)
+        module = _fit_datamodule(
+            root, 0, num_workers=1, persistent_workers=persistent_workers, cache_prepared_train_images=True
+        )
+        loader = module.train_dataloader()
+        loader.multiprocessing_context = context
+        strategy = torch.multiprocessing.get_sharing_strategy()
+        try:
+            # file_descriptor spawn also fails in the baseline on torch 2.14.
+            # Exercise prepared-source pickling independently with file_system.
+            if context == "spawn":
+                torch.multiprocessing.set_sharing_strategy("file_system")
+            actual = [list(loader) for _ in range(epochs)]
+        finally:
+            torch.multiprocessing.set_sharing_strategy(strategy)
+        for expected_epoch, actual_epoch in zip(expected, actual, strict=True):
+            for left, right in zip(expected_epoch, actual_epoch, strict=True):
+                _assert_batches_identical(left, right)
+
+    def test_failed_preparation_installs_no_partial_cache(self, tmp_path: Path) -> None:
+        """A failed decode leaves setup retryable after the missing file is restored."""
+        root = _write_coco_root(tmp_path, distinct=True)
+        missing = root / "train" / "frame1.png"
+        missing.unlink()
+        module = _datamodule(root, cache_prepared_train_images=True)
+        with pytest.raises(OSError, match="failed to read image"):
+            module.setup("fit")
+        assert module._prepared_train is None
+        assert module._cached_train_base is None
+        _write_image(missing, seed=1)
+        module.setup("fit")
+        assert module._prepared_train is not None and len(module._prepared_train) == len(_IMAGE_STEMS)
+
+    def test_draws_reuse_sources_and_do_not_center_mosaic_again(self, tmp_path: Path, decode_calls: list[str]) -> None:
+        """A silent return to per-draw reads or a fill-bearing warp must fail this gate."""
+        module = _datamodule(_write_coco_root(tmp_path), cache_prepared_train_images=True)
+        module.setup("fit")
+        assert module._train is not None
+        decoded = len(decode_calls)
+        for _ in range(8):
+            module._train[0]
+        assert len(decode_calls) == decoded == len(_IMAGE_STEMS)
+        affine = module._train._affine
+        assert affine.last_params is not None
+        assert affine._segment(affine.last_params).fill is None
+
+    @pytest.mark.parametrize("modality", ["masks", "keypoints", "oriented"])
+    def test_preserves_modality_targets_over_repeated_draws(self, tmp_path: Path, modality: str) -> None:
+        """Cached targets retain mask geometry, rotated boxes and schema-defined point flips."""
+        if modality == "oriented":
+            root = _write_yolo_root(tmp_path, row=_ORIENTED_ROW, distinct=True)
+        else:
+            root = _write_coco_root(tmp_path, distinct=True)
+        if modality == "keypoints":
+            for split in ("train", "val"):
+                path = root / "annotations" / f"instances_{split}.json"
+                payload = json.loads(path.read_text())
+                payload["categories"][0]["keypoints"] = ["base_left", "base_right"]
+                for annotation in payload["annotations"]:
+                    annotation["keypoints"] = [20.0, 16.0, 2, 40.0, 20.0, 2]
+                    annotation["num_keypoints"] = 2
+                path.write_text(json.dumps(payload))
+        flags = dict(
+            mask_targets=modality == "masks",
+            keypoint_targets=modality == "keypoints",
+            rotated_targets=modality == "oriented",
+            variant="x",
+            seed=_DETERMINISM_SEED,
+        )
+        baseline = _datamodule(root, cache_train_images=True, **flags)
+        cached = _datamodule(root, cache_prepared_train_images=True, **flags)
+        baseline.setup("fit")
+        cached.setup("fit")
+        assert baseline._train is not None and cached._train is not None
+        left_collate = baseline.train_dataloader().collate_fn
+        right_collate = cached.train_dataloader().collate_fn
+        for index in range(32):
+            left = baseline._train[index % len(baseline._train)]
+            right = cached._train[index % len(cached._train)]
+            assert torch.equal(left[0].contiguous().view(torch.uint8), right[0].contiguous().view(torch.uint8))
+            left_batch, right_batch = left_collate([left]), right_collate([right])
+            _assert_batches_identical(left_batch, right_batch)
+            for field in dataclasses.fields(left_batch[1]):
+                a, b = getattr(left_batch[1], field.name), getattr(right_batch[1], field.name)
+                if a is not None and b is not None:
+                    assert a.shape == b.shape
+                    assert torch.equal(
+                        a.contiguous().reshape(-1).view(torch.uint8), b.contiguous().reshape(-1).view(torch.uint8)
+                    )
