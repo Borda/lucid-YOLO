@@ -224,6 +224,24 @@ def test_cache_train_images_flag_reaches_datamodule(flags: tuple[str, ...], expe
     assert cli.datamodule._cache_train_images is expected
 
 
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [
+        pytest.param((), False, id="default-off"),
+        pytest.param(("--data.cache_prepared_train_images", "true"), True, id="flag-on"),
+    ],
+)
+def test_cache_prepared_train_images_flag_reaches_datamodule(flags: tuple[str, ...], expected: bool) -> None:
+    """``--data.cache_prepared_train_images`` parses onto the datamodule, and defaults to off.
+
+    The flag is the public switch for the float32 prepared cache; nothing but the CLI parse
+    proves a user's command line reaches the constructor. The datamodule keeps no public
+    accessor, so the check reads its private attribute.
+    """
+    cli = _config_cli(_CONFIGS_DIR / "det_nano_smoke.yaml", *flags)
+    assert cli.datamodule._cache_prepared_train_images is expected
+
+
 def test_variant_s_resolves_registry_multipliers() -> None:
     """Det-ablations (``variant: s``) expands to the s-row multipliers and s-policy."""
     cli = _config_cli(_CONFIGS_DIR / "det_small_ablations.yaml")

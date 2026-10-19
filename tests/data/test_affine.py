@@ -20,10 +20,14 @@ from collections.abc import Iterator
 import pytest
 import torch
 
-from lucid_yolo.data import RandomAffine, Targets, boxes_from_polygons
+from lucid_yolo.data import AffineParams, RandomAffine, Targets, boxes_from_polygons
+from lucid_yolo.data.affine import _DEFAULT_PAD_VALUE
 
 #: Square canvas used across the suite.
 _CANVAS = 64
+#: A stated pad value distinct from the default, exact in binary so no rounding can hide a
+#: fill that came from the default instead.
+_STATED_PAD = 0.25
 
 
 @pytest.fixture(autouse=True)
@@ -524,3 +528,126 @@ class TestGateStreamSeeding:
         affine = RandomAffine()
 
         assert affine._gate_stream.initial_seed() == torch.Generator().initial_seed()
+
+
+class TestCenteredInput:
+    """Prepared training feeds the same centred pixels to a fixed-canvas resample.
+
+    The letterbox route retains byte parity even for identity parameters. Without
+    letterboxing the dependency can bypass resampling for an identity transform;
+    restoring an already-centred float then retains its subtraction round-off.
+    The boundary test checks both routes and uses an absolute float32 bound,
+    without a relative tolerance that could hide a larger difference.
+    """
+
+    @pytest.mark.parametrize("pad_value", [float("nan"), float("inf"), float("-inf")])
+    def test_rejects_non_finite_pad_value(self, pad_value: float) -> None:
+        """A non-finite fill would poison every exposed pixel and, centred, every content pixel too."""
+        with pytest.raises(ValueError, match="pad_value must be finite"):
+            RandomAffine(pad_value=pad_value)
+
+    @pytest.mark.parametrize("pad_value", [_DEFAULT_PAD_VALUE, _STATED_PAD])
+    def test_matches_plain_warp_including_exposed_pad(self, pad_value: float) -> None:
+        """A centred source reproduces the plain warp byte-for-byte, pad region included.
+
+        ``scale=0.4`` and ``translate=0.3`` are large enough that the sampled transform
+        reliably zooms out and shifts the canvas, exposing padding — exactly where a wrong
+        fill would show and an interior-only comparison would miss it. The caller only
+        centres the input; ``centered_input=True`` owns restoring the fill on return, so a
+        test that re-added the pad itself would double it and fail for the wrong reason.
+        Both affines take the same ``pad_value`` and the caller centres by it, the default
+        and a stated value alike: centring means subtracting the affine's own fill.
+        """
+        image = _image()
+        plain = RandomAffine(
+            degrees=15.0, translate=0.3, scale=0.4, shear=5.0, generator=_generator(99), pad_value=pad_value
+        )
+        centered = RandomAffine(
+            degrees=15.0,
+            translate=0.3,
+            scale=0.4,
+            shear=5.0,
+            generator=_generator(99),
+            pad_value=pad_value,
+            centered_input=True,
+        )
+
+        out_plain, _ = plain(image.clone(), Targets.empty())
+        out_centered, _ = centered(image.clone() - pad_value, Targets.empty())
+
+        assert torch.equal(out_centered, out_plain)
+
+    @pytest.mark.parametrize(
+        ("centered_input", "input_shift"),
+        [pytest.param(False, 0.0, id="plain"), pytest.param(True, _STATED_PAD, id="centred")],
+    )
+    def test_stated_pad_value_fills_exposed_canvas(self, centered_input: bool, input_shift: float) -> None:
+        """A stated ``pad_value`` fills exposed canvas on both routes; content keeps its value.
+
+        Half a canvas of translation exposes the left half. The plain route fills it
+        with ``pad_value``; the centred route receives content already shifted down by
+        that same ``pad_value`` and restores it, never the module default. One column on
+        each side of the seam is left out, where bilinear sampling may blend the two.
+        The exposed fill is exact. Content is held to one float32 epsilon, absolute:
+        the resampler's sampling coordinates round, so a few content samples land one
+        ulp below ``1.0`` on both routes alike, while restoring the default instead of
+        ``pad_value`` would miss by about ``0.2``.
+        """
+        affine = RandomAffine(pad_value=_STATED_PAD, centered_input=centered_input)
+        image = torch.full((3, _CANVAS, _CANVAS), 1.0 - input_shift)
+        half = AffineParams(angle=0.0, shear_x=0.0, shear_y=0.0, scale=1.0, translate_x=_CANVAS / 2, translate_y=0.0)
+
+        out_image, _ = affine.apply(image, Targets.empty(), half)
+
+        exposed = out_image[:, :, : _CANVAS // 2 - 1]
+        content = out_image[:, :, _CANVAS // 2 + 1 :]
+        assert torch.equal(exposed, torch.full_like(exposed, _STATED_PAD))
+        torch.testing.assert_close(content, torch.ones_like(content), rtol=0, atol=torch.finfo(torch.float32).eps)
+
+    @pytest.mark.parametrize("letterbox", [None, _CANVAS, 2 * _CANVAS])
+    def test_identity_roundoff_boundary(self, letterbox: int | None) -> None:
+        """Identity stays byte-exact with letterbox and within absolute epsilon otherwise.
+
+        The RGB codes cover values whose centring round trip loses low bits. A
+        fixed canvas follows the training route and must retain exact byte parity;
+        the standalone identity may bypass the dependency's fill subtraction.
+        """
+        image = torch.arange(3 * _CANVAS * _CANVAS, dtype=torch.float32).reshape(3, _CANVAS, _CANVAS)
+        image = image.remainder(256).div(255)
+        plain = RandomAffine(
+            degrees=0.0, translate=0.0, scale=0.0, shear=0.0, letterbox=letterbox, generator=_generator(7)
+        )
+        centered = RandomAffine(
+            degrees=0.0,
+            translate=0.0,
+            scale=0.0,
+            shear=0.0,
+            letterbox=letterbox,
+            generator=_generator(7),
+            centered_input=True,
+        )
+        out_plain, _ = plain(image.clone(), Targets.empty())
+        out_centered, _ = centered(image.clone() - _DEFAULT_PAD_VALUE, Targets.empty())
+        if letterbox is None:
+            assert torch.equal(out_plain, image)
+            torch.testing.assert_close(out_centered, out_plain, rtol=0, atol=torch.finfo(torch.float32).eps)
+        else:
+            assert torch.equal(out_centered.contiguous().view(torch.uint8), out_plain.contiguous().view(torch.uint8))
+
+    def test_fuses_with_no_fill_only_when_centered(self) -> None:
+        """The fused segment omits ``fill`` for a centred source and keeps it otherwise.
+
+        This is the construction-time half of the identity above. A centred source that
+        still filled with the pad value would double-count it once the round trip restores
+        the shift — the plausible regression the byte-identity test above also catches, less
+        directly than reading the wiring itself.
+        """
+        plain = RandomAffine(translate=0.3, generator=_generator(1))
+        centered = RandomAffine(translate=0.3, generator=_generator(1), centered_input=True)
+
+        plain(_image(), Targets.empty())
+        centered(_image(), Targets.empty())
+
+        assert plain.last_params is not None and centered.last_params is not None
+        assert plain._segment(plain.last_params).fill == (_DEFAULT_PAD_VALUE,)
+        assert centered._segment(centered.last_params).fill is None
