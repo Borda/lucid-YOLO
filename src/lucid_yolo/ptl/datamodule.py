@@ -124,6 +124,7 @@ from pytorch_lightning.strategies import SingleDeviceStrategy
 from pytorch_lightning.utilities import rank_zero_warn
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, get_worker_info
+from tqdm.auto import tqdm
 
 from lucid_yolo.assign.grid import require_grid_side
 from lucid_yolo.data._quantization import _PIXEL_QUANT_MAX
@@ -930,6 +931,8 @@ class _PreparedTrainingSource(Dataset[tuple[Tensor, Targets]]):
     affine then receives exactly the tensor its ordinary fill subtraction creates.
     The fill is restored after the same resample, before any colour or blending.
     This costs four bytes per source pixel channel instead of the byte cache's one.
+    ``base`` must be a raw reader without ``transforms``: its pixels are retained as
+    the source canvas the training geometry starts from.
     """
 
     def __init__(self, base: _DetectionSource) -> None:
@@ -946,11 +949,12 @@ class _PreparedTrainingSource(Dataset[tuple[Tensor, Targets]]):
             stacklevel=3,
         )
         self._items: list[tuple[Tensor, Targets]] = []
-        for index in range(len(base)):
+        for index in tqdm(range(len(base)), desc="Preparing images", unit="img"):
             image, targets = base[index]
-            # Both readers return fresh normalized float storage, even with a byte
-            # cache. Take ownership rather than allocating another full source image.
-            self._items.append((image.sub_(_DEFAULT_PAD_VALUE), targets))
+            # Subtract out of place: the reader's tensor is never written, so nothing
+            # here depends on whether a reader hands out fresh or shared storage. The
+            # cost is one transient image per record, released on the next iteration.
+            self._items.append((image - _DEFAULT_PAD_VALUE, targets))
         retained = sum(image.nbytes for image, _ in self._items)
         warnings.warn(
             f"prepared image cache: holding {retained:,} bytes of float32 pixels "
@@ -964,7 +968,7 @@ class _PreparedTrainingSource(Dataset[tuple[Tensor, Targets]]):
         return len(self._items)
 
     def __getitem__(self, index: int) -> tuple[Tensor, Targets]:
-        """Return one read-only image and its original targets."""
+        """Return one retained image and its original targets; the image is shared storage, never write it."""
         return self._items[index]
 
 
@@ -1030,15 +1034,19 @@ class _TrainPipeline(Dataset[_TrainingSample]):
         # rather than raising, so the composition is the *only* thing that can know.
         self._copy_paste_prob = 0.0 if (oriented or polygon_free) else policy["copy_paste"]
         self._generator = torch.Generator().manual_seed(seed)
-        self._mosaic = MosaicAssembly(self._img_size, generator=self._generator)
-        if isinstance(base, _PreparedTrainingSource):
-            self._mosaic.pad_value = 0.0
+        # A prepared source has already subtracted the affine's fill from every pixel, so
+        # the mosaic leaves uncovered canvas at zero and the affine restores the fill after
+        # its resample; otherwise both fill with the same grey as usual.
+        centred = isinstance(base, _PreparedTrainingSource)
+        self._mosaic = MosaicAssembly(
+            self._img_size, generator=self._generator, pad_value=0.0 if centred else _DEFAULT_PAD_VALUE
+        )
         self._affine = RandomAffine(
             scale=policy["scale"],
             translate=_AFFINE_TRANSLATE,
             generator=self._generator,
             letterbox=self._img_size,
-            centered_input=isinstance(base, _PreparedTrainingSource),
+            centered_input=centred,
         )
         self._mixup = Mixup(p=1.0, generator=self._generator)
         self._copy_paste = CopyPaste(p=1.0, generator=self._generator)
@@ -1235,12 +1243,14 @@ class DetectionDataModule(LightningDataModule):
             stall ending in an out-of-memory kill.
         cache_prepared_train_images: Retain float32, fill-centred source images
             instead of repeatedly converting bytes and centring each random mosaic.
-            Off by default. Takes precedence over ``cache_train_images`` and costs
+            Off by default. Takes precedence over ``cache_train_images``, with a
+            ``UserWarning`` at construction when both are set, and costs
             four bytes per pixel channel, per training record and training process;
             duplicate COCO records retain separate images, plus target metadata.
             YOLO labels are snapshotted with their images. The random geometry,
             fill-restored pixels, targets and RNG draws stay unchanged. Fit setup
-            builds it once; other stages release it. Host RAM must hold the split.
+            builds it once, drawing a progress bar; other stages release it. Host RAM
+            must hold the split.
         device_hsv: Apply training HSV and quantization on CUDA, in batches, under
             float32 or mixed precision. Off by default; other backends and precisions
             retain worker-side colour augmentation. The workers
@@ -1382,6 +1392,14 @@ class DetectionDataModule(LightningDataModule):
         self._persistent_workers = bool(persistent_workers)
         self._cache_train_images = bool(cache_train_images)
         self._cache_prepared_train_images = bool(cache_prepared_train_images)
+        if self._cache_train_images and self._cache_prepared_train_images:
+            warnings.warn(
+                "cache_train_images and cache_prepared_train_images are both set; the prepared "
+                "float32 cache takes precedence and the decoded 8-bit cache is not built. "
+                "Set only one of them.",
+                UserWarning,
+                stacklevel=2,
+            )
         self._prepared_train: _PreparedTrainingSource | None = None
         self._seed = int(seed)
         self._pin_memory = torch.cuda.is_available() if pin_memory is None else bool(pin_memory)
@@ -1588,11 +1606,20 @@ class DetectionDataModule(LightningDataModule):
                 split again beside it, so the result is idempotent and the decode cost is
                 paid once, not once per call.
 
+                A call that raises installs nothing it built: the val dataset and both
+                caches keep their previous values, and no train pipeline is left behind,
+                so :meth:`train_dataloader` raises rather than serving the pipeline an
+                earlier stage built.
+
         Raises:
             FileNotFoundError: If the root satisfies neither dataset convention.
             ValueError: If it satisfies both, or the resolved layout cannot serve a
                 requested modality.
         """
+        # Dropped before anything can raise: the previous pipeline may belong to another
+        # stage (a validate-stage one never defers HSV and reads no prepared source), so a
+        # caller that catches a failed fit setup must not go on training with it.
+        self._train = None
         yolo = self.layout is DatasetLayout.YOLO
         prepare_train = self._cache_prepared_train_images and stage in {None, "fit"}
         cache_train_images = self._cache_train_images and stage in {None, "fit"} and not prepare_train
@@ -1602,7 +1629,7 @@ class DetectionDataModule(LightningDataModule):
         # caller can see: val and the augmentation pipeline around the reader are rebuilt as
         # before. A stage that reads no train images keeps nothing, which lets the cache go.
         kept_train = self._cached_train_base if cache_train_images or prepare_train else None
-        base, self._val = (
+        base, val = (
             self._build_yolo_splits(cache_train_images, kept_train)
             if yolo
             else self._build_coco_splits(cache_train_images, kept_train)
@@ -1610,7 +1637,7 @@ class DetectionDataModule(LightningDataModule):
         prepared = self._prepared_train if prepare_train else None
         if prepare_train and prepared is None:
             prepared = _PreparedTrainingSource(base)
-        self._train = _TrainPipeline(
+        train = _TrainPipeline(
             prepared if prepared is not None else base,
             self._img_size,
             self._policy,
@@ -1619,6 +1646,9 @@ class DetectionDataModule(LightningDataModule):
             polygon_free=yolo,
             defer_hsv=self._defer_hsv(stage),
         )
+        # Every build above has succeeded, so the four fields change together.
+        self._val = val
+        self._train = train
         self._cached_train_base = base if cache_train_images or prepare_train else None
         self._prepared_train = prepared
 

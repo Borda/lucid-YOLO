@@ -20,11 +20,14 @@ from collections.abc import Iterator
 import pytest
 import torch
 
-from lucid_yolo.data import RandomAffine, Targets, boxes_from_polygons
+from lucid_yolo.data import AffineParams, RandomAffine, Targets, boxes_from_polygons
 from lucid_yolo.data.affine import _DEFAULT_PAD_VALUE
 
 #: Square canvas used across the suite.
 _CANVAS = 64
+#: A stated pad value distinct from the default, exact in binary so no rounding can hide a
+#: fill that came from the default instead.
+_STATED_PAD = 0.25
 
 
 @pytest.fixture(autouse=True)
@@ -537,7 +540,8 @@ class TestCenteredInput:
     without a relative tolerance that could hide a larger difference.
     """
 
-    def test_matches_plain_warp_including_exposed_pad(self) -> None:
+    @pytest.mark.parametrize("pad_value", [_DEFAULT_PAD_VALUE, _STATED_PAD])
+    def test_matches_plain_warp_including_exposed_pad(self, pad_value: float) -> None:
         """A centred source reproduces the plain warp byte-for-byte, pad region included.
 
         ``scale=0.4`` and ``translate=0.3`` are large enough that the sampled transform
@@ -545,17 +549,54 @@ class TestCenteredInput:
         fill would show and an interior-only comparison would miss it. The caller only
         centres the input; ``centered_input=True`` owns restoring the fill on return, so a
         test that re-added the pad itself would double it and fail for the wrong reason.
+        Both affines take the same ``pad_value`` and the caller centres by it, the default
+        and a stated value alike: centring means subtracting the affine's own fill.
         """
         image = _image()
-        plain = RandomAffine(degrees=15.0, translate=0.3, scale=0.4, shear=5.0, generator=_generator(99))
+        plain = RandomAffine(
+            degrees=15.0, translate=0.3, scale=0.4, shear=5.0, generator=_generator(99), pad_value=pad_value
+        )
         centered = RandomAffine(
-            degrees=15.0, translate=0.3, scale=0.4, shear=5.0, generator=_generator(99), centered_input=True
+            degrees=15.0,
+            translate=0.3,
+            scale=0.4,
+            shear=5.0,
+            generator=_generator(99),
+            pad_value=pad_value,
+            centered_input=True,
         )
 
         out_plain, _ = plain(image.clone(), Targets.empty())
-        out_centered, _ = centered(image.clone() - _DEFAULT_PAD_VALUE, Targets.empty())
+        out_centered, _ = centered(image.clone() - pad_value, Targets.empty())
 
         assert torch.equal(out_centered, out_plain)
+
+    @pytest.mark.parametrize(
+        ("centered_input", "input_shift"),
+        [pytest.param(False, 0.0, id="plain"), pytest.param(True, _STATED_PAD, id="centred")],
+    )
+    def test_stated_pad_value_fills_exposed_canvas(self, centered_input: bool, input_shift: float) -> None:
+        """A stated ``pad_value`` fills exposed canvas on both routes; content keeps its value.
+
+        Half a canvas of translation exposes the left half. The plain route fills it
+        with ``pad_value``; the centred route receives content already shifted down by
+        that same ``pad_value`` and restores it, never the module default. One column on
+        each side of the seam is left out, where bilinear sampling may blend the two.
+        The exposed fill is exact. Content is held to one float32 epsilon, absolute:
+        the resampler's sampling coordinates round, so a few content samples land one
+        ulp below ``1.0`` on both routes alike, while restoring the default instead of
+        ``pad_value`` would miss by about ``0.2``.
+        """
+        affine = RandomAffine(pad_value=_STATED_PAD, centered_input=centered_input)
+        image = torch.full((3, _CANVAS, _CANVAS), 1.0 - input_shift)
+        half = AffineParams(angle=0.0, shear_x=0.0, shear_y=0.0, scale=1.0, translate_x=_CANVAS / 2, translate_y=0.0)
+
+        out_image, _ = affine.apply(image, Targets.empty(), half)
+
+        exposed = out_image[:, :, : _CANVAS // 2 - 1]
+        content = out_image[:, :, _CANVAS // 2 + 1 :]
+        assert torch.equal(exposed, torch.full_like(exposed, _STATED_PAD))
+        torch.testing.assert_close(content, torch.ones_like(content), rtol=0, atol=torch.finfo(torch.float32).eps)
 
     @pytest.mark.parametrize("letterbox", [None, _CANVAS, 2 * _CANVAS])
     def test_identity_roundoff_boundary(self, letterbox: int | None) -> None:
@@ -602,5 +643,5 @@ class TestCenteredInput:
         centered(_image(), Targets.empty())
 
         assert plain.last_params is not None and centered.last_params is not None
-        assert plain._segment(plain.last_params).fill is not None
+        assert plain._segment(plain.last_params).fill == (_DEFAULT_PAD_VALUE,)
         assert centered._segment(centered.last_params).fill is None
