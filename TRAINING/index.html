@@ -742,6 +742,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#prepare-the-next-epoch-during-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prepare the next epoch during validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#always-point-default_root_dir-at-storage-that-outlives-the-runtime" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4236,6 +4247,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#prepare-the-next-epoch-during-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prepare the next epoch during validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#always-point-default_root_dir-at-storage-that-outlives-the-runtime" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4421,7 +4443,10 @@
 <p>Provisioning the datasets these recipes read: docs/DATASETS.md. What the accepted runs actually measured, with the exact commands as they were run at the time: docs/REPRODUCTION_REPORT.md.</p>
 <h2 id="cuda-colour-augmentation">CUDA colour augmentation<a class="headerlink" href="#cuda-colour-augmentation" title="Permanent link">&para;</a></h2>
 <p><code>--data.device_hsv true</code> moves training HSV and quantization to CUDA with <code>32-true</code>, <code>16-mixed</code> or <code>bf16-mixed</code> precision. The workers still sample the same gains and horizontal flips, and validation keeps its existing path. The default is <code>false</code>; other backends and precisions warn once and keep worker-side HSV. Any precision plugin whose input conversion casts the float32 images or float64 gains before the data hook (true-half and double, and the FSDP and DeepSpeed plugins under every accepted precision) keeps the original path as well, with the same one-time warning.</p>
+<p>On Linux NVIDIA GPUs with compute capability 8.0 or newer, the float32 consumer restore can fuse the existing colour operations and quantization into one channels-last write. This is on by default wherever Triton and a host C compiler are present — torch's CUDA wheel already selects a Triton, so an existing <code>device_hsv</code> run there takes the fused path without installing anything (<code>uv pip install -e ".[cuda-hsv]"</code> adds Triton where it is missing). <code>--data.fused_hsv false</code> keeps <code>device_hsv</code> on the native CUDA restore, to step around a toolchain or bisect a difference between the two. The first call compiles the kernel and needs a host C compiler. The extra also installs the existing Setuptools build dependency needed by older Triton SDKs. A Triton <code>ImportError</code>, a missing compiler, other devices, noncontiguous buffers and other consumer precisions retain the native restore. So does a first compile or launch that fails: it warns once with its cause, and the native restore runs for the rest of the process. Gain sampling, rounding and the uint8 boundary are unchanged. Direct <code>unpack_batch</code> calls keep their existing path.</p>
 <p>This can help a CPU-limited training run, including one with decoded images cached by <code>--data.cache_train_images true</code>. It transports float32 images until the colour transform finishes, so image IPC and host-to-device bytes are four times the default uint8 transport. The shared-memory worker cap budgets float32 images only when the module chooses the worker count (<code>--data.num_workers</code> unset) in one process; segmentation masks still need their own memory allowance. A named <code>--data.num_workers</code> is neither capped nor warned: batch 64 at 640 px with 8 workers and <code>prefetch_factor</code> 2 queues about 5.0 GB of <code>/dev/shm</code> in float32, against 1.26 GB in uint8. Each DDP rank budgets the free <code>/dev/shm</code> on its own, so ranks sharing one host can jointly overcommit it — a known limit. The cap cannot shrink a batch: with a small <code>/dev/shm</code>, enlarge it or use <code>--data.num_workers 0</code>. Measure the complete run on the intended host.</p>
+<h2 id="prepare-the-next-epoch-during-validation">Prepare the next epoch during validation<a class="headerlink" href="#prepare-the-next-epoch-during-validation" title="Permanent link">&para;</a></h2>
+<p><code>--data.epoch_prefetch true</code> with <code>--data.persistent_workers true</code> lets the existing workers prepare up to <code>num_workers x prefetch_factor</code> batches of the next training epoch during the last step and validation. It is opt-in because the training queue can remain resident alongside validation inputs: <code>num_workers x prefetch_factor</code> batches of host memory, about 1.26 GB of uint8 images for the batch 64, 640 px, 8 worker, <code>prefetch_factor</code> 2 example above, or about 5.0 GB of float32 with <code>--data.device_hsv true</code>. With pinned host memory, which is on by default when CUDA is available, queued batches can sit in page-locked RAM that the <code>/dev/shm</code> worker cap does not budget. Use it when dataset and augmentation configuration remain stable between epochs. Every packaged config breaks that: its <code>CloseMosaicCallback</code> switches mosaic off for the final epochs through <code>set_mosaic_prob</code>, which persistent workers never see, because each keeps the pipeline copy it started with — those epochs would still train on mosaics. The module warns once when such a change arrives under <code>epoch_prefetch</code>; keep <code>--data.persistent_workers false</code> for these configs. It applies to full, single-CUDA epochs with the module's own shuffle generator; batch limits, a step bound, overfit, loader reloads and distributed training keep the ordinary loader, as do non-persistent workers, and the run warns once naming the first unmet condition. CUDA is the boundary because the overlap was measured only on one CUDA GPU (an L4); other accelerators are unmeasured, not known to fail. The configured final epoch does not prepare another one. Measure the complete fit: the benefit is greatest when first-batch preparation is a meaningful fraction of the epoch.</p>
 <h2 id="always-point-default_root_dir-at-storage-that-outlives-the-runtime">💾 Always: point <code>default_root_dir</code> at storage that outlives the runtime<a class="headerlink" href="#always-point-default_root_dir-at-storage-that-outlives-the-runtime" title="Permanent link">&para;</a></h2>
 <p><code>--trainer.default_root_dir</code> is the <code>save_dir</code> of both default loggers (TensorBoard and CSV, pinned to a single <code>lightning_logs/version_N</code> directory) and the directory checkpoints land in. On a hosted runtime it is the whole of what survives a disconnect.</p>
 <p>This is not a precaution in the abstract. 0.2.0's Seg-smoke ran with <code>default_root_dir</code> under <code>/content/</code>, and its model card records the hardware line as unrecorded because the logs went with the runtime.</p>

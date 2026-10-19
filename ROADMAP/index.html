@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="The agent's work queue: 197 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording…">
+        <meta name="description" content="The agent's work queue: 198 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording…">
       
       
         <meta name="author" content="Jirka Borovec">
@@ -70,7 +70,7 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="lucid-yolo">
   <meta property="og:title" content="Work-Package Roadmap">
-  <meta property="og:description" content="The agent&#39;s work queue: 197 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording…">
+  <meta property="og:description" content="The agent&#39;s work queue: 198 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording…">
   <meta property="og:url" content="https://borda.github.io/lucid-YOLO/ROADMAP/"><meta property="og:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -78,7 +78,7 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta name="twitter:title" content="Work-Package Roadmap">
-  <meta name="twitter:description" content="The agent&#39;s work queue: 197 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording…">
+  <meta name="twitter:description" content="The agent&#39;s work queue: 198 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording…">
   
     <link rel="alternate" type="text/markdown" href="index.md" title="Markdown copy of this page">
   
@@ -4520,7 +4520,7 @@
 
 
 <h1 id="work-package-roadmap">🗺️ Work-Package Roadmap<a class="headerlink" href="#work-package-roadmap" title="Permanent link">&para;</a></h1>
-<p>The agent's work queue: 197 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording follow-up work that landed after its package had closed. Transcribed from the governing blueprint (sec. 15) with a live status column.</p>
+<p>The agent's work queue: 198 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording follow-up work that landed after its package had closed. Transcribed from the governing blueprint (sec. 15) with a live status column.</p>
 <p><strong>Scope says what a package does, not what executing it taught.</strong> Measurements, rejected approaches and negative results live in RESEARCH_LOG.md, linked per row as <code>· log</code>; choices the papers left open live in ASSUMPTIONS.md and are cited by id; release results live in REPRODUCTION_REPORT.md. A row that restates any of those is duplicating a record that has an owner.</p>
 <p><strong>Length is guidance, not a limit, and the guide is this table's own median</strong> — Scope about 285 characters, DoD about 80, subject about 50. Nothing enforces it and no test measures it: a row whose claims genuinely need more room takes it, and cutting substance to reach a number is the worse outcome. What the figure is for is the drift it makes visible. A cell running several times its column's median is usually not carrying more scope, it is carrying the reasoning behind the scope — which has an owner elsewhere, per the paragraph above. Compress the prose first, move what survives compression to the linked log, and leave the row stating what the package does.</p>
 <p>Legend: <strong>Dep</strong> = prerequisite WPs · <strong>[DATA]</strong> needs a real dataset (synthetic stand-in per A26 for offline development only) · <strong>[GPU]</strong> needs an accelerator (MPS first, D12c) · <strong>[PRINCIPAL]</strong> belongs to whoever drives the project rather than executes it (AGENTS.md sec. 1) — never started autonomously. DoD = the test id(s) that must pass; every WP additionally requires <code>make gate</code> green. Status icons: ⬜ todo · 🔄 in-progress · ✅ done · ⛔ blocked (see docs/ESCALATION.md) · ⏸ deferred, scope still wanted but the start is waiting on something outside this repository, named in the row · ⊘ closed without its DoD met, the row itself saying why. Only ✅, 🔄 and ⊘ appear below Phase 16: every WP written before Phase 17 has either landed or been closed, so ⛔ and ⏸ are defined for rows this queue has not yet needed rather than describing anything on it; Phase 17 is the first queue of ⬜ rows, each waiting on an accelerator or a principal. ⏸ is distinct from ⛔ on both sides: nothing here is stuck, and nothing outside is being escalated to. The status column is flipped to ✅ in the same commit that completes its WP.</p>
@@ -6653,6 +6653,14 @@
 <td>Opt-in CUDA graph replay records the existing pure scalar and batched matrix iterations; gradient values are copied in, results copied out, and optimizer state stays eager. The optimizer owns a bounded workspace; other execution contracts retain the original calls (D29) · <a href="../work_packages/wp-197b/#wp-197b">log</a></td>
 <td><code>tests/optim/test_replay.py</code>; <code>test_cli.py::test_capture_orthogonalization_flag_reaches_module</code>; repeated public-COCO fits, byte parity and focused CPU/CUDA checks; full <code>make gate</code> not run</td>
 <td>196</td>
+<td>🔄</td>
+</tr>
+<tr>
+<td>198</td>
+<td><code>perf(data): overlap epoch preparation and fuse colour restore</code> [DATA][GPU]</td>
+<td>Persistent workers prepare up to <code>num_workers x prefetch_factor</code> next-epoch batches during validation; an optional Triton pass restores the existing colour boundary without intermediate batches. Fixed sampler ownership, finite epochs and exact pixel codes remain the contract · <a href="../work_packages/wp-198/#wp-198">log</a></td>
+<td><code>tests/ptl/test_epoch_prefetch.py</code>; <code>tests/ptl/test_fused_device_hsv.py</code>; isolated-L4 complete-fit comparisons; full <code>make gate</code> not run</td>
+<td>197</td>
 <td>🔄</td>
 </tr>
 </tbody>

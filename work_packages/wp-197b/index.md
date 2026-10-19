@@ -4,7 +4,7 @@
 >
 > 🔗 Depends on WP-196 · Needed by none
 >
-> ⬅️ [WP-197](https://borda.github.io/lucid-YOLO/work_packages/wp-197/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/)
+> ⬅️ [WP-197](https://borda.github.io/lucid-YOLO/work_packages/wp-197/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-198](https://borda.github.io/lucid-YOLO/work_packages/wp-198/) ➡️
 
 
 ## WP-197b — static matrix iterations keep their arithmetic and lose host dispatch

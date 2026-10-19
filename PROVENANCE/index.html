@@ -4562,6 +4562,11 @@
 <td>PyTorch CUDA semantics, <a href="https://docs.pytorch.org/docs/2.9/notes/cuda.html#cuda-graphs">CUDA graphs</a>, versions 2.4 and 2.9; BSD-3-Clause</td>
 <td>API contract for warmup, side-stream capture, stable buffers, replay and private pools in optional optimizer scheduling. The existing matrix expressions are recorded unchanged; no optimizer implementation was consulted. Licence verified 2026-10-16 from pytorch/pytorch v2.9.1 <code>LICENSE</code>.</td>
 </tr>
+<tr>
+<td>R44</td>
+<td>Triton 3.5.1, github.com/triton-lang/triton, MIT</td>
+<td>Optional CUDA compiler for <a href="../work_packages/wp-198/">WP-198</a>, with the existing local HSV expressions as the algorithm source. The <a href="https://triton-lang.org/main/python-api/generated/triton.language.div_rn.html">precise division API</a> and explicit <code>enable_fp_fusion=False</code> preserve the existing operation boundaries. <a href="https://github.com/triton-lang/triton/blob/v3.5.1/LICENSE">Licence</a> and <a href="https://github.com/triton-lang/triton/blob/v3.5.1/README.md#compatibility">supported hardware</a> verified at this revision. Its Triton 3.0 launcher imports Setuptools (MIT), already this project's build backend; the optional extra declares the same <code>&gt;=68</code> floor. The missing-build-helper control retains the native CUDA path. No external detection implementation consulted.</td>
+</tr>
 </tbody>
 </table>
 <h3 id="project-internal-governing-documents">Project-internal governing documents<a class="headerlink" href="#project-internal-governing-documents" title="Permanent link">&para;</a></h3>
@@ -4788,6 +4793,16 @@
 <td>2026-10-16</td>
 <td>R43</td>
 <td>First read of the PyTorch 2.4 CUDA graphed-callable contract and exact-tag licence for <a href="../work_packages/wp-193c/">WP-193c</a>; network arithmetic comes from this repository and the opportunity from its own L4 profiles.</td>
+</tr>
+<tr>
+<td>2026-10-17</td>
+<td>R44</td>
+<td>Optional compiler for the existing colour expressions in <a href="../work_packages/wp-198/">WP-198</a>; own CUDA profiles, launch-shape measurements and public-pixel comparisons select the fusion.</td>
+</tr>
+<tr>
+<td>2026-10-17</td>
+<td>R40</td>
+<td>The existing runtime's <a href="https://github.com/pytorch/pytorch/blob/v2.9.1/torch/utils/data/dataloader.py#L481-L494">persistent DataLoader iterator</a> is read diagnostically for <a href="../work_packages/wp-198/">WP-198</a>; the same reset is scheduled earlier, with local RNG/worker and end-to-end evidence. No framework implementation copied.</td>
 </tr>
 </tbody>
 </table>

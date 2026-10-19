@@ -2,7 +2,7 @@
 
 > Engineering log · [Phase 17 — R1 pose-objective parity](https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/)
 >
-> 🔗 Depends on WP-196 · Needed by none
+> 🔗 Depends on WP-196 · Needed by [WP-198](https://borda.github.io/lucid-YOLO/work_packages/wp-198/)
 >
 > ⬅️ [WP-195](https://borda.github.io/lucid-YOLO/work_packages/wp-195/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-197b](https://borda.github.io/lucid-YOLO/work_packages/wp-197b/) ➡️
 

@@ -4115,6 +4115,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#wp-198-prepare-the-same-training-images-with-less-exposed-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-198 — prepare the same training images with less exposed work
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4344,6 +4355,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#wp-198-prepare-the-same-training-images-with-less-exposed-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-198 — prepare the same training images with less exposed work
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4497,6 +4519,15 @@
 <p>[MEASURED] Main peak allocated CUDA memory is 829.8 (821.0–829.8) to 880.8 (880.8–880.9) MiB; peak reserved memory is 1078.0 (1070.0–1086.0) to 1298.0 (1298.0–1306.0) MiB. [MEASURED] The composition peak allocated CUDA memory is 809.7 (806.1–817.8) to 867.1 (863.1–872.4) MiB; peak reserved memory is 1082.0 (1082.0–1090.0) to 1270.0 (1268.0–1278.0) MiB. These are allocator metrics, not an OOM or capacity benefit.</p>
 <p>[MEASURED] Five separate two-update real-data probes time the 41 initial recordings at median 188.1 ms (188.0–192.7); this setup is also included in each full-fit result above. An earlier batch-8 prototype was screened only once and was not advanced without repeated complete-fit evidence. Larger batches, other models, DDP and other accelerators have no performance claim; retained workspace and startup make the flag opt-in.</p>
 <p><strong>Scope and checks.</strong> [MEASURED] The focused CPU/doctest runs pass 228 cases. The final replay test module passes 35 cases (30 CUDA and 5 CPU/doctest) on both PyTorch 2.4.0+cu124 and 2.9.1+cu129 on the L4; full precommit passes. Focused CPU and real-CUDA regressions cover independent returned storage, fresh inputs, bounded signatures, precision changes, skipped gradients, resume, eager fallbacks and failed capture. Reusing a cached integer signature for a float step count is specifically refused through the original eager error. <code>test_cli.py::test_capture_orthogonalization_flag_reaches_module</code> mirrors WP-184's <code>compile_step</code> precedent and proves <code>--model.capture_orthogonalization</code> reaches <code>DetectionLitModule.hparams</code> through the real parser rather than a constructor fixture. The full development and accelerator golden gates are outside this run's authorized validation scope; this row therefore remains open.</p>
+<h2 id="wp-198-prepare-the-same-training-images-with-less-exposed-work">WP-198 — prepare the same training images with less exposed work<a class="headerlink" href="#wp-198-prepare-the-same-training-images-with-less-exposed-work" title="Permanent link">&para;</a></h2>
+<p><a id="wp-198"></a></p>
+<p>The CUDA owner profile at batch 64 and 640 px attributed 113.406 ms to HSV, 9.999 ms to quantization and 5.481 ms to dequantization, before the channels-last copy. The operator trace materializes full-size intermediate batches around the existing pointwise arithmetic.</p>
+<p>The transfer hook now requests one Triton pixel pass for contiguous float32 CUDA images and stated float64 gains. It preserves expression order, precise tensor division, double addition before casting the saturation/value gains, nearest-even uint8 rounding and CUDA's scalar-divisor reciprocal on restore. Fused multiply-add contraction is disabled. A fresh channels-last output avoids both intermediate batches and the final layout copy. The 256-pixel launch was selected from a measured 128/256/512/1024-block matrix; it is a scheduling choice. R44 registers the optional compiler, not a method implementation.</p>
+<p>The existing device_hsv opt-in remains the entrance. Missing compiler/backend, unsupported devices, capture/compile scopes, noncontiguous inputs and other consumer precision keep the native path. The release guard accepts explicitly declared consumer extras only when their imports handle absence; development-group and unguarded imports still fail. No tensor, output or gain is cached.</p>
+<p>Without CUPTI, a two-epoch nano run spent 13.650 s waiting for the first training batches and 3.222 s across the other 62 batches. The consumer can hide part of that first-batch work: an opt-in epoch_prefetch loader resets its existing persistent iterator after fetching the final batch, so workers prepare the successor during the last step and validation. Each public iterator still ends at its own epoch. The module permits this only for complete, single-CUDA epochs with its dedicated random sampler; distributed sampling, limits, step bounds, overfit and loader reloads retain the ordinary loader.</p>
+<p>The shuffle generator is separate from the model's global RNG. An unused prepared epoch carries a generator-state receipt so teardown and a fresh worker pool do not skip a shuffle. A synchronous reset failure restores that state and is reported when the next epoch is requested, after the already-fetched batch has been delivered. The callback keeps a weak reference to its Trainer, and the prepared marker weakly references the existing iterator so Lightning teardown can release unused prefetched batches after an early stop. A regression through the real CombinedLoader reset catches strong retention. It creates no additional pool or executor. Queued training batches can remain resident during validation, which is why the flag is opt-in.</p>
+<p>The isolated L4 screening pair used 2048 public COCO2017 training images, 64 disjoint validation images, nano/B64/640/BF16 mixed, eight persistent workers and cached decoding. Each epoch is 32 training steps (2048 images at batch 64). Three complete epochs, including validation and checkpoints, took 131.179 -&gt;119.761 s; whole processes took 138.139 -&gt;126.883 s. All six model, optimizer, scheduler, EMA, loss and metric hashes matched. This is a screen, not the repeated headline. Five fresh-process pairs over ten epochs, alternating order with an empty compiler cache per fit, reduce median complete-fit time from 379.619 s (377.463–380.130) to 326.999 s (325.952–355.677), or 13.86%. Whole-process medians are 386.249 s (384.025–387.338) and 333.961 s (332.686–362.380), or 13.54%. The median CUDA-event steady window is 807.293 -&gt; 727.509 ms per step. All ten fits retain identical six-state byte hashes. The slowest candidate is retained; paired fit reductions range from 6.43% to 14.09%. Strict determinism and allocation filling remain enabled. Full make gate was not run and this package remains open.</p>
+<p>The 13.86% headline combines two features, each measured separately: colour fusion alone saved 7.15% in the ten-epoch screen, and epoch preparation alone saved 4.50% in its three-epoch screen. A CPU CopyPaste/rasterization combination reached 7.45% with fusion and was discarded. Epoch-boundary savings depend on dataset size and validation duration; these short-fit measurements are not a full-COCO training claim.</p>
 
 
 

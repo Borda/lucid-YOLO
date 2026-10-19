@@ -7192,6 +7192,27 @@ stays uint8.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
+                <code>fused_hsv</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Let the transfer hook restore a deferred-HSV batch with the fused
+Triton kernel where the host supports it (:mod:<code>lucid_yolo.data._hsv_cuda</code>).
+On by default, so a supported host takes it whenever Triton and a host C
+compiler are present; <code>False</code> keeps <code>device_hsv</code> on the native CUDA
+restore, to step around a toolchain or bisect a difference between the two.
+Pixels are identical either way. Has no effect without <code>device_hsv</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
                 <code>rotated_targets</code>
             </td>
             <td>
@@ -7291,6 +7312,31 @@ so the reader — not this dispatch — names any path it then fails to open.</p
             </td>
             <td>
                   <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>epoch_prefetch</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Queue up to <code>num_workers x prefetch_factor</code> batches of the next
+training epoch during the last batch and validation, using the existing
+persistent workers. Opt-in: queued training inputs can remain resident
+during validation. Only full,
+single-CUDA epochs with the module-owned sampler use the early reset;
+limits, step bounds, overfit, reloads and distributed sampling stay native.
+CUDA is the only accelerator it was measured on (an L4); others are
+unmeasured, not known to fail.
+A request the attached trainer cannot honour warns once, on rank zero,
+naming the first unmet condition.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
             </td>
           </tr>
       </tbody>
@@ -7893,8 +7939,14 @@ the cast records the form :func:<code>collate_detection</code> actually hands th
 
         <p>Set the training pipeline's mosaic probability.</p>
 <p>This is the seam <code>CloseMosaicCallback</code> (WP-036) drives to disable mosaic
-for the final training epochs: it sets <code>prob=0</code>. The change is consulted
-on the next sample the pipeline assembles. Repeat calls are harmless.</p>
+for the final training epochs: it sets <code>prob=0</code>. The value lands on the
+main-process pipeline, which loader worker processes copy when they start:
+in-process loading (<code>num_workers=0</code>) uses it from the next sample, and a
+pool started after this call — every later epoch's pool under the default
+<code>persistent_workers=False</code> — samples with it. Persistent workers keep the
+copy they started with and never see the change; with <code>epoch_prefetch</code>
+also requested, a change of value warns once, since the next epoch's first
+batches are also already queued by then. Repeat calls are harmless.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
