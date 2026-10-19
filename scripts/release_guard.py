@@ -343,14 +343,95 @@ def _imported_top_levels(package_root: Path) -> set[str]:
     return {top for top in tops if top not in sys.stdlib_module_names} - {package_root.name}
 
 
+#: Dotted call spellings that end the process instead of returning, as ``ast.unparse`` renders them.
+_ABORT_CALLS = frozenset({"sys.exit", "os._exit", "os.abort", "exit", "quit"})
+
+
+def _aborts(node: ast.AST) -> bool:
+    """Report whether ``node`` ends the code path it sits on instead of falling back.
+
+    Three forms count: a ``raise``, an ``assert`` and a call spelled ``sys.exit``,
+    ``os._exit``, ``os.abort``, ``exit`` or ``quit``. Any ``assert`` counts, not only
+    a falsy constant, matching how a conditional ``raise`` is already treated. The
+    match is on the spelled name only, so an abort reached through a helper call
+    (``_fail()``) or an alias (``import sys as s``) is undetectable statically and
+    reads as a fallback.
+
+    Args:
+        node: Any AST node; the caller walks a handler's subtree and asks this of each node.
+
+    Returns:
+        ``True`` when the node itself is one of the abort forms.
+
+    Examples:
+        ```pycon
+        >>> _aborts(ast.parse("sys.exit(1)").body[0].value)
+        True
+        >>> _aborts(ast.parse("assert False").body[0])
+        True
+        >>> _aborts(ast.parse("print(exit)").body[0].value)
+        False
+
+        ```
+    """
+    if isinstance(node, (ast.Raise, ast.Assert)):
+        return True
+    return isinstance(node, ast.Call) and ast.unparse(node.func) in _ABORT_CALLS
+
+
+#: Exception names whose handler catches an absent module: the import pair and the bases above it.
+_ABSENCE_CATCHERS = frozenset({"ImportError", "ModuleNotFoundError", "Exception", "BaseException"})
+
+
+def _catches_absence(handler: ast.ExceptHandler) -> bool:
+    """Report whether ``handler`` runs when the module it guards is absent.
+
+    A missing module raises ``ModuleNotFoundError``, which ``ImportError``,
+    ``Exception``, ``BaseException`` and a bare ``except:`` all catch, so a handler
+    naming any of them (alone or in a tuple) matches. A type spelled any other way,
+    an attribute such as ``builtins.ImportError`` or a variable, is undetectable
+    statically and does not match.
+
+    Args:
+        handler: One ``except`` clause of a ``try`` statement.
+
+    Returns:
+        ``True`` when the clause catches a missing module.
+
+    Examples:
+        ```pycon
+        >>> def catches(source):
+        ...     return _catches_absence(ast.parse(f"try:\\n    pass\\n{source}").body[0].handlers[0])
+        >>> catches("except Exception:\\n    pass")
+        True
+        >>> catches("except:\\n    pass")
+        True
+        >>> catches("except (OSError, ImportError):\\n    pass")
+        True
+        >>> catches("except ValueError:\\n    pass")
+        False
+
+        ```
+    """
+    if handler.type is None:
+        return True
+    return any(isinstance(n, ast.Name) and n.id in _ABSENCE_CATCHERS for n in ast.walk(handler.type))
+
+
 def _optional_top_levels(package_root: Path) -> set[str]:
     """Find modules whose every import is protected by a missing-import handler.
 
     A try around a function definition does not protect the function's later
     calls. Stop at that scope boundary; only a try inside the function can
-    make its import optional. A matching handler containing a ``raise`` is
-    conservatively treated as required: catching absence and aborting the import
-    does not provide a fallback, even when another handler would continue.
+    make its import optional. A handler matches when it catches a missing module
+    (see :func:`_catches_absence`): ``ImportError``, ``ModuleNotFoundError``, or a
+    broad ``Exception``, ``BaseException`` or bare ``except:``. Handler order is not
+    modelled. A matching handler that aborts (see :func:`_aborts`) makes the import
+    required wherever it sits among the handlers: catching absence and aborting
+    the import does not provide a fallback, even when another handler would continue.
+    The cost is a refusal of a broad aborting handler that Python never reaches behind
+    an earlier ``except ImportError``; the reverse mistake, passing an abort Python
+    does reach, cannot occur.
 
     Examples:
         ```pycon
@@ -382,17 +463,9 @@ def _optional_top_levels(package_root: Path) -> set[str]:
                 if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
                     break
                 if isinstance(parent, ast.Try) and child in parent.body:
-                    handlers = [
-                        h
-                        for h in parent.handlers
-                        if h.type
-                        and any(
-                            isinstance(n, ast.Name) and n.id in {"ImportError", "ModuleNotFoundError"}
-                            for n in ast.walk(h.type)
-                        )
-                    ]
+                    handlers = [h for h in parent.handlers if _catches_absence(h)]
                     if handlers:
-                        guarded = not any(isinstance(n, ast.Raise) for h in handlers for n in ast.walk(h))
+                        guarded = not any(_aborts(n) for h in handlers for n in ast.walk(h))
                         break
                 child = parent
             (optional if guarded else required).update(tops)
@@ -435,10 +508,11 @@ def check_dependency_tiers(
     development environment installs every group, which is why no test sees this and
     why it belongs to the release guard rather than to the suite.
 
-    An explicitly declared consumer extra may protect all its imports with
-    ImportError or ModuleNotFoundError. It remains optional on hosts where its
-    wheel does not exist; a bare import of the same module still requires a
-    runtime declaration. Dependency groups receive no such exception.
+    An explicitly declared consumer extra may protect all its imports with a
+    non-aborting handler for ImportError, ModuleNotFoundError or a broad
+    Exception, BaseException or bare ``except:``. It remains optional on hosts
+    where its wheel does not exist; a bare import of the same module still
+    requires a runtime declaration. Dependency groups receive no such exception.
 
     A module that resolves to no installed distribution is reported rather than
     ignored: it means the environment cannot answer the question, and a guard that
