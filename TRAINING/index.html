@@ -869,6 +869,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#cuda-update-preparation-replay-is-opt-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📼 CUDA update preparation replay is opt-in
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#torchcompile-is-opt-in-cuda-detect" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4391,6 +4402,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#cuda-update-preparation-replay-is-opt-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📼 CUDA update preparation replay is opt-in
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#torchcompile-is-opt-in-cuda-detect" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4560,6 +4582,8 @@
 <p>Recording warmup restores RNG and BatchNorm buffers before the first real batch. Accumulation or custom optimiser/zero-grad hooks preserve live gradients outside the graph-owned backward buffers before they can be overwritten. AMP uses an uncached autocast scope as the PyTorch API requires. Validation, prediction and public <code>forward</code> calls stay eager. Checkpoints retain the ordinary parameter names and the flag, with no graph state. Each fit records afresh and drops its recording on completion or an exception. CUDA graph pools can increase reserved memory even when peak allocated memory falls; measure both on the intended workload. The measured scope and remaining validation gaps are in <a href="../work_packages/wp-193c/">WP-193c</a>.</p>
 <h2 id="cuda-graph-replay-of-orthogonalization-is-opt-in">📼 CUDA graph replay of orthogonalization is opt-in<a class="headerlink" href="#cuda-graph-replay-of-orthogonalization-is-opt-in" title="Permanent link">&para;</a></h2>
 <p><code>--model.capture_orthogonalization true</code> records MuSGD's existing Newton--Schulz matrix calls and replays them with each new gradient. The default is <code>false</code>: private graph pools retain extra device workspace, and setup may outweigh the gain on short or compute-bound runs. Momentum, parameter updates and the learning-rate schedule remain eager. CPU and MPS keep the original functions. <a href="../work_packages/wp-197b/">WP-197b</a> records the measured workload and compatibility envelope.</p>
+<h2 id="cuda-update-preparation-replay-is-opt-in">📼 CUDA update preparation replay is opt-in<a class="headerlink" href="#cuda-update-preparation-replay-is-opt-in" title="Permanent link">&para;</a></h2>
+<p><code>--model.capture_updates true</code> additionally records MuSGD's update preparation, including momentum, for eligible dense float32 CUDA groups. Learning-rate changes and parameter writes remain outside capture. This option can be used with or without <code>capture_orthogonalization</code>; the two recordings do not nest. CPU, MPS and unsupported CUDA layouts or execution contexts retain the native step. A failure while recording raises instead of falling back to the native step (gradients and momentum are restored first), so disable <code>--model.capture_updates</code> if recording fails on your model. Loading optimizer state discards old recordings. The default is <code>false</code> because capture adds setup and retains workspace. <a href="../work_packages/wp-197c/">WP-197c</a> reports five complete public-data fits, numerical checks and measured memory cost; other workloads need their own measurement.</p>
 <h2 id="torchcompile-is-opt-in-cuda-detect">⚡ torch.compile is opt-in (CUDA, detect)<a class="headerlink" href="#torchcompile-is-opt-in-cuda-detect" title="Permanent link">&para;</a></h2>
 <p><code>--model.compile_step true</code> (or <code>compile_step: true</code> under <code>model:</code>; <code>det_nano_smoke.yaml</code> carries it at <code>false</code>) compiles the detection objective with Inductor. What is compiled is one region, <code>DetectionLitModule._detect_objective</code>: the forward, both branch decodes, the task-aligned assignment and the dual loss, traced as a single graph with no breaks — <code>tests/ptl/test_compile.py</code> pins that on CPU for a batch with ground truths and for one with none. Compiling the model half alone was measured first and was not worth a flag: x1.09–1.16 on the step, because the assignment and the loss are where the small kernels and the launch overhead live. With <a href="../work_packages/wp-183/">WP-183</a>'s dense box terms (no data-dependent gather) and the label check skipped under tracing, the whole region compiles: on an RTX PRO 6000, variant <code>n</code>, COCO, batch 16, deterministic, the eager training step is 74.7 ms and the compiled one 60.9 ms, x1.23. A bf16 run was recorded at x1.46 on the same bench and is <strong>not</strong> enabled by this flag — precision is a separate decision the fidelity gate has not been asked about.</p>
 <p>What it costs: 110–140 s of compilation per process before the first step, and a handful of recompiles over a run: the training graph, the first <code>no_grad</code> evaluation step, and — because Dynamo specialises sizes 0 and 1 whatever is marked — one each for the first batch with no ground truths (<code>tal.py</code>'s own branch), the first with exactly one padded instance, and the first with one image, if the loader ever produces it. Measured on CPU with the <code>eager</code> backend over five batch shapes: four graphs. Batch size and padded instance count are marked dynamic on the images and the ground truths before every compiled call, so the last, smaller batch of an epoch and a batch with more instances than the one before share one graph; without the marks Dynamo would specialise until <code>cache_size_limit</code> (8) and then drop to eager without saying so, and with them the assigner's <code>F.one_hot(best_gt, num_gt)</code> — a concrete class count — had to become an <code>arange</code> comparison, since the enforcing marks refuse a pinned dim rather than silently recompiling. <code>TORCH_LOGS=recompiles</code> shows the count.</p>

@@ -254,6 +254,28 @@ Focused tests cover RNG order, ordinary and deferred transport, masks, consumer 
 
 
 
+## WP-197c — replay the surrounding optimizer work
+
+<a id="wp-197c"></a>
+
+**Existing preparation, a different submission schedule.** `capture_updates`, off by default, records MuSGD's update preparation and momentum per group. Each step copies new gradients into owned inputs; the current learning rate and parameter writes stay outside capture. The native iterator still writes immediately in its original order. No coefficient, iteration count or optimizer expression changes. Warmup restores gradient identities and momentum, and loading state invalidates recordings. Layout copies preserve values while matching parameter strides for the final foreach write.
+
+**A recording certifies its inputs.** Dense independent float32 CUDA storage, live identities, layouts, scalar settings and the CUDA execution context gate reuse. Scalar keys preserve Python types and float bits; float iteration counts keep the native error, and signed-zero changes keep native momentum bits. Missing gradients, aliases, changed signatures, other devices, autograd, autocast, inference mode, compilation and enclosing capture use native preparation. Subclass iterators stay native because an override could write parameters during recording; the sibling pure orthogonalization wrapper does not depend on that iterator. Setup and retained workspace make this optional.
+
+**Complete public-data fits.** [MEASURED] Five alternating paired ten-epoch `Trainer.fit` runs after one discarded pair: nano detection, 640 px, batch 4, BF16 mixed, seed 42, four persistent workers and four torch threads. The first 256 sorted official COCO val2017 images train; the next 32 validate without overlap. Both arms enable decoded-image caching, device HSV and the already-merged orthogonalization replay. The isolated NVIDIA L4 uses driver 580.178.04, PyTorch 2.9.1+cu129 and Lightning 2.6.6. Graph setup, caches, loading, augmentation, transfer, forward/loss/backward, clipping, optimizer, EMA, validation every epoch and checkpoints are timed. Imports and CPU module construction precede the synchronized fit interval.
+
+| Complete-fit result | Native preparation | Update replay |
+| -- | -- | -- |
+| Seconds, median (range) | 120.850 (120.542–122.793) | 108.750 (108.123–110.967) |
+| Peak allocated MiB, median (range) | 877.8 (871.6–877.8) | 924.6 (924.6–924.6) |
+| Peak reserved MiB, median (range) | 1204.0 (1202.0–1212.0) | 1292.0 (1286.0–1294.0) |
+
+[MEASURED] Complete-fit time falls **10.01%**; paired reductions span 9.62–10.33%. Every model, learned optimizer, scheduler, EMA, loss-sequence and validation-metric byte hash agrees within pairs; independent baselines agree too. Only the execution flag is excluded from optimizer metadata and recorded separately. Actual state tensors from a preselected pair are saved and independently re-hashed. This is throughput and numerical-trajectory evidence, not convergence or accuracy. Added memory is a cost, not a capacity benefit; one batch-32 screen showed no benefit.
+
+**Checks and scope.** [MEASURED] 169 focused CPU/CUDA/doctest checks pass with 4 expected skips on PyTorch 2.9.1; 165 pass with 8 skips on the exact 2.4.0 floor. Layout, inference-guard and scalar-key mutations fail the corresponding regressions. The CUDA class in `tests/optim/test_update_replay.py` (every replay byte-parity, reload, AMP, layout, alias and signed-zero check) is marked `gpu` and skipped without CUDA, and `make test` deselects `gpu`: those checks run only on a CUDA host, and CI certifies the CPU-native route, the reload flag and the CLI wiring alone until `gate-gpu.yml` has an armed runner. Optimizer sources are byte-identical between `e5d7a85` and `623edc0`, so a CUDA run recorded against either commit covers both. Full precommit and strict mypy pass. The full development gate and accelerator goldens were not run, so the row stays open. Other tasks, models, accelerators, DDP and long convergence carry no performance claim. R42 governs the CUDA API; all preparation expressions come from this repository and our own profiles.
+
+
+
 ## WP-198 — prepare the same training images with less exposed work
 
 <a id="wp-198"></a>

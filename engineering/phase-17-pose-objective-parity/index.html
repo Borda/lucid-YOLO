@@ -4127,6 +4127,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#wp-197c-replay-the-surrounding-optimizer-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-197c — replay the surrounding optimizer work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#wp-198-prepare-the-same-training-images-with-less-exposed-work" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4378,6 +4389,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#wp-197c-replay-the-surrounding-optimizer-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-197c — replay the surrounding optimizer work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#wp-198-prepare-the-same-training-images-with-less-exposed-work" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4548,6 +4570,39 @@
 <p>[MEASURED] Main peak allocated CUDA memory is 829.8 (821.0–829.8) to 880.8 (880.8–880.9) MiB; peak reserved memory is 1078.0 (1070.0–1086.0) to 1298.0 (1298.0–1306.0) MiB. [MEASURED] The composition peak allocated CUDA memory is 809.7 (806.1–817.8) to 867.1 (863.1–872.4) MiB; peak reserved memory is 1082.0 (1082.0–1090.0) to 1270.0 (1268.0–1278.0) MiB. These are allocator metrics, not an OOM or capacity benefit.</p>
 <p>[MEASURED] Five separate two-update real-data probes time the 41 initial recordings at median 188.1 ms (188.0–192.7); this setup is also included in each full-fit result above. An earlier batch-8 prototype was screened only once and was not advanced without repeated complete-fit evidence. Larger batches, other models, DDP and other accelerators have no performance claim; retained workspace and startup make the flag opt-in.</p>
 <p><strong>Scope and checks.</strong> [MEASURED] The focused CPU/doctest runs pass 228 cases. The final replay test module passes 35 cases (30 CUDA and 5 CPU/doctest) on both PyTorch 2.4.0+cu124 and 2.9.1+cu129 on the L4; full precommit passes. Focused CPU and real-CUDA regressions cover independent returned storage, fresh inputs, bounded signatures, precision changes, skipped gradients, resume, eager fallbacks and failed capture. Reusing a cached integer signature for a float step count is specifically refused through the original eager error. <code>test_cli.py::test_capture_orthogonalization_flag_reaches_module</code> mirrors WP-184's <code>compile_step</code> precedent and proves <code>--model.capture_orthogonalization</code> reaches <code>DetectionLitModule.hparams</code> through the real parser rather than a constructor fixture. The full development and accelerator golden gates are outside this run's authorized validation scope; this row therefore remains open.</p>
+<h2 id="wp-197c-replay-the-surrounding-optimizer-work">WP-197c — replay the surrounding optimizer work<a class="headerlink" href="#wp-197c-replay-the-surrounding-optimizer-work" title="Permanent link">&para;</a></h2>
+<p><a id="wp-197c"></a></p>
+<p><strong>Existing preparation, a different submission schedule.</strong> <code>capture_updates</code>, off by default, records MuSGD's update preparation and momentum per group. Each step copies new gradients into owned inputs; the current learning rate and parameter writes stay outside capture. The native iterator still writes immediately in its original order. No coefficient, iteration count or optimizer expression changes. Warmup restores gradient identities and momentum, and loading state invalidates recordings. Layout copies preserve values while matching parameter strides for the final foreach write.</p>
+<p><strong>A recording certifies its inputs.</strong> Dense independent float32 CUDA storage, live identities, layouts, scalar settings and the CUDA execution context gate reuse. Scalar keys preserve Python types and float bits; float iteration counts keep the native error, and signed-zero changes keep native momentum bits. Missing gradients, aliases, changed signatures, other devices, autograd, autocast, inference mode, compilation and enclosing capture use native preparation. Subclass iterators stay native because an override could write parameters during recording; the sibling pure orthogonalization wrapper does not depend on that iterator. Setup and retained workspace make this optional.</p>
+<p><strong>Complete public-data fits.</strong> [MEASURED] Five alternating paired ten-epoch <code>Trainer.fit</code> runs after one discarded pair: nano detection, 640 px, batch 4, BF16 mixed, seed 42, four persistent workers and four torch threads. The first 256 sorted official COCO val2017 images train; the next 32 validate without overlap. Both arms enable decoded-image caching, device HSV and the already-merged orthogonalization replay. The isolated NVIDIA L4 uses driver 580.178.04, PyTorch 2.9.1+cu129 and Lightning 2.6.6. Graph setup, caches, loading, augmentation, transfer, forward/loss/backward, clipping, optimizer, EMA, validation every epoch and checkpoints are timed. Imports and CPU module construction precede the synchronized fit interval.</p>
+<table>
+<thead>
+<tr>
+<th>Complete-fit result</th>
+<th>Native preparation</th>
+<th>Update replay</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Seconds, median (range)</td>
+<td>120.850 (120.542–122.793)</td>
+<td>108.750 (108.123–110.967)</td>
+</tr>
+<tr>
+<td>Peak allocated MiB, median (range)</td>
+<td>877.8 (871.6–877.8)</td>
+<td>924.6 (924.6–924.6)</td>
+</tr>
+<tr>
+<td>Peak reserved MiB, median (range)</td>
+<td>1204.0 (1202.0–1212.0)</td>
+<td>1292.0 (1286.0–1294.0)</td>
+</tr>
+</tbody>
+</table>
+<p>[MEASURED] Complete-fit time falls <strong>10.01%</strong>; paired reductions span 9.62–10.33%. Every model, learned optimizer, scheduler, EMA, loss-sequence and validation-metric byte hash agrees within pairs; independent baselines agree too. Only the execution flag is excluded from optimizer metadata and recorded separately. Actual state tensors from a preselected pair are saved and independently re-hashed. This is throughput and numerical-trajectory evidence, not convergence or accuracy. Added memory is a cost, not a capacity benefit; one batch-32 screen showed no benefit.</p>
+<p><strong>Checks and scope.</strong> [MEASURED] 169 focused CPU/CUDA/doctest checks pass with 4 expected skips on PyTorch 2.9.1; 165 pass with 8 skips on the exact 2.4.0 floor. Layout, inference-guard and scalar-key mutations fail the corresponding regressions. The CUDA class in <code>tests/optim/test_update_replay.py</code> (every replay byte-parity, reload, AMP, layout, alias and signed-zero check) is marked <code>gpu</code> and skipped without CUDA, and <code>make test</code> deselects <code>gpu</code>: those checks run only on a CUDA host, and CI certifies the CPU-native route, the reload flag and the CLI wiring alone until <code>gate-gpu.yml</code> has an armed runner. Optimizer sources are byte-identical between <code>e5d7a85</code> and <code>623edc0</code>, so a CUDA run recorded against either commit covers both. Full precommit and strict mypy pass. The full development gate and accelerator goldens were not run, so the row stays open. Other tasks, models, accelerators, DDP and long convergence carry no performance claim. R42 governs the CUDA API; all preparation expressions come from this repository and our own profiles.</p>
 <h2 id="wp-198-prepare-the-same-training-images-with-less-exposed-work">WP-198 — prepare the same training images with less exposed work<a class="headerlink" href="#wp-198-prepare-the-same-training-images-with-less-exposed-work" title="Permanent link">&para;</a></h2>
 <p><a id="wp-198"></a></p>
 <p>The CUDA owner profile at batch 64 and 640 px attributed 113.406 ms to HSV, 9.999 ms to quantization and 5.481 ms to dequantization, before the channels-last copy. The operator trace materializes full-size intermediate batches around the existing pointwise arithmetic.</p>

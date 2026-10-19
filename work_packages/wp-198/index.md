@@ -4,7 +4,7 @@
 >
 > 🔗 Depends on [WP-197](https://borda.github.io/lucid-YOLO/work_packages/wp-197/) · Needed by none
 >
-> ⬅️ [WP-197b](https://borda.github.io/lucid-YOLO/work_packages/wp-197b/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/)
+> ⬅️ [WP-197c](https://borda.github.io/lucid-YOLO/work_packages/wp-197c/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/)
 
 
 ## WP-198 — prepare the same training images with less exposed work
