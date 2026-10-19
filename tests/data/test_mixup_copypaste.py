@@ -451,7 +451,16 @@ class TestCopyPasteModalitiesThroughApply:
 class TestCopyPasteUnion:
     """Overlapping rings copy one immutable source once without losing selected instances."""
 
-    @pytest.mark.parametrize("selected", [(), (0,), (0, 1), (1, 0, 1), (0, 1, 2)])
+    @pytest.mark.parametrize(
+        "selected",
+        [
+            pytest.param((), id="none"),
+            pytest.param((0,), id="single-ring"),
+            pytest.param((0, 1), id="overlapping-pair"),
+            pytest.param((1, 0, 1), id="repeated-index"),
+            pytest.param((0, 1, 2), id="all-three"),
+        ],
+    )
     @pytest.mark.parametrize("transposed", [False, True])
     def test_matches_sequential_pixel_bytes_and_target_order(self, selected: tuple[int, ...], transposed: bool) -> None:
         """The original per-ring assignments are an independent oracle, including overlap."""
