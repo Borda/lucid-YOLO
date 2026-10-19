@@ -117,14 +117,16 @@ from typing import cast
 from weakref import ref
 
 import torch
-from pytorch_lightning import LightningDataModule
+from pytorch_lightning import LightningDataModule, Trainer
 from pytorch_lightning.accelerators import CUDAAccelerator
 from pytorch_lightning.plugins.precision import Precision
 from pytorch_lightning.strategies import SingleDeviceStrategy
+from pytorch_lightning.utilities import rank_zero_warn
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, get_worker_info
 
 from lucid_yolo.assign.grid import require_grid_side
+from lucid_yolo.data._quantization import _PIXEL_QUANT_MAX
 from lucid_yolo.data.affine import RandomAffine
 from lucid_yolo.data.augment import HorizontalFlip, HSVJitter, HSVParams, _jitter_hsv_batch
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
@@ -134,6 +136,7 @@ from lucid_yolo.data.mixup import CopyPaste, Mixup
 from lucid_yolo.data.mosaic import MosaicAssembly
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.data.yolo import YoloDetectionDataset
+from lucid_yolo.ptl._epoch_loader import _EpochPrefetchLoader
 from lucid_yolo.ptl.seg_targets import instance_mask_targets
 
 __all__ = [
@@ -152,14 +155,6 @@ _POINT_DIM = 2
 #: Either layout's reader. Both yield ``(image, Targets)`` samples and size the same way, which
 #: is what lets the augmentation pipeline, the collate and every consumer stay layout-blind.
 _DetectionSource = CocoDetectionDataset | YoloDetectionDataset
-
-#: uint8 quantization scale for image transport. :func:`collate_detection` quantizes
-#: the post-augmentation float pixels (``[0, 1]``) to ``round(x * 255)`` uint8 codes so
-#: the image batch crosses the DataLoader worker boundary at a quarter of its float32
-#: size, and the transfer hook (or :func:`unpack_batch`) restores them as ``code / 255``
-#: on the destination device. ``torch.round`` is round-half-to-even, so the worst-case
-#: round-trip error is one half-step — ``1 / 510``.
-_PIXEL_QUANT_MAX = 255
 
 #: Image dtype a deferred-HSV batch must still carry when its colour transform runs:
 #: the worker path jitters float32 pixels, so any narrower dtype rounds them first.
@@ -798,7 +793,9 @@ def _restore_images(
     """Finish a deferred colour transform before restoring the consumer's image dtype.
 
     Only the transfer hook requests ``channels_last`` and loads the optional CUDA
-    compiler there. Direct unpacking keeps the native expression and its layout.
+    compiler there, and only while ``fused_hsv`` allows the fused restore; the hook
+    makes the native result channels-last itself otherwise. Direct unpacking keeps the
+    native expression and its layout.
 
     Raises:
         TypeError: If a deferred batch no longer carries float32 images and float64
@@ -1193,6 +1190,12 @@ class DetectionDataModule(LightningDataModule):
             unset) in one process; a named ``num_workers`` is neither capped nor
             warned, and each DDP rank budgets the free shm on its own. Validation
             stays uint8.
+        fused_hsv: Let the transfer hook restore a deferred-HSV batch with the fused
+            Triton kernel where the host supports it (:mod:`lucid_yolo.data._hsv_cuda`).
+            On by default, so a supported host takes it whenever Triton and a host C
+            compiler are present; ``False`` keeps ``device_hsv`` on the native CUDA
+            restore, to step around a toolchain or bisect a difference between the two.
+            Pixels are identical either way. Has no effect without ``device_hsv``.
         rotated_targets: Read every annotation's four-point ring as a rotated box
             (:class:`~lucid_yolo.data.coco.CocoDetectionDataset`'s ``oriented`` mode,
             WP-088), so both loaders emit ``Targets`` whose ``rboxes`` pair 1:1 with
@@ -1238,11 +1241,16 @@ class DetectionDataModule(LightningDataModule):
             the probe cannot see. Stating ``"coco"`` or ``"yolo"`` skips the probe entirely,
             so the reader — not this dispatch — names any path it then fails to open.
 
-        epoch_prefetch: Prepare the next complete training epoch during the last batch
-            and validation, using the existing persistent workers. Opt-in: queued
-            training inputs can remain resident during validation. Only full,
+        epoch_prefetch: Queue up to ``num_workers x prefetch_factor`` batches of the next
+            training epoch during the last batch and validation, using the existing
+            persistent workers. Opt-in: queued training inputs can remain resident
+            during validation. Only full,
             single-CUDA epochs with the module-owned sampler use the early reset;
             limits, step bounds, overfit, reloads and distributed sampling stay native.
+            CUDA is the only accelerator it was measured on (an L4); others are
+            unmeasured, not known to fail.
+            A request the attached trainer cannot honour warns once, on rank zero,
+            naming the first unmet condition.
 
     Examples:
         ```pycon
@@ -1276,13 +1284,17 @@ class DetectionDataModule(LightningDataModule):
         keypoint_targets: bool = False,
         layout: str | None = None,
         device_hsv: bool = False,
+        fused_hsv: bool = True,
         epoch_prefetch: bool = False,
     ) -> None:
         super().__init__()
         self._mask_targets = bool(mask_targets)
         self._device_hsv = bool(device_hsv)
+        self._fused_hsv = bool(fused_hsv)
         self._epoch_prefetch = bool(epoch_prefetch)
         self._warned_device_hsv = False
+        self._warned_mosaic_prefetch = False
+        self._warned_epoch_prefetch = False
         self._rotated_targets = bool(rotated_targets)
         self._keypoint_targets = bool(keypoint_targets)
         self._batch_size = int(batch_size)
@@ -1727,7 +1739,7 @@ class DetectionDataModule(LightningDataModule):
         images, targets = batch
         dtype = self._consumer_dtype()
         images = (
-            _restore_images(images, targets, dtype, channels_last=images.is_cuda)
+            _restore_images(images, targets, dtype, channels_last=images.is_cuda and self._fused_hsv)
             if isinstance(targets, PackedTargets)
             else _dequantize_images(images, dtype)
         )
@@ -1804,45 +1816,74 @@ class DetectionDataModule(LightningDataModule):
         }
         trainer = self.trainer
         loader: DataLoader[object]
-        if (
-            self._epoch_prefetch
-            and self._persistent_workers
-            and self._num_workers > 0
-            and trainer is not None
-            and trainer.world_size == 1
-            and isinstance(trainer.strategy, SingleDeviceStrategy)
-            and isinstance(trainer.accelerator, CUDAAccelerator)
-            and isinstance(trainer.limit_train_batches, float)
-            and trainer.limit_train_batches == 1.0
-            and trainer.max_steps == -1
-            and not getattr(trainer, "overfit_batches", 1)
-            and not getattr(trainer, "reload_dataloaders_every_n_epochs", 1)
-            and trainer.max_epochs is not None
-            and trainer.max_epochs > 0
-        ):
-            from lucid_yolo.ptl._epoch_loader import _EpochPrefetchLoader  # noqa: PLC0415
+        if self._epoch_prefetch and trainer is not None:
+            gate = self._unmet_prefetch_gate(trainer)
+            if gate is None:
+                return self._prefetch_loader(trainer, shuffle_generator, kwargs)
+            if not self._warned_epoch_prefetch:
+                rank_zero_warn(f"epoch_prefetch=True is ignored with {gate}; training epochs use the ordinary loader")
+                self._warned_epoch_prefetch = True
+        loader = DataLoader(
+            self._train,
+            shuffle=True,
+            generator=shuffle_generator,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        return cast("DataLoader[tuple[Tensor, PackedTargets]]", loader)
 
-            max_epochs = trainer.max_epochs
-            weak_trainer = ref(trainer)
+    def _unmet_prefetch_gate(self, trainer: Trainer) -> str | None:
+        """Name the first condition that keeps the ordinary training loader, or ``None``.
 
-            def prepare_next() -> bool:
-                owner = weak_trainer()
-                return owner is not None and owner.current_epoch + 1 < max_epochs and not owner.should_stop
+        The early reset needs a persistent pool to reuse and complete single-CUDA epochs
+        whose count it can trust: a limit, a step bound, overfitting, a reload or a
+        distributed sampler would each make the prepared epoch the wrong one. The
+        conditions are checked in that order and the first one unmet is named, so the
+        caller's warning points at the setting to change.
 
-            loader = _EpochPrefetchLoader(
-                self._train,
-                shuffle=True,
-                generator=shuffle_generator,
-                prepare_next=prepare_next,
-                **kwargs,
-            )
-        else:
-            loader = DataLoader(
-                self._train,
-                shuffle=True,
-                generator=shuffle_generator,
-                **kwargs,  # type: ignore[arg-type]
-            )
+        The CUDA condition marks the edge of the measurements (an L4), not a known
+        failure of other accelerators; widening it needs its own measurement.
+        """
+        overfit = getattr(trainer, "overfit_batches", 1)
+        reload_every = getattr(trainer, "reload_dataloaders_every_n_epochs", 1)
+        limit = trainer.limit_train_batches
+        gates = (
+            (self._persistent_workers, "persistent_workers=False"),
+            (self._num_workers > 0, "num_workers=0"),
+            (trainer.world_size == 1, f"world_size={trainer.world_size}"),
+            (isinstance(trainer.strategy, SingleDeviceStrategy), f"strategy={type(trainer.strategy).__name__}"),
+            # CUDA only because only CUDA was measured (an L4); other accelerators are unmeasured, not known to fail.
+            (isinstance(trainer.accelerator, CUDAAccelerator), f"accelerator={type(trainer.accelerator).__name__}"),
+            (isinstance(limit, float) and limit == 1.0, f"limit_train_batches={limit!r}"),
+            (trainer.max_steps == -1, f"max_steps={trainer.max_steps}"),
+            (not overfit, f"overfit_batches={overfit!r}"),
+            (not reload_every, f"reload_dataloaders_every_n_epochs={reload_every!r}"),
+            (trainer.max_epochs is not None and trainer.max_epochs > 0, f"max_epochs={trainer.max_epochs!r}"),
+        )
+        return next((reason for met, reason in gates if not met), None)
+
+    def _prefetch_loader(
+        self, trainer: Trainer, generator: torch.Generator, kwargs: dict[str, object]
+    ) -> DataLoader[tuple[Tensor, PackedTargets]]:
+        """Build the training loader that prepares each next epoch during the current one's end.
+
+        The predicate holds the trainer weakly, so a kept loader never keeps the model
+        alive, and stops preparing at the configured final epoch or once training was
+        asked to stop.
+        """
+        max_epochs = trainer.max_epochs or 0
+        weak_trainer = ref(trainer)
+
+        def prepare_next() -> bool:
+            owner = weak_trainer()
+            return owner is not None and owner.current_epoch + 1 < max_epochs and not owner.should_stop
+
+        loader: DataLoader[object] = _EpochPrefetchLoader(
+            self._train,
+            shuffle=True,
+            generator=generator,
+            prepare_next=prepare_next,
+            **kwargs,
+        )
         return cast("DataLoader[tuple[Tensor, PackedTargets]]", loader)
 
     def val_dataloader(self) -> DataLoader[tuple[Tensor, PackedTargets]]:
@@ -1902,8 +1943,14 @@ class DetectionDataModule(LightningDataModule):
         """Set the training pipeline's mosaic probability.
 
         This is the seam ``CloseMosaicCallback`` (WP-036) drives to disable mosaic
-        for the final training epochs: it sets ``prob=0``. The change is consulted
-        on the next sample the pipeline assembles. Repeat calls are harmless.
+        for the final training epochs: it sets ``prob=0``. The value lands on the
+        main-process pipeline, which loader worker processes copy when they start:
+        in-process loading (``num_workers=0``) uses it from the next sample, and a
+        pool started after this call — every later epoch's pool under the default
+        ``persistent_workers=False`` — samples with it. Persistent workers keep the
+        copy they started with and never see the change; with ``epoch_prefetch``
+        also requested, a change of value warns once, since the next epoch's first
+        batches are also already queued by then. Repeat calls are harmless.
 
         Args:
             prob: The new mosaic probability, forwarded to
@@ -1922,4 +1969,22 @@ class DetectionDataModule(LightningDataModule):
         """
         if self._train is None:
             raise RuntimeError("setup() must be called before set_mosaic_prob()")
-        self._train.mosaic_p = float(prob)
+        prob = float(prob)
+        if (
+            prob != self._train.mosaic_p
+            and self._epoch_prefetch
+            and self._persistent_workers
+            and self._num_workers > 0
+            and not self._warned_mosaic_prefetch
+        ):
+            warnings.warn(
+                f"set_mosaic_prob({prob}) does not reach the training workers: under epoch_prefetch with "
+                "persistent_workers they keep the pipeline copy they started with, so the remaining epochs, "
+                "a CloseMosaicCallback window included, still sample with "
+                f"mosaic_prob={self._train.mosaic_p}. Set persistent_workers=False for a run whose "
+                "augmentation changes between epochs",
+                UserWarning,
+                stacklevel=2,
+            )
+            self._warned_mosaic_prefetch = True
+        self._train.mosaic_p = prob

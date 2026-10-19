@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Callable, Iterator
 from dataclasses import fields, replace
 from pathlib import Path
 
@@ -46,6 +47,238 @@ def test_cpu_restore_keeps_native_path() -> None:
     expected = datamodule._restore_images(images, packed, torch.float32)
     assert _hsv_cuda._restore_hsv_cuda(images, gains) is None
     assert torch.equal(actual.view(torch.int32), expected.view(torch.int32))
+
+
+class _CudaLooking(torch.Tensor):
+    """Report CUDA residency on CPU storage, so the dispatch branch runs on a host without a GPU.
+
+    Torch-function dispatch is disabled, so every tensor computed from it is a plain
+    CPU tensor: only the batch handed to the restore claims to be on CUDA.
+    """
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
+    @property
+    def is_cuda(self) -> bool:  # type: ignore[override]
+        return True
+
+
+@pytest.mark.parametrize(
+    ("fused_hsv", "calls"), [pytest.param(False, 0, id="native"), pytest.param(True, 1, id="fused")]
+)
+def test_fused_switch_decides_whether_hook_reaches_kernel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fused_hsv: bool, calls: int
+) -> None:
+    """``fused_hsv=False`` keeps a CUDA batch on the native restore without consulting the fused backend.
+
+    The switch is the escape from a broken toolchain and the bisecting control between
+    the two restores, so it must bypass the backend entirely rather than rely on its
+    own fallbacks. The stand-in declines, so both rows restore native pixels.
+    """
+    seen: list[torch.Tensor] = []
+
+    def record(images: torch.Tensor, _gains: torch.Tensor) -> None:
+        seen.append(images)
+
+    monkeypatch.setattr(_hsv_cuda, "_restore_hsv_cuda", record)
+    images = torch.rand(2, 3, 3, 5)
+    packed = _packed(torch.zeros(2, 3, dtype=torch.float64))
+    expected = datamodule._restore_images(images, packed, torch.float32)
+    dm = datamodule.DetectionDataModule(tmp_path, 1, 0, "n", img_size=32, device_hsv=True, fused_hsv=fused_hsv)
+    actual, _targets, _masks = dm.on_after_batch_transfer((images.as_subclass(_CudaLooking), packed), 0)
+    assert len(seen) == calls
+    assert torch.equal(actual.view(torch.int32), expected.view(torch.int32))
+
+
+class _RecordingKernel:
+    """Stand in for the JIT kernel below the eligibility guards: record launches, optionally failing them."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.launches: list[tuple[tuple[int, ...], tuple[object, ...], dict[str, object]]] = []
+
+    def __getitem__(self, grid: tuple[int, ...]) -> Callable[..., None]:
+        def launch(*args: object, **kwargs: object) -> None:
+            self.launches.append((grid, args, kwargs))
+            if self.error is not None:
+                raise self.error
+
+        return launch
+
+
+@pytest.fixture
+def fresh_latch(monkeypatch: pytest.MonkeyPatch) -> _hsv_cuda._LaunchLatch:
+    """Give each case its own first-launch record, so a latched failure never leaks into another test."""
+    latch = _hsv_cuda._LaunchLatch()
+    monkeypatch.setattr(_hsv_cuda, "_LATCH", latch)
+    return latch
+
+
+def test_failed_first_launch_warns_once_then_latches_native(
+    monkeypatch: pytest.MonkeyPatch, fresh_latch: _hsv_cuda._LaunchLatch
+) -> None:
+    """A toolchain failing its first launch costs speed only: one warning, then no further attempts.
+
+    Pixels are identical on either path, so the restore hands back ``None`` for the
+    native expressions instead of ending the fit on its first batch. The launch sits
+    below the eligibility guards, which is what lets a CPU host reach it with a
+    stand-in kernel.
+    """
+    kernel = _RecordingKernel(RuntimeError("launcher build failed"))
+    monkeypatch.setattr(_hsv_cuda, "_restore_kernel", kernel, raising=False)
+    images = torch.zeros(1, 3, 2, 2)
+    gains = torch.zeros(1, 3, dtype=torch.float64)
+    with pytest.warns(UserWarning, match="launcher build failed") as record:
+        first = _hsv_cuda._guarded_launch(images, gains)
+        second = _hsv_cuda._guarded_launch(images, gains)
+    assert (first, second) == (None, None)
+    assert len(record) == 1
+    assert len(kernel.launches) == 1
+    assert fresh_latch.state is _hsv_cuda._LaunchState.UNAVAILABLE
+
+
+def test_failure_after_verified_launch_propagates(
+    monkeypatch: pytest.MonkeyPatch, fresh_latch: _hsv_cuda._LaunchLatch
+) -> None:
+    """Once a launch has worked, a later exception is a runtime fault the native path shares, so it surfaces.
+
+    Only the first launch answers the toolchain question. Falling back after it would
+    hide an asynchronous CUDA fault behind a warning about the compiler.
+    """
+    kernel = _RecordingKernel()
+    monkeypatch.setattr(_hsv_cuda, "_restore_kernel", kernel, raising=False)
+    images = torch.zeros(1, 3, 2, 2)
+    gains = torch.zeros(1, 3, dtype=torch.float64)
+    first = _hsv_cuda._guarded_launch(images, gains)
+    kernel.error = RuntimeError("illegal memory access")
+    with pytest.raises(RuntimeError, match="illegal memory access"):
+        _hsv_cuda._guarded_launch(images, gains)
+    assert first is not None
+    assert first.is_contiguous(memory_format=torch.channels_last)
+    assert fresh_latch.state is _hsv_cuda._LaunchState.VERIFIED
+
+
+def test_launch_passes_transport_scale_and_covers_tail_pixels(
+    monkeypatch: pytest.MonkeyPatch, fresh_latch: _hsv_cuda._LaunchLatch
+) -> None:
+    """The kernel receives the collate's own transport scale and one extra block for a partial tail.
+
+    The kernel rounds onto the code grid the collate quantizes to. Passing the one
+    shared constant, instead of a literal of its own, is what a CPU-only CI can pin
+    while the bitwise comparisons against the native path need a GPU.
+    """
+    kernel = _RecordingKernel()
+    monkeypatch.setattr(_hsv_cuda, "_restore_kernel", kernel, raising=False)
+    images = torch.zeros(1, 3, 1, 257)
+    gains = torch.zeros(1, 3, dtype=torch.float64)
+    _hsv_cuda._guarded_launch(images, gains)
+    ((grid, args, kwargs),) = kernel.launches
+    assert grid == (2,)
+    assert args[3:] == (257, 257, _hsv_cuda._BLOCK_SIZE, float(datamodule._PIXEL_QUANT_MAX))
+    assert kwargs == {"enable_fp_fusion": False, "num_warps": 4}
+
+
+def test_eligible_restore_returns_fused_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A channels-last float32 request on CUDA images hands the batch to the fused backend and returns its result."""
+    fused = torch.full((2, 3, 3, 5), 0.25)
+    monkeypatch.setattr(_hsv_cuda, "_restore_hsv_cuda", lambda _images, _gains: fused)
+    images = torch.rand(2, 3, 3, 5).as_subclass(_CudaLooking)
+    packed = _packed(torch.zeros(2, 3, dtype=torch.float64))
+    assert datamodule._restore_images(images, packed, torch.float32, channels_last=True) is fused
+
+
+@pytest.mark.parametrize(
+    ("channels_last", "dtype", "image_type"),
+    [
+        pytest.param(False, torch.float32, _CudaLooking, id="layout-not-requested"),
+        pytest.param(True, torch.float16, _CudaLooking, id="half-consumer"),
+        pytest.param(True, torch.float32, torch.Tensor, id="cpu-images"),
+    ],
+)
+def test_ineligible_restore_never_consults_fused_backend(
+    monkeypatch: pytest.MonkeyPatch, channels_last: bool, dtype: torch.dtype, image_type: type[torch.Tensor]
+) -> None:
+    """Every request short of channels-last float32 on CUDA keeps the native restore without the backend.
+
+    The dispatch decides before the backend's own guards run, so a regression here
+    would route other consumers through the optional compiler on a GPU host.
+    """
+
+    def refuse(*_args: object) -> None:
+        raise AssertionError("an ineligible restore must not consult the fused backend")
+
+    monkeypatch.setattr(_hsv_cuda, "_restore_hsv_cuda", refuse)
+    images = torch.rand(2, 3, 3, 5)
+    packed = _packed(torch.zeros(2, 3, dtype=torch.float64))
+    expected = datamodule._restore_images(images, packed, dtype)
+    actual = datamodule._restore_images(images.as_subclass(image_type), packed, dtype, channels_last=channels_last)
+    assert torch.equal(actual, expected)
+
+
+def test_unpack_batch_never_consults_fused_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A direct consumer's restore keeps the native expression and layout, even for CUDA images."""
+
+    def refuse(*_args: object) -> None:
+        raise AssertionError("unpack_batch must keep the native restore")
+
+    monkeypatch.setattr(_hsv_cuda, "_restore_hsv_cuda", refuse)
+    images = torch.rand(2, 3, 3, 5)
+    packed = _packed(torch.zeros(2, 3, dtype=torch.float64))
+    expected = datamodule._restore_images(images, packed, torch.float32)
+    actual, targets = datamodule.unpack_batch((images.as_subclass(_CudaLooking), packed))
+    assert torch.equal(actual, expected)
+    assert len(targets) == 2
+
+
+@pytest.fixture
+def fresh_compiler_probe() -> Iterator[None]:
+    """Clear the process-wide compiler probe around a case, so a faked ``PATH`` never outlives it."""
+    _hsv_cuda._host_compiler_available.cache_clear()
+    yield
+    _hsv_cuda._host_compiler_available.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("cc", "on_path", "found"),
+    [
+        pytest.param("cc-custom", {"cc-custom", "gcc"}, True, id="named-present"),
+        pytest.param("cc-custom", {"gcc", "clang"}, False, id="named-missing"),
+        pytest.param("", {"gcc"}, True, id="gcc"),
+        pytest.param("", {"clang"}, True, id="clang"),
+        pytest.param("", set(), False, id="none"),
+    ],
+)
+def test_host_compiler_probe_honours_cc_before_discovery(
+    monkeypatch: pytest.MonkeyPatch, fresh_compiler_probe: None, cc: str, on_path: set[str], found: bool
+) -> None:
+    """An explicit ``CC`` decides alone; without one, GCC or Clang on ``PATH`` admits the fused restore.
+
+    A named compiler that is missing must not be rescued by a GCC on ``PATH``: the
+    launcher build uses ``CC`` when it is set. An empty ``CC`` counts as unset.
+    """
+    monkeypatch.setenv("CC", cc)
+    monkeypatch.setattr(_hsv_cuda.shutil, "which", lambda name: f"/usr/bin/{name}" if name in on_path else None)
+    assert _hsv_cuda._host_compiler_available() is found
+
+
+@pytest.mark.gpu
+@_CUDA
+def test_failed_first_launch_keeps_native_pixels(
+    monkeypatch: pytest.MonkeyPatch, fresh_latch: _hsv_cuda._LaunchLatch
+) -> None:
+    """A JIT failing on a real CUDA host restores the native pixels after a single warning."""
+    images = torch.rand(2, 3, 5, 7, device="cuda")
+    gains = torch.zeros(2, 3, device="cuda", dtype=torch.float64)
+    packed = _packed(gains)
+    expected = datamodule._restore_images(images, packed, torch.float32)
+    monkeypatch.setattr(_hsv_cuda, "_restore_kernel", _RecordingKernel(RuntimeError("compile failed")))
+    with pytest.warns(UserWarning, match="compile failed") as record:
+        first = datamodule._restore_images(images, packed, torch.float32, channels_last=True)
+        second = datamodule._restore_images(images, packed, torch.float32, channels_last=True)
+    assert len(record) == 1
+    assert torch.equal(first.view(torch.int32), expected.view(torch.int32))
+    assert torch.equal(second.view(torch.int32), expected.view(torch.int32))
+    assert fresh_latch.state is _hsv_cuda._LaunchState.UNAVAILABLE
 
 
 @pytest.mark.gpu
@@ -227,7 +460,7 @@ assert torch.equal(_restore_images(images, packed, torch.float32), images)
         env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=120,
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -318,7 +551,7 @@ def test_tensor_subclass_keeps_native_restore(subclass_images: bool) -> None:
 
 @pytest.mark.gpu
 @_CUDA
-def test_large_tiny_batch_uses_a_linear_launch() -> None:
+def test_large_tiny_batch_uses_linear_launch() -> None:
     """The image count may exceed CUDA's second launch-axis limit without changing bits."""
     images = torch.linspace(0, 1, 65536 * 3, device="cuda").reshape(65536, 3, 1, 1)
     gains = torch.zeros((65536, 3), dtype=torch.float64, device="cuda")

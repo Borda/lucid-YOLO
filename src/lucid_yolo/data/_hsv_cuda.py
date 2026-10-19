@@ -7,15 +7,23 @@ operands are tensors, and disables multiply-add contraction. Only the rounded
 uint8 codes survive that boundary; they are restored with CUDA's existing
 host-scalar reciprocal and stored directly in the consumer's channels-last layout.
 Triton is optional: importing this module without it leaves the native path usable.
+A toolchain that imports but cannot compile or launch the kernel is found out on the
+first launch, which warns once and leaves the native restore in charge for the rest of
+the process.
 """
 
 import os
 import shutil
+import warnings
+from dataclasses import dataclass
+from enum import Enum
 from functools import lru_cache
 from typing import Any  # noqa: F401 — mypy reads the DSL type comments.
 
 import torch
 from torch import Tensor
+
+from lucid_yolo.data._quantization import _PIXEL_QUANT_MAX
 
 try:
     import triton
@@ -28,6 +36,28 @@ else:
 
 #: The balanced launch from the real-shape L4 matrix, including small tail blocks.
 _BLOCK_SIZE = 256
+
+
+class _LaunchState(Enum):
+    """What the first fused launch in this process established about the toolchain."""
+
+    UNKNOWN = "unknown"
+    VERIFIED = "verified"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(slots=True)
+class _LaunchLatch:
+    """Process-wide record of the first fused launch, updated in place."""
+
+    state: _LaunchState = _LaunchState.UNKNOWN
+
+
+#: The first launch compiles the kernel and builds Triton's host launcher, both of which
+#: depend on the installed toolchain, so that launch decides once per process whether the
+#: fused restore is usable. A failure after a verified launch is not a toolchain question
+#: and propagates.
+_LATCH = _LaunchLatch()
 
 if _AVAILABLE:
 
@@ -48,14 +78,20 @@ if _AVAILABLE:
         return tl.where(~_is_nan(x), tl.minimum(tl.maximum(x, 0.0), 1.0), x)
 
     @triton.jit  # type: ignore[untyped-decorator]
-    def _restore_code(x):  # type: (Any) -> Any
-        """Round the uint8 code and apply CUDA's existing scalar-divisor restore."""
-        x = lib.nearbyint(x * 255.0)
-        x = tl.where(~_is_nan(x), tl.minimum(tl.maximum(x, 0.0), 255.0), 0.0)
-        return x.to(tl.uint8).to(tl.float32) * (1.0 / 255.0)
+    def _restore_code(x, QUANT_MAX: tl.constexpr):  # type: ignore[no-untyped-def]
+        """Round the uint8 code and apply CUDA's existing scalar-divisor restore.
+
+        ``QUANT_MAX`` is the transport scale as a float compile-time constant, so each
+        expression keeps the shape it had as a ``255.0`` literal.
+        """
+        x = lib.nearbyint(x * QUANT_MAX)
+        x = tl.where(~_is_nan(x), tl.minimum(tl.maximum(x, 0.0), QUANT_MAX), 0.0)
+        return x.to(tl.uint8).to(tl.float32) * (1.0 / QUANT_MAX)
 
     @triton.jit  # type: ignore[untyped-decorator]
-    def _restore_kernel(images, gains, out, PIXELS, HW: tl.constexpr, BLOCK: tl.constexpr):  # type: ignore[no-untyped-def]
+    def _restore_kernel(  # type: ignore[no-untyped-def]
+        images, gains, out, PIXELS, HW: tl.constexpr, BLOCK: tl.constexpr, QUANT_MAX: tl.constexpr
+    ):
         """Write one consumer pixel from the unchanged HSV and quantization expressions."""
         linear = tl.program_id(0).to(tl.int64) * BLOCK + tl.arange(0, BLOCK)
         valid = linear < PIXELS
@@ -110,9 +146,9 @@ if _AVAILABLE:
             ),
         )
         nan_input = _is_nan(r) | _is_nan(g) | _is_nan(b)
-        red = tl.where(nan_input, 0.0, _restore_code(red))
-        green = tl.where(nan_input, 0.0, _restore_code(green))
-        blue = tl.where(nan_input, 0.0, _restore_code(blue))
+        red = tl.where(nan_input, 0.0, _restore_code(red, QUANT_MAX))
+        green = tl.where(nan_input, 0.0, _restore_code(green, QUANT_MAX))
+        blue = tl.where(nan_input, 0.0, _restore_code(blue, QUANT_MAX))
         tl.store(out + linear * 3, red, valid)
         tl.store(out + linear * 3 + 1, green, valid)
         tl.store(out + linear * 3 + 2, blue, valid)
@@ -120,22 +156,85 @@ if _AVAILABLE:
 
 @lru_cache(maxsize=1)
 def _host_compiler_available() -> bool:
-    """Keep the native restore when Triton's host launcher cannot be built.
+    """Report whether a host C compiler for Triton's launcher is on ``PATH``.
 
     A CUDA runtime install need not carry a C compiler. Respect an explicit
     ``CC`` first, then the GCC/Clang discovery the launcher needs; the decision
     is process-wide metadata, not a scan or device synchronization per batch.
+    Finding a compiler is necessary, not sufficient: one that cannot build the
+    launcher fails the first launch instead, which :func:`_guarded_launch` turns
+    into the native fallback.
     """
     compiler = os.environ.get("CC")
     return bool(shutil.which(compiler)) if compiler else bool(shutil.which("gcc") or shutil.which("clang"))
+
+
+def _launch_kernel(images: Tensor, gains: Tensor, out: Tensor) -> None:
+    """Enqueue one fused pass over every pixel, compiling the kernel on its first use."""
+    batch, _, height, width = images.shape
+    pixels = batch * height * width
+    blocks = (pixels + _BLOCK_SIZE - 1) // _BLOCK_SIZE
+    _restore_kernel[(blocks,)](
+        images,
+        gains,
+        out,
+        pixels,
+        height * width,
+        _BLOCK_SIZE,
+        float(_PIXEL_QUANT_MAX),
+        enable_fp_fusion=False,
+        num_warps=4,
+    )
+
+
+def _guarded_launch(images: Tensor, gains: Tensor) -> Tensor | None:
+    """Run the fused restore, or return ``None`` for good once its first launch has failed.
+
+    The first launch is where a toolchain that imports but cannot compile the kernel
+    or build its launcher shows itself. Pixels are identical on either path, so that
+    failure costs only speed: it is reported once, with its cause, and latched, and
+    every later call returns ``None`` for the native restore. After a launch has
+    succeeded, an exception is no longer a toolchain question and propagates.
+
+    Args:
+        images: Contiguous ``(B, 3, H, W)`` float32 images already accepted by
+            :func:`_restore_hsv_cuda`.
+        gains: Contiguous ``(B, 3)`` float64 gains on the image device.
+
+    Returns:
+        The float32 channels-last batch, or ``None`` once the backend is latched off.
+
+    Raises:
+        Exception: Whatever a launch raises after an earlier one succeeded.
+    """
+    if _LATCH.state is _LaunchState.UNAVAILABLE:
+        return None
+    result = torch.empty(images.shape, device=images.device, dtype=torch.float32, memory_format=torch.channels_last)
+    try:
+        _launch_kernel(images, gains, result)
+    except Exception as error:
+        if _LATCH.state is _LaunchState.VERIFIED:
+            raise
+        _LATCH.state = _LaunchState.UNAVAILABLE
+        warnings.warn(
+            f"the fused CUDA colour restore failed its first launch ({type(error).__name__}: {error}); "
+            "the native CUDA restore runs for the rest of this process",
+            UserWarning,
+            stacklevel=2,
+        )
+        return None
+    _LATCH.state = _LaunchState.VERIFIED
+    return result
 
 
 def _restore_hsv_cuda(images: Tensor, gains: Tensor) -> Tensor | None:
     """Return the fused consumer batch when this CUDA backend supports the inputs.
 
     The native restore remains the fallback for missing Triton, other devices,
-    non-contiguous inputs, capture scopes and other precision modes. No tensor or output buffer is
-    cached: the JIT owns compiled code, while every call returns fresh image storage.
+    non-contiguous inputs, capture scopes and other precision modes, and for the rest
+    of the process once a first compile or launch has failed (:func:`_guarded_launch`).
+    No tensor or output buffer is cached: the JIT owns compiled code, while every call
+    returns fresh image storage.
     The device guard preserves a caller's current device on multi-GPU processes.
 
     Args:
@@ -176,10 +275,4 @@ def _restore_hsv_cuda(images: Tensor, gains: Tensor) -> Tensor | None:
     with torch.cuda.device(images.device):
         if torch.cuda.get_device_capability(images.device)[0] < 8 or torch.cuda.is_current_stream_capturing():
             return None
-        batch, _, height, width = images.shape
-        result = torch.empty(images.shape, device=images.device, dtype=torch.float32, memory_format=torch.channels_last)
-        pixels = batch * height * width
-        _restore_kernel[(triton.cdiv(pixels, _BLOCK_SIZE),)](
-            images, gains, result, pixels, height * width, _BLOCK_SIZE, enable_fp_fusion=False, num_warps=4
-        )
-    return result
+        return _guarded_launch(images, gains)
