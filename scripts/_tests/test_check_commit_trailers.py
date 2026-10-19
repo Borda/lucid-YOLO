@@ -442,6 +442,20 @@ class TestContributorRange:
 
         assert any("WP" in violation for violation in violations)
 
+    @pytest.mark.parametrize("row", ["197c", "22", "192b"])
+    def test_lettered_wp_row_accepted(self, row: str) -> None:
+        """A lettered roadmap row such as 197c is citable as itself, not as 197."""
+        message = f"fix(data): x\n\nWP: {row}\nProvenance: R1\nAssumptions: none\nGate: t.py::x\n"
+
+        assert validator.validate_message(message, _registers({1})) == []
+
+    @pytest.mark.parametrize("row", ["197C", "197cd", "c197", "197-c"])
+    def test_malformed_lettered_wp_row_refused(self, row: str) -> None:
+        """Only one lowercase letter after the digits; anything else is not a row id."""
+        message = f"fix(data): x\n\nWP: {row}\nProvenance: R1\nAssumptions: none\nGate: t.py::x\n"
+
+        assert any("WP" in violation for violation in validator.validate_message(message, _registers({1})))
+
     def test_non_numeric_wp_still_refused(self) -> None:
         """Only digits or the literal `none`; a free-text row id is not a row id."""
         message = "fix(data): x\n\nWP: maybe\nProvenance: R1\nAssumptions: none\nGate: t.py::x\n"

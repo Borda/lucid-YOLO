@@ -60,14 +60,16 @@ SUBJECT_RE = re.compile(r"^(feat|fix|test|ci|docs|chore|perf|refactor|refine|exp
 SUBJECT_MAX_LEN = 72
 
 #: Trailer matchers (multiline, one capture group each).
-#: ``WP:`` takes a roadmap row id, or the literal ``none`` for the D18 case: once the
+#: ``WP:`` takes a roadmap row id -- digits with an optional lowercase letter, so a
+#: lettered row such as ``197c`` is expressible instead of collapsing onto its numeric
+#: sibling -- or the literal ``none`` for the D18 case: once the
 #: reproduction is complete and the repository public, a change altering no shipped
 #: behaviour, no public symbol, no golden and no documented assumption lands without a
 #: tracked row. ``none`` rather than an omitted trailer, matching ``Assumptions:``, so
 #: the message states that no row applies instead of leaving a reader to decide whether
 #: one was forgotten. The other three trailers stay mandatory: the derivation question
 #: does not go away because the tracking did (WP-144).
-WP_RE = re.compile(r"^WP: (\d+|none)\s*$", re.MULTILINE)
+WP_RE = re.compile(r"^WP: (\d+[a-z]?|none)\s*$", re.MULTILINE)
 PROVENANCE_RE = re.compile(r"^Provenance:\s*(.+)$", re.MULTILINE)
 ASSUMPTIONS_RE = re.compile(r"^Assumptions:\s*(.+)$", re.MULTILINE)
 GATE_RE = re.compile(r"^Gate:\s*(.+)$", re.MULTILINE)
@@ -374,7 +376,7 @@ def _check_trailers(body: str, registers: Registers) -> list[str]:
     violations: list[str] = []
     wp = WP_RE.findall(body)
     if len(wp) != 1:
-        violations.append(f"expected exactly one 'WP: <digits>' or 'WP: none' trailer, found {len(wp)}")
+        violations.append(f"expected exactly one 'WP: <digits>[letter]' or 'WP: none' trailer, found {len(wp)}")
     violations += _check_provenance(body, registers)
     assumptions = ASSUMPTIONS_RE.search(body)
     if not assumptions:
