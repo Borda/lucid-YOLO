@@ -29,9 +29,9 @@ permissions:
 
 concurrency:
   group: docs-${{ github.workflow }}-${{ github.ref }}
-  # Not cancel-in-progress, as in release.yml: a half-finished publish is worse than
-  # a queue.
-  cancel-in-progress: false
+  # Superseded PR builds cancel; a push to main never does, as in release.yml: a
+  # half-finished publish is worse than a queue.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:

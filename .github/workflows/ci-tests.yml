@@ -9,9 +9,11 @@ on:
 permissions:
   contents: read
 
+# Superseded PR pushes cancel; pushes to main never do, and each gets its own group
+# (run_id) so a queued main run is not replaced by the next one either.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Lint, strict mypy and the copyleft audit live in lint.yml, whose `trailers` job
