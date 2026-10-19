@@ -1010,9 +1010,7 @@ class TestPreparedTrainingCache:
         module.setup("fit")
         assert module._prepared_train is not None and len(module._prepared_train) == len(_IMAGE_STEMS)
 
-    def test_draws_reuse_sources_and_do_not_center_the_mosaic_again(
-        self, tmp_path: Path, decode_calls: list[str]
-    ) -> None:
+    def test_draws_reuse_sources_and_do_not_center_mosaic_again(self, tmp_path: Path, decode_calls: list[str]) -> None:
         """A silent return to per-draw reads or a fill-bearing warp must fail this gate."""
         module = _datamodule(_write_coco_root(tmp_path), cache_prepared_train_images=True)
         module.setup("fit")

@@ -537,7 +537,7 @@ class TestCenteredInput:
     without a relative tolerance that could hide a larger difference.
     """
 
-    def test_matches_the_plain_warp_including_the_exposed_pad(self) -> None:
+    def test_matches_plain_warp_including_exposed_pad(self) -> None:
         """A centred source reproduces the plain warp byte-for-byte, pad region included.
 
         ``scale=0.4`` and ``translate=0.3`` are large enough that the sampled transform
