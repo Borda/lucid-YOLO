@@ -210,7 +210,15 @@ class TestUpdateCacheOwnership:
         optimizer, params, _, _ = inputs
         group = optimizer.param_groups[0]
         monkeypatch.setattr(torch.nn.Parameter, "is_cuda", property(lambda self: True))
-        factory = Mock(side_effect=lambda *args: SimpleNamespace(key=args[-1], run=Mock()))
+        factory = Mock(
+            side_effect=lambda *args: SimpleNamespace(
+                key=args[-1],
+                run=Mock(),
+                replay_stream=submission.current,
+                spans=SimpleNamespace(reached_by=Mock(return_value=False)),
+                mismatches=0,
+            )
+        )
         monkeypatch.setattr(preparation, "_PreparedGroup", factory)
         owner = preparation._UpdateReplay(_memory_overlaps)
         with torch.no_grad():
@@ -248,7 +256,7 @@ class TestUpdateCacheOwnership:
         """A partially initialized owner is never reused after an unsuccessful first call."""
         optimizer, _, _, _ = inputs
         monkeypatch.setattr(torch.nn.Parameter, "is_cuda", property(lambda self: True))
-        entry = SimpleNamespace(run=Mock())
+        entry = SimpleNamespace(run=Mock(), replay_stream=submission.current)
         factory = Mock(return_value=entry)
         if failure == "construct":
             factory.side_effect = RuntimeError("submission stopped")
