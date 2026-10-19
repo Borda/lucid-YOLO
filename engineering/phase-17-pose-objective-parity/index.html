@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-193c, WP-194…">
+        <meta name="description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-192c, WP-193, WP-193b, WP-193c…">
       
       
         <meta name="author" content="Jirka Borovec">
@@ -70,7 +70,7 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="lucid-yolo">
   <meta property="og:title" content="Phase 17 — R1 pose-objective parity — engineering log">
-  <meta property="og:description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-193c, WP-194…">
+  <meta property="og:description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-192c, WP-193, WP-193b, WP-193c…">
   <meta property="og:url" content="https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/"><meta property="og:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -78,7 +78,7 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta name="twitter:title" content="Phase 17 — R1 pose-objective parity — engineering log">
-  <meta name="twitter:description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-193, WP-193b, WP-193c, WP-194…">
+  <meta name="twitter:description" content="Engineering log for Phase 17 — R1 pose-objective parity: the findings of WP-178, WP-183, WP-188, WP-189, WP-192, WP-192b, WP-192c, WP-193, WP-193b, WP-193c…">
   
     <link rel="alternate" type="text/markdown" href="index.md" title="Markdown copy of this page">
   
@@ -4039,6 +4039,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#wp-192c-prepared-source-pixels-and-copy-paste-masks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-192c — prepared source pixels and copy-paste masks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#wp-193-post-backward-state-updates-use-fewer-cuda-launches" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4279,6 +4290,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#wp-192c-prepared-source-pixels-and-copy-paste-masks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-192c — prepared source pixels and copy-paste masks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#wp-193-post-backward-state-updates-use-fewer-cuda-launches" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4438,6 +4460,13 @@
 <p><strong>The training headline clears the complete-path bar on top of <a href="../../work_packages/wp-193/">WP-193</a>.</strong> <a href="../../work_packages/wp-193/">WP-193</a> is merged (<code>e8d632c</code>); both arms of the L4 comparison ran on that post-backward head so adjacent gains are not double-counted. Five measured 257-step <code>Trainer.fit</code> pairs after one discarded warm-up, oriented nano at batch 16 / 1024 px / BF16 with six workers and EMA, moved from a 436.922 s median (435.429–441.999 s) to 332.337 s (332.170–343.212 s): 23.94% from arm medians. Every pair improved by 21.97–23.97%, with a 23.68% paired median. The ordinary step median was actually 2.42% slower; the interval mean fell because the multi-second loader stalls disappeared, which is the measured mechanism rather than a GPU-kernel claim. First input and first loss matched in every pair, and peak CUDA allocation was exactly 11,174,604,800 bytes in both arms. The isolated <code>g2-standard-8</code> used an NVIDIA L4, driver 580.178.04, torch 2.9.1+cu129 and Python 3.12.3; archbench deleted it and both the helper cleanup and explicit inventory found no live instance.</p>
 <p><strong>The headline is a small-slice, decode-bound-host result and does not transfer unchanged to a full-size split.</strong> The L4 fit slice was the same 41 distinct tiles (125,370,774 bytes of cache) the parity paragraph cites, expanded to 4,100 records under fresh IDs per the PR description, so the cache build cost about 41 decodes rather than 4,100; the build sits inside the measured wall time and was nearly free. The host was an 8 vCPU <code>g2-standard-8</code> with six workers, the regime where the measured mechanism, the loader stalls that disappeared, applies. A real split costs about one decode per distinct file to build, and its RAM bill follows <code>sum(3*H*W)</code> over those distinct files (TRAINING.md) rather than the 125 MB measured here; neither that build time nor that memory was measured on a full-size split, so the 23.68% and 23.94% figures say nothing about either.</p>
 <p><strong>Why the row is lettered 192b.</strong> It was lettered from <a href="../../work_packages/wp-192/">WP-192</a> so that the then-open <a href="../../work_packages/wp-193/">WP-193</a> post-backward contribution kept its identifier; <a href="../../work_packages/wp-193/">WP-193</a> has since merged.</p>
+<h2 id="wp-192c-prepared-source-pixels-and-copy-paste-masks">WP-192c — prepared source pixels and copy-paste masks<a class="headerlink" href="#wp-192c-prepared-source-pixels-and-copy-paste-masks" title="Permanent link">&para;</a></h2>
+<p><a id="wp-192c"></a></p>
+<p><strong>[THEORETICAL] Reuse immutable source work before random augmentation.</strong> <code>cache_prepared_train_images</code> is an opt-in float32 snapshot of the training reader's images and targets. Source conversion and subtraction of the existing affine fill happen once. Mosaic copies those centred values onto zero fill; the same resample restores the original fill afterwards. Preparation centres out of place, so the reader's tensor is never written and nothing depends on whether a reader hands out fresh or shared storage; the cost is one transient image per record during setup. The [MEASURED] timings below were taken at <code>672f0ba</code>, which centred in place; the out-of-place subtraction adds only that setup-time allocation and was not re-timed. No second byte cache is retained. Fit setup reuses an existing snapshot; other stages release the datamodule's references, and failed preparation installs no partial cache. YOLO labels are snapshotted with the images.</p>
+<p><strong>[THEORETICAL] One source coordinate needs one copy.</strong> Copy-paste builds the union of its selected pixel masks and copies the immutable source once into the fresh destination clone. Overlapping writes already copied the same value. The instance targets remain separate and in their original order; the rasterisation, geometry and RNG draws are unchanged. Unlike the opt-in cache, the union changes the default (non-opt-in) copy-paste path; its output is byte-identical to the previous path, as <code>TestCopyPasteUnion</code> checks. Its inclusion in this WP awaits principal acceptance, because the screens do not carry it alone: cache-only reached 5.61% and union-only 4.32%. These changes follow from this repository's source, R21's existing fill interface and measured producer work.</p>
+<p><strong>[MEASURED] The complete short fit is the performance claim.</strong> Baseline <code>d6f7ec8</code>; candidate is <code>d6f7ec8</code> plus the <code>672f0ba</code> change. Five alternating pairs on an isolated NVIDIA L4, driver 580.178.04, torch 2.9.1+cu129 and Python 3.11.17 used detection n, batch 64, 640 px, BF16, four workers and decoded caching in both arms, with <code>device_hsv=True</code>. Each fresh-process fit covered five epochs and 80 steps over 1,024 distinct COCO val2017 training images and 32 held-out images. Cache construction, augmentation, forward/backward, optimiser, EMA, validation each epoch, checkpoints and final CUDA completion are inside the timer. Mosaic stayed enabled (<code>close_mosaic=0</code>), representing the augmentation-active part of training. Baseline median 116.184 s (114.011–116.872), candidate 97.579 s (96.728–98.340); paired reduction median 15.63% (13.93–16.75%).</p>
+<p><strong>[MEASURED] Correctness is byte-level.</strong> The five pairs and baseline-against-itself controls match model, optimiser, EMA, scheduler, loss and metric hashes. A separate 64-draw public-COCO check matches float-image bytes before quantisation, packed targets and RNG state with mosaic enabled and disabled, and preserves the source snapshots. Focused tests cover both readers, overlap/duplicate selections, non-contiguous images, source reuse, rollback, repeated setup and spawned workers. Direct affine checks cover exposed padding and identity parameters on fixed letterbox canvases, the training route, with byte parity. A standalone identity without letterbox can bypass the dependency resample and retain float32 centring round-off (observed maximum 5.96e-8 on RGB codes); a regression bounds its absolute error by float32 epsilon with zero relative tolerance. The declared torch 2.4 CPU floor passes the 148-test focused suite.</p>
+<p><strong>[MEASURED] The memory cost and scope stay explicit.</strong> This slice retains 3,375,379,188 float-image bytes, against 843,844,797 decoded bytes. Prepared images are per training record, including duplicates, plus target metadata; the option stays off by default. D27 governs the decoded <code>uint8</code> cache only; the float32 shared-tensor cache is a different memory trade-off and awaits a principal decision. This is a small-slice, CPU-limited training result, not a claim for arbitrary worker counts, model sizes or full-size splits. Separate single-pair cache-only (eight epochs) and copy-paste-only (six epochs) fit screens reached 5.61% and 4.32%, respectively, so neither became a standalone claim above the investigation's eight-percent bar. A separate eight-worker, four-epoch single pair improved 4.48%, below that bar. Full <code>make gate</code> and accelerator goldens were not run; the row remains open.</p>
 <h2 id="wp-193-post-backward-state-updates-use-fewer-cuda-launches">WP-193 — post-backward state updates use fewer CUDA launches<a class="headerlink" href="#wp-193-post-backward-state-updates-use-fewer-cuda-launches" title="Permanent link">&para;</a></h2>
 <p><a id="wp-193"></a></p>
 <p><strong>The measured target is the complete interval, not either helper.</strong> A public COCO val2017 training harness measured from one completed batch to the next, including loader wait, host-to-device transfer, forward and loss, backward, clipping, MuSGD, EMA and synchronization. On an isolated <code>g2-standard-8</code> NVIDIA L4 (driver 580.178.04, torch 2.9.1+cu129), variant <code>n</code>, batch 4, 640 px and BF16, five warm ABBA pairs moved from a 256.8 ms baseline median to 222.5 ms with this row. The paired reductions were 13.28%, 13.13%, 14.90%, 12.94% and 6.38%: median 13.13%, range 6.38–14.90%. The fifth candidate arm was the run's one timing outlier at 246.4 ms, but remained faster than the fastest baseline arm at 254.9 ms. Each arm discarded 15 warm-up intervals and measured the next 44. Peak allocated memory was 822.1 MiB in both arms. The paid VM was deleted after the run and an independent cleanup found no archbench instance alive.</p>

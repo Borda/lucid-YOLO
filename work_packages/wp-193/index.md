@@ -4,7 +4,7 @@
 >
 > 🔗 Depends on [WP-192](https://borda.github.io/lucid-YOLO/work_packages/wp-192/) · Needed by [WP-193b](https://borda.github.io/lucid-YOLO/work_packages/wp-193b/), [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/)
 >
-> ⬅️ [WP-192b](https://borda.github.io/lucid-YOLO/work_packages/wp-192b/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-193b](https://borda.github.io/lucid-YOLO/work_packages/wp-193b/) ➡️
+> ⬅️ [WP-192c](https://borda.github.io/lucid-YOLO/work_packages/wp-192c/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-193b](https://borda.github.io/lucid-YOLO/work_packages/wp-193b/) ➡️
 
 
 ## WP-193 — post-backward state updates use fewer CUDA launches

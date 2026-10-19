@@ -2,9 +2,9 @@
 
 > Engineering log · [Phase 17 — R1 pose-objective parity](https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/)
 >
-> 🔗 Depends on [WP-192](https://borda.github.io/lucid-YOLO/work_packages/wp-192/) · Needed by none
+> 🔗 Depends on [WP-192](https://borda.github.io/lucid-YOLO/work_packages/wp-192/) · Needed by [WP-192c](https://borda.github.io/lucid-YOLO/work_packages/wp-192c/)
 >
-> ⬅️ [WP-192](https://borda.github.io/lucid-YOLO/work_packages/wp-192/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-193](https://borda.github.io/lucid-YOLO/work_packages/wp-193/) ➡️
+> ⬅️ [WP-192](https://borda.github.io/lucid-YOLO/work_packages/wp-192/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-192c](https://borda.github.io/lucid-YOLO/work_packages/wp-192c/) ➡️
 
 
 ## WP-192b — decode once, augment many times

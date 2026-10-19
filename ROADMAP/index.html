@@ -6592,6 +6592,14 @@
 <td>✅</td>
 </tr>
 <tr>
+<td>192c</td>
+<td><code>perf(data): reuse prepared source pixels during training</code> [DATA][GPU]</td>
+<td>Opt-in float32, fill-centred source snapshots reuse conversion and centring; copy-paste unions selected pixel masks before one image assignment. Targets and random draws are preserved; host RAM follows training records · <a href="../work_packages/wp-192c/#wp-192c">log</a></td>
+<td><code>tests/ptl/test_datamodule.py::TestPreparedTrainingCache</code>; <code>tests/data/test_mixup_copypaste.py::TestCopyPasteUnion</code>; byte-identical public COCO inputs and training states; five paired isolated-L4 fits with 15.63% median reduction (4 workers, 1,024-image slice; one 8-worker pair 4.48%); torch 2.4 CPU compatibility and full pre-commit; full <code>make gate</code> not run</td>
+<td>192b</td>
+<td>🔄</td>
+</tr>
+<tr>
 <td>193</td>
 <td><code>perf(train): fuse post-backward state updates</code> [DATA][GPU]</td>
 <td>MuSGD's exact-shape CUDA buckets evaluate the existing quintic with native batched products, and EMA groups floating tensors by device and dtype for one foreach interpolation per group. No coefficient, iteration count, branch or decay changes · <a href="../work_packages/wp-193/#wp-193">log</a></td>
