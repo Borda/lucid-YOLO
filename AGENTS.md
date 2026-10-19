@@ -73,11 +73,14 @@ WP: 022
 Provenance: R1 3.2.1, R1 3.2.2, R1 Fig. S2, R6
 Assumptions: A9
 Gate: tests/models/test_head.py::test_dual_head_shapes
+
+Signed-off-by: Jane Doe <jane@example.com>
 ```
 
 - `WP:` exactly one WP id, or `none` for work that belongs to no package — remediation of an audit finding, for one. `Provenance:` at least one source id from docs/PROVENANCE.md (papers and primary literature only). `Assumptions:` A-ids touched, or `none`. `Gate:` test id(s) proving the DoD.
 - **`Provenance: none` is a value, not an empty field**, and it may carry its reason: `none (implementation efficiency; R1 silent on target rasterisation)`. An id written inside that explanation is a **reference** — resolved against the register like any other, and never counted as satisfying "name a source", because the line is a denial. A trailer that neither cites nor denies is refused. Both halves are checked: a well-formed id naming no register row fails, and so does an id whose row sits under Placeholders rather than the source allowlist — R15 and R19 are legal-evidence citations, admissible in a document and never as an implementation source.
 - Types: `feat` `fix` `test` `ci` `docs` `chore` `perf` `refactor` `refine` `exp` `release`. `refine` is this project's own, for a change improving something already correct — a rename, a clearer boundary, a sharpened comment: `refactor` claims behaviour-preserving restructuring, `docs` claims prose, and a rename crossing code, configs and prose is neither.
+- **Every commit carries a DCO `Signed-off-by:` trailer** — merge commits, cherry-picks and agent-made commits included. Create it with `git commit -s`, `git merge --signoff` or `git cherry-pick -s`; a merge staged with `--no-commit` is finished with `git commit -s`. The DCO GitHub App checks every PR commit, and a missing sign-off on a pushed commit can only be cleared by rewriting the branch, so sign at creation time; never reword already-pushed commits to add it, since the next merge of the remote branch brings the unsigned originals back as duplicates.
 - No commit message references the Ultralytics repository; papers cited by arXiv id. No issue references (`#42`) or mentions (`@name`) in subject or body — GitHub auto-links them to whatever repository the commit ends up in; co-author trailer emails and the `Signed-off-by:` address are the two exceptions. A markdown heading is not a reference.
 
 ## 6. Naming hygiene
