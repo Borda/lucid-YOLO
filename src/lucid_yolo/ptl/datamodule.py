@@ -121,7 +121,7 @@ from pytorch_lightning import LightningDataModule, Trainer
 from pytorch_lightning.accelerators import CUDAAccelerator
 from pytorch_lightning.plugins.precision import Precision
 from pytorch_lightning.strategies import SingleDeviceStrategy
-from pytorch_lightning.utilities import rank_zero_only, rank_zero_warn
+from pytorch_lightning.utilities import rank_zero_warn
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, get_worker_info
 from tqdm.auto import tqdm
@@ -932,8 +932,8 @@ class _PreparedTrainingSource(Dataset[tuple[Tensor, Targets]]):
     The fill is restored after the same resample, before any colour or blending.
     This costs four bytes per source pixel channel instead of the byte cache's one.
     ``base`` must be a raw reader without ``transforms``: its pixels are retained as
-    the source canvas the training geometry starts from. The memory reports and the
-    progress bar come from rank zero only, so a multi-process run states them once.
+    the source canvas the training geometry starts from. The memory reports come
+    from rank zero only, so a multi-process run states them once.
 
     Raises:
         ValueError: If ``base`` carries ``transforms``; their output would be retained
@@ -957,8 +957,7 @@ class _PreparedTrainingSource(Dataset[tuple[Tensor, Targets]]):
             "an 8-bit decoded image cache in host RAM per training process"
         )
         self._items: list[tuple[Tensor, Targets]] = []
-        progress = tqdm(range(len(base)), desc="Preparing images", unit="img", disable=rank_zero_only.rank != 0)
-        for index in progress:
+        for index in tqdm(range(len(base)), desc="Preparing images", unit="img"):
             image, targets = base[index]
             # Subtract out of place: the reader's tensor is never written, so nothing
             # here depends on whether a reader hands out fresh or shared storage. The
