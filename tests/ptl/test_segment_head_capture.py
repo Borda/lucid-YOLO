@@ -8,21 +8,25 @@ import dataclasses
 import pickle
 import warnings
 from collections.abc import Iterator
+from itertools import pairwise
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
-from pytorch_lightning import Trainer
+from pytorch_lightning import Callback, Trainer
 from pytorch_lightning import __version__ as lightning_version
 from pytorch_lightning.accelerators import CUDAAccelerator
 from pytorch_lightning.strategies import SingleDeviceStrategy
+from torch.utils.data import DataLoader
 
 from lucid_yolo.cli.train import DetectionCLI, packaged_config
+from lucid_yolo.data.targets import Targets
 from lucid_yolo.models.build import SegmentOutput
 from lucid_yolo.models.heads.detect import DualDetectionHead, _build_box_stem, _DetectionBranch
 from lucid_yolo.optim.update_replay import _RecordedSpans
 from lucid_yolo.ptl import DetectionLitModule
+from lucid_yolo.ptl.callbacks import EMACallback
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.network_capture import _network_signature
 from lucid_yolo.ptl.segment_head_capture import (
@@ -478,6 +482,112 @@ def test_cuda_contract_changes_retire_and_keep_native_observability(change: str)
         if handle is not None:
             handle.remove()
         model._segment_head_capture.clear()
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_cuda_fit_replays_through_real_optimizer_callbacks_and_validation() -> None:
+    """Replay the real segmentation objective across validation under automatic MuSGD and EMA.
+
+    Observe actual CUDA graph launches after the first recording and again after
+    validation, so cached entries alone cannot make a permanent native fallback
+    pass. Other recorder options stay off to isolate the prediction graphs.
+
+    Examples:
+        >>> callable(test_cuda_fit_replays_through_real_optimizer_callbacks_and_validation)
+        True
+    """
+    torch.manual_seed(0)
+    seen: list[int] = []
+    launches: list[int] = []
+    validations: list[int] = []
+    replay_count = [0]
+    validation_count = [0]
+    native_replay = torch.cuda.CUDAGraph.replay
+
+    def _replay(graph: torch.cuda.CUDAGraph) -> None:
+        """Count a real launch without changing its execution.
+
+        Examples:
+            >>> callable(_replay)
+            True
+        """
+        replay_count[0] += 1
+        native_replay(graph)
+
+    class _EntryProbe(Callback):
+        """Observe training after a completed validation epoch and its EMA weight swap."""
+
+        def on_train_batch_end(
+            self, trainer: Trainer, pl_module: DetectionLitModule, outputs: object, batch: object, batch_idx: int
+        ) -> None:
+            """Retain recording counts and completed graph launches for each real optimizer step."""
+            seen.append(len(pl_module._segment_head_capture.entries))
+            launches.append(replay_count[0])
+            validations.append(validation_count[0])
+
+        def on_validation_epoch_end(self, trainer: Trainer, pl_module: DetectionLitModule) -> None:
+            """Count the validation epoch before training resumes."""
+            validation_count[0] += 1
+
+    def _batch() -> tuple[torch.Tensor, list[Targets], list[torch.Tensor]]:
+        """Provide valid instance polygons and explicit prototype-grid masks.
+
+        Examples:
+            >>> callable(_batch)
+            True
+        """
+        images = torch.rand(2, 3, 64, 64)
+        ring = torch.tensor([[4.0, 4.0], [28.0, 4.0], [28.0, 28.0], [4.0, 28.0]])
+        targets = [
+            Targets(boxes=torch.tensor([[4.0, 4.0, 28.0, 28.0]]), labels=torch.tensor([1]), polygons=[ring.clone()])
+            for _ in range(2)
+        ]
+        masks = [torch.zeros(1, 16, 16) for _ in range(2)]
+        for mask in masks:
+            mask[:, 1:7, 1:7] = 1.0
+        return images, targets, masks
+
+    train_loader = DataLoader([_batch(), _batch()], batch_size=None)
+    val_loader = DataLoader([_batch()], batch_size=None)
+    model = _module(
+        capture_segment_heads=True, capture_orthogonalization=False, capture_updates=False, warmup_epochs=0.0
+    )
+    initial_weight = next(model.parameters()).detach().clone()
+    trainer = Trainer(
+        accelerator="cuda",
+        devices=1,
+        precision="bf16-mixed",
+        max_epochs=2,
+        deterministic=True,
+        benchmark=False,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        num_sanity_val_steps=0,
+        callbacks=[EMACallback(), _EntryProbe()],
+    )
+    with (
+        patch("torch.cuda.CUDAGraph.replay", _replay),
+        patch("torch.cuda.make_graphed_callables", wraps=torch.cuda.make_graphed_callables) as record,
+    ):
+        trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+    assert trainer.state.finished
+    assert any(isinstance(callback, _SegmentHeadCaptureLifecycle) for callback in trainer.callbacks)
+    assert trainer.optimizers[0].state
+    assert not torch.equal(initial_weight, next(model.parameters()).detach().cpu())
+    assert validations == [0, 0, 1, 1]
+    assert validation_count[0] == 2
+    expected = 16 if _BF16_REPLAY_SUPPORTED else 0
+    assert seen == [expected] * 4
+    assert record.call_count == expected
+    if _BF16_REPLAY_SUPPORTED:
+        assert len(launches) == 4 and launches[0] > 0
+        assert all(before < after for before, after in pairwise(launches))
+    else:
+        assert launches == [0] * 4
+    assert model._segment_head_capture.entries == {}
 
 
 @pytest.mark.parametrize("enabled", [False, True])
