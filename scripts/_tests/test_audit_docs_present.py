@@ -83,7 +83,8 @@ def _write_required_docs(docs_dir: Path, repo_root: Path) -> None:
     _write(docs_dir / "ESCALATION.md", "escalation\n")
     _write(
         docs_dir / "ROADMAP.md",
-        "199 numbered work packages.\n" + "".join(f"| {i:03d} | a | b | c | d | ✅ |\n" for i in range(1, 200)),
+        f"{audit._WP_FLOOR} numbered work packages.\n"
+        + "".join(f"| {i:03d} | a | b | c | d | ✅ |\n" for i in range(1, audit._WP_FLOOR + 1)),
     )
     _write(docs_dir / "DATASETS.md", "datasets\n")
     _write(docs_dir / "TRAINING.md", "training\n")
@@ -305,11 +306,16 @@ class TestCheckRoadmapWpIdsUniqueAndComplete:
     def test_flags_floor(self, tmp_path: Path) -> None:
         """A roadmap below the work-package floor is reported even when contiguous."""
         _write_required_docs(tmp_path / "docs", tmp_path)
-        _write(tmp_path / "docs" / "ROADMAP.md", "1 numbered work packages.\n| 001 | ... |\n")
+        floor = audit._WP_FLOOR
+        _write(
+            tmp_path / "docs" / "ROADMAP.md",
+            f"{floor - 1} numbered work packages.\n"
+            + "".join(f"| {i:03d} | a | b | c | d | ✅ |\n" for i in range(1, floor)),
+        )
 
         violations = audit.check_roadmap_wp_ids_unique_and_complete(tmp_path / "docs", tmp_path)
 
-        assert any("shrank below 199" in violation for violation in violations)
+        assert violations == [f"roadmap shrank below {floor} work packages: {floor - 1}"]
 
     def test_clean_at_floor(self, tmp_path: Path) -> None:
         """A contiguous roadmap at the floor count reports no violation."""
@@ -365,12 +371,13 @@ class TestCheckRoadmapHeaderCount:
         _write_required_docs(tmp_path / "docs", tmp_path)
         text = (tmp_path / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
         _write(
-            tmp_path / "docs" / "ROADMAP.md", text.replace("199 numbered work packages.", "5 numbered work packages.")
+            tmp_path / "docs" / "ROADMAP.md",
+            text.replace(f"{audit._WP_FLOOR} numbered work packages.", "5 numbered work packages."),
         )
 
         violations = audit.check_roadmap_header_count(tmp_path / "docs", tmp_path)
 
-        assert violations == ["header states 5 numbered work packages but the table carries 199"]
+        assert violations == [f"header states 5 numbered work packages but the table carries {audit._WP_FLOOR}"]
 
     def test_clean_when_counts_agree(self, tmp_path: Path) -> None:
         """A stated package count matching the numbered rows reports no violation."""
