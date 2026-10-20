@@ -243,6 +243,20 @@ class DualBranchLoss:
         o2o_assign = self.o2o_assigner(
             o2o_logits.sigmoid(), o2o_boxes, anchor_points, gt_boxes, gt_labels, gt_mask, gt_rboxes
         )
+        return self._score(o2m_logits, o2m_boxes, o2o_logits, o2o_boxes, o2m_assign, o2o_assign, strides, alpha)
+
+    def _score(
+        self,
+        o2m_logits: Tensor,
+        o2m_boxes: Tensor,
+        o2o_logits: Tensor,
+        o2o_boxes: Tensor,
+        o2m_assign: AssignResult,
+        o2o_assign: AssignResult,
+        strides: Tensor | None,
+        alpha: Tensor | None,
+    ) -> DualLossOutput:
+        """Score the two existing assignments and apply the unchanged branch blend."""
         o2m_out = self._o2m_loss(o2m_logits, o2m_boxes, o2m_assign, strides)
         o2o_out = self._o2o_loss(o2o_logits, o2o_boxes, o2o_assign, strides)
         if alpha is None:
