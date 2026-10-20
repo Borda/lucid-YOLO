@@ -20,6 +20,8 @@
 
 --8<-- "work_packages/wp-193c.md:engineering"
 
+--8<-- "work_packages/wp-193d.md:engineering"
+
 --8<-- "work_packages/wp-193e.md:engineering"
 
 --8<-- "work_packages/wp-194.md:engineering"
@@ -33,3 +35,5 @@
 --8<-- "work_packages/wp-197c.md:engineering"
 
 --8<-- "work_packages/wp-198.md:engineering"
+
+--8<-- "work_packages/wp-199.md:engineering"
