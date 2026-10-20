@@ -5572,6 +5572,29 @@ completion or failure. Higher-order differentiation is unsupported.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
+                <code>capture_loss</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Replay the existing detection assignment and loss forward/backward
+on single-device CUDA automatic training. Default off: recording pays setup
+and retains a graph pool. Masked target capacity grows geometrically; the
+method, label checks, live branch schedule and optimizer stay unchanged.
+Requires <code>task="detect"</code> and <code>compile_step=False</code>. Can combine with
+<code>capture_network</code>, <code>capture_orthogonalization</code> and <code>capture_updates</code>;
+it records no optimizer update itself, so the optimizer step is whatever
+those optimizer options select.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
                 <code>capture_updates</code>
             </td>
             <td>
@@ -5611,8 +5634,8 @@ parameters and momentum; unsupported signatures stay native. Like
               <div class="doc-md-description">
                 <p>If <code>task</code> is not one of <code>"detect"</code>, <code>"segment"</code>, <code>"obb"</code>,
 <code>"keypoints"</code>, if <code>rotated_iou_form</code> is not a known rotated-IoU form,
-if <code>capture_network</code> is combined with a non-detection task or <code>compile_step</code>,
-if <code>keypoint_loss</code> is not a known keypoint objective, if
+if <code>capture_network</code> or <code>capture_loss</code> is combined with a non-detection
+task or <code>compile_step=True</code>, if <code>keypoint_loss</code> is not a known keypoint objective, if
 <code>task="keypoints"</code> was asked for without a <code>num_keypoints</code>, or if a
 <code>num_keypoints</code> was given for a task that builds no point stem.</p>
               </div>
@@ -5905,7 +5928,7 @@ more than one process.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Keep an opted-in network recording scoped to one fit.</p>
+        <p>Keep opted-in CUDA recordings scoped to one fit.</p>
 
 
     </div>

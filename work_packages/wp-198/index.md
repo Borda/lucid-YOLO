@@ -2,9 +2,9 @@
 
 > Engineering log · [Phase 17 — R1 pose-objective parity](https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/)
 >
-> 🔗 Depends on [WP-197](https://borda.github.io/lucid-YOLO/work_packages/wp-197/) · Needed by none
+> 🔗 Depends on [WP-197](https://borda.github.io/lucid-YOLO/work_packages/wp-197/) · Needed by [WP-199](https://borda.github.io/lucid-YOLO/work_packages/wp-199/)
 >
-> ⬅️ [WP-197c](https://borda.github.io/lucid-YOLO/work_packages/wp-197c/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/)
+> ⬅️ [WP-197c](https://borda.github.io/lucid-YOLO/work_packages/wp-197c/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-199](https://borda.github.io/lucid-YOLO/work_packages/wp-199/) ➡️
 
 
 ## WP-198 — prepare the same training images with less exposed work
