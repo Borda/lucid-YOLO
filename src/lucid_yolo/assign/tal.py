@@ -401,6 +401,28 @@ class TaskAlignedAssigner:
 
             ```
         """
+        return self._assign(
+            pred_scores, pred_boxes, anchor_points, gt_boxes, gt_labels, gt_mask, gt_rboxes, check_labels=True
+        )
+
+    def _assign(
+        self,
+        pred_scores: Tensor,
+        pred_boxes: Tensor,
+        anchor_points: Tensor,
+        gt_boxes: Tensor,
+        gt_labels: Tensor,
+        gt_mask: Tensor,
+        gt_rboxes: Tensor | None = None,
+        *,
+        check_labels: bool = True,
+    ) -> AssignResult:
+        """Run the unchanged pipeline after the caller has selected its validation boundary.
+
+        Only the CUDA loss recorder disables ``check_labels``: it validates both
+        current label bounds before copying inputs into its masked workspace.
+        Public assignment keeps the checks here, including their error order.
+        """
         with torch.no_grad():
             batch, num_anchors = pred_scores.shape[0], pred_scores.shape[1]
             # Guarded twice, for two costs of the same read. `__debug__`: reading the
@@ -412,9 +434,10 @@ class TaskAlignedAssigner:
             # while a compiled region is traced, and since the trace records what ran,
             # the compiled step never performs it: neither the upper bound nor the
             # lower bound is checked there, on any batch, the traced first one included.
-            # Every eager step still checks both; a compiled run relies on the loader
-            # producing in-range labels, which its eager counterpart would have refused.
-            if __debug__ and not torch.compiler.is_compiling():
+            # Public eager calls still check both. The loss recorder validates the current
+            # labels before capture/replay and bypasses only these duplicate checks; the
+            # existing compiled step continues to rely on in-range loader labels.
+            if check_labels and __debug__ and not torch.compiler.is_compiling():
                 _check_labels(gt_labels, gt_mask, pred_scores.shape[-1])
             if gt_boxes.shape[1] == 0:
                 return self._empty_result(batch, num_anchors, pred_boxes.dtype, pred_boxes.device)

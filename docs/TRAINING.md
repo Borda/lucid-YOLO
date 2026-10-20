@@ -137,6 +137,16 @@ This path requires single-device CUDA automatic optimisation and `task: detect`.
 
 Recording warmup restores RNG and BatchNorm buffers before the first real batch. Accumulation or custom optimiser/zero-grad hooks preserve live gradients outside the graph-owned backward buffers before they can be overwritten. AMP uses an uncached autocast scope as the PyTorch API requires. Validation, prediction and public `forward` calls stay eager. Checkpoints retain the ordinary parameter names and the flag, with no graph state. Each fit records afresh and drops its recording on completion or an exception. CUDA graph pools can increase reserved memory even when peak allocated memory falls; measure both on the intended workload. The measured scope and remaining validation gaps are in [WP-193c](work_packages/wp-193c.md).
 
+## Optional detection loss CUDA replay
+
+`--model.capture_loss true` replays the existing detection assignment and loss forward/backward with fresh predictions, targets and the current alpha tensor. Default `false`: capture costs setup time and retains CUDA workspace, so short or compute-bound runs may not benefit. It requires `task: detect`, single-device CUDA automatic optimisation and `compile_step: false`. It can combine with `capture_network` and `capture_orthogonalization`; optimizer updates remain in their existing path.
+
+One masked target workspace grows from observed instance counts and replaces the previous recording. Returned scalars and assignments own their storage. Current label bounds are checked before replay. Global module hooks, unsafe custom epsilon/exponent settings, entirely empty targets, partial batches, non-finite inputs, unsupported layouts or autograd contexts, another CUDA stream and older BF16 runtimes keep the native loss. FP32 and FP16 have focused CUDA coverage on torch 2.4.0 and 2.9.1; BF16 replay starts at the verified final 2.9 runtime. Changed criterion implementations, gains or precision retire the recording. A capture failure raises after clearing the partial owner. Higher-order differentiation and multiple backward passes through one recorded result are outside this automatic-training option.
+
+On the measured L4 nano/640/BF16 workload, five batch-4 complete-fit pairs saved 13.14%. A separate batch-16 exploratory pair was 7.767% slower. Treat this as a small-batch launch-overhead option and measure the complete fit before enabling it for another workload.
+
+[WP-199](work_packages/wp-199.md) records the measured workload, discarded screens and remaining validation gaps. Check complete-fit throughput and memory on your own batch size before enabling it.
+
 ## 📼 CUDA graph replay of orthogonalization is opt-in
 
 `--model.capture_orthogonalization true` records MuSGD's existing Newton--Schulz matrix calls and replays them with each new gradient. The default is `false`: private graph pools retain extra device workspace, and setup may outweigh the gain on short or compute-bound runs. Momentum, parameter updates and the learning-rate schedule remain eager. CPU and MPS keep the original functions. [WP-197b](work_packages/wp-197b.md) records the measured workload and compatibility envelope.
