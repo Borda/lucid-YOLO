@@ -216,7 +216,12 @@ from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
 from lucid_yolo.ptl.coco_backend import build_mean_average_precision
-from lucid_yolo.ptl.network_capture import _detection_stages, _NetworkCapture, _NetworkCaptureLifecycle
+from lucid_yolo.ptl.network_capture import (
+    _detection_stages,
+    _module_breach,
+    _NetworkCapture,
+    _NetworkCaptureLifecycle,
+)
 from lucid_yolo.ptl.seg_targets import instance_mask_targets, scale_boxes_to_grid, semantic_target
 
 if TYPE_CHECKING:
@@ -759,7 +764,11 @@ def _validate_task_arguments(task: str, num_keypoints: int | None, rotated_iou_f
 
 
 def _pose_head_topology(head: torch.nn.Module) -> tuple[tuple[object, ...], ...]:
-    """Identify the native head composition whose dense outputs use every shared feature."""
+    """Identify the head composition as constructed, whose dense outputs use every shared feature.
+
+    The fingerprint is taken when the module is built, so the certificate it feeds holds
+    the head unchanged since construction: a class patched before then is the reference.
+    """
     return tuple(
         (name, type(module), type(module).forward, getattr(type(module), "forward_branch", None))
         for name, module in head.named_modules()
@@ -770,16 +779,7 @@ def _pose_head_breach(head: torch.nn.Module, topology: tuple[tuple[object, ...],
     """Keep altered head control flow outside a recording of its shared inputs."""
     if _pose_head_topology(head) != topology:
         return "the pose head topology or class forward changed"
-    if any(
-        module._forward_hooks
-        or module._forward_pre_hooks
-        or module._backward_hooks
-        or module._backward_pre_hooks
-        or "forward" in vars(module)
-        or "forward_branch" in vars(module)
-        or getattr(module, "_compiled_call_impl", None) is not None
-        for module in head.modules()
-    ):
+    if _module_breach(head.modules()) is not None:
         return "a pose head module is hooked, overridden or compiled"
     return None
 
@@ -948,9 +948,15 @@ class DetectionLitModule(LightningModule):
             ``task="detect"`` or ``task="keypoints"``, ``compile_step=False`` and
             single-device CUDA automatic optimization.
             Pose records backbone and neck; its head stays native to preserve absent
-            gradients in batches without supervised points. Pose training with gradient
-            accumulation stays eager. Assignment, losses, schedules, optimizer, EMA and
-            evaluation stay eager.
+            gradients in batches with no assigned positives. Pose training stays eager
+            under gradient accumulation, with a fully frozen backbone and neck, or when
+            the head's topology or class forward changed since construction or a head
+            module is hooked, overridden or compiled. The trainable set is fixed per fit
+            at the first recording: a fully frozen start, or a later freeze or unfreeze
+            of a recorded parameter, keeps the rest of that fit eager after one warning.
+            Either task stays eager when the LightningModule carries a hook, overrides
+            ``forward`` or is compiled.
+            Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
             One image signature is recorded per fit; partial batches stay eager and
             changed storage, modes, hooks or precision retire the recording. Warmup
             restores buffers and RNG, and the fit callbacks discard recordings on
@@ -1398,7 +1404,7 @@ class DetectionLitModule(LightningModule):
         """Run the dual head through the training recording when its contract holds.
 
         Detection records all three stages; pose records only backbone and neck.
-        Its optional point stems stay native so batches without supervised points
+        Its optional point stems stay native so batches with no assigned positives
         keep their absent gradients, rather than zero-valued captured gradients.
         Both tasks keep changing instance counts and loss arithmetic outside capture.
         """
@@ -1412,6 +1418,8 @@ class DetectionLitModule(LightningModule):
             and torch.is_grad_enabled()
             and images.is_cuda
         ):
+            # WP-193d reports the shared recorder's CUDA accumulation checks failing on the unmodified
+            # baseline; whether detection must stay eager here too is open in docs/ESCALATION.md (2026-10-20).
             if self._task == "keypoints" and self.trainer.accumulate_grad_batches != 1:
                 self._network_capture.retire("keypoint replay requires accumulate_grad_batches=1")
             if self._task == "keypoints":
@@ -1431,13 +1439,12 @@ class DetectionLitModule(LightningModule):
                     reason = "the LightningModule call is compiled"
                 self._network_capture.retire(reason)
                 head_out = self(images)
+            elif self._task == "keypoints":
+                features = self._network_capture.run_features(images, (self.backbone, self.neck))
+                head_out = self(images) if features is None else cast("DualHeadOutput", self.head(features))
             else:
                 eager = cast("Callable[[Tensor], DualHeadOutput]", self)
-                if self._task == "keypoints":
-                    features = self._network_capture.run_features(images, (self.backbone, self.neck))
-                    head_out = self(images) if features is None else cast("DualHeadOutput", self.head(features))
-                else:
-                    head_out = self._network_capture.run(images, (self.backbone, self.neck, self.head), eager)
+                head_out = self._network_capture.run(images, (self.backbone, self.neck, self.head), eager)
         else:
             head_out = self(images)
         return head_out

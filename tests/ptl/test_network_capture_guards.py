@@ -15,7 +15,7 @@ import re
 import subprocess
 import sys
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -26,6 +26,8 @@ from lucid_yolo.ptl import DetectionLitModule
 from lucid_yolo.ptl.network_capture import (
     _detection_stages,
     _DetectionNetwork,
+    _FeatureNetwork,
+    _ineligibility,
     _NetworkCapture,
     _NetworkCaptureLifecycle,
 )
@@ -67,6 +69,33 @@ class TestRetireWarning:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             holder.retire("second cause")
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            pytest.param(
+                lambda holder, model, images: holder.run(images, (model.backbone, model.neck, model.head), MagicMock()),
+                id="detection",
+            ),
+            pytest.param(
+                lambda holder, model, images: holder.run_features(images, (model.backbone, model.neck)),
+                id="pose-features",
+            ),
+        ],
+    )
+    def test_location_is_recorder_caller(
+        self, call: Callable[[_NetworkCapture, DetectionLitModule, torch.Tensor], object]
+    ) -> None:
+        """A retirement decided inside the shared recording path names the code that called the recorder.
+
+        Both compositions retire inside one shared helper, a frame deeper than a direct
+        retire. Pointing into the recorder instead would break a user's warning filter
+        keyed on the calling module; CPU stages retire there on their storage.
+        """
+        model = _module()
+        with pytest.warns(UserWarning, match="not a strided CUDA tensor") as record:
+            call(_NetworkCapture(), model, torch.zeros(1, 3, 64, 64))
+        assert record[0].filename == __file__
 
 
 class TestRunRetireReason:
@@ -141,6 +170,54 @@ class TestBatchNormEligibility:
         with pytest.warns(UserWarning, match=f"stays eager: .*{cause}"):
             _NetworkCapture().run(torch.zeros(1, 3, 64, 64), (model.backbone, model.neck, model.head), eager)
         eager.assert_called_once()
+
+
+class TestStageModuleBreach:
+    """A recorded stage whose call runs code its class methods do not show is refused by cause."""
+
+    @pytest.mark.parametrize(
+        ("alter", "cause"),
+        [
+            pytest.param(
+                lambda network: network.neck.register_forward_hook(lambda *_: None),
+                "carries a forward or backward hook",
+                id="hook",
+            ),
+            pytest.param(
+                lambda network: vars(network.head).update(forward_branch=network.head.forward_branch),
+                "overrides forward_branch on its instance",
+                id="instance-forward-branch",
+            ),
+            pytest.param(lambda network: network.backbone.compile(), "is compiled", id="compiled"),
+            pytest.param(
+                lambda network: vars(network).update(forward=network.forward),
+                "not a strided CUDA tensor",
+                id="root-forward",
+            ),
+        ],
+    )
+    def test_names_cause(self, alter: Callable[[_DetectionNetwork], object], cause: str) -> None:
+        """Each breach is named before the CPU-storage check, except an instance forward on the root.
+
+        These guards are decided before any CUDA work, so CPU stages reach them. The graphed
+        callable installs ``forward`` on the recorder's own root, so that override must fall
+        through to the next check (here the CPU-resident storage) instead of retiring.
+        """
+        model = _module()
+        network = _DetectionNetwork(model.backbone, model.neck, model.head)
+        alter(network)
+        assert cause in (_ineligibility(network) or "")
+
+    def test_feature_reason_omits_head(self) -> None:
+        """A pose feature recording holds no head, so its stage reason cannot send a user to one.
+
+        Pose records only backbone and neck while its head stays native and is judged by
+        the head certificate; a reason naming the head would point at the wrong module.
+        """
+        model = _module()
+        model.neck.register_forward_hook(lambda *_: None)
+        reason = _ineligibility(_FeatureNetwork(model.backbone, model.neck))
+        assert reason == "a recorded stage module carries a forward or backward hook"
 
 
 class TestPrecisionPolicy:

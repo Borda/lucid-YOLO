@@ -38,8 +38,12 @@ _Features = tuple[Tensor, Tensor, Tensor]
 #: First verified BF16 replay runtime; 2.4's path does not meet the exact eager oracle.
 _BF16_REPLAY_SUPPORTED = Version(torch.__version__) >= Version("2.9")
 
+#: Method names through which a module's call reaches its arithmetic; the same name set on
+#: an instance shadows the class method a recording replays or a certificate fingerprints.
+_DISPATCH = ("forward", "forward_branch")
+
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from pytorch_lightning import LightningModule, Trainer
 
@@ -71,7 +75,7 @@ class _DetectionNetwork(nn.Module):
 class _FeatureNetwork(nn.Module):
     """Expose backbone and neck without fixing which optional head gradients exist.
 
-    Pose may have no supervised points in a batch. Its point stems then keep
+    A pose batch may have no assigned positives. Its point stems then keep
     ``grad=None``; including those stems in one fixed backward would materialize
     zero gradients and advance optimizer state that the native loop skips.
     The shared features still feed the dense classification objective, while
@@ -150,44 +154,65 @@ def _input_breach(images: Tensor, precision: tuple[object, ...]) -> str | None:
     return None
 
 
+def _module_breach(
+    modules: Iterable[nn.Module], dispatch: tuple[str, ...] = _DISPATCH, exclude: nn.Module | None = None
+) -> str | None:
+    """Name the first way a module's call runs code its class methods do not show, if any.
+
+    A recording replays what the class methods computed when it was made, and the pose
+    head certificate trusts the class methods it fingerprinted. A module hook, an
+    instance attribute shadowing a dispatch method or a compiled call breaks both, so
+    the recorder and the certificate share this one predicate.
+
+    Args:
+        modules: The modules whose calls must stay what their class methods define.
+        dispatch: Method names through which a call reaches its arithmetic.
+        exclude: A module whose instance dispatch attributes do not count: the recorder's
+            own root, whose ``forward`` the graphed callable replaces. Its hooks and
+            compiled call still count.
+
+    Returns:
+        The breach as the predicate of a sentence about one module ("carries a forward or
+        backward hook"), checked in the order hooks, dispatch overrides, compiled calls;
+        ``None`` when no module breaches.
+    """
+    members = tuple(modules)
+    if any(
+        module._forward_hooks or module._forward_pre_hooks or module._backward_hooks or module._backward_pre_hooks
+        for module in members
+    ):
+        return "carries a forward or backward hook"
+    overridden = next(
+        (name for name in dispatch for module in members if module is not exclude and name in vars(module)), None
+    )
+    if overridden is not None:
+        return f"overrides {overridden} on its instance"
+    if any(getattr(module, "_compiled_call_impl", None) is not None for module in members):
+        return "is compiled"
+    return None
+
+
 def _ineligibility(network: nn.Module) -> str | None:
     """Name the first property of the stages a recording could not keep honouring, if any."""
     runtime = nn.modules.module
+    if any(
+        getattr(runtime, name, {})
+        for name in (
+            "_global_forward_hooks",
+            "_global_forward_pre_hooks",
+            "_global_backward_hooks",
+            "_global_backward_pre_hooks",
+        )
+    ):
+        return "a global module hook is registered"
     modules = tuple(network.modules())
+    breach = _module_breach(modules, exclude=network)
+    if breach is not None:
+        return f"a recorded stage module {breach}"
     params = tuple(network.parameters())
     buffers = tuple(network.buffers())
     tensors = params + buffers
     checks: tuple[tuple[str, Callable[[], bool]], ...] = (
-        (
-            "a global module hook is registered",
-            lambda: any(
-                getattr(runtime, name, {})
-                for name in (
-                    "_global_forward_hooks",
-                    "_global_forward_pre_hooks",
-                    "_global_backward_hooks",
-                    "_global_backward_pre_hooks",
-                )
-            ),
-        ),
-        (
-            "a backbone, neck or head module carries a forward or backward hook",
-            lambda: any(
-                module._forward_hooks
-                or module._forward_pre_hooks
-                or module._backward_hooks
-                or module._backward_pre_hooks
-                for module in modules
-            ),
-        ),
-        (
-            "a backbone, neck or head module overrides forward on its instance",
-            lambda: any(module is not network and "forward" in vars(module) for module in modules),
-        ),
-        (
-            "a backbone, neck or head module is compiled",
-            lambda: any(getattr(module, "_compiled_call_impl", None) is not None for module in modules),
-        ),
         (
             # A cumulative-average BatchNorm divides by its batch count read on the host,
             # which a stream capture forbids; frozen (eval-mode) BatchNorm reads nothing.
@@ -284,7 +309,7 @@ class _NetworkCapture:
         del state
         self.clear()
 
-    def retire(self, reason: str) -> None:
+    def retire(self, reason: str, *, stacklevel: int = 3) -> None:
         """Retire a recording whose static execution contract no longer holds.
 
         Only the first cause of a fit is reported: the holder stays eager afterwards, so
@@ -293,19 +318,23 @@ class _NetworkCapture:
         Args:
             reason: Which part of the recording contract broke, completing the warning
                 that starts ``capture_network=True stays eager:``.
+            stacklevel: The frame the warning names, counted as :func:`warnings.warn`
+                counts from this method. The default names the caller of whoever called
+                ``retire``; :meth:`_run` passes 4 so a retirement it decides still names
+                the code that called :meth:`run` or :meth:`run_features`.
         """
         if self._disabled:
             return
         self.clear()
         self._disabled = True
-        warnings.warn(f"capture_network=True stays eager: {reason}", UserWarning, stacklevel=3)
+        warnings.warn(f"capture_network=True stays eager: {reason}", UserWarning, stacklevel=stacklevel)
 
     def _drift(self, state: tuple[object, ...], owners: tuple[int, ...], precision: tuple[object, ...]) -> str | None:
         """Name a change since recording that a replay would silently ignore, if any."""
         if self._input is None:
             return None
         if owners != self._owners:
-            return "the backbone, neck or head module was replaced after recording"
+            return "a recorded stage module was replaced after recording"
         if state != self._state:
             return "parameter or buffer storage, a module mode or a scalar module attribute changed after recording"
         if precision != self._input[-1]:
@@ -342,13 +371,28 @@ class _NetworkCapture:
         build: Callable[[], nn.Module],
         rebuild: Callable[[tuple[Tensor, ...]], _Output],
     ) -> _Output:
-        """Keep recording, eligibility and lifecycle identical for both stage compositions."""
+        """Keep recording, eligibility and lifecycle identical for both stage compositions.
+
+        Args:
+            images: The training batch; its shape, strides, dtype and device key the recording.
+            stages: The caller's stage modules, whose identities the recording keeps.
+            eager: Produces the value returned whenever this call does not replay. It is a
+                fallback value, not necessarily the native result: :meth:`run` passes the
+                native forward, while :meth:`run_features` returns ``None`` so its caller
+                makes the full native call itself.
+            build: Composes the stages into the module checked for eligibility until a
+                recording exists, and captured by the first one.
+            rebuild: Turns the replayed output tensors back into the caller's value.
+
+        Returns:
+            The rebuilt replay output, or whatever ``eager`` returns when this call stays eager.
+        """
         if self._disabled:
             return eager(images)
         try:
             precision = _precision_signature()
         except RuntimeError as error:
-            self.retire(f"the CUDA precision policy cannot be read ({error})")
+            self.retire(f"the CUDA precision policy cannot be read ({error})", stacklevel=4)
             return eager(images)
         owners = tuple(id(stage) for stage in stages)
         network = self._network if self._network is not None else build()
@@ -357,7 +401,7 @@ class _NetworkCapture:
         if state is not None:
             reason = self._drift(state, owners, precision)
         if reason is not None:
-            self.retire(reason)
+            self.retire(reason, stacklevel=4)
             return eager(images)
         signature = tuple(images.shape), images.stride(), images.dtype, images.device, precision
         if (self._input is not None and signature != self._input) or self._pending_backward:
