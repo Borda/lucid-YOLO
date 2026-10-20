@@ -21,7 +21,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
-from packaging.version import Version
 from pytorch_lightning import Callback, Trainer
 from pytorch_lightning.accelerators import CUDAAccelerator
 from pytorch_lightning.plugins.precision import MixedPrecision
@@ -87,10 +86,18 @@ def test_default_has_no_callback_or_registered_state() -> None:
         assert not candidate._capture_network_active
 
 
-@pytest.mark.parametrize("kwargs", [{"task": "segment"}, {"compile_step": True}])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"task": "segment"}, id="segment"),
+        pytest.param({"task": "obb"}, id="obb"),
+        pytest.param({"compile_step": True}, id="detect-compile-step"),
+        pytest.param({"task": "keypoints", "num_keypoints": 5, "compile_step": True}, id="keypoints-compile-step"),
+    ],
+)
 def test_incompatible_options_are_explicit(kwargs: dict[str, object]) -> None:
     """Unsupported tasks and the separate compiler path fail before training begins."""
-    with pytest.raises(ValueError, match="requires task='detect' and compile_step=False"):
+    with pytest.raises(ValueError, match="requires task='detect' or task='keypoints', and compile_step=False"):
         _module(capture_network=True, **kwargs)
 
 
@@ -115,6 +122,11 @@ def test_fit_boundaries_clear_recording(hook: str) -> None:
     getattr(_NetworkCaptureLifecycle(), hook)(*args, *([RuntimeError("abort")] if hook == "on_exception" else []))
     assert model._network_capture._input is None
     assert not model._network_capture._disabled
+
+
+def test_bf16_gate_tracks_torch_2_9(bf16_replay_expected: bool) -> None:
+    """BF16 replay is enabled exactly on torch 2.9 and newer, the first release verified against eager."""
+    assert bf16_replay_expected == capture_module._BF16_REPLAY_SUPPORTED
 
 
 @contextmanager
@@ -325,22 +337,13 @@ def _assert_identical(left: object, right: object) -> None:
     torch.testing.assert_close(left, right, rtol=0, atol=0)
 
 
-@pytest.fixture
-def replay_spy() -> Iterator[MagicMock]:
-    """Count graph recordings and turn a retirement warning into a failure, so replay cannot silently lapse."""
-    with (
-        warnings.catch_warnings(),
-        patch("torch.cuda.make_graphed_callables", wraps=torch.cuda.make_graphed_callables) as record,
-    ):
-        warnings.filterwarnings("error", message="capture_network=True stays eager")
-        yield record
-
-
 @pytest.mark.gpu
 @_cuda
 @pytest.mark.parametrize("dtype", [None, torch.bfloat16, torch.float16])
 @pytest.mark.parametrize("accumulation", [1, 2])
-def test_cuda_replay_matches_eager_updates_and_buffers(dtype: torch.dtype | None, accumulation: int) -> None:
+def test_cuda_replay_matches_eager_updates_and_buffers(
+    dtype: torch.dtype | None, accumulation: int, bf16_replay_expected: bool
+) -> None:
     """Recording warmup must not advance BatchNorm, RNG or the optimizer trajectory."""
     torch.manual_seed(1)
     eager = _module().cuda().to(memory_format=torch.channels_last)
@@ -371,7 +374,7 @@ def test_cuda_replay_matches_eager_updates_and_buffers(dtype: torch.dtype | None
                 assert torch.equal(tensor, replay.state_dict()[name]), name
             for left, right in zip(eager.parameters(), replay.parameters(), strict=True):
                 assert torch.equal(left.grad, right.grad)
-        expected = 0 if dtype == torch.bfloat16 and Version(torch.__version__) < Version("2.9") else 1
+        expected = 0 if dtype == torch.bfloat16 and not bf16_replay_expected else 1
         assert record.call_count == expected
         record.reset_mock()  # the spy itself owns the recorded module through its call arguments
     recorded = weakref.ref(holder._network) if holder._network is not None else lambda: None
@@ -566,7 +569,7 @@ def test_anomaly_detection_retires_existing_recording() -> None:
 @pytest.mark.parametrize("precision", ["bf16-mixed", "16-mixed"])
 @pytest.mark.parametrize("accumulation", [1, 2])
 def test_trainer_activates_once_per_fit_and_cleans_up(
-    accumulation: int, precision: Literal["bf16-mixed", "16-mixed"]
+    accumulation: int, precision: Literal["bf16-mixed", "16-mixed"], bf16_replay_expected: bool
 ) -> None:
     """The public automatic-optimisation loop records once, releases and records afresh on reuse.
 
@@ -600,7 +603,7 @@ def test_trainer_activates_once_per_fit_and_cleans_up(
                 trainer.fit(model, train_dataloaders=loader)
                 assert trainer.global_step == 2 // accumulation
                 optimizers.append(trainer.optimizers[0].state_dict()["state"])
-            bf16_gated = precision == "bf16-mixed" and Version(torch.__version__) < Version("2.9")
+            bf16_gated = precision == "bf16-mixed" and not bf16_replay_expected
             expected = 0 if bf16_gated else fit_index + 1
             assert record.call_count == expected
             assert replay._network_capture._network is None
