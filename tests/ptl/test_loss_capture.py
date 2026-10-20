@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import copy
 import gc
+import math
 import pickle
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -248,14 +250,42 @@ def test_host_contract_changes_retire_once(_host_recorder: MagicMock, change: st
     assert holder._objective is None and _host_recorder.call_count == 1
 
 
+_FLOAT32_TINY = torch.finfo(torch.float32).tiny
+
+
+@pytest.mark.parametrize("branch", ["o2m_assigner", "o2o_assigner"])
 @pytest.mark.parametrize(
-    "field,value", [("eps", 0.0), ("alpha", -1.0), ("beta", float("inf")), ("topk", torch.tensor(1))]
+    "field,value",
+    [
+        ("eps", 0.0),
+        ("eps", math.nextafter(_FLOAT32_TINY, 0.0)),
+        ("eps", float("nan")),
+        ("eps", -1e-9),
+        ("alpha", -1.0),
+        ("alpha", float("nan")),
+        ("beta", float("inf")),
+        ("beta", float("nan")),
+        ("topk", torch.tensor(1)),
+        ("topk", True),
+    ],
 )
-def test_source_signature_refuses_uncertified_settings(field: str, value: object) -> None:
-    """Invalid scalar policies cannot certify neutral padding, even without a CUDA runtime."""
+def test_source_signature_refuses_uncertified_settings(branch: str, field: str, value: object) -> None:
+    """Invalid scalar policies cannot certify neutral padding, even without a CUDA runtime.
+
+    The next float below the smallest normal float32 is the first epsilon that can
+    flush to zero on the device, so it is refused while the smallest normal is not.
+    """
     source = DualBranchLoss()
-    setattr(source.o2m_assigner, field, value)
+    setattr(getattr(source, branch), field, value)
     assert capture_module._source_signature(source) is None
+
+
+@pytest.mark.parametrize("branch", ["o2m_assigner", "o2o_assigner"])
+def test_source_signature_accepts_smallest_float32_epsilon(branch: str) -> None:
+    """An epsilon equal to the smallest normal float32 still keeps zero-overlap IoUs finite."""
+    source = DualBranchLoss()
+    getattr(source, branch).eps = _FLOAT32_TINY
+    assert capture_module._source_signature(source) is not None
 
 
 @pytest.mark.parametrize("record_first", [False, True])
@@ -296,24 +326,59 @@ def test_host_replaced_delegated_stage_keeps_native_route(
     assert holder._objective is None and holder._disabled
 
 
-@pytest.mark.parametrize("case", ["empty", "nonfinite", "shape", "labels"])
+_GUARDED_INPUTS = {"match_logits": 0, "match_boxes": 1, "unique_logits": 2, "unique_boxes": 3, "target_boxes": 5}
+
+
+@pytest.mark.parametrize("case", ["empty", "shape", "labels", *(f"nonfinite_{name}" for name in _GUARDED_INPUTS)])
 def test_host_fallback_preserves_current_inputs(_host_recorder: MagicMock, case: str) -> None:
-    """Existing recordings never hide empty, non-finite, reshaped or invalid current inputs."""
+    """Existing recordings never hide empty, non-finite, reshaped or invalid current inputs.
+
+    The recorder is stubbed to run the real objective, so a replay is visible as a
+    call to the recorded forward. Capacity and recorder counts cannot tell a
+    fallback from a replay at the same capacity, hence the forward-call count.
+    """
     holder, source = _LossCapture(), DualBranchLoss()
     holder.run(source, *_inputs(3, device="cpu")).total.backward()
     inputs = _inputs(0 if case == "empty" else 1, batch=1 if case == "shape" else 2, device="cpu")
-    if case == "labels":
-        inputs[6][1, 0] = 3
-        with pytest.raises(ValueError, match="gt_labels must be"):
-            holder.run(source, *inputs)
-    elif case == "nonfinite":
-        inputs[5][1, 0, 0] = float("inf")
-        expected, actual = _native(source, inputs), holder.run(source, *inputs)
-        assert torch.equal(expected.total.isnan(), actual.total.isnan())
-        assert torch.equal(expected.o2m_assign.fg_mask, actual.o2m_assign.fg_mask)
-    else:
-        _same(_native(source, inputs), holder.run(source, *inputs))
+    original = capture_module._LossObjective.forward
+    with patch.object(capture_module._LossObjective, "forward", autospec=True, side_effect=original) as replayed:
+        if case == "labels":
+            inputs[6][1, 0] = 3
+            with pytest.raises(ValueError, match="gt_labels must be"):
+                holder.run(source, *inputs)
+        elif case.startswith("nonfinite_"):
+            with torch.no_grad():
+                inputs[_GUARDED_INPUTS[case.removeprefix("nonfinite_")]].view(-1)[0] = float("inf")
+            expected, actual = _native(source, inputs), holder.run(source, *inputs)
+            assert torch.equal(expected.total.isnan(), actual.total.isnan())
+            assert torch.equal(expected.o2m_assign.fg_mask, actual.o2m_assign.fg_mask)
+        else:
+            _same(_native(source, inputs), holder.run(source, *inputs))
+    assert replayed.call_count == 0
     assert _host_recorder.call_count == 1 and holder._capacity == 4
+
+
+@pytest.mark.parametrize("name,index", [("anchor_points", 4), ("strides", 8)])
+def test_host_unpadded_nonfinite_inputs_replay_with_native_bits(
+    _host_recorder: MagicMock, name: str, index: int
+) -> None:
+    """Anchor points and strides are never padded, so their non-finite values need no fallback.
+
+    Padded rows only meet predictions and target boxes in arithmetic. Anchor points
+    enter comparisons and strides scale each branch's own terms, so replay and the
+    native route must agree even when the values are infinite.
+    """
+    holder, source = _LossCapture(), DualBranchLoss()
+    holder.run(source, *_inputs(3, device="cpu")).total.backward()
+    inputs = _inputs(2, device="cpu")
+    inputs[index][0] = float("inf")
+    original = capture_module._LossObjective.forward
+    with patch.object(capture_module._LossObjective, "forward", autospec=True, side_effect=original) as replayed:
+        expected, actual = _native(source, inputs), holder.run(source, *inputs)
+    assert replayed.call_count == 1, name
+    assert torch.equal(expected.total.isnan(), actual.total.isnan())
+    _bits(expected.o2m_assign.fg_mask, actual.o2m_assign.fg_mask)
+    _bits(expected.o2o_assign.fg_mask, actual.o2o_assign.fg_mask)
 
 
 def test_host_skipped_backward_resets_at_batch_start(_host_recorder: MagicMock) -> None:
@@ -918,3 +983,236 @@ def test_constructor_valid_tiny_epsilon_keeps_native_loss(device: str, branch: s
         actual = holder.run(source, *inputs)
     _same(expected, actual)
     assert holder._objective is None
+
+
+@pytest.fixture(params=["cpu", pytest.param("cuda", marks=[pytest.mark.gpu, CUDA])])
+def replay_device(request: pytest.FixtureRequest) -> str:
+    """Run a case through the stubbed CPU recorder, and again through real CUDA graph replay."""
+    if request.param == "cpu":
+        request.getfixturevalue("_host_recorder")
+    return str(request.param)
+
+
+def _replay_matches_native(
+    holder: _LossCapture, source: DualBranchLoss, inputs: tuple[torch.Tensor, ...]
+) -> DualLossOutput:
+    """Replay one batch and compare every output bit and prediction gradient with the native route.
+
+    Examples:
+        >>> _replay_matches_native.__name__
+        '_replay_matches_native'
+    """
+    reference = tuple(value.detach().clone().requires_grad_(value.requires_grad) for value in inputs)
+    expected = _native(source, reference)
+    actual = holder.run(source, *inputs)
+    _same(expected, actual)
+    expected.total.backward()
+    actual.total.backward()
+    assert not holder._pending_backward
+    for left, right in zip(inputs[:4], reference[:4], strict=True):
+        assert left.grad is not None and right.grad is not None
+        _bits(left.grad, right.grad)
+    return actual
+
+
+def _crowded(count: int, device: str) -> tuple[torch.Tensor, ...]:
+    """Make targets covering more anchors than the one-to-many top-k, with zero-overlap ties.
+
+    Every target covers at least twelve of the sixteen anchors, against ``topk=10``.
+    Five anchors per image overlap each target; the rest predict a far box, so their
+    alignment is exactly zero and the tenth slot falls inside that tie. The right
+    edge of every second target lies exactly on an anchor column (edge-inclusive).
+
+    Examples:
+        >>> _crowded(4, "cpu")[5][0, :, 2].tolist()
+        [32.0, 28.0, 27.0, 32.0]
+    """
+    values = list(_inputs(count, device=device))
+    gt = torch.zeros_like(values[5])
+    gt[..., 2] = torch.tensor([32.0, 28.0, 27.0], device=device)[torch.arange(count, device=device) % 3]
+    gt[..., 3] = 32.0
+    values[5] = gt
+    for index in (1, 3):
+        boxes = torch.tensor([100.0, 100.0, 101.0, 101.0], device=device).expand(values[index].shape).clone()
+        boxes[:, :5] = torch.tensor([0.0, 0.0, 30.0, 30.0], device=device)
+        boxes[:, :5, 2:] += 2.0 * torch.arange(5, device=device).unsqueeze(-1)
+        values[index] = boxes.requires_grad_()
+    return tuple(values)
+
+
+def _emptied(count: int, device: str, rows: tuple[int, ...]) -> tuple[torch.Tensor, ...]:
+    """Remove every real target from the listed images, leaving the others populated.
+
+    Examples:
+        >>> _emptied(3, "cpu", (1,))[7].tolist()
+        [[True, True, False], [False, False, False]]
+    """
+    values = list(_inputs(count, device=device))
+    values[6], values[7] = values[6].clone(), values[7].clone()
+    values[6][list(rows)], values[7][list(rows)] = -1, False
+    return tuple(values)
+
+
+def test_replay_follows_live_branch_weight(replay_device: str) -> None:
+    """One recording serves any branch weight, because ``alpha`` is a live input.
+
+    ``_inputs`` always carries 0.37, so a recording that baked the first weight in
+    would pass every fixed-weight case. Same predictions and targets, three weights.
+    """
+    holder, source, totals = _LossCapture(), DualBranchLoss(), []
+    for weight in (0.25, 0.5, 0.9):
+        inputs = _inputs(3, device=replay_device)
+        inputs = (*inputs[:9], torch.tensor(weight, dtype=torch.float64, device=replay_device))
+        totals.append(float(_replay_matches_native(holder, source, inputs).total.detach()))
+        recording = holder._objective
+        assert recording is not None
+    assert len(set(totals)) == 3
+    assert holder._objective is recording and not holder._disabled
+
+
+def test_replay_matches_native_top_k_truncation_and_ties(replay_device: str) -> None:
+    """Truncated candidate sets and zero-overlap ties rank the same under padded capacity.
+
+    More candidates than top-k, a tie across the top-k boundary and a fall from
+    capacity 128 to three real rows are the cases where a padded row could displace a
+    real anchor.
+    """
+    holder, source = _LossCapture(), DualBranchLoss()
+    for count in (100, 3):
+        actual = _replay_matches_native(holder, source, _crowded(count, replay_device))
+        assert bool(torch.isfinite(actual.total))
+        assert bool((actual.o2m_assign.fg_mask.sum(-1) < 16).all())
+    assert holder._capacity == 128
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        pytest.param((1,), id="second-image"),
+        pytest.param((0,), id="first-image"),
+        pytest.param((0, 1), id="every-image"),
+    ],
+)
+def test_images_without_targets_match_native(replay_device: str, rows: tuple[int, ...]) -> None:
+    """An image without real targets beside a populated one, or every mask false with N > 0.
+
+    The native route keeps no foreground for those images; masked capacity must neither
+    add one nor change the populated image's assignment, weights or gradients.
+    """
+    holder, source = _LossCapture(), DualBranchLoss()
+    for count in (2, 5, 3, 9):
+        actual = _replay_matches_native(holder, source, _emptied(count, replay_device, rows))
+        for assignment in (actual.o2m_assign, actual.o2o_assign):
+            assert not assignment.fg_mask[list(rows)].any()
+            assert not assignment.align_weights[list(rows)].any()
+    assert holder._objective is not None and holder._capacity == 16
+
+
+@contextmanager
+def _inference_with_grad() -> Iterator[None]:
+    """Enter inference mode with grad mode switched back on, isolating the inference check.
+
+    Examples:
+        >>> with _inference_with_grad():
+        ...     print(torch.is_inference_mode_enabled(), torch.is_grad_enabled())
+        True True
+    """
+    with torch.inference_mode(), torch.enable_grad():
+        yield
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        pytest.param(torch.no_grad, id="no-grad"),
+        pytest.param(torch.inference_mode, id="inference-mode"),
+        pytest.param(_inference_with_grad, id="inference-mode-with-grad"),
+        pytest.param(lambda: torch.autograd.set_detect_anomaly(True), id="anomaly-detection"),
+        pytest.param(lambda: patch.object(torch.compiler, "is_compiling", return_value=True), id="compiling"),
+    ],
+)
+def test_eligible_rejects_unsupported_context_before_unpacking_inputs(context: object) -> None:
+    """Autograd and compiler contexts exit before any input is read.
+
+    A single-element tuple would raise on the later unpacking line were the early exit
+    skipped, so a clean ``False`` proves that the context clause itself fired.
+    """
+    with context():
+        assert capture_module._eligible((torch.zeros(1),)) is False
+
+
+def test_eligible_unpacks_inputs_without_unsupported_context() -> None:
+    """Control for the context cases: outside them, the same tuple does reach unpacking."""
+    with pytest.raises(ValueError, match="not enough values to unpack"):
+        capture_module._eligible((torch.zeros(1),))
+
+
+def _swap(index: int, transform: Callable[[torch.Tensor], torch.Tensor]) -> Callable[[tuple[torch.Tensor, ...]], tuple]:
+    """Return a change that rewrites one replay input and keeps the rest.
+
+    Examples:
+        >>> _swap(0, lambda value: value + 1)((torch.zeros(1), torch.zeros(1)))[0].tolist()
+        [1.0]
+    """
+
+    def change(inputs: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
+        values = list(inputs)
+        values[index] = transform(values[index])
+        return tuple(values)
+
+    return change
+
+
+@pytest.mark.gpu
+@CUDA
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(_swap(0, torch.Tensor.detach), id="frozen-match-logits"),
+        pytest.param(_swap(1, torch.Tensor.detach), id="frozen-match-boxes"),
+        pytest.param(_swap(2, torch.Tensor.detach), id="frozen-unique-logits"),
+        pytest.param(_swap(3, torch.Tensor.detach), id="frozen-unique-boxes"),
+        pytest.param(_swap(4, torch.Tensor.requires_grad_), id="anchor-points-require-grad"),
+        pytest.param(_swap(5, torch.Tensor.requires_grad_), id="target-boxes-require-grad"),
+        pytest.param(_swap(5, lambda value: value.double()), id="target-boxes-float64"),
+        pytest.param(_swap(5, lambda value: value.transpose(1, 2).contiguous().transpose(1, 2)), id="noncontiguous"),
+        pytest.param(_swap(6, lambda value: value.int()), id="labels-int32"),
+        pytest.param(_swap(6, lambda value: value[:, :-1].contiguous()), id="labels-shape"),
+        pytest.param(_swap(7, lambda value: value.to(torch.uint8)), id="mask-uint8"),
+        pytest.param(_swap(9, lambda value: value.float()), id="alpha-float32"),
+        pytest.param(_swap(9, lambda value: value.reshape(1)), id="alpha-vector"),
+        pytest.param(_swap(9, lambda value: value.cpu()), id="alpha-on-host"),
+    ],
+)
+def test_eligible_rejects_unsupported_inputs(change: Callable[[tuple[torch.Tensor, ...]], tuple]) -> None:
+    """Frozen predictions, trainable targets, another dtype, rank or device keep the native route."""
+    inputs = _inputs(3)
+    assert capture_module._eligible(inputs) is True
+    assert capture_module._eligible(change(inputs)) is False
+
+
+@pytest.mark.gpu
+@CUDA
+@pytest.mark.parametrize("name,value", [("current_device", 99), ("is_current_stream_capturing", True)])
+def test_eligible_rejects_other_current_device_and_stream_capture(name: str, value: object) -> None:
+    """A current device other than the predictions' device, or an open capture, keeps native."""
+    inputs = _inputs(3)
+    with patch.object(torch.cuda, name, return_value=value):
+        assert capture_module._eligible(inputs) is False
+
+
+@pytest.mark.gpu
+@CUDA
+def test_other_stream_keeps_native_route_and_recording() -> None:
+    """A recording made on one stream is not replayed on another."""
+    holder, source = _LossCapture(), DualBranchLoss()
+    holder.run(source, *_inputs(3)).total.backward()
+    recording, inputs = holder._objective, _inputs(2)
+    other = torch.cuda.Stream()
+    other.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(other), patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("stream")):
+        actual = holder.run(source, *inputs)
+        expected = _native(source, inputs)
+    torch.cuda.synchronize()
+    _same(expected, actual)
+    assert holder._objective is recording and not holder._pending_backward
