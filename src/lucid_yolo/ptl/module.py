@@ -942,7 +942,9 @@ class DetectionLitModule(LightningModule):
             and retains a graph pool. Masked target capacity grows geometrically; the
             method, label checks, live branch schedule and optimizer stay unchanged.
             Requires ``task="detect"`` and ``compile_step=False``. Can combine with
-            ``capture_network`` and ``capture_orthogonalization``.
+            ``capture_network``, ``capture_orthogonalization`` and ``capture_updates``;
+            it records no optimizer update itself, so the optimizer step is whatever
+            those optimizer options select.
         capture_updates: Enable MuSGD's optional replay of the existing update preparation,
             including momentum, followed by a native batched parameter write at the current
             learning rate. Defaults to ``False``. Uses private gradient storage and live
@@ -952,8 +954,8 @@ class DetectionLitModule(LightningModule):
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
             ``"keypoints"``, if ``rotated_iou_form`` is not a known rotated-IoU form,
-            if ``capture_network`` is combined with a non-detection task or ``compile_step``,
-            if ``keypoint_loss`` is not a known keypoint objective, if
+            if ``capture_network`` or ``capture_loss`` is combined with a non-detection
+            task or ``compile_step=True``, if ``keypoint_loss`` is not a known keypoint objective, if
             ``task="keypoints"`` was asked for without a ``num_keypoints``, or if a
             ``num_keypoints`` was given for a task that builds no point stem.
 
