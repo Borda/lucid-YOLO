@@ -6623,7 +6623,7 @@ stems on both branches.</p>
 
 
 <a href="#lucid_yolo.models.DualDetectionHead.forward_branch" class="headerlink" title="Permanent link">&para;</a></h4>
-<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">forward_branch</span><span class="p">(</span><span class="n">features</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">],</span> <span class="n">branch</span><span class="p">:</span> <span class="n">BranchName</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">BranchOutput</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">forward_branch</span><span class="p">(</span><span class="n">features</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">],</span> <span class="n">branch</span><span class="p">:</span> <span class="n">BranchName</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">_runner</span><span class="p">:</span> <span class="n">_PredictionRunner</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">BranchOutput</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -6683,6 +6683,23 @@ channel counts matching the constructor's <code>in_channels</code>.</p>
             </td>
             <td>
                 <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>_runner</code>
+            </td>
+            <td>
+                  <code><span title="lucid_yolo.models.heads.detect._PredictionRunner">_PredictionRunner</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Private scheduling seam of the opt-in CUDA prediction replay, passed
+on to the branch; not public API. <code>None</code>, the default, is the native call.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
             </td>
           </tr>
       </tbody>
@@ -6782,7 +6799,7 @@ channel counts matching the constructor's <code>in_channels</code>.</p>
 
 
 <a href="#lucid_yolo.models.DualDetectionHead.forward" class="headerlink" title="Permanent link">&para;</a></h4>
-<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">forward</span><span class="p">(</span><span class="n">features</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">DualHeadOutput</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">forward</span><span class="p">(</span><span class="n">features</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">],</span> <span class="o">*</span><span class="p">,</span> <span class="n">_runner</span><span class="p">:</span> <span class="n">_PredictionRunner</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DualHeadOutput</span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
@@ -6816,6 +6833,23 @@ with channel counts matching the constructor's <code>in_channels</code>.</p>
             </td>
             <td>
                 <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>_runner</code>
+            </td>
+            <td>
+                  <code><span title="lucid_yolo.models.heads.detect._PredictionRunner">_PredictionRunner</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Private scheduling seam of the opt-in CUDA prediction replay, passed
+on to both branches; not public API. <code>None</code>, the default, is the native call.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
             </td>
           </tr>
       </tbody>

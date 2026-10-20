@@ -4094,6 +4094,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#wp-193e-preserve-prediction-gradient-boundaries-while-replaying-their-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-193e — preserve prediction gradient boundaries while replaying their work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#wp-194-static-checks-leave-pytest-test-names-lose-their-filler-words" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4378,6 +4389,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#wp-193e-preserve-prediction-gradient-boundaries-while-replaying-their-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-193e — preserve prediction gradient boundaries while replaying their work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#wp-194-static-checks-leave-pytest-test-names-lose-their-filler-words" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4604,6 +4626,42 @@
 </table>
 <p>Complete-fit time falls <strong>11.17%</strong>, with paired reductions 10.68–14.27%. In these five pairs, all model, optimizer, scheduler, EMA and per-step-loss byte hashes match; validation metrics agree. The native baseline also reproduces itself. CUDA events exclude the first 64 steps per run; the complete fit uses device synchronisation at both timing boundaries. The one-pair batch-16 screen changes fit time by 2.50% and preserves those same states; it is exploratory, not a repeated headline. These complete-fit measurement runs, made outside the test suite, are the only source for the scheduler, EMA, per-step-loss and validation parity: the in-repo pose regression (<code>tests/ptl/test_pose_network_capture.py::test_pose_trainer_matches_native</code>) compares only model, optimizer and scaler state after one epoch, with no validation, EMA or resume.</p>
 <p><strong>Compatibility and remaining evidence.</strong> All 27 focused cases pass on both torch 2.9.1 and torch 2.4.0, in one command per runtime with explicit UTF-8 configuration reading. BF16 on torch 2.4 stays native. The 17 CUDA cases carry the GPU marker selected by the accelerator gate; the head certificate also rejects instance and class overrides of <code>forward_branch</code>. Coverage includes empty and nonempty batches, FP32/FP16/BF16, clipped accumulation fallback, CLI construction, copied head certificates, branch-dispatch overrides, frozen features and head/global hooks. The branch-override regression fails with the previous guard reinstated in memory. Full pre-commit and strict mypy pass. Existing CUDA accumulation failures reproduce on the unmodified baseline and are outside this scheduling change; their test ids and runtime are not recorded here, and the decisions they raise are open in <code>docs/ESCALATION.md</code> (2026-10-20). Full <code>make gate</code>, accelerator goldens, other accelerators and long-run acceptance accuracy remain unverified; this package stays open.</p>
+<h2 id="wp-193e-preserve-prediction-gradient-boundaries-while-replaying-their-work">WP-193e — preserve prediction gradient boundaries while replaying their work<a class="headerlink" href="#wp-193e-preserve-prediction-gradient-boundaries-while-replaying-their-work" title="Permanent link">&para;</a></h2>
+<p><a id="wp-193e"></a></p>
+<p>A CUDA training trace on an L4 attributes 197.112 ms of four instrumented steps' host dispatch to the detection head's forward calls and 177.742 ms to its matching backward nodes, identified by their forward autograd sequence numbers. Together they occupy 28.40% of that 1.320 s host interval, before the separate prototype and semantic predictions. This diagnostic budgets submission work; complete-fit performance is measured separately below.</p>
+<p>The opt-in <code>capture_segment_heads</code> records existing prediction calls through R43's graphed-callable API. Box/class stems retain independent input-gradient contributions. Each branch's coefficient routine, ProtoNet and the semantic predictor keep separate backward nodes, so an unused mask prediction leaves its parameters' gradients absent. The native per-level order, flattening, concatenations, tanh and prediction expressions remain unchanged. Backbone, neck, prototype fusion, assignment, losses, optimizer, schedules and EMA retain their existing execution.</p>
+<p>Combining each branch's box/class predictions failed an exact state comparison, so the implementation retains separate stem contributions. FP32 replay also failed the semantic-bias gradient byte oracle. Replay is verified only for BF16 mixed precision on PyTorch 2.9 or newer; FP32 and FP16 retain native calls.</p>
+<p>One fresh topology traversal feeds the guard checks. An attribute certificate retains bindings and checks mutable registry names and sequence elements, while current tensor storage, hooks, modes, precision and class dispatch remain independently checked. Changed or custom prediction stages, frozen prediction parameters, aliasing, logical negative/conjugate tensor views and unsupported runtime conditions use the native route. The native fusion is included in this guard without being recorded. Each prediction group retains one recorded input signature; a partial batch stays native. Transient holders keep original checkpoint keys and discard recordings on copying and at fit completion or failure.</p>
+<p>Five alternating fresh-process pairs on an isolated NVIDIA L4 g2-standard-8, against main <code>e4db46d</code> after detection-loss and pose-feature replay landed, reduced complete nano segmentation fit time by 16.60%. Native/replay medians (ranges), seconds:</p>
+<table>
+<thead>
+<tr>
+<th>Host</th>
+<th>Native</th>
+<th>Replay</th>
+<th>Time reduction</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>g2-standard-8</td>
+<td>202.794 (201.536–204.709)</td>
+<td>169.130 (168.167–169.786)</td>
+<td>16.60%</td>
+</tr>
+</tbody>
+</table>
+<p>Each fit uses 384 training and 32 disjoint validation COCO val2017 images with the original 80-class annotations, 10 epochs, batch 4, 640 px and BF16 mixed precision. Both arms enable prepared caching, device HSV, epoch prefetch, orthogonalization replay and update replay. The timer includes construction, cache preparation, graph recording, training, EMA, validation and checkpoints. Driver 580.178.04, torch 2.9.1+cu129, Lightning 2.6.6. Whole-process median time, including imports and verification, falls 16.16%.</p>
+<p>Per-step-loss, model, optimizer, scheduler and EMA byte hashes and validation metrics match in the five pairs. A separate untimed ten-epoch pair matches eight dense prediction tensors at steps 0, 480 and 959 and matches the timed final state hashes. Runtime source SHA256: <code>1bc17340e8ede25574a4ad390e75790989dc58d9725f09d961b7cd115ab216f5</code>. This page names neither the hashed artifact nor the hashing method, so a reader cannot reproduce the digest from it; until both are published, the digest records the author's measurement rather than checkable evidence. The two prediction-recorder test files report 134 passed on the L4 with torch 2.9.1 and 126 passed, 8 skipped on torch 2.4. Full pre-commit and the offline suite pass. Full <code>make gate</code>, accelerator goldens and long-run accuracy remain unverified.</p>
+<p>Earlier cohorts are historical rather than measurements of this source: main <code>6eb6abb</code> gave 16.42% on g2-standard-8 and 11.01% on g2-standard-4; the main <code>28549ba</code> refresh gave 16.33% on g2-standard-8. Their original records remain in the earlier work-package revisions and detailed evidence; they are not a controlled comparison of CPU count or a current-source large-batch claim.</p>
+<p><strong>The speed claim is limited to the measured batch-4 workload.</strong> An earlier exploratory batch-16 L4 pair (640 px, BF16, three epochs / 72 steps) changed complete fit time from 40.413 s to 39.600 s, only 2.01%. Model, optimizer, scheduler, EMA and per-step-loss bytes and validation metrics matched. That screen used earlier source and a different harness revision; it is neither a repeated large-batch result nor a measurement of this current source. Larger-batch performance on the current source remains unverified.</p>
+<p>The private prediction-runner seam in <code>models/heads/detect.py</code> changes dispatch around the existing expressions in their original order. Keeping independent box/class input-gradient additions requires recording the separate prediction calls: the earlier combined-branch screen failed the byte oracle. The default runner still invokes the native calls, and the recorder composes their adapters outside the head. This is a scheduling seam on a restricted surface, not a new method expression or prediction format.</p>
+<p>The real automatic <code>Trainer.fit</code> regression uses MuSGD, EMA, valid instance masks and a validation epoch between two training epochs. It observes actual CUDA graph launches after recording and again after validation, instead of accepting populated entries as proof of replay. Forcing permanent native execution while retaining those entries makes this regression fail. The torch 2.4 route keeps its unsupported BF16 recorder native.</p>
+<p>A <code>_RecordedGroup</code>'s warmup shares the sibling network recorder's own hazard: a failed <code>make_graphed_callables</code> call can leave BatchNorm running-stat writes queued on its warmup stream, so the restore on the current stream must wait for a real synchronize first (<code>test_network_capture_guards.py::TestFailedRecording::test_synchronizes_before_buffer_restore</code> covers this for <a href="../../work_packages/wp-193c/">WP-193c</a>). That case had no counterpart here; a new <code>tests/ptl/test_segment_head_capture.py::test_recorded_group_synchronizes_before_buffer_restore</code> injects the same failure into a real box stem's warmup on a local RTX 4060, asserts the device is synchronized before the BatchNorm buffer is restored, and confirms the failure still raises. Reverting the synchronize call in <code>_RecordedGroup.__init__</code> makes it fail, so it is not vacuous. This is a local compatibility check, not a timed claim.</p>
+<p><code>_SegmentHeadCapture.retire()</code> shares <code>_NetworkCapture.retire()</code>'s disabled-guard contract too: only the first incompatibility of a fit warns, so a second cause in the same fit must stay silent (<code>test_network_capture_guards.py::TestRetireWarning::test_later_cause_stays_silent</code> covers this for <a href="../../work_packages/wp-193c/">WP-193c</a>). A new <code>tests/ptl/test_segment_head_capture.py::test_later_retire_cause_stays_silent</code> calls <code>retire()</code> twice on a bare holder and confirms only the first call warns; reverting the <code>if self.disabled: return</code> guard makes it fail.</p>
+<p>Two CPU-only adapter-call tests also distinguish active replay from a silent native fallback while retaining recordings. With an unchanged signature and no pending backward, the graphed callable must run; while a backward is pending, the native callable must run. The replay case fails under an always-native guard mutation.</p>
+<p>Peak CUDA reserved memory medians are 6084→6474 MiB. Graph pools cost memory, and the result is specific to the measured small-batch workload. The implementation keeps first-order automatic optimization on one CUDA device without accumulation; unsupported modes remain native. Gradient accumulation stays native because this package validated replay only at <code>accumulate_grad_batches=1</code>, not because of a known defect in how the recorded backward protects live gradients.</p>
+<p>Provenance: R43, this repository's native prediction calls and its own CUDA measurements; R12 supplies the public COCO data. No method arithmetic, coefficient, iteration count or method default changes. A15, A17 and A38 remain unchanged.</p>
 <h2 id="wp-194-static-checks-leave-pytest-test-names-lose-their-filler-words">WP-194 — static checks leave pytest, test names lose their filler words<a class="headerlink" href="#wp-194-static-checks-leave-pytest-test-names-lose-their-filler-words" title="Permanent link">&para;</a></h2>
 <p><a id="wp-194"></a></p>
 <p><strong>Pytest owns behaviour; hooks own file content.</strong> A scan of <code>tests/</code> and <code>scripts/_tests/</code> found four tests in <code>tests/</code> that read a file as text and exercised no code, and fourteen in <code>scripts/_tests/</code> that asserted a hook passes on the live tree. The second group repeated what <code>lint.yml</code> and <code>make gate</code> already run, since both call <code>pre-commit run --all-files</code>, so those tests are deleted rather than moved. The first group moved: the matplotlib and <code>_viz</code> import boundary under <code>src/</code> is ruff <code>TID251</code> banned-api with per-file ignores for <code>_viz</code>, <code>scripts/</code>, <code>tests/</code> and <code>notebooks/</code>. A probe module holding two function-local imports showed the rule fires on both, which is the case the regex test existed for. The top-k decoder's no-suppression text pin and the two packaged-recipe pins (no <code>deterministic:</code>, <code>task:</code> outside <code>det_*</code>) became the <code>content-pins</code> hook, <code>scripts/lint/audit_content_pins.py</code>, with its functional core in <code>scripts/_tests/test_audit_content_pins.py</code>. The runtime <code>sys.modules</code> probes in <code>tests/viz/test_import_surface.py</code> stay in pytest because they import code. Two kept groups in <code>test_check_commit_trailers.py</code> also read the real register, <code>TestPlaceholderRows</code> and <code>TestAssumptionRegister</code>; they stay because they test how the parser reads that register. Removed alongside: the register-contiguity assertion, which <code>docs-present</code> already checks, and the docstring-path assertion on the trailer script.</p>

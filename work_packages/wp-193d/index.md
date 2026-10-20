@@ -4,7 +4,7 @@
 >
 > 🔗 Depends on [WP-193c](https://borda.github.io/lucid-YOLO/work_packages/wp-193c/) · Needed by none
 >
-> ⬅️ [WP-193c](https://borda.github.io/lucid-YOLO/work_packages/wp-193c/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/) ➡️
+> ⬅️ [WP-193c](https://borda.github.io/lucid-YOLO/work_packages/wp-193c/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-193e](https://borda.github.io/lucid-YOLO/work_packages/wp-193e/) ➡️
 
 
 ## WP-193d — replay shared pose features, preserve native head supervision

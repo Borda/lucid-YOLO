@@ -783,6 +783,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="🖌️ Instance segmentation — COCO 2017">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#independent-segmentation-predictions-on-cuda" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Independent segmentation predictions on CUDA
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4327,6 +4344,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="🖌️ Instance segmentation — COCO 2017">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#independent-segmentation-predictions-on-cuda" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Independent segmentation predictions on CUDA
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4557,6 +4591,10 @@
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>lucid-eval<span class="w"> </span>--checkpoint<span class="w"> </span>&lt;checkpoint&gt;<span class="w"> </span>--data_root<span class="w"> </span>/content/coco2017<span class="w"> </span>--output<span class="w"> </span>seg_report.json
 </code></pre></div>
 <p><code>lucid-eval</code> reads the task off the checkpoint and scores masks when the checkpoint has them, so the same command serves both COCO tiers. <code>--masks false</code> scores boxes only from a segmentation checkpoint.</p>
+<h3 id="independent-segmentation-predictions-on-cuda">Independent segmentation predictions on CUDA<a class="headerlink" href="#independent-segmentation-predictions-on-cuda" title="Permanent link">&para;</a></h3>
+<p><code>--model.capture_segment_heads true --trainer.precision bf16-mixed</code> records the existing segmentation prediction routines, including their first-order backward work. The default is <code>false</code>. Box/class stems remain independent; coefficients, prototypes and semantic logits have separate backward nodes so an empty mask objective keeps absent gradients. Common features, prototype fusion, assignment, losses, state updates and schedules stay native.</p>
+<p>Byte-exact agreement with native training is verified only on NVIDIA L4 (sm_89) with torch 2.9.1+cu129; other GPUs and torch builds are unverified. The route requires PyTorch 2.9 or newer, one CUDA device, automatic optimisation and <code>accumulate_grad_batches=1</code>. Gradient accumulation stays native because replay was validated only at <code>accumulate_grad_batches=1</code>, not because of a known defect in the recorded backward. CPU, MPS, FP32, FP16 and older BF16 runtimes warn and use native calls; evaluation stays native too. Custom or changed prediction dispatch, hooks, frozen prediction parameters, aliased storage and retained feature gradients retire replay for the fit. Each prediction group records one input signature per fit (shape, stride, dtype, device, gradient flag and CUDA stream); a call with any other signature, a partial batch included, runs the native head without adding another graph, and the recorded graph pools stay reserved until the fit ends, so a run whose batch shapes keep changing pays that memory without replaying. Copying, checkpoints and fit teardown retain the original parameter names and no recording.</p>
+<p>A recording failure raises after restoring running buffers and RNG state; disable the flag to keep that run native. The flag retains CUDA graph pools, so check reserved memory and throughput on the actual batch size. A replayed step's mask coefficients, prototypes and semantic logits live in CUDA graph memory that the next replay overwrites in place; box and class predictions are copies. Anything that keeps those three tensors, or a gradient adopted from their backward, beyond the training step that produced them has to clone it. Measurements and rejected alternatives belong to <a href="../work_packages/wp-193e/#wp-193e">WP-193e</a>; a small-batch result does not establish a large-batch speed-up.</p>
 <h2 id="keypoints-coco-2017-person_keypoints">🕺 Keypoints — COCO 2017 <code>person_keypoints</code><a class="headerlink" href="#keypoints-coco-2017-person_keypoints" title="Permanent link">&para;</a></h2>
 <p>The same COCO tree again, read through its other annotation file. <code>num_keypoints</code> is required and has no default — the point count is a property of the annotation schema, not something a model can pick.</p>
 <div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>lucid-yolo<span class="w"> </span>fit<span class="w"> </span>--config<span class="w"> </span>pose_nano_smoke.yaml<span class="w"> </span><span class="se">\</span>
