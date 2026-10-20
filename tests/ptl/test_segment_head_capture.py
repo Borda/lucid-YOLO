@@ -6,8 +6,9 @@ from __future__ import annotations
 import copy
 import dataclasses
 import pickle
+import re
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from itertools import pairwise
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -170,7 +171,7 @@ def _assert_predictions_match(native: SegmentOutput, replay: SegmentOutput, mask
         assert _bits(left, right)
 
 
-def test_predictions_match_catches_a_sign_flip_the_squared_objective_cannot() -> None:
+def test_predictions_match_catches_sign_flip_squared_objective_cannot() -> None:
     """A squared loss is even, so a sign-flipped prediction leaves it and every upstream gradient unchanged.
 
     ``x.square()`` equals ``(-x).square()``, and the chain rule carries that same
@@ -179,10 +180,6 @@ def test_predictions_match_catches_a_sign_flip_the_squared_objective_cannot() ->
     loss comparison and :func:`_assert_state_and_gradients` undetected. Only a direct
     comparison of the raw prediction tensors, as :func:`_assert_predictions_match`
     performs, can see it.
-
-    Examples:
-        >>> callable(test_predictions_match_catches_a_sign_flip_the_squared_objective_cannot)
-        True
     """
     output = _forward_segmentation_output(_module(), torch.randn(1, 3, 64, 64))
     flipped = dataclasses.replace(output, detect=dataclasses.replace(output.detect, o2m_cls=-output.detect.o2m_cls))
@@ -223,12 +220,25 @@ def test_default_and_cpu_fallback_preserve_checkpoint_keys() -> None:
             assert replay.eval().forward_segmentation(torch.zeros(2, 3, 64, 64)).semantic is None
 
 
-@pytest.mark.parametrize("kwargs", [{"compile_step": True}, {"task": "detect"}])
+@pytest.mark.parametrize(
+    "kwargs",
+    [pytest.param({"compile_step": True}, id="compile-step"), pytest.param({"task": "detect"}, id="detect-task")],
+)
 def test_incompatible_configuration_is_explicit(kwargs: dict[str, object]) -> None:
-    """The request is never silently interpreted as another task's replay option."""
+    """The request is never silently interpreted as another task's replay option.
+
+    The refusal comes from the shared replay-option validator, before any stage is built
+    or a hyperparameter recorded, as for the sibling capture flags. Its message names why
+    the compiler is refused while the segment objective still runs eager.
+    """
     options = {"depth": 0.34, "width": 0.25, "max_channels": 64, "num_classes": 4, "task": "segment"}
     options.update(kwargs)
-    with pytest.raises(ValueError, match="capture_segment_heads=True requires"):
+    with (
+        patch("lucid_yolo.ptl.module.build_detection_stages", side_effect=AssertionError("validated after build")),
+        pytest.raises(
+            ValueError, match=r"capture_segment_heads=True requires .* keeps its meaning once it is compiled"
+        ),
+    ):
         DetectionLitModule(**options, capture_segment_heads=True)
 
 
@@ -250,13 +260,9 @@ def test_later_retire_cause_stays_silent() -> None:
     change any more, so it must not warn at all. Matches
     ``test_network_capture_guards.py::TestRetireWarning`` for the sibling detection-network
     recorder's identical disabled-guard contract.
-
-    Examples:
-        >>> callable(test_later_retire_cause_stays_silent)
-        True
     """
     holder = _SegmentHeadCapture(True)
-    with pytest.warns(UserWarning, match=r"^capture_segment_heads=True stays native: first cause$"):
+    with pytest.warns(UserWarning, match=r"^capture_segment_heads=True stays eager: first cause$"):
         holder.retire("first cause")
     assert holder.disabled
     with warnings.catch_warnings():
@@ -264,8 +270,87 @@ def test_later_retire_cause_stays_silent() -> None:
         holder.retire("second cause")
 
 
+def test_empty_features_take_native_path_without_retiring() -> None:
+    """An empty feature map sends that one call native; it does not retire replay for the fit.
+
+    A zero-element batch has nothing to record, so ``runner`` declines the call and the native head
+    runs. The holder must stay enabled, or every later full batch of the fit would silently lose replay.
+    The CUDA stream-capture query is patched because a CPU-only build cannot answer it.
+    """
+    module = _module(capture_segment_heads=True)
+    _attach(module)
+    holder = module._segment_head_capture
+    empty = (torch.empty(0, 8, 4, 4),) * 3
+    with warnings.catch_warnings(), patch("torch.cuda.is_current_stream_capturing", return_value=False):
+        warnings.simplefilter("error")
+        assert holder.runner(module, empty) is None
+    assert holder.active
+    assert not holder.disabled
+
+
+@pytest.mark.parametrize(
+    ("alter", "reason"),
+    [
+        pytest.param(
+            lambda module: setattr(module.head, "forward", module.head.forward),
+            "the detection head overrides its native dispatch",
+            id="head-dispatch",
+        ),
+        pytest.param(lambda module: None, "the features are not ordinary dense CUDA tensors", id="cpu-features"),
+    ],
+)
+def test_runner_refusal_names_cause_and_retires(alter: Callable[[DetectionLitModule], object], reason: str) -> None:
+    """Head and feature refusals reach the user as the warning's cause and keep the fit native.
+
+    A user who turned the request on and sees it stay eager needs the reason in the warning, and
+    every later call of the fit must skip the certificate. These two rows pin how ``runner`` wires a head
+    and a feature refusal into ``retire``; the other causes are asserted where the contributor's guard tests
+    reach them. Both are decided before any CUDA work, so a CPU module reaches them. The non-BF16 cause is not
+    listed: ``_feature_breach`` returns on its first check for any non-CUDA tensor.
+    """
+    module = _module(capture_segment_heads=True)
+    _attach(module)
+    alter(module)
+    holder = module._segment_head_capture
+    features = (torch.zeros(1, 8, 4, 4),) * 3
+    with (
+        patch("torch.cuda.is_current_stream_capturing", return_value=False),
+        patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("refusal must not record")),
+        pytest.warns(UserWarning, match=rf"^capture_segment_heads=True stays eager: {re.escape(reason)}$") as record,
+    ):
+        result = holder.runner(module, features)
+    assert result is None
+    assert holder.disabled and holder.entries == {} and holder.owner is None
+    assert record[0].filename == __file__
+
+
+def test_unreadable_precision_policy_retires_with_torch_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A precision query torch refuses retires with torch's own error text after the cause.
+
+    Losing that text leaves a user unable to tell a mixed legacy/new precision API from any other reason the
+    prediction groups went native. Matches the sibling recorder's
+    ``test_network_capture_guards.py::TestPrecisionPolicy`` contract.
+    """
+
+    def refuse() -> tuple[object, ...]:
+        raise RuntimeError("mix of the legacy and new APIs")
+
+    monkeypatch.setattr("lucid_yolo.ptl.segment_head_capture._precision_signature", refuse)
+    module = _module(capture_segment_heads=True)
+    _attach(module)
+    holder = module._segment_head_capture
+    features = (torch.zeros(1, 8, 4, 4),) * 3
+    with (
+        patch("torch.cuda.is_current_stream_capturing", return_value=False),
+        pytest.warns(UserWarning, match=r"stays eager: the CUDA precision policy cannot be read \(mix of the legacy"),
+    ):
+        result = holder.runner(module, features)
+    assert result is None
+    assert holder.disabled
+
+
 @pytest.mark.parametrize("event", ["on_fit_start", "on_fit_end", "on_exception"])
-def test_fit_boundaries_clear_the_holder(event: str) -> None:
+def test_fit_boundaries_clear_holder(event: str) -> None:
     """Successful, failed and repeated fits all discard the previous eligibility decision."""
     module = _module(capture_segment_heads=True)
     module._segment_head_capture.disabled = True
@@ -301,7 +386,14 @@ def test_branch_dispatch_override_uses_native_route(method: str) -> None:
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-@pytest.mark.parametrize("dtype", [None, torch.float16, torch.bfloat16])
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        pytest.param(None, id="no-autocast"),
+        pytest.param(torch.float16, id="float16"),
+        pytest.param(torch.bfloat16, id="bfloat16"),
+    ],
+)
 @pytest.mark.parametrize("first_masks", [False, True])
 def test_cuda_outputs_gradients_updates_and_unused_masks_are_exact(
     dtype: torch.dtype | None, first_masks: bool
@@ -382,6 +474,123 @@ def test_recorded_group_run_stays_native_when_backward_pending() -> None:
     group.adapter.assert_not_called()
 
 
+def test_recorded_group_output_without_backward_node_never_holds() -> None:
+    """A replay of a fully frozen group has no backward to wait for, so nothing is held.
+
+    The mocked adapter returns a tensor with no ``grad_fn``, so no backward hook can ever register and
+    release the group; holding it would force every later forward of the fit native.
+    """
+    group = _RecordedGroup.__new__(_RecordedGroup)
+    group.pending_backward = False
+    group.signature = "matching"
+    group.spans = MagicMock(reached_by=MagicMock(return_value=False))
+    group.adapter = MagicMock(return_value=(torch.ones(3),))
+    with patch("lucid_yolo.ptl.segment_head_capture._input_signature", return_value="matching"):
+        group.run((object(),))
+    assert not group.pending_backward
+
+
+def _assert_close_or_both_none(left: torch.Tensor | None, right: torch.Tensor | None, name: str) -> None:
+    """Require both tensors absent, or both present and equal within ``torch.testing`` tolerance.
+
+    Examples:
+        >>> _assert_close_or_both_none(None, None, "x")
+        >>> _assert_close_or_both_none(torch.ones(1), torch.ones(1), "x")
+    """
+    assert (left is None) == (right is None), name
+    if left is not None and right is not None:
+        torch.testing.assert_close(left, right, msg=name)
+
+
+@pytest.mark.parametrize("masks_used", [False, True])
+def test_inactive_request_matches_native_train_forward_and_gradients(masks_used: bool) -> None:
+    """A flag-on module that stays inactive on CPU computes the native forward and gradients.
+
+    Both modules start from one state dict and see the same images in train mode. The request owns no recording,
+    so every prediction tensor, every gradient and the presence of an unused mask parameter's gradient must match.
+    ``_attach`` is not used: it would activate the holder.
+    """
+    torch.manual_seed(5)
+    native, replay = _module().train(), _module(capture_segment_heads=True).train()
+    replay.load_state_dict(native.state_dict())
+    with pytest.warns(UserWarning, match="single-device CUDA"):
+        replay.setup("fit")
+    images = torch.randn(2, 3, 64, 64)
+    outputs = [_forward_segmentation_output(model, images) for model in (native, replay)]
+    for output in outputs:
+        _objective_from_output(output, masks_used).backward()
+    pairs = [
+        (getattr(o.detect, f.name), getattr(r.detect, f.name), f.name)
+        for o, r in [outputs]
+        for f in dataclasses.fields(o.detect)
+    ]
+    pairs += [
+        (outputs[0].prototypes, outputs[1].prototypes, "prototypes"),
+        (outputs[0].semantic, outputs[1].semantic, "semantic"),
+    ]
+    pairs += [(p.grad, dict(replay.named_parameters())[n].grad, n) for n, p in native.named_parameters()]
+    assert not replay._segment_head_capture.active
+    for left, right, name in pairs:
+        _assert_close_or_both_none(left, right, name)
+
+
+def _segmentation_loader() -> torch.utils.data.DataLoader[tuple[torch.Tensor, list[Targets]]]:
+    """Build a two-step loader of tiny synthetic segmentation batches with one rectangle per image.
+
+    Examples:
+        >>> len(_segmentation_loader())
+        2
+    """
+    ring = torch.tensor([[4.0, 4.0], [28.0, 4.0], [28.0, 28.0], [4.0, 28.0]])
+    batches = [
+        (
+            torch.randn(2, 3, 64, 64),
+            [
+                Targets(boxes=torch.tensor([[4.0, 4.0, 28.0, 28.0]]), labels=torch.tensor([1]), polygons=[ring])
+                for _ in range(2)
+            ],
+        )
+        for _ in range(2)
+    ]
+    return torch.utils.data.DataLoader(batches, batch_size=None)
+
+
+def test_cpu_fit_wires_lifecycle_and_warns_once_without_replay() -> None:
+    """A real CPU ``Trainer.fit`` attaches the lifecycle callback, warns once and never activates replay.
+
+    Every other test drives ``MagicMock(spec=Trainer)`` and calls the hooks by hand. Here Lightning's own setup
+    and callback dispatch run for two steps: the request is refused once at setup, each hook fires, and the
+    holder stays inactive and empty. Replay itself needs CUDA and is covered by the ``gpu`` tests.
+    """
+    module = _module(capture_segment_heads=True)
+    trainer = Trainer(
+        accelerator="cpu",
+        max_steps=2,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        limit_val_batches=0,
+        num_sanity_val_steps=0,
+    )
+    batch_start, fit_end = _SegmentHeadCaptureLifecycle.on_train_batch_start, _SegmentHeadCaptureLifecycle.on_fit_end
+    with (
+        patch.object(
+            _SegmentHeadCaptureLifecycle, "on_train_batch_start", autospec=True, side_effect=batch_start
+        ) as starts,
+        patch.object(_SegmentHeadCaptureLifecycle, "on_fit_end", autospec=True, side_effect=fit_end) as ends,
+        warnings.catch_warnings(record=True) as record,
+    ):
+        warnings.simplefilter("always")
+        trainer.fit(module, train_dataloaders=_segmentation_loader())
+    refusals = [w for w in record if "capture_segment_heads=True is ignored" in str(w.message)]
+    holder = module._segment_head_capture
+    assert len(refusals) == 1
+    assert any(isinstance(callback, _SegmentHeadCaptureLifecycle) for callback in trainer.callbacks)
+    assert (starts.call_count, ends.call_count) == (2, 1)
+    assert not holder.active and not holder.disabled and holder.entries == {}
+
+
 def test_stage_helpers_and_shared_storage_are_not_certified() -> None:
     """The certificate covers callable helpers and byte overlap, including different Parameters."""
     model = _module()
@@ -395,6 +604,34 @@ def test_stage_helpers_and_shared_storage_are_not_certified() -> None:
     other.bias.data = conv.bias.data
     assert other.bias is not conv.bias
     assert _storage_breach(owner, torch.device("cpu")) == "prediction parameters or buffers share bytes"
+
+
+def test_stage_forward_hook_names_local_cause() -> None:
+    """A forward hook on a prediction stage is reported as a stage hook, not as a process-wide one.
+
+    The contributor's hook test only checks that the word ``hook`` occurs, which a global-hook message
+    satisfies as well, so it cannot tell the two causes apart.
+    """
+    model = _module()
+    owner = torch.nn.ModuleList([model.head, model.protonet, model.semantic])
+    model.head.o2m.box_stems[0][-1].register_forward_hook(lambda *_: None)
+    assert _stage_breach(owner) == "a prediction stage carries a forward or backward hook"
+
+
+def test_global_module_hook_is_reported_before_any_stage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A process-wide module hook stays observable, so no stage is replayed while one is registered."""
+    monkeypatch.setitem(torch.nn.modules.module._global_forward_hooks, 0, lambda *_: None)
+    assert _stage_breach(torch.nn.ModuleList([torch.nn.Identity()])) == "a global module hook is registered"
+
+
+def test_unlisted_stage_type_is_named_not_reported_as_forward_override() -> None:
+    """A layer type outside the native stage list is reported by its class name.
+
+    ``nn.Identity`` has no entry in the stage table. The refusal must say the type is unlisted, rather than
+    claiming the layer overrides a forward it never had, so a maintainer knows to list or avoid the type.
+    """
+    owner = torch.nn.ModuleList([torch.nn.Identity()])
+    assert _stage_breach(owner) == "a prediction stage of type Identity is not in the native stage list"
 
 
 @pytest.mark.gpu
@@ -470,7 +707,7 @@ def test_cuda_contract_changes_retire_and_keep_native_observability(change: str)
     try:
         with (
             patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("must not re-record")),
-            pytest.warns(UserWarning, match="capture_segment_heads=True stays native"),
+            pytest.warns(UserWarning, match="capture_segment_heads=True stays eager"),
         ):
             with torch.autocast("cuda", dtype=torch.bfloat16, cache_enabled=False):
                 loss = _objective(model, images, True)
@@ -703,7 +940,7 @@ def test_attribute_certificate_keeps_live_buffer_values_and_mode_roundtrip() -> 
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available() or not _BF16_REPLAY_SUPPORTED, reason="BF16 replay runtime required")
-def test_cuda_second_forward_keeps_the_first_backward_activations() -> None:
+def test_cuda_second_forward_keeps_first_backward_activations() -> None:
     """A second forward stays native until the first graph's backward consumes its private activations."""
     torch.manual_seed(29)
     native = _module().cuda().to(memory_format=torch.channels_last).train()
@@ -757,10 +994,6 @@ def test_recorded_group_synchronizes_before_buffer_restore() -> None:
     failed warmup left queued; this is the same hazard
     ``test_network_capture_guards.py::TestFailedRecording`` covers for the
     sibling detection-network recording, exercised here for a prediction group.
-
-    Examples:
-        >>> callable(test_recorded_group_synchronizes_before_buffer_restore)
-        True
     """
     stage = _build_box_stem(16).cuda().train()
     images = torch.randn(1, 16, 8, 8, device="cuda")

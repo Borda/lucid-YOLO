@@ -552,6 +552,6 @@ class TestGroupDispatch:
                 assert torch.equal(holder.coefficients(branch, features), branch._coefficients(features))
             else:
                 branch = model.head.o2m
-                result = holder.base(branch, features)
+                result = branch._base_predictions(features, _runner=holder)
                 native = branch._base_predictions(features)
                 assert all(torch.equal(left, right) for left, right in zip(result, native, strict=True))
