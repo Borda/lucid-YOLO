@@ -1087,8 +1087,7 @@ class DetectionLitModule(LightningModule):
         self._warmup_epochs = warmup_epochs
         self._momentum = momentum
         self._weight_decay = weight_decay
-        self._w_muon = w_muon
-        self._w_sgd = w_sgd
+        self._w_muon, self._w_sgd = w_muon, w_sgd
 
         #: Mask coefficients are built only for the segmentation task, so a
         #: ``"detect"`` module's head — and therefore its state dict — is exactly
