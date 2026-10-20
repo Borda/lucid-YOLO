@@ -217,7 +217,7 @@ from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
 from lucid_yolo.ptl.coco_backend import build_mean_average_precision
-from lucid_yolo.ptl.loss_capture import _LossCapture, _LossCaptureLifecycle, _source_signature
+from lucid_yolo.ptl.loss_capture import _LossCapture, _LossCaptureLifecycle, _native_loss
 from lucid_yolo.ptl.network_capture import (
     _detection_stages,
     _module_breach,
@@ -816,6 +816,21 @@ def _validate_replay_options(
         )
 
 
+def _oriented_helpers() -> tuple[object, ...]:
+    """Read the decode and oriented-loss helpers the native objective calls by global name.
+
+    Resolved at call time, so the import-time call that builds :data:`_ORIENTED_HELPERS`
+    keeps the originals and every later call sees the current bindings.
+    """
+    return (
+        decode_ltrb,
+        decode_rboxes,
+        oriented_branch_terms,
+        vars(oriented_loss)["square_angle_loss"],
+        oriented_loss._no_ground_truth,
+    )
+
+
 def _oriented_replay_breach(module: DetectionLitModule) -> str | None:
     """Keep full-network replay on the native objective that connects all six outputs.
 
@@ -827,20 +842,9 @@ def _oriented_replay_breach(module: DetectionLitModule) -> str | None:
         method = getattr(module, name)
         if getattr(method, "__func__", method) is not expected:
             return "the native oriented objective is overridden"
-    helpers = (
-        decode_ltrb,
-        decode_rboxes,
-        oriented_branch_terms,
-        vars(oriented_loss)["square_angle_loss"],
-        oriented_loss._no_ground_truth,
-    )
-    if helpers != _ORIENTED_HELPERS:
+    if _oriented_helpers() != _ORIENTED_HELPERS:
         return "a native oriented objective helper changed"
-    try:
-        native_loss = _source_signature(module.loss) is not None
-    except AttributeError:
-        native_loss = False
-    return None if native_loss else "the native oriented classification objective changed"
+    return None if _native_loss(module.loss) else "the native loss or an assignment implementation changed"
 
 
 class DetectionLitModule(LightningModule):
@@ -2844,10 +2848,5 @@ _ORIENTED_METHODS = tuple(
     (name, getattr(DetectionLitModule, name))
     for name in ("training_step", "_shared_step", "_task_extra_loss", "_oriented_extra_loss", "_branch_oriented_terms")
 )
-_ORIENTED_HELPERS = (
-    decode_ltrb,
-    decode_rboxes,
-    oriented_branch_terms,
-    vars(oriented_loss)["square_angle_loss"],
-    oriented_loss._no_ground_truth,
-)
+#: The oriented objective helpers as imported, against which :func:`_oriented_replay_breach` compares.
+_ORIENTED_HELPERS = _oriented_helpers()

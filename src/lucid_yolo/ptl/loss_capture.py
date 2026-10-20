@@ -91,17 +91,28 @@ def _functions(source: DualBranchLoss) -> tuple[object, ...]:
 _EXPECTED = _functions(DualBranchLoss())
 
 
+def _native_loss(source: DualBranchLoss) -> bool:
+    """Tell whether the built-in loss objects and the implementations they call are unchanged.
+
+    Only identity is judged: exact component types and the callables :func:`_functions`
+    reads. Scalar settings are not, so a caller whose loss runs outside any recording can
+    rely on this without inheriting the workspace limits :func:`_source_signature` adds.
+    """
+    if type(source) is not DualBranchLoss:
+        return False
+    objects = (source, source.o2m_assigner, source.o2o_assigner, source._o2m_loss, source._o2o_loss)
+    return (
+        tuple(type(obj) for obj in objects)
+        == (DualBranchLoss, SmallTargetAssigner, UniqueAssigner, DetectionBranchLoss, DetectionBranchLoss)
+        and _functions(source) == _EXPECTED
+    )
+
+
 def _source_signature(source: DualBranchLoss) -> tuple[object, ...] | None:
     """Certify the built-in objects and scalar settings, excluding the live alpha input."""
-    if type(source) is not DualBranchLoss:
+    if not _native_loss(source):
         return None
     objects = (source, source.o2m_assigner, source.o2o_assigner, source._o2m_loss, source._o2o_loss)
-    if (
-        tuple(type(obj) for obj in objects)
-        != (DualBranchLoss, SmallTargetAssigner, UniqueAssigner, DetectionBranchLoss, DetectionBranchLoss)
-        or _functions(source) != _EXPECTED
-    ):
-        return None
     fields = ("topk", "alpha", "beta", "eps", "s_min", "s_ref")
     settings = tuple(getattr(assigner, name) for assigner in objects[1:3] for name in fields)
     settings += tuple(getattr(branch, name) for branch in objects[3:] for name in ("box_gain", "cls_gain", "l1_gain"))

@@ -22,6 +22,7 @@ from lucid_yolo.data.targets import Targets
 from lucid_yolo.models.heads.detect import DualHeadOutput
 from lucid_yolo.ptl import DetectionLitModule, EMACallback
 from lucid_yolo.ptl.datamodule import DetectionDataModule
+from lucid_yolo.ptl.loss_capture import _source_signature
 from lucid_yolo.ptl.module import _oriented_replay_breach
 from lucid_yolo.ptl.network_capture import _OrientedNetwork
 
@@ -293,7 +294,21 @@ def test_oriented_classification_override_stays_native(monkeypatch: pytest.Monke
     """An unchanged model does not certify a replaced classification consumer."""
     model = _oriented(capture_network=True)
     monkeypatch.setattr(model.loss._o2m_loss, "_classification_loss", lambda *args: torch.tensor(0.0))
-    assert _oriented_replay_breach(model) == "the native oriented classification objective changed"
+    assert _oriented_replay_breach(model) == "the native loss or an assignment implementation changed"
+
+
+def test_oriented_loss_setting_change_keeps_replay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A scalar loss setting outside the network recording leaves oriented replay eligible.
+
+    The oriented loss always runs eagerly after the recorded network, so an assigner epsilon
+    the detection loss recording refuses cannot change which outputs carry gradients. Both
+    halves are asserted: the loss certificate still refuses the value, and the network
+    guard does not inherit that refusal.
+    """
+    model = _oriented(capture_network=True)
+    monkeypatch.setattr(model.loss.o2m_assigner, "eps", 1e-40)
+    assert _source_signature(model.loss) is None
+    assert _oriented_replay_breach(model) is None
 
 
 @pytest.mark.parametrize(
