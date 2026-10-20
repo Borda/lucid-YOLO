@@ -281,8 +281,11 @@ class _LossCapture:
                 _check_labels(labels, mask, ol.shape[-1])
         # Masked rows are neutral only for finite arithmetic: NaN * 0 is NaN.
         # Preserve the native empty-target and non-finite propagation behavior.
+        # Only predictions and target boxes meet the padded rows in arithmetic:
+        # anchor points enter comparisons only, and strides and alpha are not
+        # padded, so their non-finite values match on both routes.
         if boxes.shape[1] == 0 or not bool(
-            torch.stack(tuple(value.isfinite().all() for value in inputs if value.is_floating_point())).all()
+            torch.stack(tuple(value.isfinite().all() for value in (ml, mb, ol, ob, boxes))).all()
         ):
             return source(*inputs[:4], points, boxes, labels, mask, strides=strides, alpha=alpha)
         capacity = max(self._capacity, 1 << (max(1, boxes.shape[1]) - 1).bit_length())
