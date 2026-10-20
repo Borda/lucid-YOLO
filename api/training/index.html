@@ -5555,10 +5555,10 @@ Extra workspace and setup can outweigh the saving on short runs.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Replay fixed detection or keypoint network stages' CUDA forward and backward
+                <p>Replay fixed detection, keypoint or oriented network stages' CUDA forward and backward
 with :func:<code>torch.cuda.make_graphed_callables</code>. Defaults to <code>False</code> because
 capture pays setup and retains a graph pool. Requires
-<code>task="detect"</code> or <code>task="keypoints"</code>, <code>compile_step=False</code> and
+<code>task="detect"</code>, <code>task="keypoints"</code> or <code>task="obb"</code>, <code>compile_step=False</code> and
 single-device CUDA automatic optimization.
 Pose records backbone and neck; its head stays native to preserve absent
 gradients in batches with no assigned positives. Pose training stays eager
@@ -5567,7 +5567,10 @@ the head's topology or class forward changed since construction or a head
 module is hooked, overridden or compiled. The trainable set is fixed per fit
 at the first recording: a fully frozen start, or a later freeze or unfreeze
 of a recorded parameter, keeps the rest of that fit eager after one warning.
-Either task stays eager when the LightningModule carries a hook, overrides
+Oriented training records the complete network, including both angle stems,
+and retains the native classification and oriented objective. Accumulation
+or an overridden objective keeps it eager. Every task stays eager when the
+LightningModule carries a hook, overrides
 <code>forward</code> or is compiled.
 Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
 One image signature is recorded per fit; partial batches stay eager and
@@ -5664,9 +5667,9 @@ the segment objective eager today, so an accepted configuration keeps its meanin
               <div class="doc-md-description">
                 <p>If <code>task</code> is not one of <code>"detect"</code>, <code>"segment"</code>, <code>"obb"</code>,
 <code>"keypoints"</code>, if <code>rotated_iou_form</code> is not a known rotated-IoU form,
-if <code>capture_network</code> is combined with a task other than detection or keypoints,
-<code>capture_loss</code> with a non-detection task, <code>capture_segment_heads</code> with a
-non-segmentation task, or any of them with <code>compile_step=True</code> (for
+if <code>capture_network</code> is combined with a task other than detection, keypoints or
+oriented detection, <code>capture_loss</code> with a non-detection task, <code>capture_segment_heads</code>
+with a non-segmentation task, or any of them with <code>compile_step=True</code> (for
 <code>capture_segment_heads</code>, forward compatibility with a compiled segment objective),
 if <code>keypoint_loss</code> is not a known keypoint objective, if
 <code>task="keypoints"</code> was asked for without a <code>num_keypoints</code>, or if a
