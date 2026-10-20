@@ -104,6 +104,26 @@ def _observer_breach(modules: tuple[nn.Module, ...]) -> str | None:
     return None
 
 
+def _layer_breach(layer: nn.Module) -> str | None:
+    """Name why one layer's type, forward implementation or forward helpers leave the recorded route."""
+    if type(layer) not in _STAGE_FORWARDS:
+        return f"a prediction stage of type {type(layer).__name__} is not in the native stage list"
+    if (
+        type(layer).forward is not _STAGE_FORWARDS[type(layer)]
+        or "forward" in vars(layer)
+        or getattr(layer, "_compiled_call_impl", None) is not None
+    ):
+        return "a prediction stage overrides its native forward implementation"
+    if type(layer) is nn.BatchNorm2d and layer.training and layer.track_running_stats and layer.momentum is None:
+        return "a cumulative-average BatchNorm reads its count on the host"
+    for cls, helpers in _FORWARD_HELPERS.items():
+        if type(layer) is cls and any(
+            name in vars(layer) or getattr(type(layer), name) is not method for name, method in helpers.items()
+        ):
+            return "a prediction stage overrides a native forward helper"
+    return None
+
+
 def _stage_breach(owner: nn.Module, modules: tuple[nn.Module, ...] | None = None) -> str | None:
     """Keep custom stage implementations and forward helpers outside the recorded route."""
     modules = tuple(owner.modules()) if modules is None else modules
@@ -113,19 +133,9 @@ def _stage_breach(owner: nn.Module, modules: tuple[nn.Module, ...] | None = None
     if not all(stage.training for stage in owner.children()):
         return "a prediction stage is outside training mode"
     for layer in modules:
-        if (
-            type(layer).forward is not _STAGE_FORWARDS.get(type(layer))
-            or "forward" in vars(layer)
-            or getattr(layer, "_compiled_call_impl", None) is not None
-        ):
-            return "a prediction stage overrides its native forward implementation"
-        if type(layer) is nn.BatchNorm2d and layer.training and layer.track_running_stats and layer.momentum is None:
-            return "a cumulative-average BatchNorm reads its count on the host"
-        for cls, helpers in _FORWARD_HELPERS.items():
-            if type(layer) is cls and any(
-                name in vars(layer) or getattr(type(layer), name) is not method for name, method in helpers.items()
-            ):
-                return "a prediction stage overrides a native forward helper"
+        reason = _layer_breach(layer)
+        if reason is not None:
+            return reason
     return None
 
 
@@ -275,11 +285,10 @@ def _feature_breach(features: _Tensors, precision: tuple[object, ...]) -> str | 
         type(x) is Tensor
         and x.is_cuda
         and x.layout == torch.strided
-        and x.numel()
         and (x.is_contiguous() or x.is_contiguous(memory_format=torch.channels_last))
         for x in features
     ):
-        return "the features are not nonempty ordinary dense CUDA tensors"
+        return "the features are not ordinary dense CUDA tensors"
     if any((x.requires_grad and x.is_leaf) or x.retains_grad or x._backward_hooks for x in features):
         return "feature gradients are leaf-owned, retained or hooked"
     if torch.is_anomaly_enabled() or torch.is_inference_mode_enabled() or torch.compiler.is_compiling():
@@ -335,6 +344,17 @@ class _SegmentHeadCapture:
     The model keeps its original modules and state-dict keys. Recording wrappers
     live only in this ordinary Python holder; no live module forward is replaced.
 
+    A replayed group's ``coefficients``, ``prototypes`` and ``semantic`` outputs are the graphed callable's
+    static CUDA-graph tensors, not copies; the box and class predictions are concatenation copies. The next
+    replay of that group overwrites them in place, so a consumer must finish with them, and with any ``.grad``
+    adopted from their backward, inside the training step that produced them and clone whatever it keeps
+    across steps.
+
+    Each prediction group records the input signature of its first eligible call once per fit: shape, stride,
+    dtype, device, gradient flag and CUDA stream. A call with any other signature, a partial batch included,
+    runs the native routine and records nothing more, while the recorded graphs keep their private pools
+    reserved until the fit ends.
+
     Examples:
         ```pycon
         >>> import copy
@@ -383,7 +403,7 @@ class _SegmentHeadCapture:
         )
         if self.requested and not self.active and stage == "fit":
             warnings.warn(
-                "capture_segment_heads=True stays native outside single-device CUDA automatic optimization "
+                "capture_segment_heads=True is ignored outside single-device CUDA automatic optimization "
                 "with accumulate_grad_batches=1",
                 UserWarning,
                 stacklevel=3,
@@ -395,7 +415,7 @@ class _SegmentHeadCapture:
             return
         self.clear()
         self.disabled = True
-        warnings.warn(f"capture_segment_heads=True stays native: {reason}", UserWarning, stacklevel=3)
+        warnings.warn(f"capture_segment_heads=True stays eager: {reason}", UserWarning, stacklevel=3)
 
     def runner(self, module: DetectionLitModule, features: _Tensors) -> _SegmentHeadCapture | None:
         """Certify the current head before any of its prediction groups may replay."""
@@ -410,7 +430,8 @@ class _SegmentHeadCapture:
             or not torch.is_grad_enabled()
         ):
             return None
-        if torch.cuda.is_current_stream_capturing():
+        # A capture in progress, or an empty batch with nothing to record: this call stays native, replay stays on.
+        if torch.cuda.is_current_stream_capturing() or any(x.numel() == 0 for x in features):
             return None
         if trainer.accumulate_grad_batches != 1:
             self.retire("gradient accumulation changed after setup")
@@ -418,7 +439,7 @@ class _SegmentHeadCapture:
         try:
             precision = _precision_signature()
         except RuntimeError as error:
-            self.retire(str(error))
+            self.retire(f"the CUDA precision policy cannot be read ({error})")
             return None
         reason = _head_breach(module.head, len(features))
         reason = reason or _feature_breach(features, precision)
@@ -472,17 +493,13 @@ class _SegmentHeadCapture:
         """Keep each box/class contribution separate at the shared-feature gradient sum."""
         return self._run((id(stage), "stem"), (stage,), lambda inputs: (stage(inputs[0]),), (feature,))[0]
 
-    def base(self, branch: _DetectionBranch, features: tuple[Tensor, Tensor, Tensor]) -> tuple[Tensor, Tensor]:
-        """Keep the native per-level order while scheduling independent prediction stems."""
-        return branch._base_predictions(features, _runner=self)
-
     def coefficients(self, branch: _DetectionBranch, features: tuple[Tensor, Tensor, Tensor]) -> Tensor | None:
         """Keep unused mask predictions disconnected from the optimizer, as in the native branch."""
-        assert branch.coeff_stems is not None
+        assert branch.coeff_stems is not None  # runner() certified the segmentation topology via _head_breach
 
         def eager(inputs: _Tensors) -> _Tensors:
             result = branch._coefficients(cast("tuple[Tensor, Tensor, Tensor]", inputs))
-            assert result is not None
+            assert result is not None  # _coefficients returns None only without coeff_stems, refused by _head_breach
             return (result,)
 
         return self._run((id(branch), "coeff"), tuple(branch.coeff_stems), eager, features)[0]

@@ -560,10 +560,6 @@ class _PredictionRunner(Protocol):
         """Return one stem without combining its contribution to the shared-feature gradient."""
         ...
 
-    def base(self, branch: _DetectionBranch, features: tuple[Tensor, Tensor, Tensor]) -> tuple[Tensor, Tensor]:
-        """Return the branch's native classification and box tensors."""
-        ...
-
     def coefficients(self, branch: _DetectionBranch, features: tuple[Tensor, Tensor, Tensor]) -> Tensor | None:
         """Return its native mask coefficients, with their own autograd boundary."""
         ...
@@ -638,6 +634,8 @@ class _DetectionBranch(nn.Module):
 
         Args:
             features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32.
+            _runner: Private scheduling seam of the opt-in CUDA prediction replay, not
+                public API. ``None``, the default, calls every stem natively.
 
         Returns:
             A :class:`BranchOutput` whose ``cls`` is raw class logits ``(B, A,
@@ -647,7 +645,7 @@ class _DetectionBranch(nn.Module):
             two fields are raw ``(B, A, K, 2)`` coordinate offsets and unbounded
             uncertainty or ``None``. ``A`` sums ``H * W`` over levels.
         """
-        cls, box = self._base_predictions(features) if _runner is None else _runner.base(self, features)
+        cls, box = self._base_predictions(features, _runner=_runner)
         keypoints, keypoint_sigma = self._keypoints(features)
         return BranchOutput(
             cls=cls,
@@ -890,6 +888,8 @@ class DualDetectionHead(nn.Module):
             features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32, with
                 channel counts matching the constructor's ``in_channels``.
             branch: Which branch to run, one of :data:`BRANCH_NAMES`.
+            _runner: Private scheduling seam of the opt-in CUDA prediction replay, passed
+                on to the branch; not public API. ``None``, the default, is the native call.
 
         Returns:
             That branch's :class:`BranchOutput`: dense class logits, raw ltrb distances,
@@ -917,7 +917,7 @@ class DualDetectionHead(nn.Module):
         """
         require_one_of("branch", branch, BRANCH_NAMES)
         selected = self.o2o if branch == "o2o" else self.o2m
-        return cast("BranchOutput", selected(features) if _runner is None else selected(features, _runner=_runner))
+        return cast("BranchOutput", selected(features, _runner=_runner))
 
     def forward(
         self, features: tuple[Tensor, Tensor, Tensor], *, _runner: _PredictionRunner | None = None
@@ -927,6 +927,8 @@ class DualDetectionHead(nn.Module):
         Args:
             features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32,
                 with channel counts matching the constructor's ``in_channels``.
+            _runner: Private scheduling seam of the opt-in CUDA prediction replay, passed
+                on to both branches; not public API. ``None``, the default, is the native call.
 
         Returns:
             A :class:`DualHeadOutput` with dense class logits, raw ltrb
@@ -934,12 +936,8 @@ class DualDetectionHead(nn.Module):
             coefficients, raw orientation angles, and raw point-coordinate and
             uncertainty tensors, for both branches.
         """
-        if _runner is None:
-            o2m = self.forward_branch(features, "o2m")
-            o2o = self.forward_branch(features, "o2o")
-        else:
-            o2m = self.forward_branch(features, "o2m", _runner=_runner)
-            o2o = self.forward_branch(features, "o2o", _runner=_runner)
+        o2m = self.forward_branch(features, "o2m", _runner=_runner)
+        o2o = self.forward_branch(features, "o2o", _runner=_runner)
         return DualHeadOutput(
             o2m_cls=o2m.cls,
             o2m_box=o2m.box,
