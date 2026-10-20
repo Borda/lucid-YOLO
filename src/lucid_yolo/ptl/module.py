@@ -207,7 +207,9 @@ from lucid_yolo.models.heads.detect import (
     DEFAULT_NUM_COEFFS,
     BranchName,
     BranchOutput,
+    DualDetectionHead,
     DualHeadOutput,
+    _DetectionBranch,
     decode_ltrb,
 )
 from lucid_yolo.models.heads.keypoint import decode_keypoints
@@ -765,6 +767,16 @@ def _validate_task_arguments(task: str, num_keypoints: int | None, rotated_iou_f
         )
 
 
+# The private executor keyword belongs to these native dispatch implementations.
+_POSE_STEM_DISPATCH = (
+    (DualDetectionHead, "forward", DualDetectionHead.forward),
+    (DualDetectionHead, "forward_branch", DualDetectionHead.forward_branch),
+    (_DetectionBranch, "forward", _DetectionBranch.forward),
+    (_DetectionBranch, "_keypoints", _DetectionBranch._keypoints),
+    (_DetectionBranch, "_base_predictions", _DetectionBranch._base_predictions),
+)
+
+
 def _pose_head_topology(head: torch.nn.Module) -> tuple[tuple[object, ...], ...]:
     """Identify the head composition as constructed, whose dense outputs use every shared feature.
 
@@ -779,6 +791,8 @@ def _pose_head_topology(head: torch.nn.Module) -> tuple[tuple[object, ...], ...]
 
 def _pose_head_breach(head: torch.nn.Module, topology: tuple[tuple[object, ...], ...]) -> str | None:
     """Keep altered head control flow outside a recording of its shared inputs."""
+    if any(getattr(cls, name) is not native for cls, name, native in _POSE_STEM_DISPATCH):
+        return "the native pose stem dispatch changed"
     if _pose_head_topology(head) != topology:
         return "the pose head topology or class forward changed"
     if _module_breach(head.modules()) is not None:
@@ -978,13 +992,15 @@ class DetectionLitModule(LightningModule):
             capture pays setup and retains a graph pool. Requires
             ``task="detect"`` or ``task="keypoints"``, ``compile_step=False`` and
             single-device CUDA automatic optimization.
-            Pose records backbone and neck; its head stays native to preserve absent
-            gradients in batches with no assigned positives. Pose training stays eager
+            Pose records backbone, neck and each prediction stem independently, preserving
+            absent point-stem gradients when a batch supplies no positives. Pose training stays eager
             under gradient accumulation, with a fully frozen backbone and neck, or when
             the head's topology or class forward changed since construction or a head
-            module is hooked, overridden or compiled. The trainable set is fixed per fit
-            at the first recording: a fully frozen start, or a later freeze or unfreeze
-            of a recorded parameter, keeps the rest of that fit eager after one warning.
+            module is hooked, overridden or compiled. The shared-feature trainable set is
+            fixed per fit: a fully frozen start, or a later freeze or unfreeze of a backbone
+            or neck parameter, keeps the rest of that fit eager after one warning. Each
+            stem separately retires its recording if its trainable set changes. Replacing
+            a head module retires every recording before shared features run.
             Either task stays eager when the LightningModule carries a hook, overrides
             ``forward`` or is compiled.
             Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
@@ -1494,9 +1510,9 @@ class DetectionLitModule(LightningModule):
     def _training_network(self, images: Tensor) -> DualHeadOutput:
         """Run the dual head through the training recording when its contract holds.
 
-        Detection records all three stages; pose records only backbone and neck.
-        Its optional point stems stay native so batches with no assigned positives
-        keep their absent gradients, rather than zero-valued captured gradients.
+        Detection records all three stages; pose records shared features and each stem
+        independently. Unused point outputs have no backward invocation, so batches
+        with no assigned positives retain absent point-stem gradients.
         Both tasks keep changing instance counts and loss arithmetic outside capture.
         """
         head_out: DualHeadOutput
@@ -1514,6 +1530,7 @@ class DetectionLitModule(LightningModule):
             if self._task == "keypoints" and self.trainer.accumulate_grad_batches != 1:
                 self._network_capture.retire("keypoint replay requires accumulate_grad_batches=1")
             if self._task == "keypoints":
+                self._network_capture.check_stem_owners(self.head)
                 breach = _pose_head_breach(self.head, self._pose_head_topology)
                 if breach is not None:
                     self._network_capture.retire(breach)
@@ -1532,7 +1549,11 @@ class DetectionLitModule(LightningModule):
                 head_out = self(images)
             elif self._task == "keypoints":
                 features = self._network_capture.run_features(images, (self.backbone, self.neck))
-                head_out = self(images) if features is None else cast("DualHeadOutput", self.head(features))
+                head_out = (
+                    self(images)
+                    if features is None
+                    else cast("DualHeadOutput", self.head(features, _runner=self._network_capture))
+                )
             else:
                 eager = cast("Callable[[Tensor], DualHeadOutput]", self)
                 head_out = self._network_capture.run(images, (self.backbone, self.neck, self.head), eager)

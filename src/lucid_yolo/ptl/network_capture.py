@@ -2,7 +2,7 @@
 """Opt-in replay of fixed network stages' CUDA forward and backward work.
 
 The network has a fixed image signature while its ground-truth count changes per
-batch. Detection records backbone, neck and head; pose records backbone and neck.
+batch. Detection records backbone, neck and head; pose records backbone, neck and each prediction stem separately.
 Both leave assignment, losses, schedules,
 optimizer and EMA in their existing loop. PyTorch's graphed-callable API owns the
 autograd bridge; no network arithmetic is rewritten. The recording is transient,
@@ -30,7 +30,7 @@ from packaging.version import Version
 from pytorch_lightning import Callback
 from torch import Tensor, nn
 
-from lucid_yolo.models.heads.detect import DualHeadOutput
+from lucid_yolo.models.heads.detect import DualHeadOutput, _DetectionBranch
 
 _Output = TypeVar("_Output")
 _Features = tuple[Tensor, Tensor, Tensor]
@@ -40,7 +40,7 @@ _BF16_REPLAY_SUPPORTED = Version(torch.__version__) >= Version("2.9")
 
 #: Method names through which a module's call reaches its arithmetic; the same name set on
 #: an instance shadows the class method a recording replays or a certificate fingerprints.
-_DISPATCH = ("forward", "forward_branch")
+_DISPATCH = ("forward", "forward_branch", "_keypoints", "_base_predictions")
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -79,7 +79,7 @@ class _FeatureNetwork(nn.Module):
     ``grad=None``; including those stems in one fixed backward would materialize
     zero gradients and advance optimizer state that the native loop skips.
     The shared features still feed the dense classification objective, while
-    the complete dual head and its variable supervision stay native.
+    the stems have independent autograd nodes and variable supervision stays native.
     """
 
     def __init__(self, backbone: nn.Module, neck: nn.Module) -> None:
@@ -95,6 +95,18 @@ class _FeatureNetwork(nn.Module):
         """Keep the three feature levels separate for the native dual head."""
         first, second, third = tensors
         return first, second, third
+
+
+class _StemNetwork(nn.Module):
+    """Keep one native stem's backward separate from conditionally unused stems."""
+
+    def __init__(self, stem: nn.Module) -> None:
+        super().__init__()
+        self.stem = stem
+
+    def forward(self, feature: Tensor) -> tuple[Tensor]:
+        """Expose one native stem output to PyTorch's graphed-callable bridge."""
+        return (cast("Tensor", self.stem(feature)),)
 
 
 def _fp32_policy() -> tuple[object, ...]:
@@ -138,9 +150,9 @@ def _precision_signature() -> tuple[object, ...]:
     )
 
 
-def _input_breach(images: Tensor, precision: tuple[object, ...]) -> str | None:
+def _input_breach(images: Tensor, precision: tuple[object, ...], *, allow_input_grad: bool = False) -> str | None:
     """Name why this call's inputs or autograd mode cannot use a recording, if they cannot."""
-    if images.requires_grad:
+    if images.requires_grad and not allow_input_grad:
         return "the input images require gradients"
     if torch.is_anomaly_enabled():
         return "anomaly detection is enabled, so its backward NaN checks must stay observable"
@@ -290,6 +302,10 @@ class _NetworkCapture:
 
     def clear(self) -> None:
         """Release the recording and start a fresh fit's eligibility decision."""
+        for holder in getattr(self, "_stems", {}).values():
+            holder.clear()
+        self._stems: dict[int, _NetworkCapture] = {}
+        self._stem_owners: tuple[int, ...] | None = None
         previous = getattr(self, "_network", None)
         if previous is not None:
             vars(previous).pop("forward", None)
@@ -363,6 +379,49 @@ class _NetworkCapture:
         rebuild: Callable[[tuple[Tensor, ...]], _Features | None] = _FeatureNetwork.rebuild
         return self._run(images, stages, eager, lambda: _FeatureNetwork(*stages), rebuild)
 
+    def check_stem_owners(self, head: nn.Module) -> None:
+        """Retire all recordings before changed head ownership can retain obsolete pools.
+
+        The owner checks this before shared-feature replay, so replacing an otherwise
+        identical stem keeps the complete forward native and the holder count bounded.
+        Fit cleanup and serialization reset this transient identity signature.
+        """
+        if self._disabled:
+            return
+        owners = tuple(id(module) for module in head.modules())
+        if self._stem_owners is not None and owners != self._stem_owners:
+            self.retire("a pose head module was replaced after recording")
+        else:
+            self._stem_owners = owners
+
+    def stem(self, stage: nn.Module, feature: Tensor) -> Tensor:
+        """Record each pose stem independently so unused point outputs keep absent gradients.
+
+        The parent owns these holders: fit boundaries and skipped backwards reset them
+        together with the shared-feature recording. Each stem retains its own input
+        signature, state guards and autograd node, with no fixed joint backward that
+        would advance unused point-stem optimizer state.
+        """
+        if self._disabled or not feature.is_cuda or not torch.is_grad_enabled() or not stage.training:
+            return cast("Tensor", stage(feature))
+        holder = self._stems.get(id(stage))
+        if holder is None:
+            holder = _NetworkCapture()
+            self._stems[id(stage)] = holder
+        eager = cast("Callable[[Tensor], Tensor]", stage)
+        return holder._run(
+            feature, (stage,), eager, lambda: _StemNetwork(stage), lambda outputs: outputs[0], allow_input_grad=True
+        )
+
+    @staticmethod
+    def coefficients(branch: _DetectionBranch, features: _Features) -> Tensor | None:
+        """Keep the shared prediction-runner protocol's unused mask path native.
+
+        Pose builds no coefficient stems. This adapter composes the existing private
+        runner seam without extending the recording into an optional mask objective.
+        """
+        return branch._coefficients(features)
+
     def _run(
         self,
         images: Tensor,
@@ -370,6 +429,8 @@ class _NetworkCapture:
         eager: Callable[[Tensor], _Output],
         build: Callable[[], nn.Module],
         rebuild: Callable[[tuple[Tensor, ...]], _Output],
+        *,
+        allow_input_grad: bool = False,
     ) -> _Output:
         """Keep recording, eligibility and lifecycle identical for both stage compositions.
 
@@ -383,6 +444,7 @@ class _NetworkCapture:
             build: Composes the stages into the module checked for eligibility until a
                 recording exists, and captured by the first one.
             rebuild: Turns the replayed output tensors back into the caller's value.
+            allow_input_grad: Permit differentiable feature inputs for an independent stem.
 
         Returns:
             The rebuilt replay output, or whatever ``eager`` returns when this call stays eager.
@@ -396,14 +458,14 @@ class _NetworkCapture:
             return eager(images)
         owners = tuple(id(stage) for stage in stages)
         network = self._network if self._network is not None else build()
-        reason = _input_breach(images, precision) or _ineligibility(network)
+        reason = _input_breach(images, precision, allow_input_grad=allow_input_grad) or _ineligibility(network)
         state = _network_signature(network) if reason is None else None
         if state is not None:
             reason = self._drift(state, owners, precision)
         if reason is not None:
             self.retire(reason, stacklevel=4)
             return eager(images)
-        signature = tuple(images.shape), images.stride(), images.dtype, images.device, precision
+        signature = tuple(images.shape), images.stride(), images.dtype, images.device, images.requires_grad, precision
         if (self._input is not None and signature != self._input) or self._pending_backward:
             # A second forward before the previous replay's backward would overwrite the
             # static activations that backward still has to read, so it runs eagerly.
@@ -415,7 +477,7 @@ class _NetworkCapture:
                 snapshots = [(buffer, buffer.detach().clone()) for buffer in network.buffers()]
                 with torch.random.fork_rng(devices=[images.device.index]):
                     try:
-                        sample = images.detach().clone()
+                        sample = images.detach().clone().requires_grad_(images.requires_grad)
                         graphed = cast("nn.Module", torch.cuda.make_graphed_callables(network, (sample,)))
                     finally:
                         # Warmup runs on a side stream the recorder owns; a failure there
@@ -475,6 +537,8 @@ class _NetworkCapture:
         normally releases the hold never fires; a new batch makes that replay unreachable.
         """
         self._pending_backward = False
+        for holder in self._stems.values():
+            holder.start_batch()
 
 
 class _NetworkCaptureLifecycle(Callback):
