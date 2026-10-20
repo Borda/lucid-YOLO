@@ -189,6 +189,7 @@ from lucid_yolo.eval.coco_eval import (
 )
 from lucid_yolo.eval.dota_eval import MAX_DETECTIONS, evaluate_rotated_map, rotated_detections_to_predictions
 from lucid_yolo.eval.segment_decode import decode_instance_masks
+from lucid_yolo.losses import oriented_loss
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
 from lucid_yolo.losses.keypoint_nll_loss import LaplaceNLLLoss
 from lucid_yolo.losses.mask_loss import instance_mask_loss
@@ -216,7 +217,7 @@ from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
 from lucid_yolo.ptl.coco_backend import build_mean_average_precision
-from lucid_yolo.ptl.loss_capture import _LossCapture, _LossCaptureLifecycle
+from lucid_yolo.ptl.loss_capture import _LossCapture, _LossCaptureLifecycle, _native_loss
 from lucid_yolo.ptl.network_capture import (
     _detection_stages,
     _module_breach,
@@ -791,21 +792,21 @@ def _validate_replay_options(
 ) -> None:
     """Reject replay options outside the objectives they record.
 
-    Network replay records the detection or pose stages; loss replay records the detection
-    objective only; segment-head replay records the segmentation prediction groups only.
-    Segment-head replay refuses the compiler although ``compile_step`` leaves the segment
+    Network replay records the detection, pose or oriented stages; loss replay records the
+    detection objective only; segment-head replay records the segmentation prediction groups
+    only. Segment-head replay refuses the compiler although ``compile_step`` leaves the segment
     objective eager today, so an accepted configuration keeps its meaning once that
     objective is compiled.
 
     Raises:
-        ValueError: If network replay is combined with a task other than detection or
-            keypoints, loss replay with a task other than detection, segment-head replay
-            with a task other than segmentation, or any of them with the compiler
-            (segment-head replay included, for forward compatibility with a compiled
+        ValueError: If network replay is combined with a task other than detection,
+            keypoints or oriented detection, loss replay with a task other than detection,
+            segment-head replay with a task other than segmentation, or any of them with the
+            compiler (segment-head replay included, for forward compatibility with a compiled
             segment objective).
     """
-    if capture_network and (task not in ("detect", "keypoints") or compile_step):
-        raise ValueError("capture_network=True requires task='detect' or task='keypoints', and compile_step=False")
+    if capture_network and (task not in ("detect", "keypoints", "obb") or compile_step):
+        raise ValueError("capture_network=True requires task='detect', 'keypoints' or 'obb', and compile_step=False")
     if capture_loss and (task != "detect" or compile_step):
         raise ValueError("capture_loss=True requires task='detect' and compile_step=False")
     if capture_segment_heads and (task != "segment" or compile_step):
@@ -813,6 +814,37 @@ def _validate_replay_options(
             "capture_segment_heads=True requires task='segment' and compile_step=False; the compiler is refused "
             "even while the segment objective stays eager, so this configuration keeps its meaning once it is compiled"
         )
+
+
+def _oriented_helpers() -> tuple[object, ...]:
+    """Read the decode and oriented-loss helpers the native objective calls by global name.
+
+    Resolved at call time, so the import-time call that builds :data:`_ORIENTED_HELPERS`
+    keeps the originals and every later call sees the current bindings.
+    """
+    return (
+        decode_ltrb,
+        decode_rboxes,
+        oriented_branch_terms,
+        vars(oriented_loss)["square_angle_loss"],
+        oriented_loss._no_ground_truth,
+    )
+
+
+def _oriented_replay_breach(module: DetectionLitModule) -> str | None:
+    """Keep full-network replay on the native objective that connects all six outputs.
+
+    The native empty-target path retains zero gradients for the angle stems. An
+    overridden objective may leave them absent instead, which a recorded backward
+    would materialize. Changed consumers therefore keep their complete native call.
+    """
+    for name, expected in _ORIENTED_METHODS:
+        method = getattr(module, name)
+        if getattr(method, "__func__", method) is not expected:
+            return "the native oriented objective is overridden"
+    if _oriented_helpers() != _ORIENTED_HELPERS:
+        return "a native oriented objective helper changed"
+    return None if _native_loss(module.loss) else "the native loss or an assignment implementation changed"
 
 
 class DetectionLitModule(LightningModule):
@@ -973,10 +1005,10 @@ class DetectionLitModule(LightningModule):
             strides, dtype, device, step count and precision select each recording;
             this flag alone leaves learning rates, momentum and parameters outside the graphs.
             Extra workspace and setup can outweigh the saving on short runs.
-        capture_network: Replay fixed detection or keypoint network stages' CUDA forward and backward
+        capture_network: Replay fixed detection, keypoint or oriented network stages' CUDA forward and backward
             with :func:`torch.cuda.make_graphed_callables`. Defaults to ``False`` because
             capture pays setup and retains a graph pool. Requires
-            ``task="detect"`` or ``task="keypoints"``, ``compile_step=False`` and
+            ``task="detect"``, ``task="keypoints"`` or ``task="obb"``, ``compile_step=False`` and
             single-device CUDA automatic optimization.
             Pose records backbone and neck; its head stays native to preserve absent
             gradients in batches with no assigned positives. Pose training stays eager
@@ -985,7 +1017,10 @@ class DetectionLitModule(LightningModule):
             module is hooked, overridden or compiled. The trainable set is fixed per fit
             at the first recording: a fully frozen start, or a later freeze or unfreeze
             of a recorded parameter, keeps the rest of that fit eager after one warning.
-            Either task stays eager when the LightningModule carries a hook, overrides
+            Oriented training records the complete network, including both angle stems,
+            and retains the native classification and oriented objective. Accumulation
+            or an overridden objective keeps it eager. Every task stays eager when the
+            LightningModule carries a hook, overrides
             ``forward`` or is compiled.
             Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
             One image signature is recorded per fit; partial batches stay eager and
@@ -1014,9 +1049,9 @@ class DetectionLitModule(LightningModule):
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
             ``"keypoints"``, if ``rotated_iou_form`` is not a known rotated-IoU form,
-            if ``capture_network`` is combined with a task other than detection or keypoints,
-            ``capture_loss`` with a non-detection task, ``capture_segment_heads`` with a
-            non-segmentation task, or any of them with ``compile_step=True`` (for
+            if ``capture_network`` is combined with a task other than detection, keypoints or
+            oriented detection, ``capture_loss`` with a non-detection task, ``capture_segment_heads``
+            with a non-segmentation task, or any of them with ``compile_step=True`` (for
             ``capture_segment_heads``, forward compatibility with a compiled segment objective),
             if ``keypoint_loss`` is not a known keypoint objective, if
             ``task="keypoints"`` was asked for without a ``num_keypoints``, or if a
@@ -1494,10 +1529,10 @@ class DetectionLitModule(LightningModule):
     def _training_network(self, images: Tensor) -> DualHeadOutput:
         """Run the dual head through the training recording when its contract holds.
 
-        Detection records all three stages; pose records only backbone and neck.
-        Its optional point stems stay native so batches with no assigned positives
+        Detection and oriented detection record all three stages; pose records only backbone and neck.
+        Pose's optional point stems stay native so batches with no assigned positives
         keep their absent gradients, rather than zero-valued captured gradients.
-        Both tasks keep changing instance counts and loss arithmetic outside capture.
+        All tasks keep changing instance counts and loss arithmetic outside capture.
         """
         head_out: DualHeadOutput
         if (
@@ -1511,8 +1546,9 @@ class DetectionLitModule(LightningModule):
         ):
             # WP-193d reports the shared recorder's CUDA accumulation checks failing on the unmodified
             # baseline; whether detection must stay eager here too is open in docs/ESCALATION.md (2026-10-20).
-            if self._task == "keypoints" and self.trainer.accumulate_grad_batches != 1:
-                self._network_capture.retire("keypoint replay requires accumulate_grad_batches=1")
+            if self._task in ("keypoints", "obb") and self.trainer.accumulate_grad_batches != 1:
+                label = "keypoint" if self._task == "keypoints" else "oriented"
+                self._network_capture.retire(f"{label} replay requires accumulate_grad_batches=1")
             if self._task == "keypoints":
                 breach = _pose_head_breach(self.head, self._pose_head_topology)
                 if breach is not None:
@@ -1533,12 +1569,23 @@ class DetectionLitModule(LightningModule):
             elif self._task == "keypoints":
                 features = self._network_capture.run_features(images, (self.backbone, self.neck))
                 head_out = self(images) if features is None else cast("DualHeadOutput", self.head(features))
+            elif self._task == "obb":
+                head_out = self._training_oriented_network(images)
             else:
                 eager = cast("Callable[[Tensor], DualHeadOutput]", self)
                 head_out = self._network_capture.run(images, (self.backbone, self.neck, self.head), eager)
         else:
             head_out = self(images)
         return head_out
+
+    def _training_oriented_network(self, images: Tensor) -> DualHeadOutput:
+        """Record the complete oriented network only while its native consumers stay intact."""
+        reason = _oriented_replay_breach(self)
+        if reason is not None:
+            self._network_capture.retire(reason)
+            return cast("DualHeadOutput", self(images))
+        eager = cast("Callable[[Tensor], DualHeadOutput]", self)
+        return self._network_capture.run_oriented(images, (self.backbone, self.neck, self.head), eager)
 
     def _alpha_tensor(self, device: torch.device) -> Tensor:
         """Lift the current :attr:`alpha` to a 0-d ``float64`` tensor on ``device`` for the compiled region.
@@ -2795,3 +2842,11 @@ class DetectionLitModule(LightningModule):
 
 #: The unmodified public forward; instance/class overrides retain their eager dispatch.
 _EAGER_NETWORK_FORWARD = DetectionLitModule.forward
+
+#: Consumers whose native calls retain gradients to every oriented output, even on empty batches.
+_ORIENTED_METHODS = tuple(
+    (name, getattr(DetectionLitModule, name))
+    for name in ("training_step", "_shared_step", "_task_extra_loss", "_oriented_extra_loss", "_branch_oriented_terms")
+)
+#: The oriented objective helpers as imported, against which :func:`_oriented_replay_breach` compares.
+_ORIENTED_HELPERS = _oriented_helpers()

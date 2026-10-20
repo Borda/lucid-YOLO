@@ -399,17 +399,23 @@ def test_image_without_instances_gives_finite_loss() -> None:
 
     With no ground truth the padded rotated axis has length zero, which no ``gather``
     can index; the term has to answer with an exact zero that is still connected to
-    the predictions.
+    the predictions. Connected means the backward reaches every angle stem of both
+    branches with a gradient, the native premise full-network replay rests on: an empty
+    batch that left an angle gradient absent would make a recorded backward differ.
     """
     module = _tiny_module()
     recorder = _LogRecorder()
     module.log = recorder  # type: ignore[method-assign]
 
     loss = module.training_step((torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE), [Targets.empty()]), 0)
+    loss.backward()
 
     assert bool(torch.isfinite(loss))
     assert recorder.values["train/rbox"] == 0.0
     assert recorder.values["train/angle"] == 0.0
+    angles = {name: parameter for name, parameter in module.named_parameters() if "angle_stems" in name}
+    assert any(name.startswith("head.o2o.") for name in angles) and any(name.startswith("head.o2m.") for name in angles)
+    assert all(parameter.grad is not None for parameter in angles.values()), angles.keys()
 
 
 def test_rotated_candidacy_reaches_assigner() -> None:

@@ -2,8 +2,8 @@
 """Opt-in replay of fixed network stages' CUDA forward and backward work.
 
 The network has a fixed image signature while its ground-truth count changes per
-batch. Detection records backbone, neck and head; pose records backbone and neck.
-Both leave assignment, losses, schedules,
+batch. Detection and oriented detection record backbone, neck and head; pose records backbone and neck.
+All three leave assignment, losses, schedules,
 optimizer and EMA in their existing loop. PyTorch's graphed-callable API owns the
 autograd bridge; no network arithmetic is rewritten. The recording is transient,
 bounded to one input signature and discarded at the fit boundary.
@@ -70,6 +70,53 @@ class _DetectionNetwork(nn.Module):
         """Name the replayed tensors by field, in the order :meth:`forward` returns them."""
         o2m_cls, o2m_box, o2o_cls, o2o_box = tensors
         return DualHeadOutput(o2m_cls=o2m_cls, o2m_box=o2m_box, o2o_cls=o2o_cls, o2o_box=o2o_box)
+
+
+class _OrientedNetwork(nn.Module):
+    """Expose both native angle tensors beside the four dense detection fields.
+
+    Examples:
+        ```pycon
+        >>> from lucid_yolo.ptl import DetectionLitModule
+        >>> model = DetectionLitModule(0.34, 0.25, 64, 2, task="obb").eval()
+        >>> network = _OrientedNetwork(model.backbone, model.neck, model.head)
+        >>> with torch.no_grad():
+        ...     tensors = network(torch.zeros(2, 3, 64, 64))
+        >>> len(tensors), network.rebuild(tensors).o2m_angle.shape
+        (6, torch.Size([2, 84, 1]))
+
+        ```
+    """
+
+    def __init__(self, backbone: nn.Module, neck: nn.Module, head: nn.Module) -> None:
+        super().__init__()
+        self.backbone, self.neck, self.head = backbone, neck, head
+
+    def forward(self, images: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+        """Run the existing stages and retain the six tensors the native oriented objective reads."""
+        output = _detection_stages(self.backbone, self.neck, self.head, images)
+        assert output.o2m_angle is not None and output.o2o_angle is not None
+        return (
+            output.o2m_cls,
+            output.o2m_box,
+            output.o2o_cls,
+            output.o2o_box,
+            output.o2m_angle,
+            output.o2o_angle,
+        )
+
+    @staticmethod
+    def rebuild(tensors: tuple[Tensor, ...]) -> DualHeadOutput:
+        """Rebuild every recorded field by name, leaving absent modalities absent."""
+        o2m_cls, o2m_box, o2o_cls, o2o_box, o2m_angle, o2o_angle = tensors
+        return DualHeadOutput(
+            o2m_cls=o2m_cls,
+            o2m_box=o2m_box,
+            o2o_cls=o2o_cls,
+            o2o_box=o2o_box,
+            o2m_angle=o2m_angle,
+            o2o_angle=o2o_angle,
+        )
 
 
 class _FeatureNetwork(nn.Module):
@@ -321,7 +368,7 @@ class _NetworkCapture:
             stacklevel: The frame the warning names, counted as :func:`warnings.warn`
                 counts from this method. The default names the caller of whoever called
                 ``retire``; :meth:`_run` passes 4 so a retirement it decides still names
-                the code that called :meth:`run` or :meth:`run_features`.
+                the code that called :meth:`run`, :meth:`run_features` or :meth:`run_oriented`.
         """
         if self._disabled:
             return
@@ -363,6 +410,15 @@ class _NetworkCapture:
         rebuild: Callable[[tuple[Tensor, ...]], _Features | None] = _FeatureNetwork.rebuild
         return self._run(images, stages, eager, lambda: _FeatureNetwork(*stages), rebuild)
 
+    def run_oriented(
+        self,
+        images: Tensor,
+        stages: tuple[nn.Module, nn.Module, nn.Module],
+        eager: Callable[[Tensor], DualHeadOutput],
+    ) -> DualHeadOutput:
+        """Replay all six network outputs consumed by the unchanged native oriented objective."""
+        return self._run(images, stages, eager, lambda: _OrientedNetwork(*stages), _OrientedNetwork.rebuild)
+
     def _run(
         self,
         images: Tensor,
@@ -378,8 +434,8 @@ class _NetworkCapture:
             stages: The caller's stage modules, whose identities the recording keeps.
             eager: Produces the value returned whenever this call does not replay. It is a
                 fallback value, not necessarily the native result: :meth:`run` passes the
-                native forward, while :meth:`run_features` returns ``None`` so its caller
-                makes the full native call itself.
+                native forward, and so does :meth:`run_oriented`, while :meth:`run_features`
+                returns ``None`` so its caller makes the full native call itself.
             build: Composes the stages into the module checked for eligibility until a
                 recording exists, and captured by the first one.
             rebuild: Turns the replayed output tensors back into the caller's value.
