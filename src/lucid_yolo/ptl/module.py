@@ -218,6 +218,7 @@ from lucid_yolo.optim.schedule import warmup_decay_factor
 from lucid_yolo.ptl.coco_backend import build_mean_average_precision
 from lucid_yolo.ptl.network_capture import _detection_stages, _NetworkCapture, _NetworkCaptureLifecycle
 from lucid_yolo.ptl.seg_targets import instance_mask_targets, scale_boxes_to_grid, semantic_target
+from lucid_yolo.ptl.segment_head_capture import _SegmentHeadCapture, _SegmentHeadCaptureLifecycle
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -832,6 +833,9 @@ class DetectionLitModule(LightningModule):
             ignored otherwise (A38). Defaults to ``2.5``.
         semantic_gain: Weight on the auxiliary semantic term under
             ``task="segment"``, ignored otherwise (A38). Defaults to ``0.5``.
+        capture_segment_heads: Record independent CUDA segmentation prediction groups, including first-order backward.
+            Defaults to ``False``. Requires PyTorch 2.9 or newer, BF16 mixed precision and single-device automatic
+            optimization without accumulation. CPU, MPS, FP32, FP16 and validation keep native execution.
         angle_gain: Weight on R1 Eq. 15's square-object angle term under
             ``task="obb"``, ignored otherwise. Defaults to ``0.25`` (A22 — R1 does
             not state one, and :func:`~lucid_yolo.losses.angle_loss.square_angle_loss`
@@ -977,6 +981,7 @@ class DetectionLitModule(LightningModule):
         alpha_final: float = 0.1,
         mask_gain: float = 2.5,
         semantic_gain: float = 0.5,
+        capture_segment_heads: bool = False,
         angle_gain: float = 0.25,
         rotated_iou_form: str = DEFAULT_ROTATED_IOU_FORM,
         keypoint_gain: float = 1.0,
@@ -1047,10 +1052,7 @@ class DetectionLitModule(LightningModule):
             predict_angle=task == "obb",
             num_keypoints=num_keypoints if task == "keypoints" else None,
         )
-        if task == "segment":
-            self.proto_fusion, self.protonet, self.semantic = build_segmentation_stages(
-                self.neck.channels, num_classes, DEFAULT_NUM_COEFFS
-            )
+        self._init_segmentation(task, num_classes, capture_segment_heads, compile_step)
         #: The keypoint objective, held as a submodule because R14's flow is the only
         #: loss in the project carrying parameters — hence a submodule rather than a
         #: call. Constructed **after** the stages above so those ``Linear`` layers draw
@@ -1151,6 +1153,16 @@ class DetectionLitModule(LightningModule):
         #: Per-image-size cache of ``(anchor_points, stride_per_anchor)`` on CPU.
         self._anchor_cache: dict[tuple[int, int], tuple[Tensor, Tensor]] = {}
 
+    def _init_segmentation(self, task: str, num_classes: int, capture_segment_heads: bool, compile_step: bool) -> None:
+        """Build segmentation in its existing initialization order and retain its scheduling request."""
+        if capture_segment_heads and (task != "segment" or compile_step):
+            raise ValueError("capture_segment_heads=True requires task='segment' and compile_step=False")
+        self._segment_head_capture = _SegmentHeadCapture(capture_segment_heads)
+        if task == "segment":
+            self.proto_fusion, self.protonet, self.semantic = build_segmentation_stages(
+                self.neck.channels, num_classes, DEFAULT_NUM_COEFFS
+            )
+
     @property
     def task(self) -> str:
         """Supervision task this module was built for: ``"detect"``, ``"segment"``, ``"obb"`` or ``"keypoints"``.
@@ -1229,6 +1241,7 @@ class DetectionLitModule(LightningModule):
         """
         # `_trainer` rather than the `trainer` property: the property raises when nothing
         # is attached, and a bare module (every direct-call test) must stay set-up-able.
+        self._segment_head_capture.setup(self, stage)
         on_cuda = self._trainer is not None and isinstance(self._trainer.accelerator, CUDAAccelerator)
         if on_cuda:
             self.to(memory_format=torch.channels_last)
@@ -1265,7 +1278,10 @@ class DetectionLitModule(LightningModule):
 
     def configure_callbacks(self) -> list[Callback]:
         """Keep an opted-in network recording scoped to one fit."""
-        return [_NetworkCaptureLifecycle()] if self._capture_network else []
+        callbacks: list[Callback] = [_NetworkCaptureLifecycle()] if self._capture_network else []
+        if self._segment_head_capture.requested:
+            callbacks.append(_SegmentHeadCaptureLifecycle())
+        return callbacks
 
     def _compile_objective(self, on_cuda: bool) -> None:
         """Swap the compiled detection objective in, or warn once and stay eager (WP-184, D24).
@@ -1553,9 +1569,14 @@ class DetectionLitModule(LightningModule):
         if self._task != "segment":
             raise ValueError(f"forward_segmentation requires task='segment'; this module's task is {self._task!r}")
         features: tuple[Tensor, Tensor, Tensor] = self.neck(self.backbone(images))
-        detect = cast("DualHeadOutput", self.head(features))
+        runner = self._segment_head_capture.runner(self, features)
+        detect = cast("DualHeadOutput", self.head(features) if runner is None else self.head(features, _runner=runner))
         fused: Tensor = self.proto_fusion(features)
-        return SegmentOutput(detect=detect, prototypes=self.protonet(fused), semantic=self.semantic(fused))
+        if runner is None:
+            return SegmentOutput(detect=detect, prototypes=self.protonet(fused), semantic=self.semantic(fused))
+        return SegmentOutput(
+            detect=detect, prototypes=runner.mask(self.protonet, fused), semantic=runner.mask(self.semantic, fused)
+        )
 
     def forward_branch(self, images: Tensor, branch: BranchName) -> BranchOutput:
         """Run the backbone, neck, and **one** head branch over an image batch.

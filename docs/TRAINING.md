@@ -67,6 +67,14 @@ lucid-eval --checkpoint <checkpoint> --data_root /content/coco2017 --output seg_
 
 `lucid-eval` reads the task off the checkpoint and scores masks when the checkpoint has them, so the same command serves both COCO tiers. `--masks false` scores boxes only from a segmentation checkpoint.
 
+### Independent segmentation predictions on CUDA
+
+`--model.capture_segment_heads true --trainer.precision bf16-mixed` records the existing segmentation prediction routines, including their first-order backward work. The default is `false`. Box/class stems remain independent; coefficients, prototypes and semantic logits have separate backward nodes so an empty mask objective keeps absent gradients. Common features, prototype fusion, assignment, losses, state updates and schedules stay native.
+
+The verified route requires PyTorch 2.9 or newer, one CUDA device, automatic optimisation and `accumulate_grad_batches=1`. CPU, MPS, FP32, FP16 and older BF16 runtimes warn and use native calls; evaluation stays native too. Custom or changed prediction dispatch, hooks, frozen prediction parameters, aliased storage and retained feature gradients retire replay for the fit. A partial batch stays native without adding another graph. Copying, checkpoints and fit teardown retain the original parameter names and no recording.
+
+A recording failure raises after restoring running buffers and RNG state; disable the flag to keep that run native. The flag retains CUDA graph pools, so check reserved memory and throughput on the actual batch size. Measurements and rejected alternatives belong to [WP-193e](work_packages/wp-193e.md#wp-193e); a small-batch result does not establish a large-batch speed-up.
+
 ## 🕺 Keypoints — COCO 2017 `person_keypoints`
 
 The same COCO tree again, read through its other annotation file. `num_keypoints` is required and has no default — the point count is a property of the annotation schema, not something a model can pick.
