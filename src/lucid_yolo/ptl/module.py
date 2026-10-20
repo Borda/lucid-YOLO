@@ -224,6 +224,7 @@ from lucid_yolo.ptl.network_capture import (
     _NetworkCaptureLifecycle,
 )
 from lucid_yolo.ptl.seg_targets import instance_mask_targets, scale_boxes_to_grid, semantic_target
+from lucid_yolo.ptl.segment_head_capture import _SegmentHeadCapture, _SegmentHeadCaptureLifecycle
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -785,20 +786,33 @@ def _pose_head_breach(head: torch.nn.Module, topology: tuple[tuple[object, ...],
     return None
 
 
-def _validate_replay_options(task: str, compile_step: bool, capture_network: bool, capture_loss: bool) -> None:
+def _validate_replay_options(
+    task: str, compile_step: bool, capture_network: bool, capture_loss: bool, capture_segment_heads: bool
+) -> None:
     """Reject replay options outside the objectives they record.
 
     Network replay records the detection or pose stages; loss replay records the detection
-    objective only.
+    objective only; segment-head replay records the segmentation prediction groups only.
+    Segment-head replay refuses the compiler although ``compile_step`` leaves the segment
+    objective eager today, so an accepted configuration keeps its meaning once that
+    objective is compiled.
 
     Raises:
         ValueError: If network replay is combined with a task other than detection or
-            keypoints, loss replay with a task other than detection, or either with the compiler.
+            keypoints, loss replay with a task other than detection, segment-head replay
+            with a task other than segmentation, or any of them with the compiler
+            (segment-head replay included, for forward compatibility with a compiled
+            segment objective).
     """
     if capture_network and (task not in ("detect", "keypoints") or compile_step):
         raise ValueError("capture_network=True requires task='detect' or task='keypoints', and compile_step=False")
     if capture_loss and (task != "detect" or compile_step):
         raise ValueError("capture_loss=True requires task='detect' and compile_step=False")
+    if capture_segment_heads and (task != "segment" or compile_step):
+        raise ValueError(
+            "capture_segment_heads=True requires task='segment' and compile_step=False; the compiler is refused "
+            "even while the segment objective stays eager, so this configuration keeps its meaning once it is compiled"
+        )
 
 
 class DetectionLitModule(LightningModule):
@@ -991,12 +1005,19 @@ class DetectionLitModule(LightningModule):
             learning rate. Defaults to ``False``. Uses private gradient storage and live
             parameters and momentum; unsupported signatures stay native. Like
             ``capture_orthogonalization``, this has setup and retained-workspace costs.
+        capture_segment_heads: Record independent CUDA segmentation prediction groups, including first-order backward.
+            Defaults to ``False``. Requires ``task="segment"`` and ``compile_step=False``, PyTorch 2.9 or newer, BF16
+            mixed precision and single-device automatic optimization without accumulation. CPU, MPS, FP32, FP16 and
+            validation keep native execution. ``compile_step=True`` is refused rather than ignored, although it leaves
+            the segment objective eager today, so an accepted configuration keeps its meaning once that is compiled.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
             ``"keypoints"``, if ``rotated_iou_form`` is not a known rotated-IoU form,
             if ``capture_network`` is combined with a task other than detection or keypoints,
-            ``capture_loss`` with a non-detection task, or either with ``compile_step=True``,
+            ``capture_loss`` with a non-detection task, ``capture_segment_heads`` with a
+            non-segmentation task, or any of them with ``compile_step=True`` (for
+            ``capture_segment_heads``, forward compatibility with a compiled segment objective),
             if ``keypoint_loss`` is not a known keypoint objective, if
             ``task="keypoints"`` was asked for without a ``num_keypoints``, or if a
             ``num_keypoints`` was given for a task that builds no point stem.
@@ -1049,10 +1070,11 @@ class DetectionLitModule(LightningModule):
         capture_network: bool = False,
         capture_updates: bool = False,
         capture_loss: bool = False,
+        capture_segment_heads: bool = False,
     ) -> None:
         super().__init__()
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
-        _validate_replay_options(task, compile_step, capture_network, capture_loss)
+        _validate_replay_options(task, compile_step, capture_network, capture_loss, capture_segment_heads)
         self.save_hyperparameters()
         self._capture_loss, self._capture_loss_active = capture_loss, False
         self._capture_network, self._capture_network_active = capture_network, False
@@ -1110,10 +1132,7 @@ class DetectionLitModule(LightningModule):
             num_keypoints=num_keypoints if task == "keypoints" else None,
         )
         self._pose_head_topology = _pose_head_topology(self.head) if task == "keypoints" else ()
-        if task == "segment":
-            self.proto_fusion, self.protonet, self.semantic = build_segmentation_stages(
-                self.neck.channels, num_classes, DEFAULT_NUM_COEFFS
-            )
+        self._init_segmentation(task, num_classes, capture_segment_heads)
         #: The keypoint objective, held as a submodule because R14's flow is the only
         #: loss in the project carrying parameters — hence a submodule rather than a
         #: call. Constructed **after** the stages above so those ``Linear`` layers draw
@@ -1214,6 +1233,14 @@ class DetectionLitModule(LightningModule):
         #: Per-image-size cache of ``(anchor_points, stride_per_anchor)`` on CPU.
         self._anchor_cache: dict[tuple[int, int], tuple[Tensor, Tensor]] = {}
 
+    def _init_segmentation(self, task: str, num_classes: int, capture_segment_heads: bool) -> None:
+        """Build segmentation in its existing initialization order and retain its scheduling request."""
+        self._segment_head_capture = _SegmentHeadCapture(capture_segment_heads)
+        if task == "segment":
+            self.proto_fusion, self.protonet, self.semantic = build_segmentation_stages(
+                self.neck.channels, num_classes, DEFAULT_NUM_COEFFS
+            )
+
     @property
     def task(self) -> str:
         """Supervision task this module was built for: ``"detect"``, ``"segment"``, ``"obb"`` or ``"keypoints"``.
@@ -1292,6 +1319,7 @@ class DetectionLitModule(LightningModule):
         """
         # `_trainer` rather than the `trainer` property: the property raises when nothing
         # is attached, and a bare module (every direct-call test) must stay set-up-able.
+        self._segment_head_capture.setup(self, stage)
         on_cuda = self._trainer is not None and isinstance(self._trainer.accelerator, CUDAAccelerator)
         if on_cuda:
             self.to(memory_format=torch.channels_last)
@@ -1344,6 +1372,8 @@ class DetectionLitModule(LightningModule):
         callbacks: list[Callback] = [_NetworkCaptureLifecycle()] if self._capture_network else []
         if self._capture_loss:
             callbacks.append(_LossCaptureLifecycle())
+        if self._segment_head_capture.requested:
+            callbacks.append(_SegmentHeadCaptureLifecycle())
         return callbacks
 
     def _compile_objective(self, on_cuda: bool) -> None:
@@ -1677,9 +1707,14 @@ class DetectionLitModule(LightningModule):
         if self._task != "segment":
             raise ValueError(f"forward_segmentation requires task='segment'; this module's task is {self._task!r}")
         features: tuple[Tensor, Tensor, Tensor] = self.neck(self.backbone(images))
-        detect = cast("DualHeadOutput", self.head(features))
+        runner = self._segment_head_capture.runner(self, features)
+        detect = cast("DualHeadOutput", self.head(features) if runner is None else self.head(features, _runner=runner))
         fused: Tensor = self.proto_fusion(features)
-        return SegmentOutput(detect=detect, prototypes=self.protonet(fused), semantic=self.semantic(fused))
+        if runner is None:
+            return SegmentOutput(detect=detect, prototypes=self.protonet(fused), semantic=self.semantic(fused))
+        return SegmentOutput(
+            detect=detect, prototypes=runner.mask(self.protonet, fused), semantic=runner.mask(self.semantic, fused)
+        )
 
     def forward_branch(self, images: Tensor, branch: BranchName) -> BranchOutput:
         """Run the backbone, neck, and **one** head branch over an image batch.
