@@ -2,9 +2,9 @@
 
 > Engineering log · [Phase 17 — R1 pose-objective parity](https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/)
 >
-> 🔗 Depends on [WP-193b](https://borda.github.io/lucid-YOLO/work_packages/wp-193b/) · Needed by none
+> 🔗 Depends on [WP-193b](https://borda.github.io/lucid-YOLO/work_packages/wp-193b/) · Needed by [WP-193d](https://borda.github.io/lucid-YOLO/work_packages/wp-193d/)
 >
-> ⬅️ [WP-193b](https://borda.github.io/lucid-YOLO/work_packages/wp-193b/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/) ➡️
+> ⬅️ [WP-193b](https://borda.github.io/lucid-YOLO/work_packages/wp-193b/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-193d](https://borda.github.io/lucid-YOLO/work_packages/wp-193d/) ➡️
 
 
 ## WP-193c — replay the network, keep the dynamic objective eager

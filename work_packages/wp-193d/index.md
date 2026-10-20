@@ -1,0 +1,33 @@
+# 📦 WP-193d — `perf(ptl): replay shared features in small-batch CUDA pose training`
+
+> Engineering log · [Phase 17 — R1 pose-objective parity](https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/)
+>
+> 🔗 Depends on [WP-193c](https://borda.github.io/lucid-YOLO/work_packages/wp-193c/) · Needed by none
+>
+> ⬅️ [WP-193c](https://borda.github.io/lucid-YOLO/work_packages/wp-193c/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/) ➡️
+
+
+## WP-193d — replay shared pose features, preserve native head supervision
+
+<a id="wp-193d"></a>
+
+**Replay the shared backbone and neck; keep the pose head native.** The source is the current backbone/neck/head composition and R43's forward/backward recording API. Detection keeps its original recording. Pose records only backbone and neck, then runs its complete dual head and current objectives natively. A batch with no assigned positives leaves the native point stems' gradients absent. Recording those stems too materializes zero gradients, advancing optimizer state the native loop skips; the synthetic empty-batch regression (`tests/ptl/test_pose_network_capture.py::test_pose_trainer_matches_native`, `layout="empty"`) therefore rejects that larger recording even though an ordinary public-data fit matched it. No model, assignment, loss or optimizer arithmetic changes.
+
+**One fit owns one signature.** Pose uses the existing `--model.capture_network true`; its default remains `false`. Single-device CUDA automatic optimisation is required. Pose with gradient accumulation stays native: the shared recorder's accumulation checks diverge on the unchanged baseline. Frozen features, modified head topology or forwards, head hooks and compilation also stay native. Returning no features on an unsupported call lets the owner make its complete native call, preserving root and global hook observability. The recording core and detection tensor adapter retain their original execution; only the recorded stage factory and output adapter vary. Buffer/RNG rollback, precision/storage checks, first-order-only autograd and fit cleanup remain the existing contract.
+
+**The owner was measured before the patch.** Four instrumented native training steps took about 1.541 s; backbone and neck forward calls accounted for 176.352 ms, or 11.45%, before their backward work. The candidate trace has no corresponding Python forward calls in steady replay and keeps the native head. Those instrumented shares diagnose launch overhead; they are not the end-to-end speed claim.
+
+**Five complete, alternating pairs.** Fresh processes trained the registered nano pose model on 384 original COCO val2017 images with annotated persons and 32 disjoint validation images, five epochs, batch 4, 640 px, BF16, seed 123. The isolated g2-standard-8 used NVIDIA L4, driver 580.178.04, torch 2.9.1+cu129 and Lightning 2.6.6. Both arms enabled prepared-image caching, device HSV, epoch prefetch, orthogonalization replay and optimizer-update replay. Complete fit time includes model/trainer construction, cache/recording setup, augmentation, forward/backward, clipping, optimizer, EMA, validation and checkpoints. The cohort starts on a newly provisioned VM after focused tests; first-use fit costs remain in the measurements and process order alternates. No profiler ran in the final pairs.
+
+| Metric | Native median (range) | Feature replay median (range) |
+| -- | -- | -- |
+| Complete fit, s | 118.243 (117.791–121.846) | 105.033 (104.321–105.394) |
+| Whole process, s | 123.826 (123.404–127.564) | 110.666 (109.886–111.013) |
+| Post-warmup CUDA step, ms | 194.433 (193.751–196.155) | 165.304 (164.386–166.928) |
+| Peak allocated, MiB | 913.041 (913.041–913.041) | 687.645 (687.645–687.645) |
+| Peak reserved, MiB | 1178.000 (1178.000–1178.000) | 1392.000 (1392.000–1394.000) |
+
+Complete-fit time falls **11.17%**, with paired reductions 10.68–14.27%. In these five pairs, all model, optimizer, scheduler, EMA and per-step-loss byte hashes match; validation metrics agree. The native baseline also reproduces itself. CUDA events exclude the first 64 steps per run; the complete fit uses device synchronisation at both timing boundaries. The one-pair batch-16 screen changes fit time by 2.50% and preserves those same states; it is exploratory, not a repeated headline. These complete-fit measurement runs, made outside the test suite, are the only source for the scheduler, EMA, per-step-loss and validation parity: the in-repo pose regression (`tests/ptl/test_pose_network_capture.py::test_pose_trainer_matches_native`) compares only model, optimizer and scaler state after one epoch, with no validation, EMA or resume.
+
+**Compatibility and remaining evidence.** All 27 focused cases pass on both torch 2.9.1 and torch 2.4.0, in one command per runtime with explicit UTF-8 configuration reading. BF16 on torch 2.4 stays native. The 17 CUDA cases carry the GPU marker selected by the accelerator gate; the head certificate also rejects instance and class overrides of `forward_branch`. Coverage includes empty and nonempty batches, FP32/FP16/BF16, clipped accumulation fallback, CLI construction, copied head certificates, branch-dispatch overrides, frozen features and head/global hooks. The branch-override regression fails with the previous guard reinstated in memory. Full pre-commit and strict mypy pass. Existing CUDA accumulation failures reproduce on the unmodified baseline and are outside this scheduling change; their test ids and runtime are not recorded here, and the decisions they raise are open in `docs/ESCALATION.md` (2026-10-20). Full `make gate`, accelerator goldens, other accelerators and long-run acceptance accuracy remain unverified; this package stays open.
+

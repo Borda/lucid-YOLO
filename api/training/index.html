@@ -5555,10 +5555,20 @@ Extra workspace and setup can outweigh the saving on short runs.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Replay the existing detection network's CUDA forward and backward
+                <p>Replay fixed detection or keypoint network stages' CUDA forward and backward
 with :func:<code>torch.cuda.make_graphed_callables</code>. Defaults to <code>False</code> because
-capture pays setup and retains a graph pool. Requires <code>task="detect"</code>,
-<code>compile_step=False</code> and single-device CUDA automatic optimization.
+capture pays setup and retains a graph pool. Requires
+<code>task="detect"</code> or <code>task="keypoints"</code>, <code>compile_step=False</code> and
+single-device CUDA automatic optimization.
+Pose records backbone and neck; its head stays native to preserve absent
+gradients in batches with no assigned positives. Pose training stays eager
+under gradient accumulation, with a fully frozen backbone and neck, or when
+the head's topology or class forward changed since construction or a head
+module is hooked, overridden or compiled. The trainable set is fixed per fit
+at the first recording: a fully frozen start, or a later freeze or unfreeze
+of a recorded parameter, keeps the rest of that fit eager after one warning.
+Either task stays eager when the LightningModule carries a hook, overrides
+<code>forward</code> or is compiled.
 Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
 One image signature is recorded per fit; partial batches stay eager and
 changed storage, modes, hooks or precision retire the recording. Warmup
@@ -5634,8 +5644,9 @@ parameters and momentum; unsupported signatures stay native. Like
               <div class="doc-md-description">
                 <p>If <code>task</code> is not one of <code>"detect"</code>, <code>"segment"</code>, <code>"obb"</code>,
 <code>"keypoints"</code>, if <code>rotated_iou_form</code> is not a known rotated-IoU form,
-if <code>capture_network</code> or <code>capture_loss</code> is combined with a non-detection
-task or <code>compile_step=True</code>, if <code>keypoint_loss</code> is not a known keypoint objective, if
+if <code>capture_network</code> is combined with a task other than detection or keypoints,
+<code>capture_loss</code> with a non-detection task, or either with <code>compile_step=True</code>,
+if <code>keypoint_loss</code> is not a known keypoint objective, if
 <code>task="keypoints"</code> was asked for without a <code>num_keypoints</code>, or if a
 <code>num_keypoints</code> was given for a task that builds no point stem.</p>
               </div>

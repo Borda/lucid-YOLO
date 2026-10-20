@@ -4083,6 +4083,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#wp-193d-replay-shared-pose-features-preserve-native-head-supervision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-193d — replay shared pose features, preserve native head supervision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#wp-194-static-checks-leave-pytest-test-names-lose-their-filler-words" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4356,6 +4367,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#wp-193d-replay-shared-pose-features-preserve-native-head-supervision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-193d — replay shared pose features, preserve native head supervision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#wp-194-static-checks-leave-pytest-test-names-lose-their-filler-words" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4538,6 +4560,50 @@
 <p><strong>Memory has two directions.</strong> Median peak allocated memory fell from 828.5 MiB (822.0-831.4) to 711.3 MiB (711.3-711.3), while median peak reserved memory rose from 1022.0 MiB (1022.0-1038.0) to 1260.0 MiB (1260.0-1262.0). The graph pool is a cost of the opt-in path; no avoided-OOM or batch-capacity improvement is claimed. Fit callbacks drop the holder's recording, rather than promising that every outstanding autograd reference or allocator reservation vanishes immediately.</p>
 <p><strong>The speed claim is limited to this small-batch workload.</strong> Batch-32 screens changed direction relative to the batch-4 result, so the gain above is not a general claim; the shipped detection recipes train at batch 16, which was not measured here.</p>
 <p><strong>Validation remains explicitly bounded.</strong> Full <code>make gate</code>, accelerator goldens and final accuracy have not been run; this row stays open on those checks. Focused regression tests and timing logs are retained with the contribution's review evidence.</p>
+<h2 id="wp-193d-replay-shared-pose-features-preserve-native-head-supervision">WP-193d — replay shared pose features, preserve native head supervision<a class="headerlink" href="#wp-193d-replay-shared-pose-features-preserve-native-head-supervision" title="Permanent link">&para;</a></h2>
+<p><a id="wp-193d"></a></p>
+<p><strong>Replay the shared backbone and neck; keep the pose head native.</strong> The source is the current backbone/neck/head composition and R43's forward/backward recording API. Detection keeps its original recording. Pose records only backbone and neck, then runs its complete dual head and current objectives natively. A batch with no assigned positives leaves the native point stems' gradients absent. Recording those stems too materializes zero gradients, advancing optimizer state the native loop skips; the synthetic empty-batch regression (<code>tests/ptl/test_pose_network_capture.py::test_pose_trainer_matches_native</code>, <code>layout="empty"</code>) therefore rejects that larger recording even though an ordinary public-data fit matched it. No model, assignment, loss or optimizer arithmetic changes.</p>
+<p><strong>One fit owns one signature.</strong> Pose uses the existing <code>--model.capture_network true</code>; its default remains <code>false</code>. Single-device CUDA automatic optimisation is required. Pose with gradient accumulation stays native: the shared recorder's accumulation checks diverge on the unchanged baseline. Frozen features, modified head topology or forwards, head hooks and compilation also stay native. Returning no features on an unsupported call lets the owner make its complete native call, preserving root and global hook observability. The recording core and detection tensor adapter retain their original execution; only the recorded stage factory and output adapter vary. Buffer/RNG rollback, precision/storage checks, first-order-only autograd and fit cleanup remain the existing contract.</p>
+<p><strong>The owner was measured before the patch.</strong> Four instrumented native training steps took about 1.541 s; backbone and neck forward calls accounted for 176.352 ms, or 11.45%, before their backward work. The candidate trace has no corresponding Python forward calls in steady replay and keeps the native head. Those instrumented shares diagnose launch overhead; they are not the end-to-end speed claim.</p>
+<p><strong>Five complete, alternating pairs.</strong> Fresh processes trained the registered nano pose model on 384 original COCO val2017 images with annotated persons and 32 disjoint validation images, five epochs, batch 4, 640 px, BF16, seed 123. The isolated g2-standard-8 used NVIDIA L4, driver 580.178.04, torch 2.9.1+cu129 and Lightning 2.6.6. Both arms enabled prepared-image caching, device HSV, epoch prefetch, orthogonalization replay and optimizer-update replay. Complete fit time includes model/trainer construction, cache/recording setup, augmentation, forward/backward, clipping, optimizer, EMA, validation and checkpoints. The cohort starts on a newly provisioned VM after focused tests; first-use fit costs remain in the measurements and process order alternates. No profiler ran in the final pairs.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Native median (range)</th>
+<th>Feature replay median (range)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Complete fit, s</td>
+<td>118.243 (117.791–121.846)</td>
+<td>105.033 (104.321–105.394)</td>
+</tr>
+<tr>
+<td>Whole process, s</td>
+<td>123.826 (123.404–127.564)</td>
+<td>110.666 (109.886–111.013)</td>
+</tr>
+<tr>
+<td>Post-warmup CUDA step, ms</td>
+<td>194.433 (193.751–196.155)</td>
+<td>165.304 (164.386–166.928)</td>
+</tr>
+<tr>
+<td>Peak allocated, MiB</td>
+<td>913.041 (913.041–913.041)</td>
+<td>687.645 (687.645–687.645)</td>
+</tr>
+<tr>
+<td>Peak reserved, MiB</td>
+<td>1178.000 (1178.000–1178.000)</td>
+<td>1392.000 (1392.000–1394.000)</td>
+</tr>
+</tbody>
+</table>
+<p>Complete-fit time falls <strong>11.17%</strong>, with paired reductions 10.68–14.27%. In these five pairs, all model, optimizer, scheduler, EMA and per-step-loss byte hashes match; validation metrics agree. The native baseline also reproduces itself. CUDA events exclude the first 64 steps per run; the complete fit uses device synchronisation at both timing boundaries. The one-pair batch-16 screen changes fit time by 2.50% and preserves those same states; it is exploratory, not a repeated headline. These complete-fit measurement runs, made outside the test suite, are the only source for the scheduler, EMA, per-step-loss and validation parity: the in-repo pose regression (<code>tests/ptl/test_pose_network_capture.py::test_pose_trainer_matches_native</code>) compares only model, optimizer and scaler state after one epoch, with no validation, EMA or resume.</p>
+<p><strong>Compatibility and remaining evidence.</strong> All 27 focused cases pass on both torch 2.9.1 and torch 2.4.0, in one command per runtime with explicit UTF-8 configuration reading. BF16 on torch 2.4 stays native. The 17 CUDA cases carry the GPU marker selected by the accelerator gate; the head certificate also rejects instance and class overrides of <code>forward_branch</code>. Coverage includes empty and nonempty batches, FP32/FP16/BF16, clipped accumulation fallback, CLI construction, copied head certificates, branch-dispatch overrides, frozen features and head/global hooks. The branch-override regression fails with the previous guard reinstated in memory. Full pre-commit and strict mypy pass. Existing CUDA accumulation failures reproduce on the unmodified baseline and are outside this scheduling change; their test ids and runtime are not recorded here, and the decisions they raise are open in <code>docs/ESCALATION.md</code> (2026-10-20). Full <code>make gate</code>, accelerator goldens, other accelerators and long-run acceptance accuracy remain unverified; this package stays open.</p>
 <h2 id="wp-194-static-checks-leave-pytest-test-names-lose-their-filler-words">WP-194 — static checks leave pytest, test names lose their filler words<a class="headerlink" href="#wp-194-static-checks-leave-pytest-test-names-lose-their-filler-words" title="Permanent link">&para;</a></h2>
 <p><a id="wp-194"></a></p>
 <p><strong>Pytest owns behaviour; hooks own file content.</strong> A scan of <code>tests/</code> and <code>scripts/_tests/</code> found four tests in <code>tests/</code> that read a file as text and exercised no code, and fourteen in <code>scripts/_tests/</code> that asserted a hook passes on the live tree. The second group repeated what <code>lint.yml</code> and <code>make gate</code> already run, since both call <code>pre-commit run --all-files</code>, so those tests are deleted rather than moved. The first group moved: the matplotlib and <code>_viz</code> import boundary under <code>src/</code> is ruff <code>TID251</code> banned-api with per-file ignores for <code>_viz</code>, <code>scripts/</code>, <code>tests/</code> and <code>notebooks/</code>. A probe module holding two function-local imports showed the rule fires on both, which is the case the regex test existed for. The top-k decoder's no-suppression text pin and the two packaged-recipe pins (no <code>deterministic:</code>, <code>task:</code> outside <code>det_*</code>) became the <code>content-pins</code> hook, <code>scripts/lint/audit_content_pins.py</code>, with its functional core in <code>scripts/_tests/test_audit_content_pins.py</code>. The runtime <code>sys.modules</code> probes in <code>tests/viz/test_import_surface.py</code> stay in pytest because they import code. Two kept groups in <code>test_check_commit_trailers.py</code> also read the real register, <code>TestPlaceholderRows</code> and <code>TestAssumptionRegister</code>; they stay because they test how the parser reads that register. Removed alongside: the register-contiguity assertion, which <code>docs-present</code> already checks, and the docstring-path assertion on the trailer script.</p>

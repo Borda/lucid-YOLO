@@ -2240,6 +2240,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#2026-10-20-wp-193d-cuda-accumulation-checks-fail-on-the-unmodified-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-10-20 — WP-193d CUDA accumulation checks fail on the unmodified baseline
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4210,6 +4221,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#2026-10-20-wp-193d-cuda-accumulation-checks-fail-on-the-unmodified-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-10-20 — WP-193d CUDA accumulation checks fail on the unmodified baseline
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4317,6 +4339,19 @@
 <li><strong>Decision requested</strong>: (1) a three-seed control, baseline against <a href="../work_packages/wp-183/">WP-183</a>, on both tasks, before deciding (about two A100-hours); (2) reseal both goldens on the current tree at the measured values — a statement about gate calibration on this machine, not about <a href="../work_packages/wp-183/">WP-183</a>; (3) re-freeze on a multi-seed band (the <a href="../work_packages/wp-177/">WP-177</a> entry's option 3), which would resolve both entries at once. Reverting <a href="../work_packages/wp-183/">WP-183</a> is not offered: it is what lets the training step trace as one graph (WP-184), and it is loss-identical per step.</li>
 <li><strong>Resolution</strong> (filled by the principal, 2026-09-19): Option 2. <code>goldens/gpu/overfit_micro_kp.json</code> is resealed at <code>0.491935 ± 0.05</code> and <code>goldens/gpu/overfit_micro_obb.json</code> at <code>0.908802 ± 0.008802</code> — the oriented tolerance is <code>clamped_tolerance</code>'s <code>min(0.05, score − 0.9)</code>, so that band is now as narrow as the score's headroom above its floor, and the next environmental move on obb will be reported rather than absorbed. Recorded as WP-186. The <a href="../work_packages/wp-177/">WP-177</a> entry stays pending on its own question; this resolution does not answer it.</li>
 <li><strong>Follow-up (2026-09-20, Colab rounds 4–5, same A100)</strong>: the three-seed control the entry asked for was run afterwards, per commit — baseline <code>30aea93</code>, WP-182 <code>16f4101</code>, HEAD <code>37f3ce5</code> (<a href="../work_packages/wp-183/">WP-183</a> plus the compile flag off) — at seeds 0, 1, 2. Keypoints <code>train_oks_ap</code>: baseline <code>0.5696 / 0.6187 / 0.5331</code>, WP-182 <code>0.5486 / 0.7259 / 0.5858</code>, HEAD <code>0.4919 / 0.5668 / 0.5715</code>; oriented <code>train_rotated_map50</code>: baseline <code>0.9783 / 0.9690 / 0.9696</code>, WP-182 <code>0.9388 / 0.9628 / 0.9544</code>, HEAD <code>0.9088 / 0.9379 / 0.9670</code>. The oriented move that looked monotone at HEAD (3 of 3 seeds down, mean <code>−0.034</code>) belongs to WP-182 (<code>−0.020</code>, 3 of 3) and not to <a href="../work_packages/wp-183/">WP-183</a> (<code>−0.014</code>, 2 of 3, seed 2 up) — a memory-layout change that alters no arithmetic produces the same signature as the loss rewrite, which is the control that says the signature is trajectory chaos rather than a bias. Keypoints span <code>0.49</code>–<code>0.73</code> across the nine runs; the two 3-of-3 sign results out of four comparisons, one per WP, are what a null with <code>p = 0.125</code> each expects. Reading: no evidence of a systematic move on either WP; the reseal stands as calibration; the band widths (<code>± 0.05</code> inside a <code>± 0.12</code> process, <code>± 0.0088</code> inside <code>± 0.03</code>) are the <a href="../work_packages/wp-177/">WP-177</a> entry's question and remain with it. Notebooks <code>results/compile_gate.ipynb</code>, <code>results/compile_gate_round5.ipynb</code>.</li>
+</ul>
+<h2 id="2026-10-20-wp-193d-cuda-accumulation-checks-fail-on-the-unmodified-baseline">2026-10-20 — WP-193d CUDA accumulation checks fail on the unmodified baseline<a class="headerlink" href="#2026-10-20-wp-193d-cuda-accumulation-checks-fail-on-the-unmodified-baseline" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Symptom</strong>: <a href="../work_packages/wp-193d/">WP-193d</a> keeps pose replay native under gradient accumulation because "the shared recorder's accumulation checks diverge on the unchanged baseline", and records that "existing CUDA accumulation failures reproduce on the unmodified baseline and are outside this scheduling change". Which tests fail is not recorded in <a href="../work_packages/wp-193d/">WP-193d</a>, and neither is the torch version or driver they failed on: the torch 2.9.1 and 2.4.0 runs and driver 580.178.04 it names belong to its passing focused cases and its timing cohort, not to these failures, so the divergence cannot be re-run from the record as written. The rest of the record still describes accumulation as safe — <a href="../work_packages/wp-193c/">WP-193c</a>'s "Accumulation retains its own gradients" paragraph, and <code>docs/TRAINING.md</code>'s "Accumulation or custom optimiser/zero-grad hooks preserve live gradients outside the graph-owned backward buffers" — while the accumulation guard in <code>DetectionLitModule._training_network</code> (<code>src/lucid_yolo/ptl/module.py</code>) retires keypoint replay only, so detection replay under accumulation keeps running. No sec. 4 trigger fires literally: no gate failed after two assumption iterations and no frozen golden moves. The entry is written because the questions below are principal decisions and this log is where the next agent looks for them.</li>
+<li><strong>Hypotheses tried</strong> (with ASSUMPTIONS.md revision ids): none opened. <a href="../work_packages/wp-193d/">WP-193d</a> treats the failures as pre-existing and outside its change, and contains them for pose by staying native rather than diagnosing them; no ASSUMPTIONS.md revision was made.</li>
+<li><strong>Sources consulted</strong> (allowlisted only): <a href="../work_packages/wp-193d/">WP-193d</a> ("One fit owns one signature" and "Compatibility and remaining evidence"), <a href="../work_packages/wp-193c/">WP-193c</a> ("Accumulation retains its own gradients"), <code>docs/TRAINING.md</code> "Opt-in CUDA network replay", <code>src/lucid_yolo/ptl/module.py</code> <code>_training_network</code>, <code>src/lucid_yolo/ptl/network_capture.py</code> <code>_before_replayed_backward</code>, AGENTS.md sec. 4 and sec. 7.</li>
+<li><strong>Decision requested</strong>: three, none of which an executing agent can settle from the code.<ol>
+<li><strong>Whether detection replay must also stay native under gradient accumulation</strong>, as pose already does — the guard covers <code>task: keypoints</code> only — and whether that change lands as its own work package.</li>
+<li><strong>Whether <code>docs/TRAINING.md</code> and <a href="../work_packages/wp-193c/">WP-193c</a> gain an accumulation caveat now</strong>, before the divergence is reproduced on CUDA with named tests and runtime, or only once it is.</li>
+<li><strong>Whether CUDA cases failing on the unmodified baseline count as a red <code>main</code></strong> under sec. 7, given that the offline gate runs without a GPU.</li>
+</ol>
+</li>
+<li><strong>Resolution</strong> (filled by the principal): <em>pending — awaiting decision; <a href="../work_packages/wp-193d/">WP-193d</a> stays <code>🔄</code> in <code>docs/ROADMAP.md</code> until answered.</em></li>
 </ul>
 
 
