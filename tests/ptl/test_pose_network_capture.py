@@ -149,7 +149,12 @@ def test_pose_replay_keeps_outputs_gradients_buffers(
 
 
 def _assert_same_gradients_and_state(native: DetectionLitModule, replayed: DetectionLitModule) -> None:
-    """Require equal gradient presence and bytes, and equal parameters and buffers, after a step."""
+    """Require equal gradient presence and bytes, and equal parameters and buffers, after a step.
+
+    Examples:
+        >>> model = _pose()
+        >>> _assert_same_gradients_and_state(model, copy.deepcopy(model))
+    """
     for (name, left), (_, right) in zip(native.named_parameters(), replayed.named_parameters(), strict=True):
         if left.grad is None:
             assert right.grad is None, name
@@ -160,7 +165,11 @@ def _assert_same_gradients_and_state(native: DetectionLitModule, replayed: Detec
 
 
 def _frozen_pair(freeze: tuple[str, ...]) -> tuple[DetectionLitModule, DetectionLitModule]:
-    """Build a native and a replaying CUDA pose module with equal weights and the same stages frozen."""
+    """Build a native and a replaying CUDA pose module with equal weights and the same stages frozen.
+
+    Examples:
+        >>> native, replayed = _frozen_pair(("backbone",))  # needs CUDA  # doctest: +SKIP
+    """
     torch.manual_seed(42)
     native = _pose().cuda().to(memory_format=torch.channels_last)
     replayed = _routed_pose().cuda().to(memory_format=torch.channels_last)
@@ -174,7 +183,13 @@ def _frozen_pair(freeze: tuple[str, ...]) -> tuple[DetectionLitModule, Detection
 def _step_pair(
     native: DetectionLitModule, replayed: DetectionLitModule, optimizers: list[torch.optim.Optimizer]
 ) -> None:
-    """Run one classification-plus-points SGD step on a fresh batch through each arm and require equal results."""
+    """Run one classification-plus-points SGD step on a fresh batch through each arm and require equal results.
+
+    Examples:
+        >>> pair = _frozen_pair(())  # needs CUDA  # doctest: +SKIP
+        >>> optimizers = [torch.optim.SGD(m.parameters(), lr=0.1) for m in pair]  # needs CUDA  # doctest: +SKIP
+        >>> _step_pair(*pair, optimizers)  # needs CUDA  # doctest: +SKIP
+    """
     image = torch.rand(2, 3, 64, 64, device="cuda").contiguous(memory_format=torch.channels_last)
     outputs = []
     for model, optimizer in zip((native, replayed), optimizers, strict=True):
@@ -577,7 +592,15 @@ def _cuda_flagged_images() -> torch.Tensor:
 
 
 def _count_backbone_calls(model: DetectionLitModule) -> list[None]:
-    """Record each full native forward through the backbone, which only a native fallback performs."""
+    """Record each full native forward through the backbone, which only a native fallback performs.
+
+    Examples:
+        >>> model = _pose()
+        >>> calls = _count_backbone_calls(model)
+        >>> _ = model(torch.rand(2, 3, 64, 64))
+        >>> len(calls)
+        1
+    """
     calls: list[None] = []
     model.backbone.register_forward_hook(lambda *_: calls.append(None))
     return calls
