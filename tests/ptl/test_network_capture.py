@@ -90,14 +90,14 @@ def test_default_has_no_callback_or_registered_state() -> None:
     "kwargs",
     [
         pytest.param({"task": "segment"}, id="segment"),
-        pytest.param({"task": "obb"}, id="obb"),
+        pytest.param({"task": "obb", "compile_step": True}, id="obb-compile-step"),
         pytest.param({"compile_step": True}, id="detect-compile-step"),
         pytest.param({"task": "keypoints", "num_keypoints": 5, "compile_step": True}, id="keypoints-compile-step"),
     ],
 )
 def test_incompatible_options_are_explicit(kwargs: dict[str, object]) -> None:
     """Unsupported tasks and the separate compiler path fail before training begins."""
-    with pytest.raises(ValueError, match="requires task='detect' or task='keypoints', and compile_step=False"):
+    with pytest.raises(ValueError, match=r"requires task=.*compile_step=False"):
         _module(capture_network=True, **kwargs)
 
 
