@@ -79,7 +79,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal, Protocol, cast
 
 import torch
 from torch import Tensor, nn
@@ -553,6 +553,18 @@ class BranchOutput:
     keypoint_sigma: Tensor | None = None
 
 
+class _PredictionRunner(Protocol):
+    """Schedule existing branch calls without choosing their prediction arithmetic."""
+
+    def stem(self, stage: nn.Module, feature: Tensor) -> Tensor:
+        """Return one stem without combining its contribution to the shared-feature gradient."""
+        ...
+
+    def coefficients(self, branch: _DetectionBranch, features: tuple[Tensor, Tensor, Tensor]) -> Tensor | None:
+        """Return its native mask coefficients, with their own autograd boundary."""
+        ...
+
+
 class _DetectionBranch(nn.Module):
     """One prediction branch: per-level box/class stems plus optional extra stems.
 
@@ -607,7 +619,9 @@ class _DetectionBranch(nn.Module):
                 _build_keypoint_stem(channels, num_keypoints) for channels in in_channels
             )
 
-    def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> BranchOutput:
+    def forward(
+        self, features: tuple[Tensor, Tensor, Tensor], *, _runner: _PredictionRunner | None = None
+    ) -> BranchOutput:
         """Predict dense scores, ltrb distances, and whichever optional outputs exist.
 
         The result carries a **fixed** set of named fields whatever the branch
@@ -620,6 +634,8 @@ class _DetectionBranch(nn.Module):
 
         Args:
             features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32.
+            _runner: Private scheduling seam of the opt-in CUDA prediction replay, not
+                public API. ``None``, the default, calls every stem natively.
 
         Returns:
             A :class:`BranchOutput` whose ``cls`` is raw class logits ``(B, A,
@@ -629,22 +645,36 @@ class _DetectionBranch(nn.Module):
             two fields are raw ``(B, A, K, 2)`` coordinate offsets and unbounded
             uncertainty or ``None``. ``A`` sums ``H * W`` over levels.
         """
-        cls_levels: list[Tensor] = []
-        box_levels: list[Tensor] = []
-        for feature, box_stem, cls_stem in zip(features, self.box_stems, self.cls_stems, strict=True):
-            box_levels.append(_flatten_level(box_stem(feature)))
-            cls_levels.append(_flatten_level(cls_stem(feature)))
-        cls = torch.cat(cls_levels, dim=1)
-        box = torch.cat(box_levels, dim=1)
+        cls, box = self._base_predictions(features, _runner=_runner)
         keypoints, keypoint_sigma = self._keypoints(features)
         return BranchOutput(
             cls=cls,
             box=box,
-            coeff=self._coefficients(features),
+            coeff=self._coefficients(features) if _runner is None else _runner.coefficients(self, features),
             angle=self._angles(features),
             keypoints=keypoints,
             keypoint_sigma=keypoint_sigma,
         )
+
+    def _base_predictions(
+        self, features: tuple[Tensor, Tensor, Tensor], *, _runner: _PredictionRunner | None = None
+    ) -> tuple[Tensor, Tensor]:
+        """Run the existing interleaved box/class stems and concatenate each output.
+
+        Kept apart from coefficients so a scheduling adapter cannot materialize
+        mask-parameter gradients when the native mask loss reads no coefficients.
+        The per-level order, flattening and concatenations are unchanged.
+        """
+        cls_levels: list[Tensor] = []
+        box_levels: list[Tensor] = []
+        for feature, box_stem, cls_stem in zip(features, self.box_stems, self.cls_stems, strict=True):
+            box_map = box_stem(feature) if _runner is None else _runner.stem(box_stem, feature)
+            box_levels.append(_flatten_level(box_map))
+            cls_map = cls_stem(feature) if _runner is None else _runner.stem(cls_stem, feature)
+            cls_levels.append(_flatten_level(cls_map))
+        cls = torch.cat(cls_levels, dim=1)
+        box = torch.cat(box_levels, dim=1)
+        return cls, box
 
     def _coefficients(self, features: tuple[Tensor, Tensor, Tensor]) -> Tensor | None:
         """Run the coefficient stems, tanh-activated, or return ``None`` if absent.
@@ -837,7 +867,9 @@ class DualDetectionHead(nn.Module):
             num_keypoints=num_keypoints,
         )
 
-    def forward_branch(self, features: tuple[Tensor, Tensor, Tensor], branch: BranchName) -> BranchOutput:
+    def forward_branch(
+        self, features: tuple[Tensor, Tensor, Tensor], branch: BranchName, *, _runner: _PredictionRunner | None = None
+    ) -> BranchOutput:
         """Run **one** named branch over the neck features.
 
         :meth:`forward` runs both because training needs both: the one-to-many branch
@@ -856,6 +888,8 @@ class DualDetectionHead(nn.Module):
             features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32, with
                 channel counts matching the constructor's ``in_channels``.
             branch: Which branch to run, one of :data:`BRANCH_NAMES`.
+            _runner: Private scheduling seam of the opt-in CUDA prediction replay, passed
+                on to the branch; not public API. ``None``, the default, is the native call.
 
         Returns:
             That branch's :class:`BranchOutput`: dense class logits, raw ltrb distances,
@@ -883,14 +917,18 @@ class DualDetectionHead(nn.Module):
         """
         require_one_of("branch", branch, BRANCH_NAMES)
         selected = self.o2o if branch == "o2o" else self.o2m
-        return cast("BranchOutput", selected(features))
+        return cast("BranchOutput", selected(features, _runner=_runner))
 
-    def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> DualHeadOutput:
+    def forward(
+        self, features: tuple[Tensor, Tensor, Tensor], *, _runner: _PredictionRunner | None = None
+    ) -> DualHeadOutput:
         """Run both branches over the neck features.
 
         Args:
             features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32,
                 with channel counts matching the constructor's ``in_channels``.
+            _runner: Private scheduling seam of the opt-in CUDA prediction replay, passed
+                on to both branches; not public API. ``None``, the default, is the native call.
 
         Returns:
             A :class:`DualHeadOutput` with dense class logits, raw ltrb
@@ -898,8 +936,8 @@ class DualDetectionHead(nn.Module):
             coefficients, raw orientation angles, and raw point-coordinate and
             uncertainty tensors, for both branches.
         """
-        o2m = self.forward_branch(features, "o2m")
-        o2o = self.forward_branch(features, "o2o")
+        o2m = self.forward_branch(features, "o2m", _runner=_runner)
+        o2o = self.forward_branch(features, "o2o", _runner=_runner)
         return DualHeadOutput(
             o2m_cls=o2m.cls,
             o2m_box=o2m.box,
