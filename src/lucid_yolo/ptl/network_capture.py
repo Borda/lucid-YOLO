@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Opt-in replay of the detection network's CUDA forward and backward work.
+"""Opt-in replay of fixed network stages' CUDA forward and backward work.
 
 The network has a fixed image signature while its ground-truth count changes per
-batch. Recording only backbone, neck and head leaves assignment, losses, schedules,
+batch. Detection records backbone, neck and head; pose records backbone and neck.
+Both leave assignment, losses, schedules,
 optimizer and EMA in their existing loop. PyTorch's graphed-callable API owns the
 autograd bridge; no network arithmetic is rewritten. The recording is transient,
 bounded to one input signature and discarded at the fit boundary.
@@ -22,7 +23,7 @@ Examples:
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 import torch
 from packaging.version import Version
@@ -30,6 +31,9 @@ from pytorch_lightning import Callback
 from torch import Tensor, nn
 
 from lucid_yolo.models.heads.detect import DualHeadOutput
+
+_Output = TypeVar("_Output")
+_Features = tuple[Tensor, Tensor, Tensor]
 
 #: First verified BF16 replay runtime; 2.4's path does not meet the exact eager oracle.
 _BF16_REPLAY_SUPPORTED = Version(torch.__version__) >= Version("2.9")
@@ -62,6 +66,31 @@ class _DetectionNetwork(nn.Module):
         """Name the replayed tensors by field, in the order :meth:`forward` returns them."""
         o2m_cls, o2m_box, o2o_cls, o2o_box = tensors
         return DualHeadOutput(o2m_cls=o2m_cls, o2m_box=o2m_box, o2o_cls=o2o_cls, o2o_box=o2o_box)
+
+
+class _FeatureNetwork(nn.Module):
+    """Expose backbone and neck without fixing which optional head gradients exist.
+
+    Pose may have no supervised points in a batch. Its point stems then keep
+    ``grad=None``; including those stems in one fixed backward would materialize
+    zero gradients and advance optimizer state that the native loop skips.
+    The shared features still feed the dense classification objective, while
+    the complete dual head and its variable supervision stay native.
+    """
+
+    def __init__(self, backbone: nn.Module, neck: nn.Module) -> None:
+        super().__init__()
+        self.backbone, self.neck = backbone, neck
+
+    def forward(self, images: Tensor) -> _Features:
+        """Return the three existing neck features in their original order."""
+        return cast("_Features", self.neck(self.backbone(images)))
+
+    @staticmethod
+    def rebuild(tensors: tuple[Tensor, ...]) -> _Features:
+        """Keep the three feature levels separate for the native dual head."""
+        first, second, third = tensors
+        return first, second, third
 
 
 def _fp32_policy() -> tuple[object, ...]:
@@ -121,7 +150,7 @@ def _input_breach(images: Tensor, precision: tuple[object, ...]) -> str | None:
     return None
 
 
-def _ineligibility(network: _DetectionNetwork) -> str | None:
+def _ineligibility(network: nn.Module) -> str | None:
     """Name the first property of the stages a recording could not keep honouring, if any."""
     runtime = nn.modules.module
     modules = tuple(network.modules())
@@ -186,7 +215,7 @@ def _ineligibility(network: _DetectionNetwork) -> str | None:
     return next((reason for reason, breached in checks if breached()), None)
 
 
-def _network_signature(network: _DetectionNetwork) -> tuple[object, ...]:
+def _network_signature(network: nn.Module) -> tuple[object, ...]:
     """Fingerprint the storage, modes and scalar attributes a recording will keep reading."""
     tensors = tuple(network.parameters()) + tuple(network.buffers())
     modules = tuple(network.modules())
@@ -239,7 +268,7 @@ class _NetworkCapture:
         previous = getattr(self, "_network", None)
         if previous is not None:
             vars(previous).pop("forward", None)
-        self._network: _DetectionNetwork | None = None
+        self._network: nn.Module | None = None
         self._input: tuple[object, ...] | None = None
         self._state: tuple[object, ...] | None = None
         self._owners: tuple[int, ...] | None = None
@@ -290,6 +319,30 @@ class _NetworkCapture:
         eager: Callable[[Tensor], DualHeadOutput],
     ) -> DualHeadOutput:
         """Replay an eligible training network, leaving other image signatures eager."""
+        return self._run(images, stages, eager, lambda: _DetectionNetwork(*stages), _DetectionNetwork.rebuild)
+
+    def run_features(self, images: Tensor, stages: tuple[nn.Module, nn.Module]) -> _Features | None:
+        """Replay shared pose features, or return no features so the full eager call stays observable."""
+        if not any(parameter.requires_grad for stage in stages for parameter in stage.parameters()):
+            self.retire("the shared pose features are frozen")
+            return None
+
+        def eager(_: Tensor) -> _Features | None:
+            """Leave the full native call to the module that owns its hooks."""
+            return None
+
+        rebuild: Callable[[tuple[Tensor, ...]], _Features | None] = _FeatureNetwork.rebuild
+        return self._run(images, stages, eager, lambda: _FeatureNetwork(*stages), rebuild)
+
+    def _run(
+        self,
+        images: Tensor,
+        stages: tuple[nn.Module, ...],
+        eager: Callable[[Tensor], _Output],
+        build: Callable[[], nn.Module],
+        rebuild: Callable[[tuple[Tensor, ...]], _Output],
+    ) -> _Output:
+        """Keep recording, eligibility and lifecycle identical for both stage compositions."""
         if self._disabled:
             return eager(images)
         try:
@@ -298,7 +351,7 @@ class _NetworkCapture:
             self.retire(f"the CUDA precision policy cannot be read ({error})")
             return eager(images)
         owners = tuple(id(stage) for stage in stages)
-        network = self._network if self._network is not None else _DetectionNetwork(*stages)
+        network = self._network if self._network is not None else build()
         reason = _input_breach(images, precision) or _ineligibility(network)
         state = _network_signature(network) if reason is None else None
         if state is not None:
@@ -319,7 +372,7 @@ class _NetworkCapture:
                 with torch.random.fork_rng(devices=[images.device.index]):
                     try:
                         sample = images.detach().clone()
-                        graphed = cast("_DetectionNetwork", torch.cuda.make_graphed_callables(network, (sample,)))
+                        graphed = cast("nn.Module", torch.cuda.make_graphed_callables(network, (sample,)))
                     finally:
                         # Warmup runs on a side stream the recorder owns; a failure there
                         # can leave BatchNorm writes queued, so drain the device before the
@@ -329,9 +382,9 @@ class _NetworkCapture:
                             for buffer, snapshot in snapshots:
                                 buffer.copy_(snapshot)
                 self._network, self._input, self._state, self._owners = graphed, signature, state, owners
-            outputs = self._network(images)
+            outputs = cast("tuple[Tensor, ...]", self._network(images))
         self._await_backward(outputs)
-        return _DetectionNetwork.rebuild(outputs)
+        return rebuild(outputs)
 
     def _await_backward(self, outputs: tuple[Tensor, ...]) -> None:
         """Guard the static buffers this replay's backward will read and write.

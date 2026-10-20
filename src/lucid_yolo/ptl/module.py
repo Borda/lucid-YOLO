@@ -758,6 +758,32 @@ def _validate_task_arguments(task: str, num_keypoints: int | None, rotated_iou_f
         )
 
 
+def _pose_head_topology(head: torch.nn.Module) -> tuple[tuple[object, ...], ...]:
+    """Identify the native head composition whose dense outputs use every shared feature."""
+    return tuple(
+        (name, type(module), type(module).forward, getattr(type(module), "forward_branch", None))
+        for name, module in head.named_modules()
+    )
+
+
+def _pose_head_breach(head: torch.nn.Module, topology: tuple[tuple[object, ...], ...]) -> str | None:
+    """Keep altered head control flow outside a recording of its shared inputs."""
+    if _pose_head_topology(head) != topology:
+        return "the pose head topology or class forward changed"
+    if any(
+        module._forward_hooks
+        or module._forward_pre_hooks
+        or module._backward_hooks
+        or module._backward_pre_hooks
+        or "forward" in vars(module)
+        or "forward_branch" in vars(module)
+        or getattr(module, "_compiled_call_impl", None) is not None
+        for module in head.modules()
+    ):
+        return "a pose head module is hooked, overridden or compiled"
+    return None
+
+
 class DetectionLitModule(LightningModule):
     """Lightning detector: model stack, dual-branch loss, and MuSGD (WP-034).
 
@@ -916,11 +942,15 @@ class DetectionLitModule(LightningModule):
             strides, dtype, device, step count and precision select each recording;
             this flag alone leaves learning rates, momentum and parameters outside the graphs.
             Extra workspace and setup can outweigh the saving on short runs.
-        capture_network: Replay the existing detection network's CUDA forward and backward
+        capture_network: Replay fixed detection or keypoint network stages' CUDA forward and backward
             with :func:`torch.cuda.make_graphed_callables`. Defaults to ``False`` because
-            capture pays setup and retains a graph pool. Requires ``task="detect"``,
-            ``compile_step=False`` and single-device CUDA automatic optimization.
-            Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
+            capture pays setup and retains a graph pool. Requires
+            ``task="detect"`` or ``task="keypoints"``, ``compile_step=False`` and
+            single-device CUDA automatic optimization.
+            Pose records backbone and neck; its head stays native to preserve absent
+            gradients in batches without supervised points. Pose training with gradient
+            accumulation stays eager. Assignment, losses, schedules, optimizer, EMA and
+            evaluation stay eager.
             One image signature is recorded per fit; partial batches stay eager and
             changed storage, modes, hooks or precision retire the recording. Warmup
             restores buffers and RNG, and the fit callbacks discard recordings on
@@ -934,7 +964,7 @@ class DetectionLitModule(LightningModule):
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
             ``"keypoints"``, if ``rotated_iou_form`` is not a known rotated-IoU form,
-            if ``capture_network`` is combined with a non-detection task or ``compile_step``,
+            if ``capture_network`` is combined with a task other than detection or keypoints, or ``compile_step``,
             if ``keypoint_loss`` is not a known keypoint objective, if
             ``task="keypoints"`` was asked for without a ``num_keypoints``, or if a
             ``num_keypoints`` was given for a task that builds no point stem.
@@ -989,11 +1019,14 @@ class DetectionLitModule(LightningModule):
     ) -> None:
         super().__init__()
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
-        if capture_network and (task != "detect" or compile_step):
-            raise ValueError("capture_network=True requires task='detect' and compile_step=False")
+        if capture_network and (task not in ("detect", "keypoints") or compile_step):
+            raise ValueError("capture_network=True requires task='detect' or task='keypoints', and compile_step=False")
         self.save_hyperparameters()
-        self._capture_network, self._capture_network_active = capture_network, False
-        self._network_capture = _NetworkCapture()
+        self._capture_network, self._capture_network_active, self._network_capture = (
+            capture_network,
+            False,
+            _NetworkCapture(),
+        )
         self._task, self._num_keypoints = task, num_keypoints
         self._compile_step: bool = compile_step
         self._capture_orthogonalization, self._capture_updates = capture_orthogonalization, capture_updates
@@ -1047,6 +1080,7 @@ class DetectionLitModule(LightningModule):
             predict_angle=task == "obb",
             num_keypoints=num_keypoints if task == "keypoints" else None,
         )
+        self._pose_head_topology = _pose_head_topology(self.head) if task == "keypoints" else ()
         if task == "segment":
             self.proto_fusion, self.protonet, self.semantic = build_segmentation_stages(
                 self.neck.channels, num_classes, DEFAULT_NUM_COEFFS
@@ -1343,33 +1377,7 @@ class DetectionLitModule(LightningModule):
         Returns:
             The dense head output and the dual loss output.
         """
-        if (
-            self._capture_network_active
-            and self._trainer is not None
-            and self._trainer.training
-            and self.training
-            and self.automatic_optimization
-            and torch.is_grad_enabled()
-            and images.is_cuda
-        ):
-            root_hooks = any(
-                (self._forward_hooks, self._forward_pre_hooks, self._backward_hooks, self._backward_pre_hooks)
-            )
-            custom_forward = type(self).forward is not _EAGER_NETWORK_FORWARD or "forward" in vars(self)
-            if root_hooks or custom_forward or self._compiled_call_impl is not None:
-                if root_hooks:
-                    reason = "the LightningModule carries a forward or backward hook"
-                elif custom_forward:
-                    reason = "the LightningModule overrides forward"
-                else:
-                    reason = "the LightningModule call is compiled"
-                self._network_capture.retire(reason)
-                head_out = self(images)
-            else:
-                eager = cast("Callable[[Tensor], DualHeadOutput]", self)
-                head_out = self._network_capture.run(images, (self.backbone, self.neck, self.head), eager)
-        else:
-            head_out = self(images)
+        head_out = self._training_network(images)
         o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)
         o2o_boxes = decode_ltrb(head_out.o2o_box, anchor_points, strides)
         out = self.loss(
@@ -1385,6 +1393,54 @@ class DetectionLitModule(LightningModule):
             alpha=alpha,
         )
         return head_out, out
+
+    def _training_network(self, images: Tensor) -> DualHeadOutput:
+        """Run the dual head through the training recording when its contract holds.
+
+        Detection records all three stages; pose records only backbone and neck.
+        Its optional point stems stay native so batches without supervised points
+        keep their absent gradients, rather than zero-valued captured gradients.
+        Both tasks keep changing instance counts and loss arithmetic outside capture.
+        """
+        head_out: DualHeadOutput
+        if (
+            self._capture_network_active
+            and self._trainer is not None
+            and self._trainer.training
+            and self.training
+            and self.automatic_optimization
+            and torch.is_grad_enabled()
+            and images.is_cuda
+        ):
+            if self._task == "keypoints" and self.trainer.accumulate_grad_batches != 1:
+                self._network_capture.retire("keypoint replay requires accumulate_grad_batches=1")
+            if self._task == "keypoints":
+                breach = _pose_head_breach(self.head, self._pose_head_topology)
+                if breach is not None:
+                    self._network_capture.retire(breach)
+            root_hooks = any(
+                (self._forward_hooks, self._forward_pre_hooks, self._backward_hooks, self._backward_pre_hooks)
+            )
+            custom_forward = type(self).forward is not _EAGER_NETWORK_FORWARD or "forward" in vars(self)
+            if root_hooks or custom_forward or self._compiled_call_impl is not None:
+                if root_hooks:
+                    reason = "the LightningModule carries a forward or backward hook"
+                elif custom_forward:
+                    reason = "the LightningModule overrides forward"
+                else:
+                    reason = "the LightningModule call is compiled"
+                self._network_capture.retire(reason)
+                head_out = self(images)
+            else:
+                eager = cast("Callable[[Tensor], DualHeadOutput]", self)
+                if self._task == "keypoints":
+                    features = self._network_capture.run_features(images, (self.backbone, self.neck))
+                    head_out = self(images) if features is None else cast("DualHeadOutput", self.head(features))
+                else:
+                    head_out = self._network_capture.run(images, (self.backbone, self.neck, self.head), eager)
+        else:
+            head_out = self(images)
+        return head_out
 
     def _alpha_tensor(self, device: torch.device) -> Tensor:
         """Lift the current :attr:`alpha` to a 0-d ``float64`` tensor on ``device`` for the compiled region.
@@ -2116,7 +2172,7 @@ class DetectionLitModule(LightningModule):
             alpha = self._alpha_tensor(images.device)
             head_out, out = self._objective(images, anchor_points, strides, gt_boxes, gt_labels, gt_mask, alpha)
         else:
-            head_out = self(images) if seg_out is None else seg_out.detect
+            head_out = self._training_network(images) if seg_out is None else seg_out.detect
             o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)
             o2o_boxes = decode_ltrb(head_out.o2o_box, anchor_points, strides)
             out = self.loss(
