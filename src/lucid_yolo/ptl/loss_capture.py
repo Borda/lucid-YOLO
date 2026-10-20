@@ -20,9 +20,11 @@ from packaging.version import Version
 from pytorch_lightning import Callback
 from torch import Tensor, nn
 
+from lucid_yolo.assign import stal, tal
 from lucid_yolo.assign.one_to_one import UniqueAssigner
 from lucid_yolo.assign.stal import SmallTargetAssigner
 from lucid_yolo.assign.tal import AssignResult, _check_labels
+from lucid_yolo.losses import detection_loss
 from lucid_yolo.losses.detection_loss import DetectionBranchLoss, DetectionLossOutput
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
 from lucid_yolo.ptl.network_capture import _precision_signature
@@ -63,11 +65,26 @@ def _functions(source: DualBranchLoss) -> tuple[object, ...]:
         ("__call__", "_classification_loss", "_box_losses"),
         ("__call__", "_classification_loss", "_box_losses"),
     )
-    return tuple(
+    methods = tuple(
         getattr(function, "__func__", function)
         for obj, fields in zip(objects, names, strict=True)
         for name in fields
         for function in (getattr(obj, name),)
+    )
+    # The surrogate filter reaches its parent through ``super()`` and the recorded
+    # stages call module helpers by global name, both resolved at call time, so a
+    # replacement of either is invisible through the instance attributes above.
+    delegated = tuple(
+        getattr(function, "__func__", function)
+        for assigner in objects[1:3]
+        for function in (super(SmallTargetAssigner, assigner)._candidate_mask,)
+    )
+    return (
+        *methods,
+        *delegated,
+        tal._box_iou_cross,
+        stal.surrogate_boxes,
+        vars(detection_loss)["ciou_loss"],
     )
 
 

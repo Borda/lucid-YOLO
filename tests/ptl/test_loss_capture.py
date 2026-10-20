@@ -17,9 +17,11 @@ from pytorch_lightning import Callback, Trainer, seed_everything
 from pytorch_lightning.plugins.precision import MixedPrecision
 from torch.utils.data import DataLoader
 
+from lucid_yolo.assign import stal, tal
 from lucid_yolo.assign.tal import TaskAlignedAssigner
 from lucid_yolo.cli.train import DetectionCLI, packaged_config
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.losses import detection_loss
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
 from lucid_yolo.ptl import loss_capture as capture_module
 from lucid_yolo.ptl.datamodule import DetectionDataModule
@@ -254,6 +256,44 @@ def test_source_signature_refuses_uncertified_settings(field: str, value: object
     source = DualBranchLoss()
     setattr(source.o2m_assigner, field, value)
     assert capture_module._source_signature(source) is None
+
+
+@pytest.mark.parametrize("record_first", [False, True])
+@pytest.mark.parametrize(
+    "owner,name",
+    [
+        pytest.param(TaskAlignedAssigner, "_candidate_mask", id="base-candidate-mask"),
+        pytest.param(tal, "_box_iou_cross", id="box-iou"),
+        pytest.param(stal, "surrogate_boxes", id="surrogate-boxes"),
+        pytest.param(detection_loss, "ciou_loss", id="ciou-loss"),
+    ],
+)
+def test_host_replaced_delegated_stage_keeps_native_route(
+    _host_recorder: MagicMock, record_first: bool, owner: object, name: str
+) -> None:
+    """Replacing a stage reached through super() or a module global retires replay.
+
+    The surrogate filter calls its parent through ``super()`` and the recorded stages
+    call module helpers by global name, so neither shows in the instance attributes.
+    A replacement before or after the first recording must reach the native route.
+    """
+    holder, source = _LossCapture(), DualBranchLoss()
+    if record_first:
+        holder.run(source, *_inputs(3, device="cpu")).total.backward()
+    original = getattr(owner, name)
+    calls: list[int] = []
+
+    def observed(*args: object, **kwargs: object) -> object:
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    with patch.object(owner, name, observed), pytest.warns(UserWarning, match="customized"):
+        actual = holder.run(source, *_inputs(2, device="cpu"))
+        replaced_calls = len(calls)
+        expected = _native(source, _inputs(2, device="cpu"))
+    assert replaced_calls > 0
+    _same(expected, actual)
+    assert holder._objective is None and holder._disabled
 
 
 @pytest.mark.parametrize("case", ["empty", "nonfinite", "shape", "labels"])
