@@ -504,7 +504,7 @@ def test_frozen_features_leave_full_native_call_to_owner() -> None:
     model.backbone.requires_grad_(False)
     model.neck.requires_grad_(False)
     holder = _NetworkCapture()
-    with pytest.warns(UserWarning, match="shared pose features are frozen"):
+    with pytest.warns(UserWarning, match="shared network features are frozen"):
         features = holder.run_features(torch.zeros(2, 3, 64, 64), (model.backbone, model.neck))
     assert features is None and holder._disabled and holder._network is None
 

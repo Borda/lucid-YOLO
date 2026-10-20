@@ -224,6 +224,7 @@ from lucid_yolo.ptl.network_capture import (
     _NetworkCaptureLifecycle,
 )
 from lucid_yolo.ptl.seg_targets import instance_mask_targets, scale_boxes_to_grid, semantic_target
+from lucid_yolo.ptl.segment_head_capture import _head_breach as _segment_head_breach
 from lucid_yolo.ptl.segment_head_capture import _SegmentHeadCapture, _SegmentHeadCaptureLifecycle
 
 if TYPE_CHECKING:
@@ -791,7 +792,7 @@ def _validate_replay_options(
 ) -> None:
     """Reject replay options outside the objectives they record.
 
-    Network replay records the detection or pose stages; loss replay records the detection
+    Network replay records the detection, pose or segmentation stages; loss replay records the detection
     objective only; segment-head replay records the segmentation prediction groups only.
     Segment-head replay refuses the compiler although ``compile_step`` leaves the segment
     objective eager today, so an accepted configuration keeps its meaning once that
@@ -799,13 +800,15 @@ def _validate_replay_options(
 
     Raises:
         ValueError: If network replay is combined with a task other than detection or
-            keypoints, loss replay with a task other than detection, segment-head replay
+            keypoints or segmentation, loss replay with a task other than detection, segment-head replay
             with a task other than segmentation, or any of them with the compiler
             (segment-head replay included, for forward compatibility with a compiled
             segment objective).
     """
-    if capture_network and (task not in ("detect", "keypoints") or compile_step):
-        raise ValueError("capture_network=True requires task='detect' or task='keypoints', and compile_step=False")
+    if capture_network and (task not in ("detect", "keypoints", "segment") or compile_step):
+        raise ValueError(
+            "capture_network=True requires task='detect', task='keypoints' or task='segment', and compile_step=False"
+        )
     if capture_loss and (task != "detect" or compile_step):
         raise ValueError("capture_loss=True requires task='detect' and compile_step=False")
     if capture_segment_heads and (task != "segment" or compile_step):
@@ -973,10 +976,10 @@ class DetectionLitModule(LightningModule):
             strides, dtype, device, step count and precision select each recording;
             this flag alone leaves learning rates, momentum and parameters outside the graphs.
             Extra workspace and setup can outweigh the saving on short runs.
-        capture_network: Replay fixed detection or keypoint network stages' CUDA forward and backward
+        capture_network: Replay fixed detection, keypoint or segmentation stages' CUDA forward and backward
             with :func:`torch.cuda.make_graphed_callables`. Defaults to ``False`` because
             capture pays setup and retains a graph pool. Requires
-            ``task="detect"`` or ``task="keypoints"``, ``compile_step=False`` and
+            ``task="detect"``, ``task="keypoints"`` or ``task="segment"``, ``compile_step=False`` and
             single-device CUDA automatic optimization.
             Pose records backbone and neck; its head stays native to preserve absent
             gradients in batches with no assigned positives. Pose training stays eager
@@ -985,8 +988,12 @@ class DetectionLitModule(LightningModule):
             module is hooked, overridden or compiled. The trainable set is fixed per fit
             at the first recording: a fully frozen start, or a later freeze or unfreeze
             of a recorded parameter, keeps the rest of that fit eager after one warning.
-            Either task stays eager when the LightningModule carries a hook, overrides
-            ``forward`` or is compiled.
+            Detection and pose stay eager when the LightningModule carries a hook, overrides
+            ``forward`` or is compiled. Segmentation records only backbone and neck,
+            leaving all predictions independent; ``capture_segment_heads`` can replay
+            those predictions separately. Segmentation also keeps accumulation native,
+            and retires replay when the head topology/dispatch changes, a head hook is
+            registered, or ``forward_segmentation`` is overridden or compiled.
             Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
             One image signature is recorded per fit; partial batches stay eager and
             changed storage, modes, hooks or precision retire the recording. Warmup
@@ -1132,6 +1139,7 @@ class DetectionLitModule(LightningModule):
             num_keypoints=num_keypoints if task == "keypoints" else None,
         )
         self._pose_head_topology = _pose_head_topology(self.head) if task == "keypoints" else ()
+        self._segment_head_topology = _pose_head_topology(self.head) if task == "segment" else ()
         self._init_segmentation(task, num_classes, capture_segment_heads)
         #: The keypoint objective, held as a submodule because R14's flow is the only
         #: loss in the project carrying parameters — hence a submodule rather than a
@@ -1706,7 +1714,7 @@ class DetectionLitModule(LightningModule):
         """
         if self._task != "segment":
             raise ValueError(f"forward_segmentation requires task='segment'; this module's task is {self._task!r}")
-        features: tuple[Tensor, Tensor, Tensor] = self.neck(self.backbone(images))
+        features = self._segmentation_features(images)
         runner = self._segment_head_capture.runner(self, features)
         detect = cast("DualHeadOutput", self.head(features) if runner is None else self.head(features, _runner=runner))
         fused: Tensor = self.proto_fusion(features)
@@ -1715,6 +1723,43 @@ class DetectionLitModule(LightningModule):
         return SegmentOutput(
             detect=detect, prototypes=runner.mask(self.protonet, fused), semantic=runner.mask(self.semantic, fused)
         )
+
+    def _segmentation_features(self, images: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        """Replay shared segmentation features while keeping mask supervision outside capture.
+
+        The three feature levels always feed the dense classification objective.
+        Coefficients, prototypes and semantic predictions keep their independent
+        backward nodes, so an unused mask branch retains its absent gradients.
+        The existing holder owns precision/storage checks, buffer rollback and
+        the one-signature-per-fit lifecycle, as for shared pose features.
+        """
+        if (
+            self._capture_network_active
+            and self._trainer is not None
+            and self._trainer.training
+            and self.training
+            and self.automatic_optimization
+            and torch.is_grad_enabled()
+            and images.is_cuda
+        ):
+            if self.trainer.accumulate_grad_batches != 1:
+                self._network_capture.retire("segmentation replay requires accumulate_grad_batches=1")
+            if (
+                _pose_head_topology(self.head) != self._segment_head_topology
+                or _segment_head_breach(self.head) is not None
+                or _module_breach(self.head.modules()) is not None
+            ):
+                self._network_capture.retire("the segmentation head topology or dispatch changed, or it carries a hook")
+            if (
+                type(self).forward_segmentation is not _EAGER_SEGMENT_FORWARD
+                or "forward_segmentation" in vars(self)
+                or self._compiled_call_impl is not None
+            ):
+                self._network_capture.retire("the segmentation forward is overridden or compiled")
+            features = self._network_capture.run_features(images, (self.backbone, self.neck))
+            if features is not None:
+                return features
+        return cast("tuple[Tensor, Tensor, Tensor]", self.neck(self.backbone(images)))
 
     def forward_branch(self, images: Tensor, branch: BranchName) -> BranchOutput:
         """Run the backbone, neck, and **one** head branch over an image batch.
@@ -2795,3 +2840,6 @@ class DetectionLitModule(LightningModule):
 
 #: The unmodified public forward; instance/class overrides retain their eager dispatch.
 _EAGER_NETWORK_FORWARD = DetectionLitModule.forward
+
+#: Segment composition overrides keep their native execution.
+_EAGER_SEGMENT_FORWARD = DetectionLitModule.forward_segmentation

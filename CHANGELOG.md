@@ -6,6 +6,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Added
 
+- `capture_network` now replays shared backbone and neck stages for segmentation, independently of `capture_segment_heads`. The default remains off; modified heads/forwards, accumulation and unsupported signatures retain native execution, with transient graph state cleared at fit boundaries (WP-193g).
+
 - **Opt-in CUDA replay of detection assignment and loss.** `--model.capture_loss true` records the existing loss forward/backward with a masked target workspace that grows from observed counts. Current label checks and schedules stay live; returned values own their storage and fit exit releases the recording. Default off, compatible with network and orthogonalization replay. See [WP-199](docs/work_packages/wp-199.md) for measurements and limits.
 
 - **Opt-in shared-feature CUDA replay for pose training.** `--model.capture_network true` can record the existing backbone and neck for `task: keypoints`; the head stays native so a batch with no assigned positives keeps absent point-stem gradients. Accumulated pose runs, runs with a fully frozen backbone and neck, and heads with changed topology, hooks or forwards stay native. The default remains off. The speed claim is limited to a small-batch workload (batch 4, one L4): a single batch-16 pair changed fit time by 2.50%, and replay lowered peak allocated memory while raising peak reserved memory, so check throughput and both memory figures on your own batch size. See [WP-193d](docs/work_packages/wp-193d.md) for complete-fit measurements and validation limits.

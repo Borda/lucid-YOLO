@@ -2,7 +2,7 @@
 """Opt-in replay of fixed network stages' CUDA forward and backward work.
 
 The network has a fixed image signature while its ground-truth count changes per
-batch. Detection records backbone, neck and head; pose records backbone and neck.
+batch. Detection records backbone, neck and head; pose and segmentation record backbone and neck.
 Both leave assignment, losses, schedules,
 optimizer and EMA in their existing loop. PyTorch's graphed-callable API owns the
 autograd bridge; no network arithmetic is rewritten. The recording is transient,
@@ -351,9 +351,9 @@ class _NetworkCapture:
         return self._run(images, stages, eager, lambda: _DetectionNetwork(*stages), _DetectionNetwork.rebuild)
 
     def run_features(self, images: Tensor, stages: tuple[nn.Module, nn.Module]) -> _Features | None:
-        """Replay shared pose features, or return no features so the full eager call stays observable."""
+        """Replay shared features, or return no features so the full eager call stays observable."""
         if not any(parameter.requires_grad for stage in stages for parameter in stage.parameters()):
-            self.retire("the shared pose features are frozen")
+            self.retire("the shared network features are frozen")
             return None
 
         def eager(_: Tensor) -> _Features | None:
