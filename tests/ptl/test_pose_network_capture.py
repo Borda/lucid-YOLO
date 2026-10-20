@@ -4,21 +4,21 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterator
+import warnings
+from collections.abc import Callable, Iterator
 from dataclasses import fields
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
-from pytorch_lightning import Callback, Trainer
+from pytorch_lightning import Trainer
 from torch.utils.data import DataLoader
 
 from lucid_yolo.cli.train import DetectionCLI, packaged_config
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.models.heads.detect import DualHeadOutput
 from lucid_yolo.ptl import DetectionLitModule
-from lucid_yolo.ptl import network_capture as capture_module
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.module import _pose_head_breach
 from lucid_yolo.ptl.network_capture import _FeatureNetwork, _NetworkCapture
@@ -88,30 +88,43 @@ def test_pose_features_preserve_fields() -> None:
             assert right is not None and _bits_equal(left, right), field.name
 
 
-def _replayed_pose(holder: _NetworkCapture, model: DetectionLitModule, image: torch.Tensor) -> DualHeadOutput:
-    """Use the shared feature recording and native head of the production pose route.
+def _stem_gradients(model: DetectionLitModule) -> list[str]:
+    """Name the point-stem parameters that hold a gradient.
 
     Examples:
-        >>> holder = _NetworkCapture()
-        >>> holder._disabled = True
-        >>> output = _replayed_pose(holder, _pose().eval(), torch.zeros(2, 3, 64, 64))
-        >>> output.o2o_keypoints.shape[-2:]
-        torch.Size([5, 2])
+        >>> _stem_gradients(_pose())
+        []
     """
-    features = holder.run_features(image, (model.backbone, model.neck))
-    return model(image) if features is None else model.head(features)
+    return [
+        name for name, parameter in model.named_parameters() if "keypoint_stems" in name and parameter.grad is not None
+    ]
 
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA graph replay")
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-def test_pose_replay_keeps_outputs_gradients_buffers(dtype: torch.dtype) -> None:
-    """Changing images and repeated SGD updates follow the exact native trajectory."""
+@pytest.mark.parametrize(
+    ("loss_fields", "stems_trained"),
+    [
+        pytest.param(None, True, id="all-fields"),
+        pytest.param(("o2m_cls", "o2o_cls"), False, id="classification-only"),
+    ],
+)
+def test_pose_replay_keeps_outputs_gradients_buffers(
+    dtype: torch.dtype, loss_fields: tuple[str, ...] | None, stems_trained: bool, bf16_replay_expected: bool
+) -> None:
+    """Changing images and repeated SGD updates follow the exact native trajectory.
+
+    The replayed arm runs through ``_training_network`` so the production eligibility,
+    breach and root-hook gates apply. A classification-only loss never reaches the point
+    stems, and their gradients must stay absent on both arms rather than become zeros.
+    """
     torch.manual_seed(42)
     torch.cuda.manual_seed_all(42)
     native = _pose().cuda().to(memory_format=torch.channels_last)
-    replayed = copy.deepcopy(native)
-    holder = _NetworkCapture()
+    replayed = _routed_pose().cuda().to(memory_format=torch.channels_last)
+    replayed.load_state_dict(native.state_dict())
+    names = [field.name for field in fields(DualHeadOutput)] if loss_fields is None else list(loss_fields)
     optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5) for model in (native, replayed)]
     for _ in range(4):
         image = torch.rand(2, 3, 64, 64, device="cuda").contiguous(memory_format=torch.channels_last)
@@ -119,40 +132,118 @@ def test_pose_replay_keeps_outputs_gradients_buffers(dtype: torch.dtype) -> None
         for model, optimizer in zip((native, replayed), optimizers, strict=True):
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast("cuda", dtype=dtype, enabled=dtype != torch.float32, cache_enabled=False):
-                output = model(image) if model is native else _replayed_pose(holder, model, image)
-                tensors = [
-                    getattr(output, field.name)
-                    for field in fields(DualHeadOutput)
-                    if getattr(output, field.name) is not None
-                ]
-                loss = sum(value.float().square().mean() for value in tensors)
+                output = model(image) if model is native else model._training_network(image)
+                loss = sum(
+                    value.float().square().mean() for name in names if (value := getattr(output, name)) is not None
+                )
             loss.backward()
-            outputs.append(tensors)
+            outputs.append([getattr(output, field.name) for field in fields(DualHeadOutput)])
             optimizer.step()
-        assert (holder._network is not None) == (dtype != torch.bfloat16 or capture_module._BF16_REPLAY_SUPPORTED)
+            assert bool(_stem_gradients(model)) is stems_trained
+        assert (replayed._network_capture._network is not None) == (dtype != torch.bfloat16 or bf16_replay_expected)
         for left, right in zip(*outputs, strict=True):
-            assert _bits_equal(left, right)
-        for (name, left), (_, right) in zip(native.named_parameters(), replayed.named_parameters(), strict=True):
-            if left.grad is None:
-                assert right.grad is None, name
-            else:
-                assert right.grad is not None and _bits_equal(left.grad, right.grad), name
-        for name, value in native.state_dict().items():
-            assert _bits_equal(value, replayed.state_dict()[name]), name
+            assert (left is None) == (right is None)
+            if left is not None:
+                assert _bits_equal(left, right)
+        _assert_same_gradients_and_state(native, replayed)
 
 
-class _RecordingObserved(Callback):
-    """Observe graph execution before the fit-boundary cleanup releases it."""
+def _assert_same_gradients_and_state(native: DetectionLitModule, replayed: DetectionLitModule) -> None:
+    """Require equal gradient presence and bytes, and equal parameters and buffers, after a step."""
+    for (name, left), (_, right) in zip(native.named_parameters(), replayed.named_parameters(), strict=True):
+        if left.grad is None:
+            assert right.grad is None, name
+        else:
+            assert right.grad is not None and _bits_equal(left.grad, right.grad), name
+    for name, value in native.state_dict().items():
+        assert _bits_equal(value, replayed.state_dict()[name]), name
 
-    def __init__(self) -> None:
-        self.recorded = False
 
-    def on_train_batch_end(
-        self, trainer: Trainer, pl_module: DetectionLitModule, outputs: object, batch: object, batch_idx: int
-    ) -> None:
-        """Require the public training step to create the actual recording."""
-        del trainer, outputs, batch, batch_idx
-        self.recorded |= pl_module._network_capture._network is not None
+def _frozen_pair(freeze: tuple[str, ...]) -> tuple[DetectionLitModule, DetectionLitModule]:
+    """Build a native and a replaying CUDA pose module with equal weights and the same stages frozen."""
+    torch.manual_seed(42)
+    native = _pose().cuda().to(memory_format=torch.channels_last)
+    replayed = _routed_pose().cuda().to(memory_format=torch.channels_last)
+    replayed.load_state_dict(native.state_dict())
+    for model in (native, replayed):
+        for stage in freeze:
+            getattr(model, stage).requires_grad_(False)
+    return native, replayed
+
+
+def _step_pair(
+    native: DetectionLitModule, replayed: DetectionLitModule, optimizers: list[torch.optim.Optimizer]
+) -> None:
+    """Run one classification-plus-points SGD step on a fresh batch through each arm and require equal results."""
+    image = torch.rand(2, 3, 64, 64, device="cuda").contiguous(memory_format=torch.channels_last)
+    outputs = []
+    for model, optimizer in zip((native, replayed), optimizers, strict=True):
+        optimizer.zero_grad(set_to_none=True)
+        output = model(image) if model is native else model._training_network(image)
+        loss = sum(
+            value.float().square().mean()
+            for field in fields(DualHeadOutput)
+            if (value := getattr(output, field.name)) is not None
+        )
+        loss.backward()
+        outputs.append(output)
+        optimizer.step()
+    for field in fields(DualHeadOutput):
+        left, right = (getattr(output, field.name) for output in outputs)
+        assert (left is None) == (right is None), field.name
+        if left is not None:
+            assert _bits_equal(left, right), field.name
+    _assert_same_gradients_and_state(native, replayed)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA graph replay")
+@pytest.mark.parametrize(
+    "freeze",
+    [
+        pytest.param(("backbone",), id="backbone-only"),
+        pytest.param(("neck",), id="neck-only"),
+        pytest.param((), id="none"),
+    ],
+)
+def test_pose_replay_with_partial_freeze_matches_native(freeze: tuple[str, ...]) -> None:
+    """Fine-tuning with only some shared stages frozen replays and keeps native gradient presence.
+
+    Frozen stages must stay without gradients on both arms, trainable ones must receive
+    identical bytes, and the recording must exist so the parity is not two native runs.
+    """
+    native, replayed = _frozen_pair(freeze)
+    optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5) for model in (native, replayed)]
+    for _ in range(3):
+        _step_pair(native, replayed, optimizers)
+    assert replayed._network_capture._network is not None
+    for stage in freeze:
+        assert all(parameter.grad is None for parameter in getattr(replayed, stage).parameters())
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA graph replay")
+def test_pose_unfreeze_mid_fit_warns_once_and_stays_native() -> None:
+    """Unfreezing a stage after recording retires the replay with one warning and keeps native results.
+
+    The frozen backbone is recorded for two steps, then trained: the recording would keep
+    producing frozen-stage gradients, so the signature change must send every later step
+    through the full native call without repeating the warning.
+    """
+    native, replayed = _frozen_pair(("backbone",))
+    optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5) for model in (native, replayed)]
+    for _ in range(2):
+        _step_pair(native, replayed, optimizers)
+    assert replayed._network_capture._network is not None
+    for model in (native, replayed):
+        model.backbone.requires_grad_(True)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for _ in range(2):
+            _step_pair(native, replayed, optimizers)
+    retired = [str(item.message) for item in caught if str(item.message).startswith("capture_network=True stays")]
+    assert len(retired) == 1 and "changed after recording" in retired[0], retired
+    assert replayed._network_capture._disabled and replayed._network_capture._network is None
 
 
 def _same_state(left: object, right: object) -> None:
@@ -175,37 +266,81 @@ def _same_state(left: object, right: object) -> None:
         assert left == right
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires public CUDA training")
-@pytest.mark.parametrize("precision", ["32-true", "16-mixed", "bf16-mixed"])
-@pytest.mark.parametrize("accumulation", [1, 2])
-@pytest.mark.parametrize("empty_batch", [False, True])
-def test_pose_trainer_matches_native(precision: str, accumulation: int, empty_batch: bool) -> None:
-    """Public pose training keeps flow/optimizer/scaler state through clipped accumulation."""
-    torch.manual_seed(42)
+def _pose_batches(layout: str) -> list[tuple[torch.Tensor, list[Targets]]]:
+    """Three loader batches of a realistic shape pattern for a five-point pose fit.
+
+    ``uniform`` repeats one ``(2, 3, 64, 64)`` batch; ``empty`` makes the middle batch
+    supervision-free; ``short-last`` ends on a one-image batch (``[2, 2, 1]``); ``mixed``
+    puts an image with a person and one without in the middle batch; ``invisible`` gives
+    the middle batch boxes whose points are all unlabelled (``keypoint_vis`` zero).
+
+    Examples:
+        >>> [len(targets) for _, targets in _pose_batches("short-last")]
+        [2, 2, 1]
+    """
     image = torch.rand(2, 3, 64, 64)
-    target = Targets(
+    person = Targets(
         boxes=torch.tensor([[8.0, 8.0, 48.0, 48.0]]),
         labels=torch.tensor([1]),
         keypoints=torch.tensor([[[16.0, 16.0]] * 5]),
         keypoint_vis=torch.ones(1, 5, dtype=torch.int64),
     )
-    batches = [(image, [copy.deepcopy(target), copy.deepcopy(target)]) for _ in range(3)]
-    if empty_batch:
-        empty = Targets(
-            boxes=torch.empty(0, 4),
-            labels=torch.empty(0, dtype=torch.int64),
-            keypoints=torch.empty(0, 5, 2),
-            keypoint_vis=torch.empty(0, 5, dtype=torch.int64),
-        )
-        batches[1] = (image, [copy.deepcopy(empty), copy.deepcopy(empty)])
+    empty = Targets(
+        boxes=torch.empty(0, 4),
+        labels=torch.empty(0, dtype=torch.int64),
+        keypoints=torch.empty(0, 5, 2),
+        keypoint_vis=torch.empty(0, 5, dtype=torch.int64),
+    )
+    invisible = Targets(
+        boxes=person.boxes.clone(),
+        labels=person.labels.clone(),
+        keypoints=person.keypoints.clone(),
+        keypoint_vis=torch.zeros(1, 5, dtype=torch.int64),
+    )
+    batches = [(image, [copy.deepcopy(person), copy.deepcopy(person)]) for _ in range(3)]
+    middle = {
+        "uniform": [person, person],
+        "empty": [empty, empty],
+        "short-last": [person, person],
+        "mixed": [person, empty],
+        "invisible": [invisible, invisible],
+    }[layout]
+    batches[1] = (image, [copy.deepcopy(target) for target in middle])
+    if layout == "short-last":
+        batches[2] = (image[:1], [copy.deepcopy(person)])
+    return batches
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires public CUDA training")
+@pytest.mark.parametrize("precision", ["32-true", "16-mixed", "bf16-mixed"])
+@pytest.mark.parametrize("accumulation", [1, 2])
+@pytest.mark.parametrize("layout", ["uniform", "empty", "short-last", "mixed", "invisible"])
+def test_pose_trainer_matches_native(
+    precision: str, accumulation: int, layout: str, graph_recordings: MagicMock, bf16_replay_expected: bool
+) -> None:
+    """Public pose training keeps flow/optimizer/scaler state through clipped accumulation.
+
+    Accumulation 1 records the shared features exactly once and replays every later batch,
+    the empty-supervision batch included, without a retirement warning. Accumulation 2
+    never records and reports exactly the accumulation reason, so a lapse after the first
+    batch cannot pass as parity of two native runs.
+    """
+    torch.manual_seed(42)
+    batches = _pose_batches(layout)
+    retirements = (
+        ["accumulate_grad_batches=1"]
+        if accumulation == 2
+        else ["BF16 replay requires"]
+        if precision == "bf16-mixed" and not bf16_replay_expected
+        else []
+    )
     initial = _pose().state_dict()
     states = []
     for capture in (False, True):
         torch.manual_seed(42)
         model = _pose(capture_network=capture, lr=1e-4)
         model.load_state_dict(initial)
-        observed = _RecordingObserved()
         trainer = Trainer(
             accelerator="cuda",
             devices=1,
@@ -219,12 +354,15 @@ def test_pose_trainer_matches_native(precision: str, accumulation: int, empty_ba
             enable_model_summary=False,
             num_sanity_val_steps=0,
             limit_val_batches=0,
-            callbacks=[observed],
         )
-        trainer.fit(model, train_dataloaders=DataLoader(batches, batch_size=None))
-        assert observed.recorded == (
-            capture and accumulation == 1 and (precision != "bf16-mixed" or capture_module._BF16_REPLAY_SUPPORTED)
-        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            trainer.fit(model, train_dataloaders=DataLoader(batches, batch_size=None))
+        retired = [str(item.message) for item in caught if str(item.message).startswith("capture_network=True stays")]
+        expected = retirements if capture else []
+        assert len(retired) == len(expected), retired
+        assert all(fragment in message for fragment, message in zip(expected, retired, strict=True)), retired
+        assert graph_recordings.call_count == int(capture and not retirements)
         assert trainer.global_step == (3 + accumulation - 1) // accumulation
         assert model._network_capture._network is None
         scaler = getattr(trainer.precision_plugin, "scaler", None)
@@ -236,6 +374,43 @@ def test_pose_trainer_matches_native(precision: str, accumulation: int, empty_ba
             )
         )
     _same_state(*states)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires public CUDA training")
+def test_pose_trainer_with_optimizer_captures_matches_native(graph_recordings: MagicMock) -> None:
+    """The benchmarked combination of network replay, orthogonalization and update capture stays native-exact.
+
+    One FP32, accumulation-1 fit enables all three CUDA replay options together, the way the
+    WP-193d measurement did, and must end on the model weights and per-parameter optimizer
+    state of a fit with none of them. Group flags legitimately differ, so only ``state`` is compared.
+    """
+    batches = _pose_batches("uniform")
+    initial = _pose().state_dict()
+    results = []
+    for options in ({}, {"capture_network": True, "capture_orthogonalization": True, "capture_updates": True}):
+        torch.manual_seed(42)
+        model = _pose(lr=1e-4, **options)
+        model.load_state_dict(initial)
+        trainer = Trainer(
+            accelerator="cuda",
+            devices=1,
+            max_epochs=1,
+            precision="32-true",
+            gradient_clip_val=1.0,
+            logger=False,
+            enable_checkpointing=False,
+            enable_progress_bar=False,
+            enable_model_summary=False,
+            num_sanity_val_steps=0,
+            limit_val_batches=0,
+        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", message="capture_network=True stays eager")
+            trainer.fit(model, train_dataloaders=DataLoader(batches, batch_size=None))
+        results.append((copy.deepcopy(model.state_dict()), copy.deepcopy(trainer.optimizers[0].state_dict()["state"])))
+    assert graph_recordings.call_count == 1
+    _same_state(*results)
 
 
 @pytest.mark.parametrize("capture", [False, True])
@@ -283,6 +458,31 @@ def test_pose_head_certificate_rejects_forward_branch_overrides() -> None:
         assert _pose_head_breach(model.head, model._pose_head_topology) is not None
 
 
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda head: head.register_forward_pre_hook(lambda *_: None), id="forward-pre-hook"),
+        pytest.param(lambda head: head.register_full_backward_hook(lambda *_: None), id="backward-hook"),
+        pytest.param(lambda head: next(head.children()).register_forward_hook(lambda *_: None), id="submodule-hook"),
+        pytest.param(
+            lambda head: setattr(next(head.children()), "forward", next(head.children()).forward),
+            id="submodule-forward-override",
+        ),
+        pytest.param(lambda head: setattr(head, next(head.named_children())[0], torch.nn.Identity()), id="child-swap"),
+        pytest.param(lambda head: setattr(head, "_compiled_call_impl", lambda *_: None), id="compiled-call"),
+    ],
+)
+def test_altered_pose_head_dispatch_fails_certificate(mutate: Callable[[torch.nn.Module], object]) -> None:
+    """Every way to change how the head dispatches is refused, so shared features cannot detach from it.
+
+    Starts from a fresh deepcopy certified clean, applies one mutation, and expects a named breach.
+    """
+    model = copy.deepcopy(_pose())
+    assert _pose_head_breach(model.head, model._pose_head_topology) is None
+    mutate(model.head)
+    assert _pose_head_breach(model.head, model._pose_head_topology) is not None
+
+
 def test_frozen_features_leave_full_native_call_to_owner() -> None:
     """A fully frozen feature extractor needs no recorded backward, even on CPU."""
     model = _pose()
@@ -296,9 +496,19 @@ def test_frozen_features_leave_full_native_call_to_owner() -> None:
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA pose dispatch")
-@pytest.mark.parametrize("location", ["head", "global"])
-def test_pose_hook_retires_features_and_observes_native_root(location: str) -> None:
-    """After recording, hooks keep their full native call boundary and retire the graph."""
+@pytest.mark.parametrize(
+    ("location", "reason"),
+    [
+        pytest.param("head", "a pose head module is hooked", id="head"),
+        pytest.param("global", "a global module hook is registered", id="global"),
+    ],
+)
+def test_pose_hook_retires_features_and_observes_native_root(location: str, reason: str) -> None:
+    """After recording, hooks keep their full native call boundary and retire the graph.
+
+    The warning must name the hook that caused the retirement, so a retirement for an
+    unrelated reason cannot satisfy the test.
+    """
     model = _pose(capture_network=True).cuda()
     model._trainer = SimpleNamespace(training=True, accumulate_grad_batches=1)
     model._capture_network_active = True
@@ -320,9 +530,138 @@ def test_pose_hook_retires_features_and_observes_native_root(location: str) -> N
         else torch.nn.modules.module.register_module_forward_hook(observe)
     )
     try:
-        with pytest.warns(UserWarning, match="stays eager"):
+        with pytest.warns(UserWarning, match=f"stays eager: {reason}"):
             model._training_network(image)
         assert calls == [model if location == "global" else model.head]
         assert model._network_capture._disabled and model._network_capture._network is None
     finally:
         handle.remove()
+
+
+class _CudaFlagged(torch.Tensor):
+    """CPU tensor that reports CUDA residency so the CUDA-gated pose routing is reachable offline.
+
+    Operations unwrap to plain tensors, so the real model still runs on the CPU.
+    """
+
+    is_cuda = True
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):  # type: ignore[no-untyped-def]
+        """Run the operation on the underlying data and return an ordinary tensor."""
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **(kwargs or {}))
+
+
+def _routed_pose(accumulation: int = 1) -> DetectionLitModule:
+    """Build a pose module that satisfies every training-time gate of the shared-feature route.
+
+    Examples:
+        >>> _routed_pose(2).trainer.accumulate_grad_batches
+        2
+    """
+    model = _pose(capture_network=True)
+    model._trainer = SimpleNamespace(training=True, accumulate_grad_batches=accumulation)
+    model._capture_network_active = True
+    return model
+
+
+def _cuda_flagged_images() -> torch.Tensor:
+    """Images that pass the ``is_cuda`` gate while living on the CPU.
+
+    Examples:
+        >>> _cuda_flagged_images().is_cuda
+        True
+    """
+    return torch.rand(2, 3, 64, 64).as_subclass(_CudaFlagged)
+
+
+def _count_backbone_calls(model: DetectionLitModule) -> list[None]:
+    """Record each full native forward through the backbone, which only a native fallback performs."""
+    calls: list[None] = []
+    model.backbone.register_forward_hook(lambda *_: calls.append(None))
+    return calls
+
+
+@pytest.mark.parametrize(
+    ("accumulation", "mutate", "reason"),
+    [
+        pytest.param(2, lambda head: None, "keypoint replay requires accumulate_grad_batches=1", id="accumulation"),
+        pytest.param(
+            1,
+            lambda head: head.register_forward_hook(lambda *_: None),
+            "a pose head module is hooked, overridden or compiled",
+            id="head-breach",
+        ),
+    ],
+)
+def test_pose_routing_retires_then_runs_native(
+    accumulation: int, mutate: Callable[[torch.nn.Module], object], reason: str
+) -> None:
+    """A broken pose contract retires the recording once and trains through the full native call.
+
+    The CUDA-only route cannot execute on CPU runners, so images spoof ``is_cuda`` and the
+    real retirement logic runs; the native fallback shows as one backbone forward.
+    """
+    torch.manual_seed(42)
+    model = _routed_pose(accumulation)
+    mutate(model.head)
+    images = _cuda_flagged_images()
+    calls = _count_backbone_calls(model)
+    with (
+        patch.object(model._network_capture, "run_features", wraps=model._network_capture.run_features) as spy,
+        pytest.warns(UserWarning, match=f"stays eager: {reason}"),
+    ):
+        output = model._training_network(images)
+    spy.assert_called_once_with(images, (model.backbone, model.neck))
+    assert model._network_capture._disabled and model._network_capture._network is None
+    assert len(calls) == 1
+    assert output.o2m_cls.shape[0] == 2
+
+
+def test_pose_routing_falls_back_when_features_are_absent() -> None:
+    """When the recorder declines to return features, the full native call runs without a warning."""
+    torch.manual_seed(42)
+    model = _routed_pose()
+    images = _cuda_flagged_images()
+    calls = _count_backbone_calls(model)
+    with patch.object(model._network_capture, "run_features", return_value=None) as spy, warnings.catch_warnings():
+        warnings.simplefilter("error")
+        output = model._training_network(images)
+    spy.assert_called_once_with(images, (model.backbone, model.neck))
+    assert len(calls) == 1
+    assert output.o2m_cls.shape[0] == 2
+
+
+def test_pose_routing_dispatches_shared_features_to_native_head() -> None:
+    """Returned shared features feed the native head directly, with no second backbone pass."""
+    torch.manual_seed(42)
+    model = _routed_pose()
+    images = _cuda_flagged_images()
+    network = _FeatureNetwork(model.backbone, model.neck)
+    features = network.rebuild(network(images))
+    expected = model.head(features)
+    calls = _count_backbone_calls(model)
+    with (
+        patch.object(model._network_capture, "run_features", return_value=features) as spy,
+        warnings.catch_warnings(),
+    ):
+        warnings.simplefilter("error")
+        output = model._training_network(images)
+    spy.assert_called_once_with(images, (model.backbone, model.neck))
+    assert calls == []
+    for field in fields(DualHeadOutput):
+        left, right = getattr(expected, field.name), getattr(output, field.name)
+        assert (left is None) == (right is None), field.name
+        if left is not None:
+            assert _bits_equal(left, right), field.name
+
+
+def test_pose_routing_leaves_cpu_images_native() -> None:
+    """Images that are not on CUDA never reach the recorder, however many gates pass."""
+    torch.manual_seed(42)
+    model = _routed_pose()
+    with patch.object(model._network_capture, "run_features") as spy:
+        output = model._training_network(torch.rand(2, 3, 64, 64))
+    spy.assert_not_called()
+    assert output.o2m_cls.shape[0] == 2
