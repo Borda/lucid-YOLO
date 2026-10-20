@@ -216,6 +216,7 @@ from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
 from lucid_yolo.ptl.coco_backend import build_mean_average_precision
+from lucid_yolo.ptl.loss_capture import _LossCapture, _LossCaptureLifecycle
 from lucid_yolo.ptl.network_capture import _detection_stages, _NetworkCapture, _NetworkCaptureLifecycle
 from lucid_yolo.ptl.seg_targets import instance_mask_targets, scale_boxes_to_grid, semantic_target
 from lucid_yolo.ptl.segment_head_capture import _SegmentHeadCapture, _SegmentHeadCaptureLifecycle
@@ -759,6 +760,17 @@ def _validate_task_arguments(task: str, num_keypoints: int | None, rotated_iou_f
         )
 
 
+def _validate_replay_options(task: str, compile_step: bool, capture_network: bool, capture_loss: bool) -> None:
+    """Reject replay options outside the detection objective they record.
+
+    Raises:
+        ValueError: If either recording is combined with another task or the compiler.
+    """
+    if (capture_network or capture_loss) and (task != "detect" or compile_step):
+        option = "capture_network" if capture_network else "capture_loss"
+        raise ValueError(f"{option}=True requires task='detect' and compile_step=False")
+
+
 class DetectionLitModule(LightningModule):
     """Lightning detector: model stack, dual-branch loss, and MuSGD (WP-034).
 
@@ -929,6 +941,14 @@ class DetectionLitModule(LightningModule):
             changed storage, modes, hooks or precision retire the recording. Warmup
             restores buffers and RNG, and the fit callbacks discard recordings on
             completion or failure. Higher-order differentiation is unsupported.
+        capture_loss: Replay the existing detection assignment and loss forward/backward
+            on single-device CUDA automatic training. Default off: recording pays setup
+            and retains a graph pool. Masked target capacity grows geometrically; the
+            method, label checks, live branch schedule and optimizer stay unchanged.
+            Requires ``task="detect"`` and ``compile_step=False``. Can combine with
+            ``capture_network``, ``capture_orthogonalization`` and ``capture_updates``;
+            it records no optimizer update itself, so the optimizer step is whatever
+            those optimizer options select.
         capture_updates: Enable MuSGD's optional replay of the existing update preparation,
             including momentum, followed by a native batched parameter write at the current
             learning rate. Defaults to ``False``. Uses private gradient storage and live
@@ -938,8 +958,8 @@ class DetectionLitModule(LightningModule):
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
             ``"keypoints"``, if ``rotated_iou_form`` is not a known rotated-IoU form,
-            if ``capture_network`` is combined with a non-detection task or ``compile_step``,
-            if ``keypoint_loss`` is not a known keypoint objective, if
+            if ``capture_network`` or ``capture_loss`` is combined with a non-detection
+            task or ``compile_step=True``, if ``keypoint_loss`` is not a known keypoint objective, if
             ``task="keypoints"`` was asked for without a ``num_keypoints``, or if a
             ``num_keypoints`` was given for a task that builds no point stem.
 
@@ -991,14 +1011,15 @@ class DetectionLitModule(LightningModule):
         capture_orthogonalization: bool = False,
         capture_network: bool = False,
         capture_updates: bool = False,
+        capture_loss: bool = False,
     ) -> None:
         super().__init__()
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
-        if capture_network and (task != "detect" or compile_step):
-            raise ValueError("capture_network=True requires task='detect' and compile_step=False")
+        _validate_replay_options(task, compile_step, capture_network, capture_loss)
         self.save_hyperparameters()
+        self._capture_loss, self._capture_loss_active = capture_loss, False
         self._capture_network, self._capture_network_active = capture_network, False
-        self._network_capture = _NetworkCapture()
+        self._network_capture, self._loss_capture = _NetworkCapture(), _LossCapture()
         self._task, self._num_keypoints = task, num_keypoints
         self._compile_step: bool = compile_step
         self._capture_orthogonalization, self._capture_updates = capture_orthogonalization, capture_updates
@@ -1258,6 +1279,19 @@ class DetectionLitModule(LightningModule):
                 UserWarning,
                 stacklevel=2,
             )
+        self._capture_loss_active = (
+            self._capture_loss
+            and on_cuda
+            and self._trainer is not None
+            and isinstance(self.trainer.strategy, SingleDeviceStrategy)
+            and self.automatic_optimization
+        )
+        if self._capture_loss and not self._capture_loss_active and stage == "fit":
+            warnings.warn(
+                "capture_loss=True is ignored outside single-device CUDA automatic optimization",
+                UserWarning,
+                stacklevel=2,
+            )
         if self._compile_step and not self._compile_step_resolved:
             self._compile_objective(on_cuda)
         if stage == "predict" or self.task not in _RANK_LOCAL_VAL_TASKS:
@@ -1277,8 +1311,10 @@ class DetectionLitModule(LightningModule):
             )
 
     def configure_callbacks(self) -> list[Callback]:
-        """Keep an opted-in network recording scoped to one fit."""
+        """Keep opted-in CUDA recordings scoped to one fit."""
         callbacks: list[Callback] = [_NetworkCaptureLifecycle()] if self._capture_network else []
+        if self._capture_loss:
+            callbacks.append(_LossCaptureLifecycle())
         if self._segment_head_capture.requested:
             callbacks.append(_SegmentHeadCaptureLifecycle())
         return callbacks
@@ -1388,18 +1424,40 @@ class DetectionLitModule(LightningModule):
             head_out = self(images)
         o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)
         o2o_boxes = decode_ltrb(head_out.o2o_box, anchor_points, strides)
-        out = self.loss(
-            head_out.o2m_cls,
-            o2m_boxes,
-            head_out.o2o_cls,
-            o2o_boxes,
-            anchor_points,
-            gt_boxes,
-            gt_labels,
-            gt_mask,
-            strides=strides,
-            alpha=alpha,
-        )
+        if (
+            self._capture_loss_active
+            and self._trainer is not None
+            and self._trainer.training
+            and self.training
+            and self.automatic_optimization
+            and torch.is_grad_enabled()
+        ):
+            out = self._loss_capture.run(
+                self.loss,
+                head_out.o2m_cls,
+                o2m_boxes,
+                head_out.o2o_cls,
+                o2o_boxes,
+                anchor_points,
+                gt_boxes,
+                gt_labels,
+                gt_mask,
+                strides,
+                alpha,
+            )
+        else:
+            out = self.loss(
+                head_out.o2m_cls,
+                o2m_boxes,
+                head_out.o2o_cls,
+                o2o_boxes,
+                anchor_points,
+                gt_boxes,
+                gt_labels,
+                gt_mask,
+                strides=strides,
+                alpha=alpha,
+            )
         return head_out, out
 
     def _alpha_tensor(self, device: torch.device) -> Tensor:
