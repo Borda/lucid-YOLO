@@ -1530,7 +1530,7 @@ class DetectionLitModule(LightningModule):
         """Run the dual head through the training recording when its contract holds.
 
         Detection and oriented detection record all three stages; pose records only backbone and neck.
-        Its optional point stems stay native so batches with no assigned positives
+        Pose's optional point stems stay native so batches with no assigned positives
         keep their absent gradients, rather than zero-valued captured gradients.
         All tasks keep changing instance counts and loss arithmetic outside capture.
         """

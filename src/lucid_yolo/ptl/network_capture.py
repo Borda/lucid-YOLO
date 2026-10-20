@@ -3,7 +3,7 @@
 
 The network has a fixed image signature while its ground-truth count changes per
 batch. Detection and oriented detection record backbone, neck and head; pose records backbone and neck.
-Both leave assignment, losses, schedules,
+All three leave assignment, losses, schedules,
 optimizer and EMA in their existing loop. PyTorch's graphed-callable API owns the
 autograd bridge; no network arithmetic is rewritten. The recording is transient,
 bounded to one input signature and discarded at the fit boundary.
@@ -368,7 +368,7 @@ class _NetworkCapture:
             stacklevel: The frame the warning names, counted as :func:`warnings.warn`
                 counts from this method. The default names the caller of whoever called
                 ``retire``; :meth:`_run` passes 4 so a retirement it decides still names
-                the code that called :meth:`run` or :meth:`run_features`.
+                the code that called :meth:`run`, :meth:`run_features` or :meth:`run_oriented`.
         """
         if self._disabled:
             return
@@ -434,8 +434,8 @@ class _NetworkCapture:
             stages: The caller's stage modules, whose identities the recording keeps.
             eager: Produces the value returned whenever this call does not replay. It is a
                 fallback value, not necessarily the native result: :meth:`run` passes the
-                native forward, while :meth:`run_features` returns ``None`` so its caller
-                makes the full native call itself.
+                native forward, and so does :meth:`run_oriented`, while :meth:`run_features`
+                returns ``None`` so its caller makes the full native call itself.
             build: Composes the stages into the module checked for eligibility until a
                 recording exists, and captured by the first one.
             rebuild: Turns the replayed output tensors back into the caller's value.
