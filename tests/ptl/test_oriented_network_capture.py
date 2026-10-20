@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import copy
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import fields
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -151,20 +152,37 @@ def test_oriented_adapter_preserves_fields() -> None:
         _same(getattr(expected, field.name), getattr(actual, field.name))
 
 
-def test_oriented_default_and_cpu_fallback() -> None:
-    """Enabling the existing flag changes no checkpoint keys and stays native without CUDA."""
+@pytest.mark.parametrize("stage", ["fit", "validate", "test", "predict"])
+def test_oriented_default_and_cpu_fallback(stage: str) -> None:
+    """Enabling the existing flag changes no checkpoint keys and stays native without CUDA.
+
+    Every Lightning stage sets the module up, and only ``fit`` trains, so only ``fit``
+    names the ignored flag: an evaluation run reporting a replay it never would use is
+    noise, and a CPU setup that turned recording on would be a silent regression. The
+    recorder entry point raises if anything reaches it, so the CPU setup is proven inert.
+    """
     native, replayed = _oriented(), _oriented(capture_network=True)
     assert native.state_dict().keys() == replayed.state_dict().keys()
     assert not native.hparams.capture_network and replayed.hparams.capture_network
     assert _oriented_replay_breach(replayed) is None
     replayed.trainer = Trainer(accelerator="cpu", logger=False, enable_checkpointing=False)
-    with pytest.warns(UserWarning, match="single-device CUDA"):
-        replayed.setup("fit")
+    with (
+        patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("CPU must stay eager")),
+        warnings.catch_warnings(record=True) as caught,
+    ):
+        warnings.simplefilter("always")
+        replayed.setup(stage)
+    ignored = [str(item.message) for item in caught if str(item.message).startswith("capture_network=True is ignored")]
+    assert len(ignored) == int(stage == "fit"), ignored
     assert not replayed._capture_network_active
 
 
 def test_oriented_cli_accepts_network_replay() -> None:
-    """The packaged oriented recipe builds the flag and keeps rotated-target transport enabled."""
+    """The packaged oriented recipe builds the flag, keeps rotated-target transport and passes the replay guard.
+
+    A shipped setting that tripped the guard would leave every user of the recipe on the
+    eager path with only a retirement warning to show for it.
+    """
     cli = DetectionCLI(
         DetectionLitModule,
         DetectionDataModule,
@@ -182,6 +200,7 @@ def test_oriented_cli_accepts_network_replay() -> None:
     )
     assert cli.model.task == "obb" and cli.model.hparams.capture_network
     assert cli.datamodule._rotated_targets
+    assert _oriented_replay_breach(cli.model) is None
 
 
 @pytest.mark.gpu
@@ -197,9 +216,22 @@ def test_oriented_trainer_preserves_native_state(
     bf16_replay_expected: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Actual replay survives EMA validation and preserves empty-target gradients and temporary fallback."""
+    """Actual replay survives EMA validation and preserves empty-target gradients and temporary fallback.
+
+    A replaying arm that never records names exactly one cause, and the cause is pinned:
+    accumulation is checked before the recorder reads the precision policy, so with both
+    breached the accumulation reason is the one reported. A retirement for an unrelated
+    cause would otherwise satisfy the count while hiding the regression behind it.
+    """
     torch.manual_seed(42)
     batches = _batches(layout)
+    retirements = (
+        ["accumulate_grad_batches=1"]
+        if accumulation == 2
+        else ["BF16 replay requires"]
+        if precision == "bf16-mixed" and not bf16_replay_expected
+        else []
+    )
     initial = _oriented().state_dict()
     real_replay = torch.cuda.CUDAGraph.replay
     launches: list[int] = []
@@ -216,7 +248,8 @@ def test_oriented_trainer_preserves_native_state(
     try:
         for capture in (False, True):
             torch.manual_seed(42)
-            model = _oriented(capture_network=capture)
+            # A decaying LR keeps a real scheduler on both arms, so its state joins the oracle.
+            model = _oriented(capture_network=capture, lrf=0.1)
             model.load_state_dict(initial)
             probe, ema = _ReplayProbe(launches), EMACallback()
             callbacks: list[Callback] = [probe, ema]
@@ -254,6 +287,8 @@ def test_oriented_trainer_preserves_native_state(
                 str(item.message) for item in caught if str(item.message).startswith("capture_network=True stays")
             ]
             assert len(retired) == int(capture and not recording), retired
+            expected = retirements if capture else []
+            assert all(fragment in message for fragment, message in zip(expected, retired, strict=True)), retired
             assert graph_recordings.call_count == int(recording)
             assert len(probe.deltas) == 6 and all(probe.angle_gradients)
             assert trainer.global_step == (3 + accumulation - 1) // accumulation * 2
@@ -270,6 +305,7 @@ def test_oriented_trainer_preserves_native_state(
                     (
                         model.state_dict(),
                         trainer.optimizers[0].state_dict(),
+                        trainer.lr_scheduler_configs[0].scheduler.state_dict(),
                         ema.state_dict(),
                         probe.losses,
                         None if scaler is None else scaler.state_dict(),
@@ -282,7 +318,9 @@ def test_oriented_trainer_preserves_native_state(
         torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
 
 
-@pytest.mark.parametrize("method", ["training_step", "_task_extra_loss", "_branch_oriented_terms"])
+@pytest.mark.parametrize(
+    "method", ["training_step", "_shared_step", "_task_extra_loss", "_oriented_extra_loss", "_branch_oriented_terms"]
+)
 def test_oriented_objective_override_stays_native(method: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """A changed consumer cannot silently replace absent gradients with recorded zeros."""
     model = _oriented(capture_network=True)
@@ -328,6 +366,140 @@ def test_oriented_helper_replacement_stays_native(target: str, monkeypatch: pyte
     assert _oriented_replay_breach(model) == "a native oriented objective helper changed"
 
 
+class _CudaFlagged(torch.Tensor):
+    """CPU tensor that reports CUDA residency so the CUDA-gated oriented routing is reachable offline.
+
+    Operations unwrap to plain tensors, so the real model still runs on the CPU. A copy of
+    the pose suite's class: ``tests/`` is not a package, so one test module cannot import
+    another's helpers.
+    """
+
+    is_cuda = True
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):  # type: ignore[no-untyped-def]
+        """Run the operation on the underlying data and return an ordinary tensor."""
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **(kwargs or {}))
+
+
+def _routed_oriented(accumulation: int = 1) -> DetectionLitModule:
+    """Build an oriented module that satisfies every training-time gate of the full-network route.
+
+    Examples:
+        >>> _routed_oriented(2).trainer.accumulate_grad_batches
+        2
+    """
+    model = _oriented(capture_network=True)
+    model._trainer = SimpleNamespace(training=True, accumulate_grad_batches=accumulation)
+    model._capture_network_active = True
+    return model
+
+
+def _cuda_flagged_images() -> torch.Tensor:
+    """Images that pass the ``is_cuda`` gate while living on the CPU.
+
+    Examples:
+        >>> _cuda_flagged_images().is_cuda
+        True
+    """
+    return torch.rand(2, 3, 64, 64).as_subclass(_CudaFlagged)
+
+
+def _override_objective(model: DetectionLitModule) -> None:
+    """Replace one native oriented consumer on this instance, as a user customization would.
+
+    Examples:
+        >>> model = _oriented()
+        >>> _override_objective(model)
+        >>> "_task_extra_loss" in vars(model)
+        True
+    """
+    model._task_extra_loss = lambda *args: torch.tensor(0.0)  # type: ignore[method-assign]
+
+
+def test_oriented_routing_dispatches_full_network_to_recorder() -> None:
+    """An unbroken oriented module hands all three stages to the oriented recorder and returns its output.
+
+    The CUDA-only route cannot execute on CPU runners, so images spoof ``is_cuda`` and the
+    recorder is replaced: what is pinned is the dispatch itself, the oriented entry point
+    with the complete stage tuple and the module as its eager fallback, never the
+    detection route, and no retirement warning.
+    """
+    model = _routed_oriented()
+    images = _cuda_flagged_images()
+    replayed = object()
+    with (
+        patch.object(model._network_capture, "run_oriented", return_value=replayed) as oriented,
+        patch.object(model._network_capture, "run") as detect,
+        warnings.catch_warnings(),
+    ):
+        warnings.simplefilter("error")
+        output = model._training_network(images)
+    oriented.assert_called_once_with(images, (model.backbone, model.neck, model.head), model)
+    detect.assert_not_called()
+    assert output is replayed
+
+
+def test_oriented_routing_leaves_cpu_images_native() -> None:
+    """Images that are not on CUDA never reach the oriented recorder, however many gates pass.
+
+    Every other training-time gate is satisfied, so the image residency check alone
+    keeps the route native: the recorder is never called, no retirement is warned, and
+    all six fields equal the module's own eager forward byte for byte.
+    """
+    model = _routed_oriented()
+    images = torch.rand(2, 3, 64, 64)
+    expected = model(images)
+    with (
+        patch.object(model._network_capture, "run_oriented") as oriented,
+        warnings.catch_warnings(),
+    ):
+        warnings.simplefilter("error")
+        output = model._training_network(images)
+    oriented.assert_not_called()
+    _same(
+        [getattr(expected, field.name) for field in fields(DualHeadOutput)],
+        [getattr(output, field.name) for field in fields(DualHeadOutput)],
+    )
+
+
+@pytest.mark.parametrize(
+    ("accumulation", "mutate", "recorder_calls", "reason"),
+    [
+        pytest.param(2, lambda model: None, 1, "oriented replay requires accumulate_grad_batches=1", id="accumulation"),
+        pytest.param(1, _override_objective, 0, "the native oriented objective is overridden", id="objective-override"),
+    ],
+)
+def test_oriented_routing_retires_then_runs_native(
+    accumulation: int, mutate: Callable[[DetectionLitModule], None], recorder_calls: int, reason: str
+) -> None:
+    """A broken oriented contract retires the recording once and returns the full native call.
+
+    Accumulation retires before dispatch, so the retired recorder is still reached and hands
+    back its eager fallback; an overridden consumer retires before the recorder is reached
+    at all. Either way the output is the module's own forward, run exactly once.
+    """
+    model = _routed_oriented(accumulation)
+    mutate(model)
+    images = _cuda_flagged_images()
+    expected = model(images)
+    calls: list[None] = []
+    model.backbone.register_forward_hook(lambda *_: calls.append(None))
+    with (
+        patch.object(model._network_capture, "run_oriented", wraps=model._network_capture.run_oriented) as spy,
+        pytest.warns(UserWarning, match=f"stays eager: {reason}"),
+    ):
+        output = model._training_network(images)
+    assert spy.call_count == recorder_calls
+    assert model._network_capture._disabled and model._network_capture._network is None
+    assert len(calls) == 1
+    _same(
+        [getattr(expected, field.name) for field in fields(DualHeadOutput)],
+        [getattr(output, field.name) for field in fields(DualHeadOutput)],
+    )
+
+
 class _ClassificationOnly(DetectionLitModule):
     """A supported native customization whose objective leaves angle gradients absent."""
 
@@ -336,10 +508,25 @@ class _ClassificationOnly(DetectionLitModule):
         return torch.zeros_like(out.total)
 
 
+def test_oriented_subclass_override_stays_native() -> None:
+    """A consumer overridden in a subclass retires replay, as an instance attribute does.
+
+    The guard unwraps bound methods through ``__func__`` before comparing them. A subclass
+    method is a bound method whose function is not the native one, the path the
+    instance-level lambdas above never reach; this case runs it without a GPU.
+    """
+    model = _ClassificationOnly(0.34, 0.25, 64, 2, task="obb", capture_network=True)
+    assert _oriented_replay_breach(model) == "the native oriented objective is overridden"
+
+
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA training")
 def test_oriented_override_keeps_absent_angle_gradients(graph_recordings: MagicMock) -> None:
-    """The public trainer fallback skips angle state instead of materializing zero gradients."""
+    """The public trainer fallback skips angle state instead of materializing zero gradients.
+
+    The replaying arm retires once, and for the overridden objective specifically: a
+    retirement for any other cause would leave the same absent gradients behind it.
+    """
     batches = _batches("uniform")
     initial = _oriented().state_dict()
     results = []
@@ -376,6 +563,7 @@ def test_oriented_override_keeps_absent_angle_gradients(graph_recordings: MagicM
             trainer.fit(model, train_dataloaders=DataLoader(copy.deepcopy(batches), batch_size=None))
         retired = [str(item.message) for item in caught if str(item.message).startswith("capture_network=True stays")]
         assert len(retired) == int(capture)
+        assert all("the native oriented objective is overridden" in message for message in retired), retired
         assert not graph_recordings.call_count
         angles = [parameter for name, parameter in model.named_parameters() if "angle_stems" in name]
         assert angles and all(parameter.grad is None for parameter in angles)

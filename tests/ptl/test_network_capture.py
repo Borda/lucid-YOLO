@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import gc
 import pickle
+import re
 import warnings
 import weakref
 from collections.abc import Callable, Iterator, Sequence
@@ -96,8 +97,13 @@ def test_default_has_no_callback_or_registered_state() -> None:
     ],
 )
 def test_incompatible_options_are_explicit(kwargs: dict[str, object]) -> None:
-    """Unsupported tasks and the separate compiler path fail before training begins."""
-    with pytest.raises(ValueError, match=r"requires task=.*compile_step=False"):
+    """Unsupported tasks and the separate compiler path fail before training begins.
+
+    The whole message is matched, so it names the network-replay option and every task
+    it accepts: a dropped or added task, or the loss-replay message, would fail here.
+    """
+    message = "capture_network=True requires task='detect', 'keypoints' or 'obb', and compile_step=False"
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
         _module(capture_network=True, **kwargs)
 
 
