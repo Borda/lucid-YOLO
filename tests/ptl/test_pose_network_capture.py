@@ -8,6 +8,7 @@ import warnings
 from collections.abc import Callable, Iterator
 from dataclasses import fields
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,8 +21,8 @@ from lucid_yolo.data.targets import Targets
 from lucid_yolo.models.heads.detect import DualHeadOutput
 from lucid_yolo.ptl import DetectionLitModule
 from lucid_yolo.ptl.datamodule import DetectionDataModule
-from lucid_yolo.ptl.module import _pose_head_breach
-from lucid_yolo.ptl.network_capture import _FeatureNetwork, _NetworkCapture
+from lucid_yolo.ptl.module import _POSE_STEM_DISPATCH, _pose_head_breach
+from lucid_yolo.ptl.network_capture import _FeatureNetwork, _input_breach, _NetworkCapture, _NetworkCaptureLifecycle
 
 
 @pytest.fixture(autouse=True)
@@ -336,7 +337,7 @@ def test_pose_trainer_matches_native(
 ) -> None:
     """Public pose training keeps flow/optimizer/scaler state through clipped accumulation.
 
-    Accumulation 1 records the shared features exactly once and replays every later batch,
+    Accumulation 1 records shared features and eighteen independent stems once and replays every later batch,
     the empty-supervision batch included, without a retirement warning. Accumulation 2
     never records and reports exactly the accumulation reason, so a lapse after the first
     batch cannot pass as parity of two native runs.
@@ -377,9 +378,11 @@ def test_pose_trainer_matches_native(
         expected = retirements if capture else []
         assert len(retired) == len(expected), retired
         assert all(fragment in message for fragment, message in zip(expected, retired, strict=True)), retired
-        assert graph_recordings.call_count == int(capture and not retirements)
+        assert graph_recordings.call_count == 19 * int(capture and not retirements)
         assert trainer.global_step == (3 + accumulation - 1) // accumulation
         assert model._network_capture._network is None
+        assert model._network_capture._stems == {}
+        assert model._network_capture._stem_owners is None
         scaler = getattr(trainer.precision_plugin, "scaler", None)
         states.append(
             (
@@ -424,7 +427,7 @@ def test_pose_trainer_with_optimizer_captures_matches_native(graph_recordings: M
             warnings.filterwarnings("error", message="capture_network=True stays eager")
             trainer.fit(model, train_dataloaders=DataLoader(batches, batch_size=None))
         results.append((copy.deepcopy(model.state_dict()), copy.deepcopy(trainer.optimizers[0].state_dict()["state"])))
-    assert graph_recordings.call_count == 1
+    assert graph_recordings.call_count == 19
     _same_state(*results)
 
 
@@ -485,6 +488,11 @@ def test_pose_head_certificate_rejects_forward_branch_overrides() -> None:
         ),
         pytest.param(lambda head: setattr(head, next(head.named_children())[0], torch.nn.Identity()), id="child-swap"),
         pytest.param(lambda head: setattr(head, "_compiled_call_impl", lambda *_: None), id="compiled-call"),
+        pytest.param(lambda head: setattr(head.o2m, "_keypoints", head.o2m._keypoints), id="keypoints-override"),
+        pytest.param(
+            lambda head: setattr(head.o2m, "_base_predictions", head.o2m._base_predictions),
+            id="base-predictions-override",
+        ),
     ],
 )
 def test_altered_pose_head_dispatch_fails_certificate(mutate: Callable[[torch.nn.Module], object]) -> None:
@@ -688,3 +696,335 @@ def test_pose_routing_leaves_cpu_images_native() -> None:
         output = model._training_network(torch.rand(2, 3, 64, 64))
     spy.assert_not_called()
     assert output.o2m_cls.shape[0] == 2
+
+
+def test_native_stem_executor_keeps_every_field_and_call_order() -> None:
+    """The private scheduling seam calls the same eighteen native stems in order."""
+    model = _pose().eval()
+    features = _FeatureNetwork(model.backbone, model.neck)(torch.rand(2, 3, 64, 64))
+    expected = model.head(features)
+    visited = []
+
+    def execute(stem: torch.nn.Module, feature: torch.Tensor) -> torch.Tensor:
+        visited.append(stem)
+        return stem(feature)
+
+    holder = _NetworkCapture()
+    with patch.object(holder, "stem", side_effect=execute):
+        actual = model.head(features, _runner=holder)
+    assert len(visited) == 2 * 3 * 3
+    assert len({id(stem) for stem in visited}) == len(visited)
+    assert visited[0] is model.head.o2m.box_stems[0]
+    assert visited[1] is model.head.o2m.cls_stems[0]
+    assert visited[-1] is model.head.o2o.keypoint_stems[-1]
+    for field in fields(DualHeadOutput):
+        left, right = getattr(expected, field.name), getattr(actual, field.name)
+        assert (left is None) == (right is None)
+        if left is not None:
+            assert _bits_equal(left, right), field.name
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires independent CUDA stem replay")
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+def test_pose_stems_replay_through_changing_supervision(
+    dtype: torch.dtype, graph_recordings: MagicMock, bf16_replay_expected: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unused point backwards stay absent and resume replay when supervision returns."""
+    if dtype == torch.bfloat16 and not bf16_replay_expected:
+        pytest.skip("BF16 graph replay requires the verified torch 2.9 runtime")
+    launches: list[int] = []
+    native_replay = torch.cuda.CUDAGraph.replay
+
+    def observe(graph: torch.cuda.CUDAGraph) -> None:
+        """Count real forward/backward execution without replacing device work."""
+        launches.append(id(graph))
+        native_replay(graph)
+
+    monkeypatch.setattr(torch.cuda.CUDAGraph, "replay", observe)
+    torch.manual_seed(42)
+    native = _pose().cuda().to(memory_format=torch.channels_last)
+    replayed = _routed_pose().cuda().to(memory_format=torch.channels_last)
+    replayed.load_state_dict(native.state_dict())
+    optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5, momentum=0.9) for model in (native, replayed)]
+    for iteration, point_branches in enumerate((("o2m", "o2o"), (), ("o2m",), ("o2m", "o2o"))):
+        previous_launches = len(launches)
+        replayed._network_capture.start_batch()
+        image = torch.rand(2, 3, 64, 64, device="cuda").contiguous(memory_format=torch.channels_last)
+        names = ["o2m_cls", "o2o_cls"] + [f"{branch}_keypoints" for branch in point_branches]
+        for model, optimizer in zip((native, replayed), optimizers, strict=True):
+            optimizer.zero_grad(set_to_none=True)
+            with torch.autocast("cuda", dtype=dtype, enabled=dtype != torch.float32, cache_enabled=False):
+                output = model(image) if model is native else model._training_network(image)
+                loss = sum(getattr(output, name).float().square().mean() for name in names)
+            loss.backward()
+            optimizer.step()
+        if iteration:
+            # Nineteen forwards; one feature backward, six class backwards,
+            # and three point backwards per supervised branch. Box outputs are unused.
+            assert len(launches) - previous_launches >= 19 + 1 + 6 + 3 * len(point_branches)
+        _assert_same_gradients_and_state(native, replayed)
+        _same_state(optimizers[0].state_dict(), optimizers[1].state_dict())
+        holders = replayed._network_capture._stems
+        assert len(holders) == 18
+        assert all(holder._network is not None for holder in holders.values())
+        assert graph_recordings.call_count == 19
+        for branch in ("o2m", "o2o"):
+            stem = getattr(replayed.head, branch).keypoint_stems[0]
+            assert all((parameter.grad is not None) == (branch in point_branches) for parameter in stem.parameters())
+            assert holders[id(stem)]._pending_backward == (branch not in point_branches)
+    restored = copy.deepcopy(replayed._network_capture)
+    assert restored._network is None and restored._stems == {}
+    replayed._network_capture.clear()
+    assert replayed._network_capture._stems == {}
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires differentiable CUDA stem inputs")
+def test_stem_replay_preserves_input_gradients_and_accumulation() -> None:
+    """A stem propagates feature gradients without overwriting adopted parameter gradients."""
+    torch.manual_seed(42)
+    native = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).cuda()
+    replayed = copy.deepcopy(native)
+    holder = _NetworkCapture()
+    for _ in range(3):
+        left = torch.randn(3, 4, device="cuda", requires_grad=True)
+        right = left.detach().clone().requires_grad_()
+        native(left).square().sum().backward()
+        holder.stem(replayed, right).square().sum().backward()
+        assert _bits_equal(left.grad, right.grad)
+        for expected, actual in zip(native.parameters(), replayed.parameters(), strict=True):
+            assert _bits_equal(expected.grad, actual.grad)
+        assert holder._stems[id(replayed)]._network is not None
+    actual = holder.stem(replayed, right.detach())
+    assert _bits_equal(native(right.detach()), actual)
+
+
+@pytest.mark.parametrize(
+    ("owner", "name"),
+    [pytest.param(owner, name, id=f"{owner.__name__}.{name}") for owner, name, _ in _POSE_STEM_DISPATCH],
+)
+def test_stem_dispatch_override_before_construction_stays_observable(owner: type, name: str) -> None:
+    """A class-level replacement of any native dispatch method is refused, even before construction.
+
+    Each dispatch-table entry is patched alone with a forwarding wrapper that cannot be
+    the native function object, so dropping one entry from the table fails exactly its case.
+    """
+    native = getattr(owner, name)
+
+    def custom(self: torch.nn.Module, *args: object, **kwargs: object) -> object:
+        """Forward to the native method while being a different function object."""
+        return native(self, *args, **kwargs)
+
+    with patch.object(owner, name, custom):
+        model = _pose()
+        assert _pose_head_breach(model.head, model._pose_head_topology) == "the native pose stem dispatch changed"
+
+
+def test_stem_holder_dispatch_and_lifetime_without_cuda() -> None:
+    """CPU CI checks host ownership while actual replay numerics are checked on CUDA."""
+    parent = _NetworkCapture()
+    stem = torch.nn.Identity()
+    feature = _cuda_flagged_images()
+    with patch.object(_NetworkCapture, "_run", autospec=True, return_value=feature) as run:
+        assert parent.stem(stem, feature) is feature
+        child = parent._stems[id(stem)]
+        assert parent.stem(stem, feature) is feature
+        assert len(parent._stems) == 1
+        assert run.call_args.args[0] is child
+        assert run.call_args.kwargs == {"allow_input_grad": True}
+        _, stages, eager, build, rebuild = run.call_args.args[1:]
+        assert stages == (stem,)
+        assert eager(feature) is feature
+        assert build()(feature) == (feature,)
+        assert rebuild((feature,)) is feature
+    child._pending_backward = True
+    parent.start_batch()
+    assert not child._pending_backward
+    assert copy.deepcopy(parent)._stems == {}
+    parent.clear()
+    assert parent._stems == {}
+
+
+def test_stem_feature_gradient_permission_does_not_change_image_guard() -> None:
+    """Only the explicit internal stem route permits differentiable inputs."""
+    feature = torch.ones(2, 3, requires_grad=True)
+    assert _NetworkCapture().stem(torch.nn.Identity(), feature) is feature
+
+    precision = (False, torch.float16)
+    assert _input_breach(feature, precision) == "the input images require gradients"
+    assert _input_breach(feature, precision, allow_input_grad=True) is None
+
+
+@pytest.mark.parametrize(
+    ("training", "disabled", "make_feature", "grad"),
+    [
+        pytest.param(False, False, _cuda_flagged_images, True, id="eval-stage"),
+        pytest.param(True, True, _cuda_flagged_images, True, id="disabled-parent"),
+        pytest.param(True, False, lambda: torch.rand(2, 3, 64, 64), True, id="cpu-feature"),
+        pytest.param(True, False, _cuda_flagged_images, False, id="no-grad"),
+    ],
+)
+def test_stem_bypass_runs_native_without_holder(
+    training: bool, disabled: bool, make_feature: Callable[[], torch.Tensor], grad: bool
+) -> None:
+    """Each native-bypass clause of the stem route returns the native result and starts no recording.
+
+    Every case differs from a recordable call in one clause only: an eval-mode stage, a
+    retired parent, a CPU feature or disabled gradients. Dropping that clause would record
+    graphs during validation, under ``no_grad`` or for an eval-mode stem.
+    """
+    parent = _NetworkCapture()
+    parent._disabled = disabled
+    stage = torch.nn.Identity().train(training)
+    feature = make_feature()
+    with patch.object(_NetworkCapture, "_run", autospec=True) as run, torch.set_grad_enabled(grad):
+        result = parent.stem(stage, feature)
+    assert result is feature
+    assert parent._stems == {}
+    run.assert_not_called()
+
+
+def test_recorded_stem_switched_to_eval_reaches_drift_check() -> None:
+    """A recorded stem switched to eval goes through its holder, whose drift check retires it.
+
+    The holder is marked recorded without CUDA and the patched replay path stands in for the
+    drift check that a CUDA run applies; only the routing decision is exercised here.
+    """
+    parent = _NetworkCapture()
+    stage = torch.nn.Identity()
+    feature = _cuda_flagged_images()
+    with patch.object(_NetworkCapture, "_run", autospec=True, return_value=feature) as run:
+        parent.stem(stage, feature)
+        parent._stems[id(stage)]._network = torch.nn.Identity()
+        stage.eval()
+        parent.stem(stage, feature)
+    assert run.call_count == 2
+
+
+def test_stem_retirement_warning_names_stem_and_caller() -> None:
+    """A retired stem holder names its stem, says the rest keeps replaying, and points past internal frames.
+
+    The child is created through the parent's normal route after the owner check recorded
+    the head's module names; the warning must name this test as its caller, the first frame
+    outside the replay stack, never the head's dispatch code.
+    """
+    model = _pose()
+    parent = _NetworkCapture()
+    parent.check_stem_owners(model.head)
+    stage = model.head.o2m.keypoint_stems[0]
+    feature = _cuda_flagged_images()
+    with patch.object(_NetworkCapture, "_run", autospec=True, return_value=feature):
+        parent.stem(stage, feature)
+    match = r"keeps pose stem o2m\.keypoint_stems\.0 eager while the shared features and the other stems keep replaying"
+    with pytest.warns(UserWarning, match=match) as caught:
+        parent._stems[id(stage)].retire("a test cause")
+    assert caught[0].filename == __file__
+
+
+@pytest.mark.parametrize(
+    "finish",
+    [
+        pytest.param(lambda callback, module: callback.on_fit_end(cast("Trainer", None), module), id="fit-end"),
+        pytest.param(
+            lambda callback, module: callback.on_exception(cast("Trainer", None), module, RuntimeError("abort")),
+            id="exception",
+        ),
+    ],
+)
+def test_lifecycle_releases_stem_holders(finish: Callable[[_NetworkCaptureLifecycle, object], None]) -> None:
+    """Fit completion and failure both release every stem holder together with the shared recording.
+
+    A child holder stands in for a recorded stem and the callback is driven directly, so the
+    clearing path is checked on CPU while recording numerics stay on the CUDA matrix.
+    """
+    holder = _NetworkCapture()
+    holder.check_stem_owners(_pose().head)
+    holder._stems[1] = _NetworkCapture("stem")
+    finish(_NetworkCaptureLifecycle(), SimpleNamespace(_network_capture=holder))
+    assert holder._stems == {}
+    assert holder._stem_owners is None
+
+
+def test_changed_pose_stem_ownership_retires_all_holders() -> None:
+    """An identical replacement cannot keep adding unreachable graph owners to a fit."""
+    model = _pose()
+    holder = _NetworkCapture()
+    holder.check_stem_owners(model.head)
+    holder._stems[1] = _NetworkCapture()
+    holder.check_stem_owners(model.head)
+    assert not holder._disabled and len(holder._stems) == 1
+    model.head.o2m.keypoint_stems[0] = copy.deepcopy(model.head.o2m.keypoint_stems[0])
+    with pytest.warns(UserWarning, match="pose head module was replaced"):
+        holder.check_stem_owners(model.head)
+    assert holder._disabled and holder._stems == {} and holder._stem_owners is None
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires retirement before CUDA feature replay")
+def test_replaced_pose_stem_keeps_complete_forward_native() -> None:
+    """Replacement is detected before recording can leave an obsolete graph pool alive."""
+    native, replayed = _frozen_pair(())
+    optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5) for model in (native, replayed)]
+    _step_pair(native, replayed, optimizers)
+    assert len(replayed._network_capture._stems) == 18
+    replacement = copy.deepcopy(native.head.o2m.keypoint_stems[0])
+    native.head.o2m.keypoint_stems[0] = copy.deepcopy(replacement)
+    replayed.head.o2m.keypoint_stems[0] = copy.deepcopy(replacement)
+    with pytest.warns(UserWarning, match="pose head module was replaced"):
+        _step_pair(native, replayed, optimizers)
+    assert replayed._network_capture._disabled
+    assert replayed._network_capture._network is None and replayed._network_capture._stems == {}
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires changed CUDA stem trainability")
+def test_changed_stem_trainability_retires_only_its_recording() -> None:
+    """Freezing and unfreezing one point stem preserves native gradients and optimizer state."""
+    native, replayed = _frozen_pair(())
+    optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5, momentum=0.9) for model in (native, replayed)]
+    _step_pair(native, replayed, optimizers)
+    for model in (native, replayed):
+        model.head.o2m.keypoint_stems[0].requires_grad_(False)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _step_pair(native, replayed, optimizers)
+    retired = [item for item in caught if str(item.message).startswith("capture_network=True")]
+    assert len(retired) == 1, [str(item.message) for item in retired]
+    assert "o2m.keypoint_stems.0" in str(retired[0].message)
+    assert "changed after recording" in str(retired[0].message)
+    assert not retired[0].filename.endswith("detect.py")
+    capture = replayed._network_capture
+    frozen = id(replayed.head.o2m.keypoint_stems[0])
+    assert capture._network is not None
+    assert capture._stems[frozen]._disabled and capture._stems[frozen]._network is None
+    assert sum(child._disabled for child in capture._stems.values()) == 1
+    assert sum(child._network is not None for child in capture._stems.values()) == len(capture._stems) - 1
+    for model in (native, replayed):
+        model.head.o2m.keypoint_stems[0].requires_grad_(True)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="capture_network=True")
+        _step_pair(native, replayed, optimizers)
+    assert capture._stems[frozen]._disabled
+    _same_state(optimizers[0].state_dict(), optimizers[1].state_dict())
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires changed CUDA stem mode")
+def test_changed_stem_mode_retires_only_its_recording() -> None:
+    """Switching one recorded point stem to eval retires that stem alone and keeps native parity.
+
+    The mode change reaches the stem holder's drift check, as a recorded feature stage's
+    would, so the stem runs eager while the shared features keep replaying.
+    """
+    native, replayed = _frozen_pair(())
+    optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5, momentum=0.9) for model in (native, replayed)]
+    _step_pair(native, replayed, optimizers)
+    for model in (native, replayed):
+        model.head.o2m.keypoint_stems[0].eval()
+    with pytest.warns(UserWarning, match=r"keeps pose stem o2m\.keypoint_stems\.0 eager"):
+        _step_pair(native, replayed, optimizers)
+    capture = replayed._network_capture
+    assert capture._network is not None
+    assert capture._stems[id(replayed.head.o2m.keypoint_stems[0])]._disabled
+    _same_state(optimizers[0].state_dict(), optimizers[1].state_dict())
