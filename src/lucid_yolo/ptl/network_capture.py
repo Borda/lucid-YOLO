@@ -124,11 +124,13 @@ class _OrientedNetwork(nn.Module):
 class _FeatureNetwork(nn.Module):
     """Expose backbone and neck without fixing which optional head gradients exist.
 
-    A pose batch may have no assigned positives. Its point stems then keep
-    ``grad=None``; including those stems in one fixed backward would materialize
-    zero gradients and advance optimizer state that the native loop skips.
-    The shared features still feed the dense classification objective, while
-    the stems have independent autograd nodes and variable supervision stays native.
+    A pose or segmentation batch may have no assigned positives. Its optional
+    branches (pose point stems; segmentation coefficient, prototype and semantic
+    predictions) then keep ``grad=None``; including them in one fixed backward
+    would materialize zero gradients and advance optimizer state that the native
+    loop skips. The shared features still feed the dense classification objective,
+    while those branches keep independent backward nodes outside the recording and
+    variable supervision stays native.
     """
 
     def __init__(self, backbone: nn.Module, neck: nn.Module) -> None:
