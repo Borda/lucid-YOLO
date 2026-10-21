@@ -650,6 +650,30 @@ def test_pose_routing_retires_then_runs_native(
     assert output.o2m_cls.shape[0] == 2
 
 
+def test_retired_holder_skips_pose_replay_predicates() -> None:
+    """A retired recording sends later steps through the full native call without re-checking the head.
+
+    Once retired, the owner check and every later ``retire`` are no-ops, so the stem-owner
+    walk and the head certificate could change nothing; a step after retirement skips both
+    and never reaches the recorder.
+    """
+    torch.manual_seed(42)
+    model = _routed_pose()
+    with pytest.warns(UserWarning, match="stays eager: a test cause"):
+        model._network_capture.retire("a test cause")
+    images = _cuda_flagged_images()
+    with (
+        patch("lucid_yolo.ptl.module._pose_head_breach", autospec=True) as breach,
+        patch.object(model._network_capture, "check_stem_owners") as owners,
+        patch.object(model._network_capture, "run_features") as run,
+    ):
+        output = model._training_network(images)
+    breach.assert_not_called()
+    owners.assert_not_called()
+    run.assert_not_called()
+    assert output.o2m_cls.shape[0] == 2
+
+
 def test_pose_routing_falls_back_when_features_are_absent() -> None:
     """When the recorder declines to return features, the full native call runs without a warning."""
     torch.manual_seed(42)

@@ -263,6 +263,31 @@ def test_segment_host_routing_and_native_fallback(mode: str) -> None:
             _same(getattr(actual.detect, field.name), getattr(expected, field.name))
 
 
+def test_retired_holder_skips_segment_replay_predicates() -> None:
+    """A retired recording sends later steps native without re-walking the head certificate.
+
+    Once retired, the holder answers every call eagerly and ignores later causes, so the
+    dispatch and topology walks could change nothing; a step after retirement skips them
+    and never reaches the recorder.
+    """
+    model = _module(capture_network=True)
+    model._capture_network_active = True
+    model._trainer = SimpleNamespace(training=True, accumulate_grad_batches=1)
+    with pytest.warns(UserWarning, match="stays eager: a test cause"):
+        model._network_capture.retire("a test cause")
+    images = torch.rand(2, 3, 64, 64).as_subclass(_CudaMarked)
+    with (
+        patch("lucid_yolo.ptl.module._segment_head_breach", autospec=True) as dispatch,
+        patch("lucid_yolo.ptl.module._head_topology_breach", autospec=True) as topology,
+        patch.object(model._network_capture, "run_features") as run,
+    ):
+        features = model._segmentation_features(images)
+    dispatch.assert_not_called()
+    topology.assert_not_called()
+    run.assert_not_called()
+    assert len(features) == 3
+
+
 def test_frozen_segment_features_retire_before_cuda_submission() -> None:
     """Frozen features stay native after unfreezing and report the shared-stage cause."""
     model = _module(capture_network=True)

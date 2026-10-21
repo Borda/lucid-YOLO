@@ -1579,9 +1579,12 @@ class DetectionLitModule(LightningModule):
         Every task's training route shares this, so a change to when replay applies lands
         once: only a training step of an activated fit, with automatic optimisation, enabled
         gradients and CUDA images, qualifies. Everything else, evaluation included, stays native.
+        A retired recording answers every call eagerly and ignores later causes, so the
+        task-specific checks are skipped for the rest of that fit.
         """
         return (
             self._capture_network_active
+            and not self._network_capture.retired
             and self._trainer is not None
             and self._trainer.training
             and self.training

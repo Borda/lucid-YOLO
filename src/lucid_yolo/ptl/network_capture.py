@@ -400,6 +400,29 @@ class _NetworkCapture:
         self._label = None
         self.clear()
 
+    @property
+    def retired(self) -> bool:
+        """Report whether this fit's recording was retired, so every later call takes the eager route.
+
+        Callers read it to skip their own replay checks once no cause they could find would
+        change the route; :meth:`clear` at the next fit resets it.
+
+        Examples:
+            ```pycon
+            >>> import warnings
+            >>> holder = _NetworkCapture()
+            >>> holder.retired
+            False
+            >>> with warnings.catch_warnings():
+            ...     warnings.simplefilter("ignore")
+            ...     holder.retire("a doctest cause")
+            >>> holder.retired
+            True
+
+            ```
+        """
+        return self._disabled
+
     def retire(self, reason: str, *, stacklevel: int = 3) -> None:
         """Retire a recording whose static execution contract no longer holds.
 
