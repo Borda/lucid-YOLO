@@ -6,6 +6,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Added
 
+- `capture_network` now replays shared backbone and neck stages for segmentation, independently of `capture_segment_heads`. The default remains off; modified heads/forwards, accumulation and unsupported signatures retain native execution, with transient graph state cleared at fit boundaries (WP-193g).
+
 - **Opt-in CUDA network replay for oriented training.** `--model.capture_network true` records the existing backbone, neck and both oriented head branches, including their angle outputs. The native objective and state updates remain outside capture. Accumulation and overridden objectives keep the native route; the default stays off. The speed claim is limited to a small-batch workload (Nano OBB at batch 4, BF16, one L4): a single batch-8 pair changed fit time by only 4.10%, and replay raised peak reserved memory from 3974 to 4300 MiB, so check throughput and memory on your own batch size. See [WP-200](docs/work_packages/wp-200.md) for complete-fit measurements and limits.
 
 - **Opt-in CUDA pose loss execution.** `--model.capture_loss true` also accepts pose: it replays the shared detection objective and batches certified native RLE densities, preserving separate visibility, means and branch weights. Default off; altered scoring and validation retain native calls. Batched parameter-gradient rounding can differ, and long-run acceptance accuracy is unverified. See [WP-199b](docs/work_packages/wp-199b.md).

@@ -3,8 +3,9 @@
 
 The network has a fixed image signature while its ground-truth count changes per
 batch. Detection and oriented detection record backbone, neck and head; pose records
-backbone, neck and each prediction stem separately. All three leave assignment, losses,
-schedules, optimizer and EMA in their existing loop. PyTorch's graphed-callable API owns the
+backbone, neck and each prediction stem separately; segmentation records backbone and neck.
+All four leave assignment, losses, schedules, optimizer and EMA in their existing loop.
+PyTorch's graphed-callable API owns the
 autograd bridge; no network arithmetic is rewritten. The recording is transient,
 bounded to one input signature and discarded at the fit boundary.
 
@@ -123,11 +124,13 @@ class _OrientedNetwork(nn.Module):
 class _FeatureNetwork(nn.Module):
     """Expose backbone and neck without fixing which optional head gradients exist.
 
-    A pose batch may have no assigned positives. Its point stems then keep
-    ``grad=None``; including those stems in one fixed backward would materialize
-    zero gradients and advance optimizer state that the native loop skips.
-    The shared features still feed the dense classification objective, while
-    the stems have independent autograd nodes and variable supervision stays native.
+    A pose or segmentation batch may have no assigned positives. Its optional
+    branches (pose point stems; segmentation coefficient, prototype and semantic
+    predictions) then keep ``grad=None``; including them in one fixed backward
+    would materialize zero gradients and advance optimizer state that the native
+    loop skips. The shared features still feed the dense classification objective,
+    while those branches keep independent backward nodes outside the recording and
+    variable supervision stays native.
     """
 
     def __init__(self, backbone: nn.Module, neck: nn.Module) -> None:
@@ -397,6 +400,29 @@ class _NetworkCapture:
         self._label = None
         self.clear()
 
+    @property
+    def retired(self) -> bool:
+        """Report whether this fit's recording was retired, so every later call takes the eager route.
+
+        Callers read it to skip their own replay checks once no cause they could find would
+        change the route; :meth:`clear` at the next fit resets it.
+
+        Examples:
+            ```pycon
+            >>> import warnings
+            >>> holder = _NetworkCapture()
+            >>> holder.retired
+            False
+            >>> with warnings.catch_warnings():
+            ...     warnings.simplefilter("ignore")
+            ...     holder.retire("a doctest cause")
+            >>> holder.retired
+            True
+
+            ```
+        """
+        return self._disabled
+
     def retire(self, reason: str, *, stacklevel: int = 3) -> None:
         """Retire a recording whose static execution contract no longer holds.
 
@@ -452,9 +478,9 @@ class _NetworkCapture:
         return self._run(images, stages, eager, lambda: _DetectionNetwork(*stages), _DetectionNetwork.rebuild)
 
     def run_features(self, images: Tensor, stages: tuple[nn.Module, nn.Module]) -> _Features | None:
-        """Replay shared pose features, or return no features so the full eager call stays observable."""
+        """Replay shared features, or return no features so the full eager call stays observable."""
         if not any(parameter.requires_grad for stage in stages for parameter in stage.parameters()):
-            self.retire("the shared pose features are frozen")
+            self.retire("the shared network features are frozen")
             return None
 
         def eager(_: Tensor) -> _Features | None:
