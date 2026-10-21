@@ -646,7 +646,9 @@ class _DetectionBranch(nn.Module):
             uncertainty or ``None``. ``A`` sums ``H * W`` over levels.
         """
         cls, box = self._base_predictions(features, _runner=_runner)
-        keypoints, keypoint_sigma = self._keypoints(features)
+        keypoints, keypoint_sigma = (
+            self._keypoints(features) if _runner is None else self._keypoints(features, _runner=_runner)
+        )
         return BranchOutput(
             cls=cls,
             box=box,
@@ -716,7 +718,9 @@ class _DetectionBranch(nn.Module):
         ]
         return torch.cat(levels, dim=1)
 
-    def _keypoints(self, features: tuple[Tensor, Tensor, Tensor]) -> tuple[Tensor | None, Tensor | None]:
+    def _keypoints(
+        self, features: tuple[Tensor, Tensor, Tensor], *, _runner: _PredictionRunner | None = None
+    ) -> tuple[Tensor | None, Tensor | None]:
         """Run the keypoint stems unactivated, or return ``(None, None)`` if absent.
 
         Each flattened level follows the stem's point-major channel convention:
@@ -727,6 +731,7 @@ class _DetectionBranch(nn.Module):
 
         Args:
             features: The neck maps ``(n3, n4, n5)`` at strides 8, 16, and 32.
+            _runner: Private stem scheduler; None calls the existing stems natively.
 
         Returns:
             Dense raw coordinate offsets and sigma, each ``(B, A, K, 2)``, or
@@ -737,7 +742,7 @@ class _DetectionBranch(nn.Module):
         levels: list[Tensor] = []
         point_outputs = _KEYPOINT_COORD_OUTPUTS + _KEYPOINT_SIGMA_OUTPUTS
         for feature, keypoint_stem in zip(features, self.keypoint_stems, strict=True):
-            flat = _flatten_level(keypoint_stem(feature))
+            flat = _flatten_level(keypoint_stem(feature) if _runner is None else _runner.stem(keypoint_stem, feature))
             levels.append(flat.reshape(flat.shape[0], flat.shape[1], -1, point_outputs))
         points = torch.cat(levels, dim=1)
         return points[..., :_KEYPOINT_COORD_OUTPUTS], points[..., _KEYPOINT_COORD_OUTPUTS:]

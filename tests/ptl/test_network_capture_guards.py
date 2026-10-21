@@ -211,8 +211,9 @@ class TestStageModuleBreach:
     def test_feature_reason_omits_head(self) -> None:
         """A pose feature recording holds no head, so its stage reason cannot send a user to one.
 
-        Pose records only backbone and neck while its head stays native and is judged by
-        the head certificate; a reason naming the head would point at the wrong module.
+        The pose feature recording holds only backbone and neck; each head stem records
+        separately and the head is judged by its certificate, so a reason naming the head
+        would point at the wrong module.
         """
         model = _module()
         model.neck.register_forward_hook(lambda *_: None)
