@@ -9,6 +9,7 @@ does. No assignment, loss or optimizer expression is recorded or rewritten.
 
 from __future__ import annotations
 
+import contextlib
 import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
@@ -371,16 +372,20 @@ class _SegmentHeadCapture:
         self.clear()
 
     def clear(self) -> None:
-        """Drain recorded streams before releasing their private pools."""
+        """Reset the holder, then drain recorded streams before their private pools are released.
+
+        The reset comes first, so a failing drain still leaves an empty holder; the recordings stay
+        alive in a local reference until every stream they ran on has finished.
+        """
         entries = getattr(self, "entries", {})
-        for stream in {entry.stream for entry in entries.values()}:
-            stream.synchronize()
         self.entries: dict[tuple[int, str], _RecordedGroup] = {}
         self.owner: nn.Module | None = None
         self.attributes: _AttributePlan | None = None
         self.tensors: tuple[Tensor, ...] = ()
         self.state: tuple[object, ...] | None = None
         self.disabled = False
+        for stream in {entry.stream for entry in entries.values()}:
+            stream.synchronize()
 
     def __getstate__(self) -> dict[str, bool]:
         """Serialize the request and no CUDA recording or live module reference."""
@@ -513,22 +518,44 @@ class _SegmentHeadCaptureLifecycle(Callback):
     """Keep transient prediction recordings inside one fit, including skipped and failed steps."""
 
     @staticmethod
-    def _holder(module: LightningModule) -> _SegmentHeadCapture:
-        return cast("_SegmentHeadCapture", module._segment_head_capture)
+    def _holder(module: LightningModule) -> _SegmentHeadCapture | None:
+        holder = getattr(module, "_segment_head_capture", None)
+        return holder if isinstance(holder, _SegmentHeadCapture) else None
+
+    @classmethod
+    def _clear(cls, module: LightningModule) -> None:
+        holder = cls._holder(module)
+        if holder is not None:
+            holder.clear()
 
     def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Begin the fit without a graph from an earlier model or trainer."""
-        self._holder(pl_module).clear()
+        self._clear(pl_module)
 
     def on_train_batch_start(self, trainer: Trainer, pl_module: LightningModule, batch: object, batch_idx: int) -> None:
         """A new batch releases holds whose previous training step skipped backward."""
-        for entry in self._holder(pl_module).entries.values():
+        holder = self._holder(pl_module)
+        for entry in holder.entries.values() if holder is not None else ():
             entry.pending_backward = False
 
     def on_fit_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Drain and release recordings at normal fit completion."""
-        self._holder(pl_module).clear()
+        """Drain and release recordings at normal fit completion; a failing drain is raised."""
+        self._clear(pl_module)
 
     def on_exception(self, trainer: Trainer, pl_module: LightningModule, exception: BaseException) -> None:
-        """Release recordings when the trainer fails too."""
-        self._holder(pl_module).clear()
+        """Release recordings when the trainer fails, without replacing its exception or skipping teardown.
+
+        A failed CUDA step usually leaves the device in an error state that the drain raises again.
+        Raising it here would hide the trainer's own exception and skip the trainer's teardown, so a
+        drain failure becomes a warning; the holder is already empty by then.
+        """
+        try:
+            self._clear(pl_module)
+        except RuntimeError as error:
+            # Warning filters must not replace the trainer's original exception.
+            with contextlib.suppress(UserWarning):
+                warnings.warn(
+                    f"capture_segment_heads=True could not drain its recordings after the fit failed ({error})",
+                    UserWarning,
+                    stacklevel=2,
+                )
