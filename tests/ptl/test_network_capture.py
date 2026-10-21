@@ -87,6 +87,16 @@ def test_default_has_no_callback_or_registered_state() -> None:
         assert not candidate._capture_network_active
 
 
+@pytest.mark.parametrize("task", ["detect", "keypoints", "obb", "segment"])
+def test_network_replay_accepts_all_supported_tasks_after_sync(task: str) -> None:
+    """Merging independent task extensions must retain every public constructor route."""
+    options: dict[str, object] = {"num_keypoints": 5} if task == "keypoints" else {}
+    candidate = _module(task=task, capture_network=True, **options)
+    assert candidate.task == task
+    assert candidate.hparams.capture_network is True
+    assert not candidate._capture_network_active
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -97,7 +107,7 @@ def test_default_has_no_callback_or_registered_state() -> None:
     ],
 )
 def test_incompatible_options_are_explicit(kwargs: dict[str, object]) -> None:
-    """Unsupported tasks and the separate compiler path fail before training begins.
+    """The separate compiler path fails before training begins.
 
     The whole message is matched, so it names the network-replay option and every task
     it accepts: a dropped or added task, or the loss-replay message, would fail here.
