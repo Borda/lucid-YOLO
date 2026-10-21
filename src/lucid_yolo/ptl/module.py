@@ -174,6 +174,7 @@ from typing import TYPE_CHECKING, cast
 import torch
 from pytorch_lightning import Callback, LightningModule
 from pytorch_lightning.accelerators import CUDAAccelerator
+from pytorch_lightning.plugins.precision import MixedPrecision, Precision
 from pytorch_lightning.strategies import SingleDeviceStrategy
 from torch import Tensor
 
@@ -219,6 +220,8 @@ from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
 from lucid_yolo.ptl.coco_backend import build_mean_average_precision
+from lucid_yolo.ptl.gradient_norm_capture import _SUPPORTED as _NORM_CAPTURE_SUPPORTED
+from lucid_yolo.ptl.gradient_norm_capture import _GradientNormCapture, _GradientNormLifecycle
 from lucid_yolo.ptl.loss_capture import _LossCapture, _LossCaptureLifecycle, _native_loss, _source_signature
 from lucid_yolo.ptl.network_capture import (
     _detection_stages,
@@ -234,11 +237,19 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
+    from torch.optim import Optimizer
 
     from lucid_yolo.assign.tal import AssignResult
     from lucid_yolo.data.targets import Targets
 
 __all__ = ["DetectionLitModule", "pad_keypoints", "pad_rboxes", "pad_targets"]
+
+_NATIVE_MODULE_CLIPPING = LightningModule.clip_gradients
+_NATIVE_CONFIGURE_CLIPPING = LightningModule.configure_gradient_clipping
+_NATIVE_PRECISION_CLIPPING = {
+    kind: {name: getattr(kind, name) for name in ("clip_gradients", "clip_grad_by_norm", "main_params")}
+    for kind in (Precision, MixedPrecision)
+}
 
 #: Feature-level input-pixel strides of the P3/P4/P5 detection head (8, 16, 32).
 _STRIDES: tuple[int, int, int] = (8, 16, 32)
@@ -1083,6 +1094,11 @@ class DetectionLitModule(LightningModule):
             summation can change rounding. Can combine with ``capture_network``,
             ``capture_orthogonalization`` and ``capture_updates``; it records no optimizer
             update itself, so the optimizer step is whatever those optimizer options select.
+        capture_gradient_norm: Replay PyTorch's L2 gradient-norm reduction on single-device CUDA with torch>=2.9.
+            Default false. Native scaling reads the current clipping limit; one fit-scoped
+            gradient signature is retained and drift retires recording. CPU, older runtimes,
+            custom clipping and unsupported gradient layouts stay native. Extra private CUDA
+            buffers and setup cost may outweigh the gain outside small-batch training.
         capture_updates: Enable MuSGD's optional replay of the existing update preparation,
             including momentum, followed by a native batched parameter write at the current
             learning rate. Defaults to ``False``. Uses private gradient storage and live
@@ -1154,6 +1170,7 @@ class DetectionLitModule(LightningModule):
         capture_updates: bool = False,
         capture_loss: bool = False,
         capture_segment_heads: bool = False,
+        capture_gradient_norm: bool = False,
     ) -> None:
         super().__init__()
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
@@ -1162,6 +1179,11 @@ class DetectionLitModule(LightningModule):
         self._capture_loss, self._capture_loss_active = capture_loss, False
         self._capture_network, self._capture_network_active = capture_network, False
         self._network_capture, self._loss_capture = _NetworkCapture(), _LossCapture()
+        self._capture_gradient_norm, self._capture_gradient_norm_active, self._gradient_norm_capture = (
+            capture_gradient_norm,
+            False,
+            _GradientNormCapture(),
+        )
         self._task, self._num_keypoints = task, num_keypoints
         self._compile_step: bool = compile_step
         self._capture_orthogonalization, self._capture_updates = capture_orthogonalization, capture_updates
@@ -1420,6 +1442,20 @@ class DetectionLitModule(LightningModule):
                 UserWarning,
                 stacklevel=2,
             )
+        self._capture_gradient_norm_active = (
+            self._capture_gradient_norm
+            and _NORM_CAPTURE_SUPPORTED
+            and on_cuda
+            and self._trainer is not None
+            and isinstance(self.trainer.strategy, SingleDeviceStrategy)
+            and self.automatic_optimization
+        )
+        if self._capture_gradient_norm and not self._capture_gradient_norm_active and stage == "fit":
+            warnings.warn(
+                "capture_gradient_norm=True requires single-device CUDA automatic optimization and torch>=2.9",
+                UserWarning,
+                stacklevel=2,
+            )
         self._capture_loss_active = (
             self._capture_loss
             and on_cuda
@@ -1458,7 +1494,63 @@ class DetectionLitModule(LightningModule):
             callbacks.append(_LossCaptureLifecycle())
         if self._segment_head_capture.requested:
             callbacks.append(_SegmentHeadCaptureLifecycle())
+        if self._capture_gradient_norm:
+            callbacks.append(_GradientNormLifecycle())
         return callbacks
+
+    def configure_gradient_clipping(
+        self,
+        optimizer: Optimizer,
+        gradient_clip_val: int | float | None = None,
+        gradient_clip_algorithm: str | None = None,
+    ) -> None:
+        """Optionally record only the norm reduction; retain native clipping semantics.
+
+        The precision plugin has already unscaled FP16 gradients before this hook.
+        Value clipping, disabled clipping and customized clipping implementations keep
+        the original call, including the plugin's optimizer-unscaling rejection.
+        """
+        native = super().configure_gradient_clipping
+        if not self._capture_gradient_norm_active or self._gradient_norm_capture._disabled:
+            native(optimizer, gradient_clip_val, gradient_clip_algorithm)
+            return
+        trainer_maximum, trainer_algorithm = self.trainer.gradient_clip_val, self.trainer.gradient_clip_algorithm
+        if (gradient_clip_val is not None and trainer_maximum is not None and gradient_clip_val != trainer_maximum) or (
+            gradient_clip_algorithm is not None
+            and trainer_algorithm is not None
+            and gradient_clip_algorithm.lower() != trainer_algorithm
+        ):
+            # A caller passing a value that contradicts `Trainer(gradient_clip_val=...)` gets the
+            # same rejection a non-capturing module would: native raises before any clip runs.
+            native(optimizer, gradient_clip_val, gradient_clip_algorithm)
+            return
+        maximum = trainer_maximum if gradient_clip_val is None else gradient_clip_val
+        algorithm = trainer_algorithm if gradient_clip_algorithm is None else gradient_clip_algorithm
+        if maximum is None or maximum <= 0 or (algorithm is not None and algorithm != "norm"):
+            native(optimizer, gradient_clip_val, gradient_clip_algorithm)
+            return
+        plugin = self.trainer.precision_plugin
+        methods = _NATIVE_PRECISION_CLIPPING.get(type(plugin))
+        if (
+            LightningModule.configure_gradient_clipping is not _NATIVE_CONFIGURE_CLIPPING
+            or type(self).clip_gradients is not _NATIVE_MODULE_CLIPPING
+            or "clip_gradients" in vars(self)
+            or methods is None
+            or any(
+                getattr(type(plugin), name) is not method or name in vars(plugin) for name, method in methods.items()
+            )
+        ):
+            self._gradient_norm_capture.retire("the module or precision plugin has customized clipping")
+            native(optimizer, gradient_clip_val, gradient_clip_algorithm)
+            return
+        if getattr(optimizer, "_step_supports_amp_scaling", False):
+            native(optimizer, gradient_clip_val, gradient_clip_algorithm)
+            return
+        self._gradient_norm_capture.run(
+            plugin.main_params(optimizer),
+            float(maximum),
+            lambda: native(optimizer, gradient_clip_val, gradient_clip_algorithm),
+        )
 
     def _compile_objective(self, on_cuda: bool) -> None:
         """Swap the compiled detection objective in, or warn once and stay eager (WP-184, D24).

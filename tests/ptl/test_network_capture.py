@@ -231,6 +231,57 @@ def test_retirement_warns_once_and_later_calls_stay_eager() -> None:
     assert eager.call_count == 2
 
 
+def test_captured_signature_reflects_bindings_after_warmup_not_before() -> None:
+    """A scalar flipped during warmup must certify what warmup actually left behind.
+
+    CUDA graph capture runs the network through its own warmup iterations before freezing
+    the replay, so a scalar module attribute mutated there (a "first call" flip, for one) is
+    part of what gets recorded. `_run` retains the original recording stamp to detect drift. Seeding `_ModuleMetadata`
+    from that stamp while retaining post-warmup bindings instead of a fresh matching
+    scalar snapshot would certify bindings the recording never actually saw,
+    and every later call matching the metadata's own (post-warmup) bindings would then return
+    that stale value forever, masking the real drift.
+    """
+
+    class _FirstCallFlips(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.lin = torch.nn.Linear(2, 2)
+            self.flag = False
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            out: torch.Tensor = self.lin(x)
+            return out + (3.0 if self.flag else 0.0)
+
+    network = _FirstCallFlips()
+    with torch.no_grad():
+        network.lin.weight.fill_(1.0)
+        network.lin.bias.fill_(0.0)
+    images = torch.ones(1, 2) * 7.5
+
+    members = capture_module._members(network)
+    eligibility_time_state = capture_module._network_signature(network, members, None)
+    recorded_output = network(images)
+
+    network.flag = True  # the mutation a warmup iteration can leave behind
+    warmup_output = network(images)
+    assert not torch.equal(recorded_output, warmup_output)
+
+    certified = capture_module._module_signature(members[0])
+    assert certified != eligibility_time_state[0]
+
+    stale_metadata = capture_module._ModuleMetadata(members[0], eligibility_time_state[0])
+    fixed_metadata = capture_module._ModuleMetadata(members[0], certified)
+
+    # Nothing else changes before this read: both metadata objects see identical live bindings.
+    stale_read = capture_module._network_signature(network, members, stale_metadata)[0]
+    fixed_read = capture_module._network_signature(network, members, fixed_metadata)[0]
+    assert stale_read == eligibility_time_state[0]  # the bug: certifies a value warmup never saw
+    assert fixed_read == certified  # the fix: certifies what warmup actually left behind
+    assert fixed_read != stale_read
+    assert torch.equal(network(images), warmup_output)
+
+
 def test_cpu_images_bypass_recording_when_capture_is_active() -> None:
     """A step on CPU images never enters the recorder even when the module believes capture is active."""
     model = _module(capture_network=True)
@@ -776,7 +827,8 @@ def test_load_state_dict_assign_retires_recording_and_matches_eager_gradients() 
     """Assigning checkpoint tensors after recording leaves the graph on stale storage, so it must retire.
 
     ``assign=True`` swaps every parameter for a new tensor; a surviving graph would keep reading and
-    writing the old ones, leaving the live parameters without gradients.
+    writing the old ones, leaving the live supervised parameters without gradients. Only classification
+    is supervised here; the eager oracle keeps unused branches at ``None``.
     """
     eager = _module().cuda()
     replay = copy.deepcopy(eager)
@@ -791,7 +843,6 @@ def test_load_state_dict_assign_retires_recording_and_matches_eager_gradients() 
     with pytest.warns(UserWarning, match="stays eager"):
         _run(holder, replay, images).o2m_cls.sum().backward()
     assert holder._network is None
-    assert all(parameter.grad is not None for parameter in replay.parameters())
     _assert_identical([p.grad for p in eager.parameters()], [p.grad for p in replay.parameters()])
 
 
