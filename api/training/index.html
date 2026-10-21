@@ -5560,13 +5560,15 @@ with :func:<code>torch.cuda.make_graphed_callables</code>. Defaults to <code>Fal
 capture pays setup and retains a graph pool. Requires
 <code>task="detect"</code>, <code>task="keypoints"</code> or <code>task="obb"</code>, <code>compile_step=False</code> and
 single-device CUDA automatic optimization.
-Pose records backbone and neck; its head stays native to preserve absent
-gradients in batches with no assigned positives. Pose training stays eager
+Pose records backbone, neck and each prediction stem independently, preserving
+absent point-stem gradients when a batch supplies no positives. Pose training stays eager
 under gradient accumulation, with a fully frozen backbone and neck, or when
 the head's topology or class forward changed since construction or a head
 module is hooked, overridden or compiled. The trainable set is fixed per fit
 at the first recording: a fully frozen start, or a later freeze or unfreeze
 of a recorded parameter, keeps the rest of that fit eager after one warning.
+Each pose stem separately retires its recording if its trainable set or mode changes,
+and replacing a head module retires every recording before shared features run.
 Oriented training records the complete network, including both angle stems,
 and retains the native classification and oriented objective. Accumulation
 or an overridden objective keeps it eager. Every task stays eager when the

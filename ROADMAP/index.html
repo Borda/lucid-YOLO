@@ -6640,6 +6640,14 @@
 <td>🔄</td>
 </tr>
 <tr>
+<td>193f</td>
+<td><code>perf(ptl): replay independent CUDA pose prediction stems</code> [DATA][GPU]</td>
+<td>The existing pose flag records eighteen native stems independently through the shared prediction runner, preserving absent point gradients and bounded fit ownership · <a href="../work_packages/wp-193f/#wp-193f">log</a></td>
+<td>Focused CPU/CUDA, real replay and lifecycle regressions; five isolated-L4 complete pairs with 12.97% median time reduction at batch 4 and byte-identical states; reserved memory increases; full gate, aggregate coverage and goldens not run</td>
+<td>193d,193e</td>
+<td>🔄</td>
+</tr>
+<tr>
 <td>194</td>
 <td><code>refine(tests): static checks to hooks, plain test names</code></td>
 <td>File-content tests leave pytest: the <code>_viz</code>/matplotlib import boundary becomes ruff <code>TID251</code>, the top-k and packaged-recipe text pins the <code>content-pins</code> hook, and live-tree "hook passes" copies are dropped. Test names lose <code>a an the its their is are does that</code> · <a href="../work_packages/wp-194/#wp-194">log</a></td>
