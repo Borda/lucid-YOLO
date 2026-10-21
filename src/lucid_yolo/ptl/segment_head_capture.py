@@ -551,8 +551,11 @@ class _SegmentHeadCaptureLifecycle(Callback):
         try:
             self._clear(pl_module)
         except RuntimeError as error:
-            warnings.warn(
-                f"capture_segment_heads=True could not drain its recordings after the fit failed ({error})",
-                UserWarning,
-                stacklevel=2,
-            )
+            try:
+                warnings.warn(
+                    f"capture_segment_heads=True could not drain its recordings after the fit failed ({error})",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            except UserWarning:
+                pass  # Warning filters must not replace the trainer's original exception.
