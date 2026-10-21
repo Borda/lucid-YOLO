@@ -457,23 +457,23 @@ def test_pose_cli_accepts_network_capture(capture: bool) -> None:
 def test_pose_head_certificate_survives_copy_and_rejects_overrides() -> None:
     """A native head stays eligible through deepcopy; changed dispatch cannot detach shared features."""
     model = copy.deepcopy(_pose())
-    assert _pose_head_breach(model.head, model._pose_head_topology) is None
+    assert _pose_head_breach(model.head, model._head_topology) is None
     with patch.object(model.head, "forward", wraps=model.head.forward):
-        assert _pose_head_breach(model.head, model._pose_head_topology) is not None
-    assert _pose_head_breach(model.head, model._pose_head_topology) is None
+        assert _pose_head_breach(model.head, model._head_topology) is not None
+    assert _pose_head_breach(model.head, model._head_topology) is None
     with patch.object(type(model.head), "forward", lambda self, values: values):
-        assert _pose_head_breach(model.head, model._pose_head_topology) is not None
+        assert _pose_head_breach(model.head, model._head_topology) is not None
 
 
 def test_pose_head_certificate_rejects_forward_branch_overrides() -> None:
     """``forward`` only reaches submodules through ``forward_branch``; both dispatch points count."""
     model = copy.deepcopy(_pose())
-    assert _pose_head_breach(model.head, model._pose_head_topology) is None
+    assert _pose_head_breach(model.head, model._head_topology) is None
     with patch.object(model.head, "forward_branch", wraps=model.head.forward_branch):
-        assert _pose_head_breach(model.head, model._pose_head_topology) is not None
-    assert _pose_head_breach(model.head, model._pose_head_topology) is None
+        assert _pose_head_breach(model.head, model._head_topology) is not None
+    assert _pose_head_breach(model.head, model._head_topology) is None
     with patch.object(type(model.head), "forward_branch", lambda self, features, branch: features):
-        assert _pose_head_breach(model.head, model._pose_head_topology) is not None
+        assert _pose_head_breach(model.head, model._head_topology) is not None
 
 
 @pytest.mark.parametrize(
@@ -501,9 +501,9 @@ def test_altered_pose_head_dispatch_fails_certificate(mutate: Callable[[torch.nn
     Starts from a fresh deepcopy certified clean, applies one mutation, and expects a named breach.
     """
     model = copy.deepcopy(_pose())
-    assert _pose_head_breach(model.head, model._pose_head_topology) is None
+    assert _pose_head_breach(model.head, model._head_topology) is None
     mutate(model.head)
-    assert _pose_head_breach(model.head, model._pose_head_topology) is not None
+    assert _pose_head_breach(model.head, model._head_topology) is not None
 
 
 def test_frozen_features_leave_full_native_call_to_owner() -> None:
@@ -818,7 +818,7 @@ def test_stem_dispatch_override_before_construction_stays_observable(owner: type
 
     with patch.object(owner, name, custom):
         model = _pose()
-        assert _pose_head_breach(model.head, model._pose_head_topology) == "the native pose stem dispatch changed"
+        assert _pose_head_breach(model.head, model._head_topology) == "the native pose stem dispatch changed"
 
 
 def test_stem_holder_dispatch_and_lifetime_without_cuda() -> None:

@@ -255,7 +255,7 @@ def test_segment_host_routing_and_native_fallback(mode: str) -> None:
         actual = model.forward_segmentation(images)
     assert run.call_count == int(expected_call)
     assert backbone.call_count == int(mode != "record")
-    assert retire.call_count == int(mode in ("accumulate", "override", "compiled", "head-hook", "head-helper"))
+    assert retire.call_count == int(mode in ("accumulate", "override", "head-hook", "head-helper"))
     assert actual.prototypes.shape == (2, 32, 16, 16)
     if mode == "record":
         expected = model.head(features)
@@ -319,7 +319,7 @@ def test_segment_head_hook_retires_feature_replay_and_stays_observable() -> None
     observed = []
     handle = model.head.register_forward_hook(lambda *_: observed.append(True))
     with (
-        pytest.warns(UserWarning, match="segmentation head topology or dispatch"),
+        pytest.warns(UserWarning, match="stays eager: a segmentation head module is hooked, overridden or compiled$"),
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("custom head must stay native")),
     ):
         model.forward_segmentation(images)

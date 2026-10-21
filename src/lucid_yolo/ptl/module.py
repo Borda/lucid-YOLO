@@ -779,11 +779,13 @@ _POSE_STEM_DISPATCH = (
 )
 
 
-def _pose_head_topology(head: torch.nn.Module) -> tuple[tuple[object, ...], ...]:
+def _head_topology(head: torch.nn.Module) -> tuple[tuple[object, ...], ...]:
     """Identify the head composition as constructed, whose dense outputs use every shared feature.
 
     The fingerprint is taken when the module is built, so the certificate it feeds holds
     the head unchanged since construction: a class patched before then is the reference.
+    Pose and segmentation both replay shared features into this head, so both compare
+    against the same fingerprint.
     """
     return tuple(
         (name, type(module), type(module).forward, getattr(type(module), "forward_branch", None))
@@ -791,15 +793,36 @@ def _pose_head_topology(head: torch.nn.Module) -> tuple[tuple[object, ...], ...]
     )
 
 
+def _head_topology_breach(head: torch.nn.Module, topology: tuple[tuple[object, ...], ...], label: str) -> str | None:
+    """Name a head changed or hooked since construction, which replayed shared features cannot feed.
+
+    Args:
+        head: The prediction head consuming the replayed shared features.
+        topology: The head's :func:`_head_topology` fingerprint taken at construction.
+        label: The task named in the reason, such as ``"pose"`` or ``"segmentation"``.
+
+    Returns:
+        The retirement reason, or ``None`` while the head is still the one constructed.
+    """
+    if _head_topology(head) != topology:
+        return f"the {label} head topology or class forward changed"
+    if _module_breach(head.modules()) is not None:
+        return f"a {label} head module is hooked, overridden or compiled"
+    return None
+
+
 def _pose_head_breach(head: torch.nn.Module, topology: tuple[tuple[object, ...], ...]) -> str | None:
     """Keep altered head control flow outside a recording of its shared inputs."""
     if any(getattr(cls, name) is not native for cls, name, native in _POSE_STEM_DISPATCH):
         return "the native pose stem dispatch changed"
-    if _pose_head_topology(head) != topology:
-        return "the pose head topology or class forward changed"
-    if _module_breach(head.modules()) is not None:
-        return "a pose head module is hooked, overridden or compiled"
-    return None
+    return _head_topology_breach(head, topology, "pose")
+
+
+#: Tasks whose network replay stays eager under gradient accumulation, with the label its
+#: warning names. WP-193d reports the shared recorder's CUDA accumulation checks failing on
+#: the unmodified baseline; detection is absent because whether it must stay eager too is
+#: open in docs/ESCALATION.md (2026-10-20).
+_ACCUMULATION_EAGER_LABELS: dict[str, str] = {"keypoints": "keypoint", "obb": "oriented", "segment": "segmentation"}
 
 
 def _validate_replay_options(
@@ -1189,8 +1212,8 @@ class DetectionLitModule(LightningModule):
             predict_angle=task == "obb",
             num_keypoints=num_keypoints if task == "keypoints" else None,
         )
-        self._pose_head_topology = _pose_head_topology(self.head) if task == "keypoints" else ()
-        self._segment_head_topology = _pose_head_topology(self.head) if task == "segment" else ()
+        #: The head as constructed, for the two tasks that replay shared features into it.
+        self._head_topology = _head_topology(self.head) if task in ("keypoints", "segment") else ()
         self._init_segmentation(task, num_classes, capture_segment_heads)
         #: The keypoint objective, held as a submodule because R14's flow is the only
         #: loss in the project carrying parameters — hence a submodule rather than a
@@ -1550,6 +1573,34 @@ class DetectionLitModule(LightningModule):
             )
         return head_out, out
 
+    def _network_replay_eligible(self, images: Tensor) -> bool:
+        """Decide whether a call may reach the network recording, before any task-specific contract.
+
+        Every task's training route shares this, so a change to when replay applies lands
+        once: only a training step of an activated fit, with automatic optimisation, enabled
+        gradients and CUDA images, qualifies. Everything else, evaluation included, stays native.
+        """
+        return (
+            self._capture_network_active
+            and self._trainer is not None
+            and self._trainer.training
+            and self.training
+            and self.automatic_optimization
+            and torch.is_grad_enabled()
+            and images.is_cuda
+        )
+
+    def _retire_accumulated_replay(self) -> None:
+        """Retire this task's network replay under gradient accumulation, which it was validated without.
+
+        Tasks absent from :data:`_ACCUMULATION_EAGER_LABELS`, detection today, keep replaying.
+        ``stacklevel=4`` names the caller of the training route, as a retirement that route
+        decides itself does.
+        """
+        label = _ACCUMULATION_EAGER_LABELS.get(self._task)
+        if label is not None and self.trainer.accumulate_grad_batches != 1:
+            self._network_capture.retire(f"{label} replay requires accumulate_grad_batches=1", stacklevel=4)
+
     def _training_network(self, images: Tensor) -> DualHeadOutput:
         """Run the dual head through the training recording when its contract holds.
 
@@ -1559,23 +1610,11 @@ class DetectionLitModule(LightningModule):
         All tasks keep changing instance counts and loss arithmetic outside capture.
         """
         head_out: DualHeadOutput
-        if (
-            self._capture_network_active
-            and self._trainer is not None
-            and self._trainer.training
-            and self.training
-            and self.automatic_optimization
-            and torch.is_grad_enabled()
-            and images.is_cuda
-        ):
-            # WP-193d reports the shared recorder's CUDA accumulation checks failing on the unmodified
-            # baseline; whether detection must stay eager here too is open in docs/ESCALATION.md (2026-10-20).
-            if self._task in ("keypoints", "obb") and self.trainer.accumulate_grad_batches != 1:
-                label = "keypoint" if self._task == "keypoints" else "oriented"
-                self._network_capture.retire(f"{label} replay requires accumulate_grad_batches=1")
+        if self._network_replay_eligible(images):
+            self._retire_accumulated_replay()
             if self._task == "keypoints":
                 self._network_capture.check_stem_owners(self.head)
-                breach = _pose_head_breach(self.head, self._pose_head_topology)
+                breach = _pose_head_breach(self.head, self._head_topology)
                 if breach is not None:
                     self._network_capture.retire(breach)
             root_hooks = any(
@@ -1801,28 +1840,17 @@ class DetectionLitModule(LightningModule):
         The existing holder owns precision/storage checks, buffer rollback and
         the one-signature-per-fit lifecycle, as for shared pose features.
         """
-        if (
-            self._capture_network_active
-            and self._trainer is not None
-            and self._trainer.training
-            and self.training
-            and self.automatic_optimization
-            and torch.is_grad_enabled()
-            and images.is_cuda
-        ):
-            if self.trainer.accumulate_grad_batches != 1:
-                self._network_capture.retire("segmentation replay requires accumulate_grad_batches=1")
-            if (
-                _pose_head_topology(self.head) != self._segment_head_topology
-                or _segment_head_breach(self.head) is not None
-                or _module_breach(self.head.modules()) is not None
-            ):
-                self._network_capture.retire("the segmentation head topology or dispatch changed, or it carries a hook")
-            if (
-                type(self).forward_segmentation is not _EAGER_SEGMENT_FORWARD
-                or "forward_segmentation" in vars(self)
-                or self._compiled_call_impl is not None
-            ):
+        if self._network_replay_eligible(images):
+            self._retire_accumulated_replay()
+            breach = _segment_head_breach(self.head) or _head_topology_breach(
+                self.head, self._head_topology, "segmentation"
+            )
+            if breach is not None:
+                self._network_capture.retire(breach)
+            # Training calls `forward_segmentation` directly, never `self(...)`, so a compiled
+            # LightningModule call (`_compiled_call_impl`) never reaches this route; a compiled
+            # `forward_segmentation` assigned on the instance is caught by the `vars` check.
+            if type(self).forward_segmentation is not _EAGER_SEGMENT_FORWARD or "forward_segmentation" in vars(self):
                 self._network_capture.retire("the segmentation forward is overridden or compiled")
             features = self._network_capture.run_features(images, (self.backbone, self.neck))
             if features is not None:
