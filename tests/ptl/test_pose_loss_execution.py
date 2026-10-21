@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import warnings
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -302,8 +303,16 @@ def test_pose_cuda_execution_composes_with_network_replay() -> None:
             assert (left - right).norm() <= 1e-5 * left.norm() + 1e-6, name
 
 
+#: The warning a customized criterion raises, for detection and pose alike, when it retires the fit's recorder.
+_CUSTOMIZED = "capture_loss=True stays eager: the loss or an assignment implementation was customized"
+
+
 def test_pose_custom_criterion_keeps_native_keywords() -> None:
-    """A customized pose criterion need not accept the recorder's alpha keyword."""
+    """A customized pose criterion need not accept the recorder's alpha keyword, and its fallback is reported.
+
+    The routing gate sends a criterion the recorder cannot certify to its native call, which never reaches
+    the recorder's own source check; the step still names the cause, as detection does for the same setup.
+    """
     model = _pose(True)
     model._capture_loss_active = True
     model._trainer = MagicMock(spec=Trainer, training=True)
@@ -330,6 +339,26 @@ def test_pose_custom_criterion_keeps_native_keywords() -> None:
     with (
         patch.object(model, "log"),
         patch.object(model._loss_capture, "run", side_effect=AssertionError("custom criterion recorded")),
+        pytest.warns(UserWarning, match=f"^{_CUSTOMIZED}$"),
     ):
         result = model.training_step(_batch(1), 0)
     assert len(calls) == 1 and calls[0] is None and torch.isfinite(result)
+
+
+def test_pose_custom_criterion_retires_recorder_once_per_fit() -> None:
+    """The first customized-criterion step retires the recorder; later steps of the fit stay quiet.
+
+    Without a once-per-fit latch, every training step would repeat the same fallback warning. The latch is
+    the recorder's own retirement, which the fit lifecycle clears at the next fit start.
+    """
+    model = _pose(True)
+    model._capture_loss_active = True
+    model._trainer = MagicMock(spec=Trainer, training=True)
+    model.loss = model.loss.__call__  # the same arithmetic behind a callable the recorder cannot certify
+    with patch.object(model, "log"), warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        model.training_step(_batch(1), 0)
+        model.training_step(_batch(2), 1)
+    retirements = [str(warning.message) for warning in caught if "stays eager" in str(warning.message)]
+    assert retirements == [_CUSTOMIZED]
+    assert model._loss_capture._disabled

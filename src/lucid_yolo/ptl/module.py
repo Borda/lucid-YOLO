@@ -2415,12 +2415,7 @@ class DetectionLitModule(LightningModule):
             gt_keypoints = gt_keypoints.to(images.device)
             gt_keypoint_vis = gt_keypoint_vis.to(images.device)
         seg_out = self.forward_segmentation(images) if self._task == "segment" else None
-        if self._task == "detect" or (
-            self._task == "keypoints"
-            and self._capture_loss_active
-            and stage == "train"
-            and _source_signature(self.loss) is not None
-        ):
+        if self._task == "detect" or self._pose_records_loss(stage):
             # Pose shares the unrotated detection objective, but its ragged point
             # terms remain outside recording and consume the returned assignments.
             # Its native and validation routes retain their existing call signature.
@@ -2459,6 +2454,30 @@ class DetectionLitModule(LightningModule):
         total = out.total + self._task_extra_loss(context, out, stage)
         self._log_loss(out, total, stage, images.shape[0])
         return total, head_out, seg_out
+
+    def _pose_records_loss(self, stage: str) -> bool:
+        """Tell whether a pose step sends its unrotated detection objective to the loss recorder.
+
+        Only a training step of a pose fit whose ``capture_loss`` is active qualifies;
+        validation keeps the criterion's original call signature. A criterion
+        :func:`~lucid_yolo.ptl.loss_capture._source_signature` cannot certify keeps its
+        native call, and the first such step retires the fit's recorder with the warning
+        detection emits for the same configuration, so the fallback is reported once per
+        fit rather than silently on every step.
+
+        Args:
+            stage: Metric prefix of the step, ``"train"`` or ``"val"``.
+
+        Returns:
+            ``True`` when the step should call :attr:`_objective`, else ``False``.
+        """
+        if self._task != "keypoints" or not self._capture_loss_active or stage != "train":
+            return False
+        if _source_signature(self.loss) is not None:
+            return True
+        if not self._loss_capture._disabled:
+            self._loss_capture.retire("the loss or an assignment implementation was customized")
+        return False
 
     def _task_extra_loss(self, context: _StepContext, out: DualLossOutput, stage: str) -> Tensor:
         """Return the task-conditional extra loss: the segment, oriented or pose terms, else zero.
