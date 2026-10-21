@@ -6648,6 +6648,14 @@
 <td>🔄</td>
 </tr>
 <tr>
+<td>193g</td>
+<td><code>perf(ptl): replay shared segmentation features</code> [DATA][GPU]</td>
+<td>Opt-in backbone/neck replay preserves independent segmentation prediction gradients. Combines with head replay; accumulation and modified forwards stay native, with one fit-scoped signature · <a href="../work_packages/wp-193g/#wp-193g">log</a></td>
+<td><code>tests/ptl/test_segment_network_capture.py</code>; public-COCO byte parity; five paired isolated-L4 complete fits; focused tooling; full <code>make gate</code> and accelerator goldens not run (offline CI green at PR head 8ebf10e)</td>
+<td>193d, 193e</td>
+<td>🔄</td>
+</tr>
+<tr>
 <td>194</td>
 <td><code>refine(tests): static checks to hooks, plain test names</code></td>
 <td>File-content tests leave pytest: the <code>_viz</code>/matplotlib import boundary becomes ruff <code>TID251</code>, the top-k and packaged-recipe text pins the <code>content-pins</code> hook, and live-tree "hook passes" copies are dropped. Test names lose <code>a an the its their is are does that</code> · <a href="../work_packages/wp-194/#wp-194">log</a></td>

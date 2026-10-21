@@ -5555,10 +5555,10 @@ Extra workspace and setup can outweigh the saving on short runs.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Replay fixed detection, keypoint or oriented network stages' CUDA forward and backward
-with :func:<code>torch.cuda.make_graphed_callables</code>. Defaults to <code>False</code> because
-capture pays setup and retains a graph pool. Requires
-<code>task="detect"</code>, <code>task="keypoints"</code> or <code>task="obb"</code>, <code>compile_step=False</code> and
+                <p>Replay fixed detection, keypoint, oriented or segmentation network stages' CUDA
+forward and backward with :func:<code>torch.cuda.make_graphed_callables</code>. Defaults to <code>False</code>
+because capture pays setup and retains a graph pool. Requires <code>task="detect"</code>,
+<code>task="keypoints"</code>, <code>task="obb"</code> or <code>task="segment"</code>, <code>compile_step=False</code> and
 single-device CUDA automatic optimization.
 Pose records backbone, neck and each prediction stem independently, preserving
 absent point-stem gradients when a batch supplies no positives. Pose training stays eager
@@ -5571,9 +5571,13 @@ Each pose stem separately retires its recording if its trainable set or mode cha
 and replacing a head module retires every recording before shared features run.
 Oriented training records the complete network, including both angle stems,
 and retains the native classification and oriented objective. Accumulation
-or an overridden objective keeps it eager. Every task stays eager when the
-LightningModule carries a hook, overrides
-<code>forward</code> or is compiled.
+or an overridden objective keeps it eager. Detection, pose and oriented training
+stay eager when the LightningModule carries a hook, overrides
+<code>forward</code> or is compiled. Segmentation records only backbone and neck,
+leaving all predictions independent; <code>capture_segment_heads</code> can replay
+those predictions separately. Segmentation also keeps accumulation native,
+and retires replay when the head topology/dispatch changes, a head hook is
+registered, or <code>forward_segmentation</code> is overridden or compiled.
 Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
 One image signature is recorded per fit; partial batches stay eager and
 changed storage, modes, hooks or precision retire the recording. Warmup
@@ -5669,8 +5673,8 @@ the segment objective eager today, so an accepted configuration keeps its meanin
               <div class="doc-md-description">
                 <p>If <code>task</code> is not one of <code>"detect"</code>, <code>"segment"</code>, <code>"obb"</code>,
 <code>"keypoints"</code>, if <code>rotated_iou_form</code> is not a known rotated-IoU form,
-if <code>capture_network</code> is combined with a task other than detection, keypoints or
-oriented detection, <code>capture_loss</code> with a non-detection task, <code>capture_segment_heads</code>
+if <code>capture_network</code> is combined with a task other than detection, keypoints,
+oriented detection or segmentation, <code>capture_loss</code> with a non-detection task, <code>capture_segment_heads</code>
 with a non-segmentation task, or any of them with <code>compile_step=True</code> (for
 <code>capture_segment_heads</code>, forward compatibility with a compiled segment objective),
 if <code>keypoint_loss</code> is not a known keypoint objective, if

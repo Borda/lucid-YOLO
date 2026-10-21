@@ -4,7 +4,7 @@
 >
 > 🔗 Depends on [WP-193d](https://borda.github.io/lucid-YOLO/work_packages/wp-193d/), [WP-193e](https://borda.github.io/lucid-YOLO/work_packages/wp-193e/) · Needed by none
 >
-> ⬅️ [WP-193e](https://borda.github.io/lucid-YOLO/work_packages/wp-193e/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/) ➡️
+> ⬅️ [WP-193e](https://borda.github.io/lucid-YOLO/work_packages/wp-193e/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-193g](https://borda.github.io/lucid-YOLO/work_packages/wp-193g/) ➡️
 
 
 ## WP-193f — independent pose stem backwards preserve absent gradients
