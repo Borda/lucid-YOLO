@@ -404,7 +404,15 @@ def test_host_old_bf16_contract_stays_native(_host_recorder: MagicMock) -> None:
     assert holder._workspace is None and not holder._disabled
 
 
-@pytest.mark.parametrize("kwargs", [{"task": "segment"}, {"compile_step": True}])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"task": "segment"}, id="segment"),
+        pytest.param({"task": "obb"}, id="obb"),
+        pytest.param({"compile_step": True}, id="compile_step"),
+        pytest.param({"task": "keypoints", "num_keypoints": 3, "compile_step": True}, id="keypoints_compile_step"),
+    ],
+)
 def test_unsupported_configurations_raise(kwargs: dict[str, object]) -> None:
     """The public option cannot silently promise replay for another task or compiler."""
     with pytest.raises(ValueError, match="capture_loss=True requires"):
@@ -524,10 +532,18 @@ def test_changed_gain_retires_recording_and_keeps_native_result() -> None:
     _same(_native(source, inputs), actual)
 
 
-def test_cpu_setup_warns_and_default_has_no_loss_callback() -> None:
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({}, id="detect"),
+        pytest.param({"task": "keypoints", "num_keypoints": 3}, id="keypoints"),
+    ],
+)
+def test_cpu_setup_warns_and_default_has_no_loss_callback(kwargs: dict[str, object]) -> None:
     """CPU compatibility leaves capture disabled and checkpoint tensor keys unchanged."""
-    native = DetectionLitModule(0.5, 0.25, 64, 3)
-    model = DetectionLitModule(0.5, 0.25, 64, 3, capture_loss=True)
+    native = DetectionLitModule(0.5, 0.25, 64, 3, **kwargs)
+    model = DetectionLitModule(0.5, 0.25, 64, 3, capture_loss=True, **kwargs)
+    model._trainer = MagicMock(spec=Trainer, world_size=1)  # pose setup reads the attached trainer's world size
     assert native.configure_callbacks() == []
     assert native.state_dict().keys() == model.state_dict().keys()
     with pytest.warns(UserWarning, match="single-device CUDA"):

@@ -14,19 +14,32 @@ from pytorch_lightning.plugins.precision import MixedPrecision
 from torch.utils.data import DataLoader
 
 from lucid_yolo.data.targets import Targets
-from lucid_yolo.ptl.loss_capture import _BF16_SUPPORTED
+from lucid_yolo.ptl.loss_capture import _BF16_SUPPORTED, _LossCaptureLifecycle
 from lucid_yolo.ptl.module import DetectionLitModule
 
 
-def _pose(capture: bool, keypoint_loss: str = "rle") -> DetectionLitModule:
+def _pose(
+    capture: bool, keypoint_loss: str = "rle", *, alpha: float = 0.5, oks_gain: float = 0.0
+) -> DetectionLitModule:
     """Construct the public pose option with a small matching annotation schema.
 
     Examples:
         >>> _pose(True).hparams.capture_loss
         True
+        >>> _pose(False, alpha=0.8, oks_gain=1.0).loss.alpha
+        0.8
     """
     return DetectionLitModule(
-        0.5, 0.25, 64, 2, task="keypoints", num_keypoints=3, capture_loss=capture, keypoint_loss=keypoint_loss
+        0.5,
+        0.25,
+        64,
+        2,
+        task="keypoints",
+        num_keypoints=3,
+        capture_loss=capture,
+        keypoint_loss=keypoint_loss,
+        alpha=alpha,
+        oks_gain=oks_gain,
     )
 
 
@@ -53,10 +66,21 @@ def _batch(count: int, visible: bool = True) -> tuple[torch.Tensor, list[Targets
 
 @pytest.mark.parametrize("keypoint_loss", ["rle", "laplace_nll"])
 @pytest.mark.parametrize("count,visible", [(0, False), (1, False), (2, True)])
-def test_pose_host_execution_keeps_loss_and_gradient_values(count: int, visible: bool, keypoint_loss: str) -> None:
-    """CPU compatibility exercises routing while CUDA submission keeps native fallback."""
+@pytest.mark.parametrize("alpha,oks_gain", [(0.5, 0.0), (0.8, 1.0)])
+def test_pose_host_execution_keeps_loss_and_gradient_values(
+    alpha: float, oks_gain: float, count: int, visible: bool, keypoint_loss: str
+) -> None:
+    """On CPU the routed pose step matches the native step in loss value and gradients.
+
+    This proves wiring only: the loss recorder is entered and answers with its native call, and the paired
+    density scoring reproduces the per-branch result. Nothing is recorded off CUDA, so recorder coverage
+    lives in the gpu-marked tests below.
+
+    The default branch weights (alpha 0.5, OKS gain 0) hide a swapped branch blend, since both branches weigh
+    the same, and a dropped OKS term, since its gain is zero. The second weight pair makes both visible.
+    """
     seed_everything(19)
-    native = _pose(False, keypoint_loss)
+    native = _pose(False, keypoint_loss, alpha=alpha, oks_gain=oks_gain)
     executed = copy.deepcopy(native)
     executed._capture_loss_active = True
     executed._trainer = MagicMock(spec=Trainer, training=True)
@@ -75,7 +99,6 @@ def test_pose_host_execution_keeps_loss_and_gradient_values(count: int, visible:
         actual.backward()
     assert replay.call_count == 1
     assert paired.call_count == int(keypoint_loss == "rle")
-    assert executed._loss_capture._objective is None
     for (name, left), (other, right) in zip(native.named_parameters(), executed.named_parameters(), strict=True):
         assert name == other and (left.grad is None) == (right.grad is None)
         if left.grad is not None:
@@ -121,36 +144,45 @@ def test_pose_pairing_continues_after_recorder_retires() -> None:
     assert paired.call_count == 1
 
 
-def test_pose_validation_keeps_original_criterion_signature() -> None:
-    """Validation retains native loss dispatch and does not force the replay alpha argument."""
+def test_pose_validation_keeps_native_dispatch_with_certified_criterion() -> None:
+    """A validation step keeps native loss dispatch although the stock criterion could be recorded.
+
+    The stock criterion certifies for recording, so only the training-stage gate keeps a validation step
+    off the detection objective the recorder serves. A customized criterion also takes the native route,
+    but by failing certification, so it would leave the gate itself unproven; the custom-criterion tests
+    own that route and its keyword signature.
+    """
     model = _pose(True).eval()
     model._capture_loss_active = True
-    original = model.loss
-    seen = []
-
-    def criterion(*args: object, **kwargs: object) -> object:
-        seen.append(kwargs)
-        return original(*args, **kwargs)
-
-    model.loss = criterion
     with (
         patch.object(model, "log"),
+        patch.object(model, "_objective", side_effect=AssertionError("validation objective")),
         patch.object(model._loss_capture, "run", side_effect=AssertionError("validation recording")),
         patch.object(model, "_paired_keypoint_terms", side_effect=AssertionError("validation pairing")),
     ):
-        model._shared_step(_batch(1), "val")
-    assert len(seen) == 1 and "alpha" not in seen[0]
+        loss, _, _ = model._shared_step(_batch(1), "val")
+    assert torch.isfinite(loss) and not model._loss_capture._disabled
 
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA execution needs a device")
 @pytest.mark.parametrize("precision", ["32-true", "16-mixed", "bf16-mixed"])
-def test_pose_cuda_execution_keeps_objective_and_gradient_direction(precision: str) -> None:
-    """A real automatic step records assignment and batches the same point objective."""
+@pytest.mark.parametrize("count,visible,records", [(2, True, True), (2, False, True), (0, False, False)])
+def test_pose_cuda_execution_keeps_objective_and_gradient_direction(
+    precision: str, count: int, visible: bool, records: bool
+) -> None:
+    """A real automatic step records assignment and batches the same point objective.
+
+    Loss and gradients must agree with the native step within the precision's epsilon: per parameter in
+    relative L2 distance, and over the whole gradient in direction, as cosine similarity.
+
+    Besides a batch of visible points, the step runs one whose points are all invisible and one with no
+    instances. An empty batch is answered natively, so the recorder only records for the first two.
+    """
     if precision == "bf16-mixed" and not _BF16_SUPPORTED:
         pytest.skip("BF16 replay requires torch 2.9")
     seed_everything(23)
-    batch = _batch(2)
+    batch = _batch(count, visible)
     results = []
 
     class Observe(Callback):
@@ -203,7 +235,7 @@ def test_pose_cuda_execution_keeps_objective_and_gradient_direction(precision: s
         with patch.object(model, "_paired_keypoint_terms", wraps=model._paired_keypoint_terms) as paired:
             trainer.fit(model, train_dataloaders=DataLoader([batch], batch_size=None))
         assert paired.call_count == int(capture)
-        assert observed.recorded is capture
+        assert observed.recorded is (capture and records)
         assert model._loss_capture._objective is None
         results.append(observed)
     epsilon = {
@@ -219,6 +251,12 @@ def test_pose_cuda_execution_keeps_objective_and_gradient_direction(precision: s
         if left is not None:
             assert right is not None and torch.isfinite(left).all() and torch.isfinite(right).all()
             assert (left - right).norm() <= epsilon * left.norm() + 1e-5, name
+    # One vector per arm, in float64: a per-parameter cosine on a near-zero gradient is rounding noise.
+    native, executed = (
+        torch.cat([value.flatten().double() for value in arm.gradients.values() if value is not None])
+        for arm in results
+    )
+    assert torch.cosine_similarity(native, executed, dim=0) >= 1 - epsilon
 
 
 @pytest.mark.gpu
@@ -230,22 +268,28 @@ def test_pose_cuda_execution_composes_with_network_replay() -> None:
     `_network_capture.run_features` for pose when `capture_network` is also set — a
     second, independent recorder with its own graph pool. Nothing before this test ran
     the two together for `task="keypoints"`.
+
+    The four steps differ in content: full instances, no instances, instances without a visible point, then
+    full instances again. The empty step is answered natively by the loss recorder, and the last step proves
+    both recorders still serve the fit afterwards. Loss and gradients are compared at every step.
     """
     seed_everything(23)
-    batches = [_batch(2) for _ in range(4)]
+    batches = [_batch(2), _batch(0), _batch(1, visible=False), _batch(2)]
     results = []
 
     class Observe(Callback):
         def __init__(self) -> None:
-            self.gradients: dict[str, torch.Tensor | None] = {}
+            self.gradients: list[dict[str, torch.Tensor | None]] = []
             self.losses: list[torch.Tensor] = []
             self.active: list[tuple[bool, bool]] = []
 
         def on_after_backward(self, trainer: Trainer, pl_module: DetectionLitModule) -> None:
-            self.gradients = {
-                name: None if value.grad is None else value.grad.detach().cpu().clone()
-                for name, value in pl_module.named_parameters()
-            }
+            self.gradients.append(
+                {
+                    name: None if value.grad is None else value.grad.detach().cpu().clone()
+                    for name, value in pl_module.named_parameters()
+                }
+            )
 
         def on_train_batch_end(
             self,
@@ -292,15 +336,20 @@ def test_pose_cuda_execution_composes_with_network_replay() -> None:
             assert observed.active[-1] == (True, True)
         results.append(observed)
 
-    for left, right in zip(results[0].losses, results[1].losses, strict=True):
-        torch.testing.assert_close(left, right, rtol=1e-5, atol=1e-6)
-    assert results[0].gradients.keys() == results[1].gradients.keys()
-    for name, left in results[0].gradients.items():
-        right = results[1].gradients[name]
-        assert (left is None) == (right is None), name
-        if left is not None:
-            assert right is not None and torch.isfinite(right).all()
-            assert (left - right).norm() <= 1e-5 * left.norm() + 1e-6, name
+    assert len(results[0].losses) == len(results[0].gradients) == len(batches)
+    assert len(results[1].losses) == len(results[1].gradients) == len(batches)
+    for step, (left, right) in enumerate(zip(results[0].losses, results[1].losses, strict=True)):
+        torch.testing.assert_close(
+            left, right, rtol=1e-5, atol=1e-6, msg=lambda text, step=step: f"step {step}: {text}"
+        )
+    for step, (native, executed) in enumerate(zip(results[0].gradients, results[1].gradients, strict=True)):
+        assert native.keys() == executed.keys(), step
+        for name, left in native.items():
+            right = executed[name]
+            assert (left is None) == (right is None), (step, name)
+            if left is not None:
+                assert right is not None and torch.isfinite(right).all()
+                assert (left - right).norm() <= 1e-5 * left.norm() + 1e-6, (step, name)
 
 
 #: The warning a customized criterion raises, for detection and pose alike, when it retires the fit's recorder.
@@ -362,3 +411,100 @@ def test_pose_custom_criterion_retires_recorder_once_per_fit() -> None:
     retirements = [str(warning.message) for warning in caught if "stays eager" in str(warning.message)]
     assert retirements == [_CUSTOMIZED]
     assert model._loss_capture._disabled
+
+
+#: The `_keypoint_terms` refusal a 4-point head raises for the 3-point annotations of `_batch`.
+_POINT_MISMATCH = "the head predicts 4 keypoints but the batch annotates 3"
+
+
+def _mismatched_pose() -> DetectionLitModule:
+    """Construct a capture-enabled pose module whose head predicts one point more than `_batch` annotates.
+
+    Examples:
+        >>> _mismatched_pose().hparams.num_keypoints
+        4
+    """
+    return DetectionLitModule(0.5, 0.25, 64, 2, task="keypoints", num_keypoints=4, capture_loss=True)
+
+
+def _single_step_trainer(accelerator: str, callback: Callback) -> Trainer:
+    """Build a one-step automatic trainer with no logging, checkpointing or validation.
+
+    Examples:
+        >>> _single_step_trainer("cpu", Callback()).max_steps
+        1
+    """
+    return Trainer(
+        accelerator=accelerator,
+        devices=1,
+        precision="32-true",
+        max_steps=1,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        limit_val_batches=0,
+        num_sanity_val_steps=0,
+        callbacks=[callback],
+    )
+
+
+@pytest.mark.parametrize("capture", [False, True])
+def test_pose_capture_installs_loss_lifecycle(capture: bool) -> None:
+    """A pose module opting into capture_loss carries the fit lifecycle that releases the recorder.
+
+    The lifecycle clears the recorder at fit start, at fit end and on failure. A pose step can fail after
+    the detection objective already ran, so pose needs that owner exactly as detection does.
+    """
+    callbacks = _pose(capture).configure_callbacks()
+    assert [type(callback) for callback in callbacks] == [_LossCaptureLifecycle] * capture
+
+
+def test_pose_point_mismatch_clears_recorder_on_fit_exception() -> None:
+    """A pose fit aborted by the point-count check leaves its loss recorder cleared.
+
+    `_keypoint_terms` raises after the detection objective ran. CPU records nothing, so a callback marks
+    the recorder retired at batch start; only the lifecycle's `on_exception` can reset that mark before
+    the error reaches the caller, which is the release a CUDA recording relies on.
+    """
+
+    class Retire(Callback):
+        def on_train_batch_start(
+            self, trainer: Trainer, pl_module: DetectionLitModule, batch: object, batch_idx: int
+        ) -> None:
+            pl_module._loss_capture._disabled = True
+
+    model = _mismatched_pose()
+    trainer = _single_step_trainer("cpu", Retire())
+    with (
+        pytest.warns(UserWarning, match="capture_loss=True is ignored outside single-device CUDA"),
+        pytest.raises(ValueError, match=_POINT_MISMATCH),
+    ):
+        trainer.fit(model, train_dataloaders=DataLoader([_batch(2)], batch_size=None))
+    assert not model._loss_capture._disabled
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA execution needs a device")
+def test_pose_cuda_point_mismatch_releases_recording() -> None:
+    """A recording made before the point-count check raises is released by the fit's exception hook.
+
+    The detection objective records on the first CUDA step, then `_keypoint_terms` rejects the batch. A
+    trainer callback runs before the model's own lifecycle, so it sees the recording in `on_exception`;
+    after the error propagates, the graph and its target workspace are gone.
+    """
+
+    class Observe(Callback):
+        def __init__(self) -> None:
+            self.recorded: bool | None = None
+
+        def on_exception(self, trainer: Trainer, pl_module: DetectionLitModule, exception: BaseException) -> None:
+            self.recorded = pl_module._loss_capture._objective is not None
+
+    model = _mismatched_pose()
+    observed = Observe()
+    trainer = _single_step_trainer("cuda", observed)
+    with pytest.raises(ValueError, match=_POINT_MISMATCH):
+        trainer.fit(model, train_dataloaders=DataLoader([_batch(2)], batch_size=None))
+    assert observed.recorded is True
+    assert model._loss_capture._objective is None and model._loss_capture._workspace is None
