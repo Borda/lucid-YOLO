@@ -45,6 +45,22 @@ def _policy(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(capture, "_BF16_REPLAY_SUPPORTED", True)
 
 
+@pytest.fixture
+def _failing_drain() -> SimpleNamespace:
+    """Hold one disabled recording whose stream raises on synchronize, as after a CUDA device error.
+
+    Examples:
+        >>> callable(_failing_drain)
+        True
+    """
+    holder = capture._SegmentHeadCapture(True)
+    stream = MagicMock()
+    stream.synchronize.side_effect = RuntimeError("device-side assert triggered")
+    holder.entries = {(1, "stem"): SimpleNamespace(stream=stream)}
+    holder.owner, holder.disabled = nn.Identity(), True
+    return SimpleNamespace(holder=holder, stream=stream, module=SimpleNamespace(_segment_head_capture=holder))
+
+
 class TestReplayCallbackComposition:
     """The merged detection-loss callback and segmentation callback retain their own task scopes."""
 
@@ -74,7 +90,7 @@ class TestReplayCallbackComposition:
         assert [type(callback).__name__ for callback in model.configure_callbacks()] == expected
 
     @pytest.mark.parametrize(("task", "cause"), [("detect", "capture_segment_heads"), ("segment", "capture_loss")])
-    def test_incompatible_task_requests_are_still_explicit(self, task: str, cause: str) -> None:
+    def test_incompatible_task_requests_are_explicit(self, task: str, cause: str) -> None:
         """Two independent options cannot bypass each other's task restrictions after integration."""
         with pytest.raises(ValueError, match=cause):
             DetectionLitModule(
@@ -92,7 +108,7 @@ class TestStageContracts:
     """Observers and custom dispatch must stay visible through native execution."""
 
     @pytest.mark.parametrize("global_hook", [False, True])
-    def test_hook_names_the_native_cause(self, global_hook: bool) -> None:
+    def test_hook_names_native_cause(self, global_hook: bool) -> None:
         """Both local and global observers prevent a recording from bypassing their calls."""
         owner = nn.ModuleList([nn.Conv2d(1, 1, 1)])
         if global_hook:
@@ -106,7 +122,7 @@ class TestStageContracts:
         assert capture._stage_breach(owner) is None
 
     @pytest.mark.parametrize("change", ["eval", "forward", "compiled", "helper", "cumulative"])
-    def test_refuses_an_observable_stage_change(self, change: str) -> None:
+    def test_refuses_observable_stage_change(self, change: str) -> None:
         """Each rejected policy names its cause rather than silently recording a different call."""
         stage = nn.BatchNorm2d(2) if change == "cumulative" else nn.Conv2d(2, 2, 1)
         owner = nn.ModuleList([stage])
@@ -132,7 +148,7 @@ class TestStorageContracts:
     """Live parameter and buffer metadata is independent of the attribute certificate."""
 
     @pytest.mark.parametrize("change", ["empty", "frozen", "dtype", "hook", "post_hook", "buffer_grad"])
-    def test_parameter_contract_names_the_breach(self, change: str) -> None:
+    def test_parameter_contract_names_breach(self, change: str) -> None:
         """A mutable tensor contract must be read again even when its Python binding is unchanged."""
         parameter = nn.Parameter(torch.ones(2))
         buffer = torch.ones(2)
@@ -182,7 +198,7 @@ class TestStorageContracts:
 class TestFeaturePolicy:
     """Feature-side policy decisions depend on real layout, dtype and autograd metadata."""
 
-    def test_cpu_features_keep_the_native_route(self) -> None:
+    def test_cpu_features_keep_native_route(self) -> None:
         """A real CPU tensor is rejected before CUDA-specific metadata or runtime checks."""
         reason = capture._feature_breach((torch.ones(2, dtype=torch.bfloat16),), (True, torch.bfloat16))
         assert "ordinary dense CUDA tensors" in reason
@@ -260,7 +276,7 @@ class TestRunnerCertificate:
         monkeypatch.setattr(capture, "_precision_signature", lambda: (True, torch.bfloat16))
         return model, holder, features
 
-    def test_reuses_the_same_valid_certificate(self, runtime: tuple) -> None:
+    def test_reuses_same_valid_certificate(self, runtime: tuple) -> None:
         """Repeated certification retains its owner and attribute certificate without recording a graph."""
         model, holder, features = runtime
         assert holder.runner(model, features) is holder
@@ -342,7 +358,7 @@ class TestHeadTopology:
     """Only the segmentation dispatch and its existing level counts are certifiable."""
 
     @pytest.mark.parametrize("change", ["head", "branch", "coefficients", "angles", "keypoints", "levels"])
-    def test_names_an_unsupported_topology(self, change: str) -> None:
+    def test_names_unsupported_topology(self, change: str) -> None:
         """A different prediction family never borrows the segmentation recording's call signature."""
         head = _module().head
         if change == "head":
@@ -469,7 +485,7 @@ class TestRecordingLifetime:
         second.synchronize.assert_called_once_with()
         assert holder.entries == {} and holder.owner is None
 
-    def test_new_batch_releases_a_skipped_backward_hold(self) -> None:
+    def test_new_batch_releases_skipped_backward_hold(self) -> None:
         """A skipped training backward cannot force every later batch onto the native path."""
         holder = capture._SegmentHeadCapture(True)
         entry = SimpleNamespace(pending_backward=True)
@@ -477,6 +493,43 @@ class TestRecordingLifetime:
         module = SimpleNamespace(_segment_head_capture=holder)
         capture._SegmentHeadCaptureLifecycle().on_train_batch_start(None, module, None, 0)
         assert not entry.pending_backward
+
+    def test_failing_drain_raises_at_fit_end_after_reset(self, _failing_drain: SimpleNamespace) -> None:
+        """A drain failure after a completed fit is raised, and the holder is already empty.
+
+        Nothing else is in flight at normal fit completion, so a failing stream is the error to report.
+        Resetting before the drain keeps a later ``clear()`` from failing on the same stream again.
+        """
+        with pytest.raises(RuntimeError, match="device-side assert"):
+            capture._SegmentHeadCaptureLifecycle().on_fit_end(None, _failing_drain.module)
+        _failing_drain.stream.synchronize.assert_called_once_with()
+        assert _failing_drain.holder.entries == {} and _failing_drain.holder.owner is None
+
+    def test_failing_drain_warns_on_failed_fit_after_reset(self, _failing_drain: SimpleNamespace) -> None:
+        """A drain failure after a failed fit is a warning, so the trainer's own exception still propagates.
+
+        A failed CUDA step usually leaves the device erroring on every later synchronize; raising that
+        from ``on_exception`` would replace the original exception and skip the trainer's teardown.
+        """
+        with pytest.warns(UserWarning, match=r"could not drain its recordings .*\(device-side assert"):
+            capture._SegmentHeadCaptureLifecycle().on_exception(None, _failing_drain.module, RuntimeError("step"))
+        _failing_drain.stream.synchronize.assert_called_once_with()
+        assert _failing_drain.holder.entries == {} and not _failing_drain.holder.disabled
+
+    @pytest.mark.parametrize(
+        "module",
+        [
+            pytest.param(SimpleNamespace(), id="missing"),
+            pytest.param(SimpleNamespace(_segment_head_capture=object()), id="foreign"),
+        ],
+    )
+    def test_module_without_holder_makes_every_hook_no_op(self, module: SimpleNamespace) -> None:
+        """A trainer reused on another module class does not fail in the segmentation lifecycle."""
+        lifecycle = capture._SegmentHeadCaptureLifecycle()
+        lifecycle.on_fit_start(None, module)
+        lifecycle.on_train_batch_start(None, module, None, 0)
+        lifecycle.on_fit_end(None, module)
+        lifecycle.on_exception(None, module, RuntimeError("abort"))
 
 
 class TestGroupDispatch:
@@ -517,7 +570,7 @@ class TestGroupDispatch:
         eager.assert_called_once_with((feature,))
         assert holder.entries == {}
 
-    def test_reuses_one_entry_for_the_same_group(self) -> None:
+    def test_reuses_one_entry_for_same_group(self) -> None:
         """Only the recording boundary is replaced; real group identity controls reuse."""
         stage = nn.Linear(2, 2)
         feature = torch.ones(1, 2)
@@ -534,7 +587,7 @@ class TestGroupDispatch:
         eager.assert_not_called()
 
     @pytest.mark.parametrize("kind", ["stem", "mask", "coefficients", "base"])
-    def test_routes_the_original_prediction_expression(self, kind: str) -> None:
+    def test_routes_original_prediction_expression(self, kind: str) -> None:
         """The scheduling wrapper returns the actual native prediction, without changing its expression."""
         holder = capture._SegmentHeadCapture(True)
         model = _module()

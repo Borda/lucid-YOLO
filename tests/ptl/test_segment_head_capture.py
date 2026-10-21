@@ -594,7 +594,7 @@ def test_cpu_fit_wires_lifecycle_and_warns_once_without_replay() -> None:
 def test_stage_helpers_and_shared_storage_are_not_certified() -> None:
     """The certificate covers callable helpers and byte overlap, including different Parameters."""
     model = _module()
-    owner = torch.nn.ModuleList([model.head, model.protonet, model.semantic])
+    owner = torch.nn.ModuleList([model.head, model.proto_fusion, model.protonet, model.semantic])
     assert _stage_breach(owner) is None
     conv = model.head.o2m.box_stems[0][-1]
     with patch.object(conv, "_conv_forward", conv._conv_forward):
