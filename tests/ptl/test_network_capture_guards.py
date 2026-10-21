@@ -346,6 +346,10 @@ class TestReplayBackwardHold:
         weight.grad = alias
         holder = _NetworkCapture()
         holder._network = network
+        # `_run`'s capture block always sets this alongside `_network`; set it here too,
+        # since `_before_replayed_backward` now walks this cached list instead of re-tracing
+        # `network.parameters()` on every hold.
+        holder._recorded_parameters = tuple(network.parameters())
         output = network.backbone(torch.ones(1, 3))
         holder._await_backward((output,))
         output.sum().backward()
