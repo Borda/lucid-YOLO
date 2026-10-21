@@ -219,7 +219,7 @@ from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
 from lucid_yolo.ptl.coco_backend import build_mean_average_precision
-from lucid_yolo.ptl.loss_capture import _LossCapture, _LossCaptureLifecycle, _native_loss
+from lucid_yolo.ptl.loss_capture import _LossCapture, _LossCaptureLifecycle, _native_loss, _source_signature
 from lucid_yolo.ptl.network_capture import (
     _detection_stages,
     _module_breach,
@@ -831,24 +831,24 @@ def _validate_replay_options(
     """Reject replay options outside the objectives they record.
 
     Network replay records the detection, pose, oriented or segmentation stages; loss replay
-    records the detection objective only; segment-head replay records the segmentation prediction
-    groups only. Segment-head replay refuses the compiler although ``compile_step`` leaves the segment
-    objective eager today, so an accepted configuration keeps its meaning once that
-    objective is compiled.
+    records the detection objective shared by detection and pose; segment-head replay records
+    the segmentation prediction groups only. Segment-head replay refuses the compiler although
+    ``compile_step`` leaves the segment objective eager today, so an accepted configuration
+    keeps its meaning once that objective is compiled.
 
     Raises:
         ValueError: If network replay is combined with a task other than detection,
             keypoints, oriented detection or segmentation, loss replay with a task other than
-            detection, segment-head replay with a task other than segmentation, or any of them
-            with the compiler (segment-head replay included, for forward compatibility with a
-            compiled segment objective).
+            detection or keypoints, segment-head replay with a task other than segmentation, or
+            any of them with the compiler (segment-head replay included, for forward
+            compatibility with a compiled segment objective).
     """
     if capture_network and (task not in ("detect", "keypoints", "obb", "segment") or compile_step):
         raise ValueError(
             "capture_network=True requires task='detect', 'keypoints', 'obb' or 'segment', and compile_step=False"
         )
-    if capture_loss and (task != "detect" or compile_step):
-        raise ValueError("capture_loss=True requires task='detect' and compile_step=False")
+    if capture_loss and (task not in ("detect", "keypoints") or compile_step):
+        raise ValueError("capture_loss=True requires task='detect' or 'keypoints', and compile_step=False")
     if capture_segment_heads and (task != "segment" or compile_step):
         raise ValueError(
             "capture_segment_heads=True requires task='segment' and compile_step=False; the compiler is refused "
@@ -1073,14 +1073,16 @@ class DetectionLitModule(LightningModule):
             changed storage, modes, hooks or precision retire the recording. Warmup
             restores buffers and RNG, and the fit callbacks discard recordings on
             completion or failure. Higher-order differentiation is unsupported.
-        capture_loss: Replay the existing detection assignment and loss forward/backward
-            on single-device CUDA automatic training. Default off: recording pays setup
-            and retains a graph pool. Masked target capacity grows geometrically; the
-            method, label checks, live branch schedule and optimizer stay unchanged.
-            Requires ``task="detect"`` and ``compile_step=False``. Can combine with
-            ``capture_network``, ``capture_orthogonalization`` and ``capture_updates``;
-            it records no optimizer update itself, so the optimizer step is whatever
-            those optimizer options select.
+        capture_loss: Replay the existing detection assignment and loss forward/backward,
+            for detection or pose, on single-device CUDA automatic training. Default off:
+            recording pays setup and retains a graph pool. Masked target capacity grows
+            geometrically; the method, label checks, live branch schedule and optimizer stay
+            unchanged. Requires ``task="detect"`` or ``task="keypoints"``, and
+            ``compile_step=False``. Pose also batches the existing RLE densities, keeping
+            visibility, separate means and branch weights. Batched parameter-gradient
+            summation can change rounding. Can combine with ``capture_network``,
+            ``capture_orthogonalization`` and ``capture_updates``; it records no optimizer
+            update itself, so the optimizer step is whatever those optimizer options select.
         capture_updates: Enable MuSGD's optional replay of the existing update preparation,
             including momentum, followed by a native batched parameter write at the current
             learning rate. Defaults to ``False``. Uses private gradient storage and live
@@ -1096,12 +1098,12 @@ class DetectionLitModule(LightningModule):
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
             ``"keypoints"``, if ``rotated_iou_form`` is not a known rotated-IoU form,
             if ``capture_network`` is combined with a task other than detection, keypoints,
-            oriented detection or segmentation, ``capture_loss`` with a non-detection task, ``capture_segment_heads``
-            with a non-segmentation task, or any of them with ``compile_step=True`` (for
-            ``capture_segment_heads``, forward compatibility with a compiled segment objective),
-            if ``keypoint_loss`` is not a known keypoint objective, if
-            ``task="keypoints"`` was asked for without a ``num_keypoints``, or if a
-            ``num_keypoints`` was given for a task that builds no point stem.
+            oriented detection or segmentation, ``capture_loss`` with a task other than detection
+            or keypoints, ``capture_segment_heads`` with a non-segmentation task, or any of them
+            with ``compile_step=True`` (for ``capture_segment_heads``, forward compatibility
+            with a compiled segment objective), if ``keypoint_loss`` is not a known keypoint
+            objective, if ``task="keypoints"`` was asked for without a ``num_keypoints``, or if
+            a ``num_keypoints`` was given for a task that builds no point stem.
 
     Examples:
         ```pycon
@@ -2411,10 +2413,18 @@ class DetectionLitModule(LightningModule):
             gt_keypoints = gt_keypoints.to(images.device)
             gt_keypoint_vis = gt_keypoint_vis.to(images.device)
         seg_out = self.forward_segmentation(images) if self._task == "segment" else None
-        if self._task == "detect":
-            # The one task whose whole objective is the region `_objective` may have
-            # compiled (WP-184); the other three keep the inline call below because
-            # their extra terms read on the host and the oriented one feeds `gt_rboxes`.
+        # `_objective` is the detection region `compile_step` may compile (WP-184). Detection
+        # always calls it; pose calls it only for training steps `_pose_records_loss` routes to
+        # the loss recorder, and there it is always the bare method, since `_compile_objective`
+        # compiles detection alone and `_validate_replay_options` refuses `capture_loss` with
+        # `compile_step`. Oriented and segmentation steps keep the inline call below: the
+        # oriented assignment reads `gt_rboxes`, which the region does not take, and
+        # segmentation already ran its network in `forward_segmentation`, which the region
+        # would run a second time.
+        if self._task == "detect" or self._pose_records_loss(stage):
+            # Pose shares the unrotated detection objective, but its ragged point
+            # terms remain outside recording and consume the returned assignments.
+            # Its native and validation routes retain their existing call signature.
             self._mark_dynamic(images, gt_boxes, gt_labels, gt_mask)
             alpha = self._alpha_tensor(images.device)
             head_out, out = self._objective(images, anchor_points, strides, gt_boxes, gt_labels, gt_mask, alpha)
@@ -2450,6 +2460,30 @@ class DetectionLitModule(LightningModule):
         total = out.total + self._task_extra_loss(context, out, stage)
         self._log_loss(out, total, stage, images.shape[0])
         return total, head_out, seg_out
+
+    def _pose_records_loss(self, stage: str) -> bool:
+        """Tell whether a pose step sends its unrotated detection objective to the loss recorder.
+
+        Only a training step of a pose fit whose ``capture_loss`` is active qualifies;
+        validation keeps the criterion's original call signature. A criterion
+        :func:`~lucid_yolo.ptl.loss_capture._source_signature` cannot certify keeps its
+        native call, and the first such step retires the fit's recorder with the warning
+        detection emits for the same configuration, so the fallback is reported once per
+        fit rather than silently on every step.
+
+        Args:
+            stage: Metric prefix of the step, ``"train"`` or ``"val"``.
+
+        Returns:
+            ``True`` when the step should call :attr:`_objective`, else ``False``.
+        """
+        if self._task != "keypoints" or not self._capture_loss_active or stage != "train":
+            return False
+        if _source_signature(self.loss) is not None:
+            return True
+        if not self._loss_capture._disabled:
+            self._loss_capture.retire("the loss or an assignment implementation was customized")
+        return False
 
     def _task_extra_loss(self, context: _StepContext, out: DualLossOutput, stage: str) -> Tensor:
         """Return the task-conditional extra loss: the segment, oriented or pose terms, else zero.
@@ -2572,8 +2606,20 @@ class DetectionLitModule(LightningModule):
         that disagree early in training are better served by one shared density or by
         two independent ones is a question this project has no measurement for, and
         one flow is both the smaller claim and the smaller parameter count. It is
-        called twice rather than once over concatenated positives so each branch's
-        term can be weighted by its own ``alpha`` share.
+        normally called twice. With ``capture_loss`` active for the fit — decided once
+        at :meth:`setup`, for single-device CUDA automatic optimization — a step in
+        training mode scores both branches' row-independent density calls as one batch
+        through :meth:`_paired_keypoint_terms`, while selection, each branch's mean and
+        its ``alpha`` share stay separate. That batching has a gate of its own: the
+        density must be the built-in :class:`~lucid_yolo.losses.rle_loss.RLELoss`
+        passing ``_can_pair`` (no hooked, altered or compiled density module), and
+        ``_score_branch``, ``_rle_on``, ``_oks_on`` and ``_gather_keypoint_positives``
+        must keep their class implementations. It never reads the loss recorder's state,
+        so batching continues after the recorder retires and on every step whose
+        detection loss takes its native call — a customized criterion, or BF16 on a
+        torch older than 2.9. Batched parameter-gradient summation can differ in
+        floating-point rounding; this opt-in path promises the same objective rather
+        than identical training bytes.
 
         Args:
             context: The step's shared quantities, carrying the padded point targets.
@@ -2604,9 +2650,48 @@ class DetectionLitModule(LightningModule):
                 f"the head predicts {predicted_points} keypoints but the batch annotates {annotated_points}; "
                 f"num_keypoints must match the dataset's annotation schema"
             )
+        if (
+            self._capture_loss_active
+            and self.training
+            and type(self.rle_loss) is RLELoss
+            and self.rle_loss._can_pair()
+            and all(
+                getattr(getattr(self, name), "__func__", None) is function for name, function in _EAGER_POSE_SCORING
+            )
+        ):
+            return self._paired_keypoint_terms(context, out)
         o2m_rle, o2m_oks = self._score_branch(o2m_points, o2m_sigma, out.o2m_assign, context)
         o2o_rle, o2o_oks = self._score_branch(o2o_points, o2o_sigma, out.o2o_assign, context)
         return alpha * o2m_rle + (1.0 - alpha) * o2o_rle, alpha * o2m_oks + (1.0 - alpha) * o2o_oks
+
+    def _paired_keypoint_terms(self, context: _StepContext, out: DualLossOutput) -> tuple[Tensor, Tensor]:
+        """Score the two existing pose branches with one shared density batch.
+
+        Gathers, box frames, visibility and OKS stay per branch. Only the row-independent
+        RLE density calls are batched; each selected subset retains its own mean and
+        its original alpha weight. This is an opt-in part of CUDA pose loss execution.
+        """
+        head = context.head_out
+        assert head.o2m_keypoints is not None and head.o2m_keypoint_sigma is not None
+        assert head.o2o_keypoints is not None and head.o2o_keypoint_sigma is not None
+        left = self._gather_keypoint_positives(head.o2m_keypoints, head.o2m_keypoint_sigma, out.o2m_assign, context)
+        right = self._gather_keypoint_positives(head.o2o_keypoints, head.o2o_keypoint_sigma, out.o2o_assign, context)
+        arguments = tuple(
+            (
+                normalize_keypoints_to_box(value.predicted, value.frame),
+                value.raw_sigma,
+                normalize_keypoints_to_box(value.annotated, value.frame),
+                value.visibility,
+            )
+            for value in (left, right)
+        )
+        assert isinstance(self.rle_loss, RLELoss)
+        left_rle, right_rle = self.rle_loss._forward_pair(*arguments)
+        alpha = out.alpha
+        return (
+            alpha * left_rle + (1.0 - alpha) * right_rle,
+            alpha * self._oks_on(left) + (1.0 - alpha) * self._oks_on(right),
+        )
 
     def _score_branch(
         self, raw_points: Tensor, raw_sigma: Tensor, assign: AssignResult, context: _StepContext
@@ -2950,3 +3035,8 @@ _ORIENTED_METHODS = tuple(
 )
 #: The oriented objective helpers as imported, against which :func:`_oriented_replay_breach` compares.
 _ORIENTED_HELPERS = _oriented_helpers()
+
+_EAGER_POSE_SCORING = tuple(
+    (name, getattr(DetectionLitModule, name))
+    for name in ("_score_branch", "_rle_on", "_oks_on", "_gather_keypoint_positives")
+)

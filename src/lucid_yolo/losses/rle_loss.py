@@ -122,6 +122,7 @@ sigma``, not R1 Eq. 11's two).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import cast
 
 import torch
@@ -553,6 +554,10 @@ class RLELoss(nn.Module):
             ``mu_hat`` and ``sigma_raw``'s graphs, when no point is visible.
         """
         offset, sigma_hat = _select_visible(mu_hat, sigma_raw, mu_gt, visibility)  # both (V, 2)
+        return _reduce_selected(self._per_point(offset, sigma_hat))
+
+    def _per_point(self, offset: Tensor, sigma_hat: Tensor) -> Tensor:
+        """Score selected rows with the existing density expressions before their mean."""
         residual = offset / sigma_hat
 
         laplace = Laplace(0.0, _BASE_LAPLACE_SCALE)
@@ -563,4 +568,76 @@ class RLELoss(nn.Module):
         log_sigma_term = torch.log(sigma_hat).sum(dim=-1)  # (V,)
         per_point = -base_log_prob - flow_log_prob + log_sigma_term  # (V,), R14 Eq. 8 (log s dropped)
 
-        return _reduce_selected(per_point)
+        return per_point
+
+    def _forward_pair(
+        self,
+        left: tuple[Tensor, Tensor, Tensor, Tensor],
+        right: tuple[Tensor, Tensor, Tensor, Tensor],
+    ) -> tuple[Tensor, Tensor]:
+        """Batch row-independent densities, retaining each branch's own visible-point mean.
+
+        Selection remains separate and precedes arithmetic, so an unlabelled non-finite
+        coordinate never reaches either density. The split is the selected left count,
+        not its instance count. Parameter-gradient summation order can change on CUDA.
+        """
+        if any(type(value) is not Tensor for value in (*left, *right)) or any(
+            first.dtype != second.dtype or first.device != second.device
+            for first, second in zip(left, right, strict=True)
+        ):
+            return self(*left), self(*right)
+        left_offset, left_sigma = _select_visible(*left)
+        right_offset, right_sigma = _select_visible(*right)
+        count = left_offset.shape[0]
+        values = self._per_point(torch.cat((left_offset, right_offset)), torch.cat((left_sigma, right_sigma)))
+        return _reduce_selected(values[:count]), _reduce_selected(values[count:])
+
+    def _can_pair(self) -> bool:
+        """Keep altered, hooked or compiled densities on their original two-call route."""
+        runtime = nn.modules.module
+        if any(
+            getattr(runtime, name, {})
+            for name in (
+                "_global_forward_hooks",
+                "_global_forward_pre_hooks",
+                "_global_backward_hooks",
+                "_global_backward_pre_hooks",
+            )
+        ):
+            return False
+        for module in self.modules():
+            expected = _PAIR_METHODS.get(type(module))
+            if (
+                expected is None
+                or module._forward_hooks
+                or module._forward_pre_hooks
+                or module._backward_hooks
+                or module._backward_pre_hooks
+            ):
+                return False
+            if getattr(module, "_compiled_call_impl", None) is not None:
+                return False
+            for name, function in expected:
+                if name in vars(module) or getattr(type(module), name) is not function:
+                    return False
+        return not any(
+            type(parameter) is not nn.Parameter or parameter._backward_hooks or parameter._post_accumulate_grad_hooks
+            for parameter in self.parameters()
+        )
+
+
+# These built-in stages have no cross-row operation. Snapshot identities so replacing
+# a class method later cannot silently turn the batching certificate into a new policy.
+_PAIR_METHODS: dict[type[nn.Module], tuple[tuple[str, Callable[..., object]], ...]] = {
+    cls: tuple((name, getattr(cls, name)) for name in (*names, "__call__", "_call_impl"))
+    for cls, names in (
+        (RLELoss, ("forward", "_per_point", "_forward_pair")),
+        (_RealNVPFlow, ("log_density", "invert")),
+        (_AffineCoupling, ("invert",)),
+        (_CouplingConditioner, ("forward",)),
+        (nn.ModuleList, ()),
+        (nn.Sequential, ("forward",)),
+        (nn.Linear, ("forward",)),
+        (nn.LeakyReLU, ("forward",)),
+    )
+}
