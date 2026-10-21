@@ -2,9 +2,9 @@
 
 > Engineering log · [Phase 17 — R1 pose-objective parity](https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/)
 >
-> 🔗 Depends on [WP-198](https://borda.github.io/lucid-YOLO/work_packages/wp-198/) · Needed by [WP-200](https://borda.github.io/lucid-YOLO/work_packages/wp-200/)
+> 🔗 Depends on [WP-198](https://borda.github.io/lucid-YOLO/work_packages/wp-198/) · Needed by [WP-199b](https://borda.github.io/lucid-YOLO/work_packages/wp-199b/), [WP-200](https://borda.github.io/lucid-YOLO/work_packages/wp-200/)
 >
-> ⬅️ [WP-198](https://borda.github.io/lucid-YOLO/work_packages/wp-198/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-200](https://borda.github.io/lucid-YOLO/work_packages/wp-200/) ➡️
+> ⬅️ [WP-198](https://borda.github.io/lucid-YOLO/work_packages/wp-198/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-199b](https://borda.github.io/lucid-YOLO/work_packages/wp-199b/) ➡️
 
 
 ## WP-199 — the existing dynamic loss runs in a bounded CUDA workspace

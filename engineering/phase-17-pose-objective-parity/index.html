@@ -4204,6 +4204,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#wp-199b-one-opt-in-pose-loss-execution-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-199b — one opt-in pose loss execution path
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#wp-200-six-native-outputs-one-recorded-network" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4525,6 +4536,17 @@
     <span class="md-ellipsis">
       
         WP-199 — the existing dynamic loss runs in a bounded CUDA workspace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp-199b-one-opt-in-pose-loss-execution-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WP-199b — one opt-in pose loss execution path
       
     </span>
   </a>
@@ -4909,6 +4931,13 @@
 <p>[MEASURED] Five alternating fresh-process pairs on an isolated g2-standard-8 (eight vCPUs, 32 GB), NVIDIA L4, driver 580.178.04, torch 2.9.1+cu129 and Lightning 2.6.6: complete fit time is <strong>125.272 (124.536–126.679) s native</strong> and <strong>108.811 (108.582–109.466) s with replay</strong>, a <strong>13.140%</strong> reduction (median and range). The workload is nano, batch 4, 640 px, BF16, five epochs on 1,024 COCO val2017 images used for training and 32 disjoint validation images, with four persistent training workers. Prepared caching, device HSV with its fused restore, epoch prefetch, network replay, orthogonalization replay and optimizer update replay are enabled in both arms. Timing includes construction, cache preparation, graph setup, training, schedules, EMA, validation and checkpoints. Dependency compiler and OS caches are warm; every fit rebuilds its image cache and CUDA recordings.</p>
 <p>The model, full optimizer state, scheduler, EMA and complete loss tensor byte hashes match in each pair; validation metrics match too. The five native controls match each other. Actual replay plus native empty-batch counts cover every training batch. A separate batch-16 exploratory pair was 7.767% slower. The claim covers the measured small-batch workload. Long-run accuracy and full-COCO throughput remain unverified.</p>
 <p>The final loss replay suite passes 59 cases on L4 torch 2.9.1 and 58 with one intentional BF16 skip on torch 2.4.0. Eight optimizer-flag CLI cases passed before the test-only composition addition, on the unchanged API. CUDA cases carry the GPU marker used by the project's test target. Real automatic Trainer coverage includes accumulation, clipping, FP16 overflow recovery, checkpoint plus assign=True restoration and simultaneous network/loss replay with both optimizer replay options. Seven mutation controls fail their dedicated regressions. The normal project environment passes the complete pre-commit set, including strict typing. Historical preliminary alpha compilation-counter and copied torch2.9 stub diagnostics reproduced on unchanged pre-merge main; these were not rerun on the merged source and neither is a green full-suite claim. Full development and accelerator-golden gates were not run; this package remains open.</p>
+<h2 id="wp-199b-one-opt-in-pose-loss-execution-path">WP-199b — one opt-in pose loss execution path<a class="headerlink" href="#wp-199b-one-opt-in-pose-loss-execution-path" title="Permanent link">&para;</a></h2>
+<p><a id="wp-199b"></a></p>
+<p><code>capture_loss</code>, off by default, also accepts pose. Its unrotated detection objective uses the existing recording, and the current assignments feed the native point gathers. During training, a certified native RLE flow scores the two branches' selected rows together. Visibility selection precedes arithmetic, the split uses the selected point count, and each branch retains its own mean and alpha weight. The density expressions, shared parameters and optimizer remain the existing ones.</p>
+<p>The flow has six row-independent coupling conditioners, each with three linear calls. Batching reduces those forward calls from 36 to 18. Source and runtime identities, hooks and compiled modules are checked before pairing; altered scoring, custom densities and validation retain their native calls. Different branch input dtypes/devices and tensor subclasses also keep separate calls, preserving each branch's logarithm precision. Existing detection recorder guards and fit cleanup stay in force for the detection objective; they do not gate the density batching, which keys on the option being active for the fit and so continues after the recorder retires, under a customized criterion and under the BF16 fallback for torch older than 2.9. Laplace-only pose keeps its native point objective.</p>
+<p>This is not a byte-identical training option. Changing the batch can change matrix-kernel selection and the order of parameter-gradient sums. CPU double comparisons establish the separate branch objective and derivatives; CUDA comparisons measure the rounding difference. Default execution is unchanged. Long-run convergence and acceptance accuracy remain unverified.</p>
+<p>Initial profiles on an L4 identified host dispatch rather than a dominant device kernel: median kernel duration was about 1.4 microseconds, and the eager detection loss and RLE forward scopes together occupied about 15% of the instrumented step window before backward. Those initial diagnostic runs used the module's 0.34-depth example, not the registry nano model, and are not a nano throughput result. Detection-loss replay alone reduced the exploratory fit by 4.54%; density batching alone by 7.54%. Neither was sufficient alone. Complete-fit validation uses registered nano (depth 0.50), batch 4, 640 px and BF16 on one L4 with Torch 2.9.1+cu129, five epochs over 384 public COCO person images and 32 disjoint validation images. Both arms enable the existing applicable training options. Five alternating fresh-process pairs include model/trainer and cache setup, graph recording, training, EMA, validation and checkpoints. Native median (range) is 100.586 (99.890–101.894) s; pose loss execution is 87.058 (86.201–87.297) s: 13.45% less complete-fit time. Whole-process medians are 106.025 and 92.389 s. Peak reserved CUDA memory rose from 1404 to 1496 MiB on the measured arms; as with the timing, the submitted tree has no memory measurement. The native arm is <code>main</code> at <code>0c84549</code>. The commit of the pose loss execution arm is not recorded and is pending the contributor. The submitted tree builds on <code>22d8df4</code> (pose prediction-stem replay, <a href="../../work_packages/wp-193f/">WP-193f</a>) and <code>main</code> has since gained <code>5756ea0</code> (segmentation replay); neither that tree nor the merged one has been re-measured, so the percentage is a result for the measured arms only. One complete batch-16 pair measured 48.357 to 46.338 s (4.18% less time), below the investigation's 8% target, so the repeated claim stays at batch 4. Same-weight public COCO samples have equal forward loss values but up to 1.45% relative gradient L2 difference in BF16; the five-epoch terminal training losses are 38.89 and 42.14, but which arm ended at which value is not recorded and is pending the contributor, so the accuracy effect cannot be read from them; short-run throughput does not establish accuracy preservation.</p>
+<p>Focused regression tests cover separate visible means, asymmetric and empty subsets, non-finite unlabelled annotations, gradient agreement, an executable 36-to-18 call count, altered dispatch, real automatic CUDA training and composition with the existing pose network replay (<code>capture_network</code>). The tests proving this are <code>tests/losses/test_rle_pair.py::test_pair_keeps_separate_visible_means_and_gradients</code>, <code>tests/losses/test_rle_pair.py::test_pair_halves_native_linear_calls</code>, <code>tests/losses/test_rle_pair.py::test_pair_certificate_refuses_altered_dispatch</code>, <code>tests/ptl/test_pose_loss_execution.py::test_pose_host_execution_keeps_loss_and_gradient_values</code>, <code>tests/ptl/test_pose_loss_execution.py::test_pose_custom_scoring_keeps_native_dispatch</code>, <code>tests/ptl/test_pose_loss_execution.py::test_pose_cuda_execution_keeps_objective_and_gradient_direction</code> and <code>tests/ptl/test_pose_loss_execution.py::test_pose_cuda_execution_composes_with_network_replay</code>. The full development gate, aggregate offline coverage and accelerator goldens remain unverified. This work package stays open.</p>
 <p><a id="wp-200"></a></p>
 <h2 id="wp-200-six-native-outputs-one-recorded-network">WP-200 — six native outputs, one recorded network<a class="headerlink" href="#wp-200-six-native-outputs-one-recorded-network" title="Permanent link">&para;</a></h2>
 <p><strong>The oriented head is part of the recording.</strong> The existing <code>capture_network</code> option now accepts <code>task: obb</code>. Backbone, neck and both head branches run their existing expressions through R43's graphed-callable API. The adapter retains the four dense detection fields and both angle tensors, rebuilding them by name. Assignment, rotated decoding, classification, ProbIoU, rotated L1, angle scoring, schedules, clipping, optimizer, EMA and validation stay in their current loop. No method arithmetic, gain, convention or frozen golden changes.</p>
