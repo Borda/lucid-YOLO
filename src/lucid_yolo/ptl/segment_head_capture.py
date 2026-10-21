@@ -9,6 +9,7 @@ does. No assignment, loss or optimizer expression is recorded or rewritten.
 
 from __future__ import annotations
 
+import contextlib
 import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
@@ -551,11 +552,10 @@ class _SegmentHeadCaptureLifecycle(Callback):
         try:
             self._clear(pl_module)
         except RuntimeError as error:
-            try:
+            # Warning filters must not replace the trainer's original exception.
+            with contextlib.suppress(UserWarning):
                 warnings.warn(
                     f"capture_segment_heads=True could not drain its recordings after the fit failed ({error})",
                     UserWarning,
                     stacklevel=2,
                 )
-            except UserWarning:
-                pass  # Warning filters must not replace the trainer's original exception.
