@@ -457,23 +457,23 @@ def test_pose_cli_accepts_network_capture(capture: bool) -> None:
 def test_pose_head_certificate_survives_copy_and_rejects_overrides() -> None:
     """A native head stays eligible through deepcopy; changed dispatch cannot detach shared features."""
     model = copy.deepcopy(_pose())
-    assert _pose_head_breach(model.head, model._pose_head_topology) is None
+    assert _pose_head_breach(model.head, model._head_topology) is None
     with patch.object(model.head, "forward", wraps=model.head.forward):
-        assert _pose_head_breach(model.head, model._pose_head_topology) is not None
-    assert _pose_head_breach(model.head, model._pose_head_topology) is None
+        assert _pose_head_breach(model.head, model._head_topology) is not None
+    assert _pose_head_breach(model.head, model._head_topology) is None
     with patch.object(type(model.head), "forward", lambda self, values: values):
-        assert _pose_head_breach(model.head, model._pose_head_topology) is not None
+        assert _pose_head_breach(model.head, model._head_topology) is not None
 
 
 def test_pose_head_certificate_rejects_forward_branch_overrides() -> None:
     """``forward`` only reaches submodules through ``forward_branch``; both dispatch points count."""
     model = copy.deepcopy(_pose())
-    assert _pose_head_breach(model.head, model._pose_head_topology) is None
+    assert _pose_head_breach(model.head, model._head_topology) is None
     with patch.object(model.head, "forward_branch", wraps=model.head.forward_branch):
-        assert _pose_head_breach(model.head, model._pose_head_topology) is not None
-    assert _pose_head_breach(model.head, model._pose_head_topology) is None
+        assert _pose_head_breach(model.head, model._head_topology) is not None
+    assert _pose_head_breach(model.head, model._head_topology) is None
     with patch.object(type(model.head), "forward_branch", lambda self, features, branch: features):
-        assert _pose_head_breach(model.head, model._pose_head_topology) is not None
+        assert _pose_head_breach(model.head, model._head_topology) is not None
 
 
 @pytest.mark.parametrize(
@@ -501,9 +501,9 @@ def test_altered_pose_head_dispatch_fails_certificate(mutate: Callable[[torch.nn
     Starts from a fresh deepcopy certified clean, applies one mutation, and expects a named breach.
     """
     model = copy.deepcopy(_pose())
-    assert _pose_head_breach(model.head, model._pose_head_topology) is None
+    assert _pose_head_breach(model.head, model._head_topology) is None
     mutate(model.head)
-    assert _pose_head_breach(model.head, model._pose_head_topology) is not None
+    assert _pose_head_breach(model.head, model._head_topology) is not None
 
 
 def test_frozen_features_leave_full_native_call_to_owner() -> None:
@@ -512,7 +512,7 @@ def test_frozen_features_leave_full_native_call_to_owner() -> None:
     model.backbone.requires_grad_(False)
     model.neck.requires_grad_(False)
     holder = _NetworkCapture()
-    with pytest.warns(UserWarning, match="shared pose features are frozen"):
+    with pytest.warns(UserWarning, match="shared network features are frozen"):
         features = holder.run_features(torch.zeros(2, 3, 64, 64), (model.backbone, model.neck))
     assert features is None and holder._disabled and holder._network is None
 
@@ -647,6 +647,30 @@ def test_pose_routing_retires_then_runs_native(
     spy.assert_called_once_with(images, (model.backbone, model.neck))
     assert model._network_capture._disabled and model._network_capture._network is None
     assert len(calls) == 1
+    assert output.o2m_cls.shape[0] == 2
+
+
+def test_retired_holder_skips_pose_replay_predicates() -> None:
+    """A retired recording sends later steps through the full native call without re-checking the head.
+
+    Once retired, the owner check and every later ``retire`` are no-ops, so the stem-owner
+    walk and the head certificate could change nothing; a step after retirement skips both
+    and never reaches the recorder.
+    """
+    torch.manual_seed(42)
+    model = _routed_pose()
+    with pytest.warns(UserWarning, match="stays eager: a test cause"):
+        model._network_capture.retire("a test cause")
+    images = _cuda_flagged_images()
+    with (
+        patch("lucid_yolo.ptl.module._pose_head_breach", autospec=True) as breach,
+        patch.object(model._network_capture, "check_stem_owners") as owners,
+        patch.object(model._network_capture, "run_features") as run,
+    ):
+        output = model._training_network(images)
+    breach.assert_not_called()
+    owners.assert_not_called()
+    run.assert_not_called()
     assert output.o2m_cls.shape[0] == 2
 
 
@@ -818,7 +842,7 @@ def test_stem_dispatch_override_before_construction_stays_observable(owner: type
 
     with patch.object(owner, name, custom):
         model = _pose()
-        assert _pose_head_breach(model.head, model._pose_head_topology) == "the native pose stem dispatch changed"
+        assert _pose_head_breach(model.head, model._head_topology) == "the native pose stem dispatch changed"
 
 
 def test_stem_holder_dispatch_and_lifetime_without_cuda() -> None:
