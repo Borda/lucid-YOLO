@@ -38,6 +38,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 - **`torch.compile` of the detection step, opt-in.** `--model.compile_step true` compiles the forward, both decodes, the assignment and the dual loss as one Inductor region on a CUDA accelerator under `task: detect`; measured on an RTX PRO 6000 at variant `n`, COCO, batch 16, deterministic, the training step goes from 74.7 ms to 60.9 ms (x1.23), for 110–140 s of compilation per process and a handful of recompiles per run (the evaluation graph, and one each for a batch with no ground truths, one padded instance, or one image). The compile wraps the bound method rather than the module, so parameter names, checkpoints, the EMA shadow and export are exactly what they are with the flag off; off CUDA and under the other three tasks the module warns once and trains eager. The label-range check in the assigner is skipped under tracing and is the one thing a compiled step does not do. Default off until A78 — the same mAP as eager within run noise — is measured (D24).
 
+- **`oks_gain`, the OKS half of R1's pose objective, off by default.** `DetectionLitModule(task="keypoints")` accepts `oks_gain` and `losses/oks_loss.py` scores `1 - OKS` per assigned instance — R12's evaluation quantity, with the assigned box's area as the scale and the same sigma table the evaluator uses. The default is `0.0`: the shipped objective is bit-exact, and R1 Table 9's `(24, 1)` split is a published target no run here has tested (A75; WP-179 is that run).
+
 ### Fixed
 
 - **The compiled detection step survives the alpha schedule.** A 2-epoch smoke run on an A100 with `--model.compile_step true` recompiled the whole region at every epoch: the dual loss read its branch weight as a Python float attribute, the WP-035 schedule rewrites that float per epoch, and Dynamo guards on a float's value — so each epoch paid a fresh compilation and a longer run would have crossed `cache_size_limit` around epoch 7 and silently trained eager from there. The weight now enters the region as a 0-d `float64` tensor built on the host each step and blended inside the loss with the same rounding as the float form, so the total is bit-identical, the compiled graph is reused across the schedule, and the logged `alpha` is unchanged. Eager training is unaffected.
@@ -97,10 +99,6 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 - **Coverage has a floor.** `fail_under = 96` against a measured 97.21%, so the promise of coverage as a gate is one the gate can keep.
 
 - **Contributors with an existing `.venv` must reinstall the dev dependency group.** 0.8.0 added `--doctest-plus` to `addopts` and `pytest-doctestplus>=1.3` to the `dev` group in the same commit, so an environment provisioned before it aborts every `pytest` invocation with `unrecognized arguments: --doctest-plus` — including `make test` and therefore `make gate`, which fail before collecting anything rather than reporting a missing plugin. `make setup` provisions it; an existing tree needs `uv pip install --python .venv/bin/python -e . --group dev --group typing`, the `typing` group being the second thing that release left undeclared. The failure is loud but its message names the flag rather than the plugin, which is the part worth stating here.
-
-### Added
-
-- **`oks_gain`, the OKS half of R1's pose objective, off by default.** `DetectionLitModule(task="keypoints")` accepts `oks_gain` and `losses/oks_loss.py` scores `1 - OKS` per assigned instance — R12's evaluation quantity, with the assigned box's area as the scale and the same sigma table the evaluator uses. The default is `0.0`: the shipped objective is bit-exact, and R1 Table 9's `(24, 1)` split is a published target no run here has tested (A75; WP-179 is that run).
 
 ## [0.8.0] - 2026-09-05
 

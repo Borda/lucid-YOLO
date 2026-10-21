@@ -70,7 +70,7 @@ DOTA's composition limits apply directly. It is satellite and aerial imagery of 
 | Hardware | one RTX PRO 6000, operator-reported — the run's own artifacts record no device, as with the earlier tiers |
 | EMA | decay 0.9999, tau 2000 |
 
-The wiring gate that precedes any DOTA launch is `scripts/overfit_micro.py --task obb`: 100 images, 592 instances, 4 classes, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train rotated mAP50 **0.9390** against a 0.9 floor (`goldens/gpu/overfit_micro_obb.json`).
+The wiring gate that precedes any DOTA launch is `scripts/overfit_micro.py --task obb`: 100 images, 592 instances, 4 classes, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train rotated mAP50 **0.9088 ± 0.0088** against a 0.9 floor (`goldens/gpu/overfit_micro_obb.json`, resealed by WP-186: the band is as narrow as the score's headroom above the floor, so the next environmental move on this task is reported rather than absorbed).
 
 ## 📈 Training curves
 

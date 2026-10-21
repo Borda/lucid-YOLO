@@ -290,4 +290,6 @@ nav:
               - Engineering: engineering/phase-16-training-throughput.md
           - Phase 17 — R1 pose-objective parity:
               - Engineering: engineering/phase-17-pose-objective-parity.md
+          - Phase 18 — Codebase audit remediation:
+              - Engineering: engineering/phase-18-codebase-audit.md
       - Contributor guide: CONTRIBUTING.md

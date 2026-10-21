@@ -122,6 +122,7 @@ Two words matter here and the code keeps them apart. *Layout* is where a split's
 | detect | `bbox`: pixel `[x, y, w, h]`, converted to `xyxy` on read | five normalized fields: `cls cx cy w h` |
 | segment | first ring of `segmentation`: pixel `(P, 2)` polygon, `P >= 3` | not expressible — the format carries no rings |
 | obb | four-point `segmentation` ring, plus four non-schema keys (A53) | nine normalized fields: `cls x1 y1 x2 y2 x3 y3 x4 y4` |
+| keypoints | flat `keypoints` field per annotation, split into `K` points of xy plus a visibility value | refused — the label rows carry a class and a box and no point fields; train from a COCO-format root |
 
 The structural difference is one file against many: COCO keeps a split's whole annotation set — and its class list — in a single JSON beside the images, while YOLO writes one text file per image and keeps the class list in a separate `data.yaml`. The two trees below are the same `val` split of the same two images in each format.
 

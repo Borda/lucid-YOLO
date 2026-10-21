@@ -69,7 +69,7 @@ The same composition limits `detection.md`/`segmentation.md` record for COCO's `
 | Hardware | one unrecorded Colab GPU (`default_root_dir` under `/content/`); wall clock 13:30→20:36 on 2026-08-24, about 8m30s an epoch, derived from artifact timestamps rather than logged |
 | EMA | decay 0.9999, tau 2000 |
 
-The wiring gate that precedes any COCO launch is `scripts/overfit_micro.py --task keypoints`: 100 images, 548 instances, 1 class, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train OKS AP **0.3357** against a 0.30 floor (`goldens/gpu/overfit_micro_kp.json`) — a floor set low relative to the sibling gates' because OKS at A67's uniform sigma is a cliff on symbols a few dozen pixels across, not because the loop learns less.
+The wiring gate that precedes any COCO launch is `scripts/overfit_micro.py --task keypoints`: 100 images, 548 instances, 1 class, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train OKS AP **0.4919 ± 0.05** against a 0.30 floor (`goldens/gpu/overfit_micro_kp.json`, resealed by WP-186; the figure first stood at 0.3357 in [WP-132](../work_packages/wp-132.md), rose to 0.5747 once [WP-169](../work_packages/wp-169.md) fixed the assigner, as [WP-167](../work_packages/wp-167.md) measured, and fell to the current value with [WP-183](../work_packages/wp-183.md)'s dense box terms) — a floor set low relative to the sibling gates' because OKS at A67's uniform sigma is a cliff on symbols a few dozen pixels across, not because the loop learns less.
 
 ## 📈 Training curves
 

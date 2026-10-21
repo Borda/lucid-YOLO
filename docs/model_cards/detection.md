@@ -61,6 +61,8 @@ COCO's documented composition limits apply to this model directly: category freq
 | Hardware | one RTX PRO 6000, ~8m45s/epoch, ~7.3 hours total |
 | EMA | decay 0.9999, tau 2000 |
 
+The wiring gate that precedes any COCO launch is `scripts/overfit_micro.py --task detect`: 100 images, 592 instances, 4 classes, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train recall at IoU 0.5 **0.9966 ± 0.04** against a 0.95 floor (`goldens/gpu/overfit_micro_det.json`).
+
 **`w_muon` and `w_sgd` are independent gains (A7), so `w_muon = 0` is a supported SGD-only configuration** — `MuSGD._parameter_update` branches on it explicitly and skips the Newton–Schulz iteration rather than computing and discarding it, and `tests/optim/test_musgd.py` pins the resulting update. Supported is all it is: no run in this project has ever trained a tier under it, so there is **no measurement of what the Muon branch is worth on this architecture** and this row should not be read as one arm of an ablation. Every tier above trained at `0.5 / 0.5`.
 
 ## 📈 Training curves
