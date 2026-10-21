@@ -1031,7 +1031,7 @@ class DetectionLitModule(LightningModule):
             module is hooked, overridden or compiled. The trainable set is fixed per fit
             at the first recording: a fully frozen start, or a later freeze or unfreeze
             of a recorded parameter, keeps the rest of that fit eager after one warning.
-            Each pose stem separately retires its recording if its trainable set changes,
+            Each pose stem separately retires its recording if its trainable set or mode changes,
             and replacing a head module retires every recording before shared features run.
             Oriented training records the complete network, including both angle stems,
             and retains the native classification and oriented objective. Accumulation

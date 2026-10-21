@@ -22,6 +22,7 @@ Examples:
 
 from __future__ import annotations
 
+import sys
 import warnings
 from typing import TYPE_CHECKING, TypeVar, cast
 
@@ -334,6 +335,26 @@ def _network_signature(network: nn.Module) -> tuple[object, ...]:
     )
 
 
+def _caller_stacklevel() -> int:
+    """Name the first frame outside the replay stack in a warning that a pose stem holder raises.
+
+    A stem holder is reached through the head's dispatch and the module call machinery,
+    whose depth no fixed ``stacklevel`` can follow. Counting starts at the frame that calls
+    :func:`warnings.warn`, which is the caller of this function.
+    """
+    internal = {
+        __file__,
+        _DetectionBranch._keypoints.__code__.co_filename,
+        nn.Module._call_impl.__code__.co_filename,
+    }
+    frame = sys._getframe(1)
+    level = 1
+    while frame.f_back is not None and frame.f_code.co_filename in internal:
+        frame = frame.f_back
+        level += 1
+    return level
+
+
 class _NetworkCapture:
     """Own one fit's recording without registering another copy of the model's parameters.
 
@@ -344,7 +365,9 @@ class _NetworkCapture:
     detection stays eager so its backward NaN checks remain observable.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, label: str | None = None) -> None:
+        # A pose stem holder names its stem in warnings; the parent holder carries no label.
+        self._label = label
         self.clear()
 
     def clear(self) -> None:
@@ -353,6 +376,7 @@ class _NetworkCapture:
             holder.clear()
         self._stems: dict[int, _NetworkCapture] = {}
         self._stem_owners: tuple[int, ...] | None = None
+        self._stem_names: dict[int, str] = {}
         previous = getattr(self, "_network", None)
         if previous is not None:
             vars(previous).pop("forward", None)
@@ -370,27 +394,41 @@ class _NetworkCapture:
     def __setstate__(self, state: dict[str, object]) -> None:
         """Restore an empty holder that may record in its next fit."""
         del state
+        self._label = None
         self.clear()
 
     def retire(self, reason: str, *, stacklevel: int = 3) -> None:
         """Retire a recording whose static execution contract no longer holds.
 
         Only the first cause of a fit is reported: the holder stays eager afterwards, so
-        later causes change nothing a user could act on.
+        later causes change nothing a user could act on. A pose stem holder retires only
+        its own stem, so its warning names that stem and says the shared features and the
+        other stems keep replaying; each stem reports its own first cause.
 
         Args:
             reason: Which part of the recording contract broke, completing the warning
-                that starts ``capture_network=True stays eager:``.
+                that starts ``capture_network=True stays eager:``, or, for a stem holder,
+                ``capture_network=True keeps pose stem <name> eager ...:``.
             stacklevel: The frame the warning names, counted as :func:`warnings.warn`
                 counts from this method. The default names the caller of whoever called
                 ``retire``; :meth:`_run` passes 4 so a retirement it decides still names
                 the code that called :meth:`run`, :meth:`run_features` or :meth:`run_oriented`.
+                A stem holder ignores it and names the first frame outside the head and
+                this module, the training code that called the head.
         """
         if self._disabled:
             return
         self.clear()
         self._disabled = True
-        warnings.warn(f"capture_network=True stays eager: {reason}", UserWarning, stacklevel=stacklevel)
+        if self._label is None:
+            message = f"capture_network=True stays eager: {reason}"
+        else:
+            message = (
+                f"capture_network=True keeps pose stem {self._label} eager while the shared features "
+                f"and the other stems keep replaying: {reason}"
+            )
+            stacklevel = _caller_stacklevel()
+        warnings.warn(message, UserWarning, stacklevel=stacklevel)
 
     def _drift(self, state: tuple[object, ...], owners: tuple[int, ...], precision: tuple[object, ...]) -> str | None:
         """Name a change since recording that a replay would silently ignore, if any."""
@@ -445,10 +483,11 @@ class _NetworkCapture:
         if self._disabled:
             return
         owners = tuple(id(module) for module in head.modules())
-        if self._stem_owners is not None and owners != self._stem_owners:
-            self.retire("a pose head module was replaced after recording")
-        else:
+        if self._stem_owners is None:
             self._stem_owners = owners
+            self._stem_names = {id(module): name for name, module in head.named_modules()}
+        elif owners != self._stem_owners:
+            self.retire("a pose head module was replaced after recording")
 
     def stem(self, stage: nn.Module, feature: Tensor) -> Tensor:
         """Record each pose stem independently so unused point outputs keep absent gradients.
@@ -456,13 +495,17 @@ class _NetworkCapture:
         The parent owns these holders: fit boundaries and skipped backwards reset them
         together with the shared-feature recording. Each stem retains its own input
         signature, state guards and autograd node, with no fixed joint backward that
-        would advance unused point-stem optimizer state.
+        would advance unused point-stem optimizer state. An eval-mode stem never starts a
+        recording; a recorded stem switched to eval reaches the drift check and retires,
+        as a mode change of a recorded feature stage does.
         """
-        if self._disabled or not feature.is_cuda or not torch.is_grad_enabled() or not stage.training:
+        if self._disabled or not feature.is_cuda or not torch.is_grad_enabled():
             return cast("Tensor", stage(feature))
         holder = self._stems.get(id(stage))
+        if not stage.training and (holder is None or holder._network is None):
+            return cast("Tensor", stage(feature))
         if holder is None:
-            holder = _NetworkCapture()
+            holder = _NetworkCapture(self._stem_names.get(id(stage), type(stage).__name__))
             self._stems[id(stage)] = holder
         eager = cast("Callable[[Tensor], Tensor]", stage)
         return holder._run(
