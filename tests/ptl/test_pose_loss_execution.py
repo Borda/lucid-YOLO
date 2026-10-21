@@ -98,6 +98,28 @@ def test_pose_custom_scoring_keeps_native_dispatch(custom: str) -> None:
     assert wrapped.call_count == 2
 
 
+def test_pose_pairing_continues_after_recorder_retires() -> None:
+    """Density batching keys on the fit's capture flag, not on the loss recorder's state.
+
+    A retired recorder answers every later detection loss with its native call for the rest of
+    the fit. The pose density batch has a gate of its own, so it still scores both branches in one
+    call — the documented behaviour, pinned so a later change to it is a decision, not a drift.
+    """
+    model = _pose(True)
+    model._capture_loss_active = True
+    model._trainer = MagicMock(spec=Trainer, training=True)
+    with pytest.warns(UserWarning, match="^capture_loss=True stays eager: a test cause$"):
+        model._loss_capture.retire("a test cause")
+    with (
+        patch.object(model, "log"),
+        patch.object(model, "_paired_keypoint_terms", wraps=model._paired_keypoint_terms) as paired,
+        patch.object(model._loss_capture, "run", wraps=model._loss_capture.run) as replay,
+    ):
+        model.training_step(_batch(2), 0)
+    assert replay.call_count == 1 and model._loss_capture._disabled
+    assert paired.call_count == 1
+
+
 def test_pose_validation_keeps_original_criterion_signature() -> None:
     """Validation retains native loss dispatch and does not force the replay alpha argument."""
     model = _pose(True).eval()

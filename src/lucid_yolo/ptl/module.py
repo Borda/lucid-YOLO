@@ -2581,11 +2581,20 @@ class DetectionLitModule(LightningModule):
         that disagree early in training are better served by one shared density or by
         two independent ones is a question this project has no measurement for, and
         one flow is both the smaller claim and the smaller parameter count. It is
-        normally called twice. Under CUDA pose loss replay the row-independent
-        density calls can share one batch, while selection, each branch's mean and
-        its ``alpha`` share stay separate. Batched parameter-gradient summation can
-        differ in floating-point rounding; this opt-in path promises the same
-        objective rather than identical training bytes.
+        normally called twice. With ``capture_loss`` active for the fit — decided once
+        at :meth:`setup`, for single-device CUDA automatic optimization — a step in
+        training mode scores both branches' row-independent density calls as one batch
+        through :meth:`_paired_keypoint_terms`, while selection, each branch's mean and
+        its ``alpha`` share stay separate. That batching has a gate of its own: the
+        density must be the built-in :class:`~lucid_yolo.losses.rle_loss.RLELoss`
+        passing ``_can_pair`` (no hooked, altered or compiled density module), and
+        ``_score_branch``, ``_rle_on``, ``_oks_on`` and ``_gather_keypoint_positives``
+        must keep their class implementations. It never reads the loss recorder's state,
+        so batching continues after the recorder retires and on every step whose
+        detection loss takes its native call — a customized criterion, or BF16 on a
+        torch older than 2.9. Batched parameter-gradient summation can differ in
+        floating-point rounding; this opt-in path promises the same objective rather
+        than identical training bytes.
 
         Args:
             context: The step's shared quantities, carrying the padded point targets.
