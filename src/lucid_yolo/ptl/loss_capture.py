@@ -20,7 +20,7 @@ from packaging.version import Version
 from pytorch_lightning import Callback
 from torch import Tensor, nn
 
-from lucid_yolo.assign import stal, tal
+from lucid_yolo.assign import _cuda, stal, tal
 from lucid_yolo.assign.one_to_one import UniqueAssigner
 from lucid_yolo.assign.stal import SmallTargetAssigner
 from lucid_yolo.assign.tal import AssignResult, _check_labels
@@ -43,6 +43,7 @@ def _functions(source: DualBranchLoss) -> tuple[object, ...]:
         (
             "__call__",
             "_assign",
+            "_assign_impl",
             "_candidate_mask",
             "_alignment_metric",
             "_select_topk",
@@ -54,6 +55,7 @@ def _functions(source: DualBranchLoss) -> tuple[object, ...]:
         (
             "__call__",
             "_assign",
+            "_assign_impl",
             "_candidate_mask",
             "_alignment_metric",
             "_select_topk",
@@ -83,6 +85,29 @@ def _functions(source: DualBranchLoss) -> tuple[object, ...]:
         *methods,
         *delegated,
         tal._box_iou_cross,
+        vars(tal)["_assignment_scope"],
+        vars(tal)["_cuda_metric"],
+        vars(tal)["_cuda_conflicts"],
+        _cuda._requested,
+        _cuda._supported,
+        _cuda._indexable,
+        _cuda._dense_rows,
+        _cuda._run,
+        _cuda._host_compiler_available,
+        _cuda._device_supported,
+        *(
+            getattr(getattr(_cuda, "kernels", None), name, None)
+            for name in (
+                "_iou_pass",
+                "_metric_pass",
+                "_divide",
+                "_maximum",
+                "_minimum",
+                "_inside_pass",
+                "_first_maximum",
+                "_conflicts_pass",
+            )
+        ),
         stal.surrogate_boxes,
         vars(detection_loss)["ciou_loss"],
     )
@@ -116,6 +141,9 @@ def _source_signature(source: DualBranchLoss) -> tuple[object, ...] | None:
     fields = ("topk", "alpha", "beta", "eps", "s_min", "s_ref")
     settings = tuple(getattr(assigner, name) for assigner in objects[1:3] for name in fields)
     settings += tuple(getattr(branch, name) for branch in objects[3:] for name in ("box_gain", "cls_gain", "l1_gain"))
+    switches = tuple(assigner.fused_assignment for assigner in objects[1:3])
+    if any(type(value) is not bool for value in switches):
+        return None
     if any(type(value) not in (int, float) for value in settings):
         return None
     # Padding must keep zero-overlap IoUs finite in float32. A constructor-valid
@@ -130,7 +158,7 @@ def _source_signature(source: DualBranchLoss) -> tuple[object, ...] | None:
         for assigner in (source.o2m_assigner, source.o2o_assigner)
     ):
         return None
-    return tuple(id(obj) for obj in objects), tuple((type(value), value) for value in settings)
+    return tuple(id(obj) for obj in objects), tuple((type(value), value) for value in settings), switches
 
 
 class _LossObjective(nn.Module):

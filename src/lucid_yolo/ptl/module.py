@@ -1024,6 +1024,9 @@ class DetectionLitModule(LightningModule):
             ``oks_gain=0`` bit-exactness test is its validation); the pre-gain term
             is still computed and logged as ``train/oks`` so a dose-response run
             against ``(24, 1)`` has its reading before it moves the gain.
+        fused_assignment: Opt into CUDA target-assignment fusion. It retains the
+            current objectives and native CPU/MPS, compiler and unsupported-layout paths.
+            Default ``False`` avoids compilation cost on short or small workloads.
         compile_step: Whether to :func:`torch.compile` the detection objective —
             forward, both decodes, assignment and the dual loss as **one** Inductor
             region (WP-184, D24). Defaults to ``False``. Honoured on a CUDA
@@ -1148,6 +1151,7 @@ class DetectionLitModule(LightningModule):
         keypoint_gain: float = 1.0,
         keypoint_loss: str = "rle",
         oks_gain: float = 0.0,
+        fused_assignment: bool = False,
         compile_step: bool = False,
         capture_orthogonalization: bool = False,
         capture_network: bool = False,
@@ -1246,6 +1250,7 @@ class DetectionLitModule(LightningModule):
             cls_gain=cls_gain,
             l1_gain=0.0 if oriented else l1_gain,
             alpha=alpha,
+            fused_assignment=fused_assignment,
         )
         self._loss_schedule = ProgressiveLossSchedule(alpha_init=alpha_init, alpha_final=alpha_final)
 

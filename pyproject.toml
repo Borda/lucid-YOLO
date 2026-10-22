@@ -89,6 +89,10 @@ dependencies = [
 # without the extra retain the native tensor path. Torch's CUDA wheel already
 # selects its compatible Triton; the range permits that selection.
 [project.optional-dependencies]
+cuda-assignment = [
+  "triton>=3.0,<4; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "setuptools>=68; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
 cuda-hsv = [
   "triton>=3.0,<4; sys_platform == 'linux' and platform_machine == 'x86_64'",
   # Triton 3.0 imports its build helper at runtime; use this project's build floor.

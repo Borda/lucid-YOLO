@@ -73,6 +73,8 @@ class UniqueAssigner(SmallTargetAssigner):
             Validated with ``s_min`` by
             :class:`~lucid_yolo.assign.stal.SmallTargetAssigner`, which this
             constructor forwards both to unchanged.
+        fused_assignment: Opt into the base assigner's optional CUDA schedule;
+            defaults to ``False`` and leaves unsupported inputs native.
 
     Examples:
         ```pycon
@@ -100,8 +102,10 @@ class UniqueAssigner(SmallTargetAssigner):
         eps: float = 1e-9,
         s_min: float = 8.0,
         s_ref: float = 16.0,
+        *,
+        fused_assignment: bool = False,
     ) -> None:
-        super().__init__(topk, alpha, beta, eps, s_min, s_ref)
+        super().__init__(topk, alpha, beta, eps, s_min, s_ref, fused_assignment=fused_assignment)
 
     def _finalize_mask(self, mask_pos: Tensor, align_metric: Tensor) -> Tensor:
         """Keep each ground truth's single highest-alignment anchor; ``(B, N, A)``.

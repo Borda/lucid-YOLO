@@ -127,6 +127,8 @@ class DualBranchLoss:
             smallest stride, ``8.0`` at 640 input).
         s_ref: Small-target surrogate replacement size shared by both assigners
             (the next stride, ``16.0`` at 640 input).
+        fused_assignment: Request the optional CUDA assignment passes on both branches.
+            Default ``False`` keeps the existing schedule.
 
     Examples:
         ```pycon
@@ -156,11 +158,15 @@ class DualBranchLoss:
         alpha: float = 0.5,
         s_min: float = 8.0,
         s_ref: float = 16.0,
+        *,
+        fused_assignment: bool = False,
     ) -> None:
         self._o2m_loss = DetectionBranchLoss(box_gain, cls_gain, l1_gain)
         self._o2o_loss = DetectionBranchLoss(box_gain, cls_gain, l1_gain)
-        self.o2m_assigner = SmallTargetAssigner(topk=o2m_topk, s_min=s_min, s_ref=s_ref)
-        self.o2o_assigner = UniqueAssigner(topk=o2o_topk, s_min=s_min, s_ref=s_ref)
+        self.o2m_assigner = SmallTargetAssigner(
+            topk=o2m_topk, s_min=s_min, s_ref=s_ref, fused_assignment=fused_assignment
+        )
+        self.o2o_assigner = UniqueAssigner(topk=o2o_topk, s_min=s_min, s_ref=s_ref, fused_assignment=fused_assignment)
         self.alpha = alpha
 
     def __call__(

@@ -56,7 +56,7 @@ def isolate_dynamo() -> Iterator[None]:
     torch._dynamo.reset()
 
 
-def _module(compile_step: bool = False) -> DetectionLitModule:
+def _module(compile_step: bool = False, fused_assignment: bool = False) -> DetectionLitModule:
     """Build an n-scale detection module with a low channel cap.
 
     Examples:
@@ -66,7 +66,12 @@ def _module(compile_step: bool = False) -> DetectionLitModule:
         True
     """
     return DetectionLitModule(
-        depth=0.34, width=0.25, max_channels=256, num_classes=_NUM_CLASSES, compile_step=compile_step
+        depth=0.34,
+        width=0.25,
+        max_channels=256,
+        num_classes=_NUM_CLASSES,
+        compile_step=compile_step,
+        fused_assignment=fused_assignment,
     )
 
 
@@ -126,10 +131,13 @@ class TestDetectObjectiveTracesAsOneGraph:
 
     @pytest.mark.parametrize("capture_scalar_outputs", [True, False])
     @pytest.mark.parametrize("counts", [pytest.param((2, 1), id="with_gts"), pytest.param((0, 0), id="zero_gts")])
-    def test_zero_graph_breaks(self, counts: tuple[int, int], capture_scalar_outputs: bool) -> None:
+    @pytest.mark.parametrize("fused_assignment", [False, True])
+    def test_zero_graph_breaks(
+        self, counts: tuple[int, int], capture_scalar_outputs: bool, fused_assignment: bool
+    ) -> None:
         """One graph, no breaks — with the flag as ``setup`` sets it and without it."""
         torch._dynamo.config.capture_scalar_outputs = capture_scalar_outputs
-        module = _module()
+        module = _module(fused_assignment=fused_assignment)
         inputs = _region_inputs(module, counts)
 
         explanation = torch._dynamo.explain(module._detect_objective)(*inputs)
