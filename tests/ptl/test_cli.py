@@ -371,3 +371,11 @@ def test_rotated_targets_follows_model_task(config_name: str, expected: bool) ->
     cli = _config_cli(_CONFIGS_DIR / config_name)
 
     assert cli.datamodule._rotated_targets is expected
+
+
+def test_fused_assignment_flag_reaches_both_assigners() -> None:
+    """The public parser constructs the persisted option on both production branches."""
+    cli = _build_cli("--config", str(packaged_config("det_nano_smoke")), "--model.fused_assignment", "true")
+    assert cli.model.hparams.fused_assignment is True
+    assert cli.model.loss.o2m_assigner.fused_assignment is True
+    assert cli.model.loss.o2o_assigner.fused_assignment is True

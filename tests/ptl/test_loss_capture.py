@@ -19,7 +19,7 @@ from pytorch_lightning import Callback, Trainer, seed_everything
 from pytorch_lightning.plugins.precision import MixedPrecision
 from torch.utils.data import DataLoader
 
-from lucid_yolo.assign import stal, tal
+from lucid_yolo.assign import _cuda, stal, tal
 from lucid_yolo.assign.tal import TaskAlignedAssigner
 from lucid_yolo.cli.train import DetectionCLI, packaged_config
 from lucid_yolo.data.targets import Targets
@@ -436,16 +436,17 @@ CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 @pytest.mark.gpu
 @CUDA
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
-def test_variable_target_capacity_matches_native_bits_and_gradients(dtype: torch.dtype) -> None:
+@pytest.mark.parametrize("fused_assignment", [False, True])
+def test_variable_target_capacity_matches_native_bits_and_gradients(dtype: torch.dtype, fused_assignment: bool) -> None:
     """Growth, shrinkage and empty targets keep each branch's real assignment unchanged."""
     if dtype == torch.bfloat16 and not _BF16_SUPPORTED:
         pytest.skip("BF16 replay begins at the verified 2.9 runtime; separate test proves native fallback")
-    holder, source = _LossCapture(), DualBranchLoss()
+    holder, source = _LossCapture(), DualBranchLoss(fused_assignment=fused_assignment)
     for count in (3, 1, 0, 7, 2, 0, 9, 1):
         inputs = _inputs(count, dtype=dtype)
         reference = tuple(value.detach().clone().requires_grad_(value.requires_grad) for value in inputs)
         with torch.autocast("cuda", enabled=dtype != torch.float32, dtype=dtype, cache_enabled=False):
-            expected = _native(source, reference)
+            expected = _native(DualBranchLoss(), reference)
             actual = holder.run(source, *inputs)
         assert holder._objective is not None
         _same(expected, actual)
@@ -636,9 +637,11 @@ def test_settings_and_implementations_changed_before_capture_stay_observable() -
 
 @pytest.mark.gpu
 @CUDA
-def test_public_fit_records_loss_and_releases_owner() -> None:
+@pytest.mark.parametrize("fused_assignment", [False, True])
+def test_public_fit_records_loss_and_releases_owner(fused_assignment: bool) -> None:
     """A real automatic Trainer activates replay and clears it after fit completion."""
     seen: list[int] = []
+    _cuda._STATE = _cuda._BackendState()
 
     class Probe(Callback):
         def on_train_batch_end(
@@ -655,7 +658,9 @@ def test_public_fit_records_loss_and_releases_owner() -> None:
         for _ in range(3)
     ]
     loader = DataLoader(batches, batch_size=None)
-    model = DetectionLitModule(0.5, 0.25, 64, 3, capture_loss=True, warmup_epochs=0.0)
+    model = DetectionLitModule(
+        0.5, 0.25, 64, 3, capture_loss=True, fused_assignment=fused_assignment, warmup_epochs=0.0
+    )
     trainer = Trainer(
         accelerator="cuda",
         devices=1,
@@ -670,6 +675,8 @@ def test_public_fit_records_loss_and_releases_owner() -> None:
     )
     trainer.fit(model, train_dataloaders=loader)
     assert len(seen) == 3 and all(capacity >= 1 for capacity in seen)
+    if fused_assignment and _cuda._AVAILABLE:
+        assert {kind for kind, _ in _cuda._STATE.verified} == {"metric", "conflicts"}
     assert model._loss_capture._objective is None and model._loss_capture._workspace is None
 
 
