@@ -113,6 +113,7 @@ from lucid_yolo.predict import (
     predict_oriented,
     predict_segmentation,
 )
+from lucid_yolo.validate import require_one_of
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -267,7 +268,7 @@ def predict(
     device: str = "auto",
     output: Path | None = None,
 ) -> int:
-    """Detect objects in one image, and segment or orient them when the checkpoint can.
+    """Predict boxes, instance masks, rotated boxes or keypoints for one image.
 
     Which of the four happens is the checkpoint's ``task``, not a flag: a ``segment``
     checkpoint run as a detector would answer plausibly with its mask branch unread, an
@@ -276,7 +277,7 @@ def predict(
 
     Args:
         checkpoint: Lightning ``.ckpt`` to predict with; its task must be ``detect``,
-            ``segment`` or ``obb``.
+            ``segment``, ``obb`` or ``keypoints``.
         image: Image file to run on.
         ema: Predict with the EMA shadow stored in the checkpoint rather than raw
             weights.
@@ -300,7 +301,8 @@ def predict(
         ``0``; a failure here raises rather than returning a code.
 
     Raises:
-        ValueError: If ``device`` names a backend that is not available
+        ValueError: If the checkpoint's ``task`` is unknown, if ``device`` names a backend
+            that is not available
             (:func:`~lucid_yolo.eval.checkpoint.pick_device`), or if ``decoder``,
             ``conf_threshold`` or ``img_size`` is outside its domain — the four entry
             points of :mod:`lucid_yolo.predict` own that check, so this command and a
@@ -316,9 +318,10 @@ def predict(
     """
     module, info = load_eval_module(checkpoint, use_ema=ema)
     task = str(module.task)
+    require_one_of("task", task, tuple(DEFAULT_IMG_SIZE))
     info["task"] = task
     info["decoder"] = decoder
-    resolved_img_size = DEFAULT_IMG_SIZE.get(task, 640) if img_size is None else img_size
+    resolved_img_size = DEFAULT_IMG_SIZE[task] if img_size is None else img_size
     run_on = pick_device(device)
     records: list[DetectionRecord] | list[OrientedDetectionRecord] | list[KeypointDetectionRecord]
     box_format: str | None = None

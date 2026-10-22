@@ -65,7 +65,7 @@ lucid-yolo fit --config seg_nano_smoke.yaml \
 lucid-eval --checkpoint <checkpoint> --data_root /content/coco2017 --output seg_report.json
 ```
 
-`lucid-eval` reads the task off the checkpoint and scores masks when the checkpoint has them, so the same command serves both COCO tiers. `--masks false` scores boxes only from a segmentation checkpoint.
+`lucid-eval` reads the task off the checkpoint and scores masks when the checkpoint has them, so the same command serves both COCO tiers. `--masks false` scores boxes only from a segmentation checkpoint. For the COCO tiers (detect, segment, keypoints) `--ann_file` and `--images_dir` override the annotation JSON and image directory independently; the defaults stay `annotations/instances_val2017.json` (`person_keypoints_val2017.json` for keypoints) and `val2017/` under `--data_root`. An option the checkpoint's task does not use (`--split`, `--variant` for a non-oriented checkpoint; `--masks` other than for segment; `--eval_backend`, `--ann_file`, `--images_dir` for an oriented one) is refused by name when passed explicitly.
 
 ### Independent segmentation predictions on CUDA
 

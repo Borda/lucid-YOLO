@@ -21,10 +21,9 @@ gets a wrong report, and a caller who names none cannot.
 known, so an oriented run gets the tier's 1024 px crop side and a COCO run gets 640, and
 neither caller has to remember which; an explicit value always wins.
 
-Arguments that belong to one protocol are accepted and unused by the other (``masks`` is
-detection-only; ``split`` and ``variant`` are oriented-only). Subcommands per task would
-make the caller state what the checkpoint already knows, which is the property this
-command exists to avoid.
+Explicit protocol-specific arguments are refused when the checkpoint's task does not
+use them. Unset arguments retain the protocol's defaults. COCO annotation and image
+paths can be overridden independently without changing the default val2017 layout.
 
 Provenance: R1 Table 7, R1 sec. 4.4; R18 sec. 4. Assumptions: A9, A10, A37, A46, A47, A48.
 """
@@ -140,19 +139,22 @@ def _check_arguments(batch_size: int | None, img_size: int | None, limit: int) -
         require_grid_side("img_size", img_size)
 
 
-def evaluate(
+def evaluate(  # noqa: PLR0913 - Explicit CLI options supply jsonargparse's flags and help.
     checkpoint: Path,
     data_root: Path,
     ema: bool = True,
-    masks: bool = True,
-    split: str = "val",
-    variant: str = "n",
+    masks: bool | None = None,
+    split: str | None = None,
+    variant: str | None = None,
     batch_size: int | None = None,
     img_size: int | None = None,
     device: str = "auto",
     limit: int = 0,
     output: Path | None = None,
-    eval_backend: str = "auto",
+    eval_backend: str | None = None,
+    *,
+    ann_file: Path | None = None,
+    images_dir: Path | None = None,
 ) -> int:
     """Score a checkpoint on the acceptance protocol its task defines.
 
@@ -160,32 +162,29 @@ def evaluate(
         checkpoint: Lightning ``.ckpt`` to evaluate.
         data_root: COCO root, or the tiled layout root for an oriented checkpoint.
         ema: Evaluate the EMA shadow stored in the checkpoint rather than raw weights.
-        masks: detect/segment only; set false to score boxes from a segmentation
-            checkpoint.
-        split: obb only; split of the tiled layout to score.
-        variant: obb only; scale letter of the trained model.
+        masks: Segment only; score masks by default. Set false to score boxes alone.
+        split: OBB only; split of the tiled layout to score. Defaults to val.
+        variant: OBB only; scale letter of the trained model. Defaults to n.
         batch_size: Images or tiles per forward pass. Defaults per task.
         img_size: Letterbox side. Defaults per task.
         device: ``auto``, ``cpu``, ``mps`` or ``cuda``.
         limit: Score only the first N images or tiles; ``0`` scores all.
         output: Write the JSON report here.
-        eval_backend: bbox/segm scoring engine (WP-138) — ``"auto"`` (default)
-            prefers ``hotcoco``, falling back to ``faster_coco_eval`` only if
-            hotcoco is not usable *here* (see :func:`_resolve_eval_backend`);
-            ``"hotcoco"`` or ``"faster_coco_eval"`` states one explicitly and
-            raises rather than substituting if it is not available. ``obb``
-            ignores this — WP-063's rotated mAP is not a COCOeval protocol at
-            all — and the ten OKS keypoint statistics stay on hand-driven
-            ``faster_coco_eval`` regardless (A73); this only ever selects the
-            box (and, for a segmentation checkpoint, mask) engine.
+        eval_backend: COCO box/mask scoring engine; defaults to auto, which prefers
+            hotcoco and falls back to faster_coco_eval when unavailable. An explicit
+            engine must be usable. OBB does not accept this option. Keypoint OKS
+            statistics always use faster_coco_eval.
+        ann_file: COCO only; annotation JSON path. Defaults to annotations/instances_val2017.json
+            under data_root, or annotations/person_keypoints_val2017.json for keypoints.
+        images_dir: COCO only; image directory. Defaults to val2017 under data_root.
 
     Returns:
         The protocol's exit code.
 
     Raises:
         ValueError: If ``limit``, ``batch_size`` or ``img_size`` is outside its domain
-            (:func:`_check_arguments`), or if the checkpoint's task is not one this
-            command implements a protocol for.
+            (:func:`_check_arguments`), the checkpoint's task is unsupported, or an
+            explicit option is unused by that task.
 
     Examples:
         ```pycon
@@ -215,6 +214,18 @@ def evaluate(
     # file. The four are read off the defaults table rather than restated here, so a fifth
     # task arrives with its own defaults or does not arrive at all.
     require_one_of("task", task, tuple(DEFAULT_IMG_SIZE))
+    # None distinguishes omission from explicitly passing even a protocol's default,
+    # including values supplied by --config. Validate before backend setup or scoring.
+    for name, value, applicable in (
+        ("split", split, task == "obb"),
+        ("variant", variant, task == "obb"),
+        ("masks", masks, task == "segment"),
+        ("eval_backend", eval_backend, task != "obb"),
+        ("ann_file", ann_file, task != "obb"),
+        ("images_dir", images_dir, task != "obb"),
+    ):
+        if value is not None and not applicable:
+            raise ValueError(f"{name} is not used by checkpoint task {task!r}")
     info["task"] = task
     resolved_img_size = DEFAULT_IMG_SIZE[task] if img_size is None else img_size
     resolved_batch_size = DEFAULT_BATCH_SIZE[task] if batch_size is None else batch_size
@@ -223,15 +234,15 @@ def evaluate(
             module,
             info,
             data_root=data_root,
-            split=split,
-            variant=variant,
+            split="val" if split is None else split,
+            variant="n" if variant is None else variant,
             img_size=resolved_img_size,
             batch_size=resolved_batch_size,
             device_name=device,
             limit=limit,
             output=output,
         )
-    resolved_backend, fallback_reason = _resolve_eval_backend(eval_backend)
+    resolved_backend, fallback_reason = _resolve_eval_backend("auto" if eval_backend is None else eval_backend)
     if fallback_reason is not None:
         info["eval_backend_fallback_reason"] = fallback_reason
         print(
@@ -248,6 +259,8 @@ def evaluate(
             limit=limit,
             output=output,
             eval_backend=resolved_backend,
+            ann_file=ann_file,
+            images_dir=images_dir,
         )
     return detect_eval.run(
         module,
@@ -255,11 +268,13 @@ def evaluate(
         data_root=data_root,
         img_size=resolved_img_size,
         batch_size=resolved_batch_size,
-        masks=masks,
+        masks=True if masks is None else masks,
         device_name=device,
         limit=limit,
         output=output,
         eval_backend=resolved_backend,
+        ann_file=ann_file,
+        images_dir=images_dir,
     )
 
 

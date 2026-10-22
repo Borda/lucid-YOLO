@@ -14,6 +14,8 @@ lucid-data download --data_root /data/coco --splits '[train,val]'  # adds the 18
 lucid-data check    --data_root /data/coco
 ```
 
+`lucid-data check` also accepts a COCO root written in the plain spelling of the layout table below, including the tiles a `lucid-data build-tiles` run writes (`train/` and `val/` beside `annotations/instances_train.json` and `instances_val.json`). Each split is resolved the way the reader resolves it. COCO 2017's own `train2017`/`val2017` pair keeps its published names and counts, and a split in any other spelling is checked for presence and parseability only, since the 2017 totals describe a different image set.
+
 Transfers stream to a `.part` file and are renamed on completion, so a killed run resumes rather than leaving a truncated archive, and an already-extracted split is skipped without touching the network. A `.part` carries a sidecar naming the URL and the expected total size; a partial that disagrees with it, or that has no sidecar at all, is discarded and the transfer restarts rather than resuming into a file of unknown provenance. The official archives publish no authoritative SHA-256 digests, so none are hard-coded; the computed digest of every archive is printed, and an expected one may be enforced per archive with `--sha256`.
 
 `--sha256` enforces on what a run downloads. A split that is already extracted is skipped before any transfer, and the `.zip` it would hash is gone (removed after extraction unless `--keep_archives` was set), so a digest supplied for it prints `checksum not verified: … already extracted` instead of being checked — `--force true` re-downloads and re-verifies.
@@ -35,7 +37,7 @@ data:
 
 Those two lines are already in `pose_nano_smoke.yaml` as placeholders; point them at your own root before launching. Leaving them at the placeholder paths, or dropping them, leaves the layout probe to resolve the `instances_` files, whose annotations carry no `keypoints` field — `parse_coco_keypoints` rejects that by name, reporting the file and image rather than raising a bare `KeyError` (L-29). It fails at dataset construction, not silently, but it fails after you have queued the run.
 
-`lucid-data check` validates the layout, which is the `instances_` question; it does not verify that the keypoint annotation files are present or readable. Confirm both paths exist before spending GPU hours on the tier.
+`lucid-data check` validates the layout, which is the `instances_` question, and by default it does not look at the keypoint annotation files. `lucid-data check --data_root <root> --keypoints true` also requires each split's `person_keypoints_*.json`, beside its `instances_*.json`, to exist and parse, and reports a missing or unreadable one as a root-level problem. Run it before spending GPU hours on the tier; the flag applies to `--dataset coco` only.
 
 ## 🛰️ DOTA-v1.0 (R18)
 
@@ -104,6 +106,8 @@ lucid-data build-tiles --root <dota_root> --out <tiles_root> --splits train,val 
 ```
 
 Tiles are PNG by default, matching the lossless source. `--suffix .jpg --quality 92` trades that for decode speed, and the trade is worth weighing: the loader decodes every tile once per epoch and mosaic pulls four source tiles per training sample, so a 64-image step at 1024 px is around 250 decodes and PNG is where a run starves before the GPU does. Annotations are unaffected by the choice.
+
+`build-tiles` writes 8-bit tiles and refuses a source that decodes to more than 8 bits per channel (a 16-bit PNG), naming the file; convert such a source to 8 bits first. `--data_root` is accepted as an alias of `--root`.
 
 The tiles are a build artifact and are never committed. The output is a COCO container with quadrilateral rings, in the layout `obb_nano_smoke.yaml` names, so training and evaluation read it through the same dataset class as COCO.
 
@@ -208,7 +212,7 @@ A YOLO root's own `data.yaml` outranks this table for any split it names. `resol
 
 **Obb.** The oriented row is exactly nine fields — class index, then four normalized `(x, y)` corners — and a ten-field row (R18's own label lines append a trailing `difficult` flag the normalized variant has no published spelling for) is rejected naming the file and line, never assumed away (A56; `_parse_row`, `lucid_yolo/data/yolo.py`). At `width=10, height=10`, the row `0 0.1 0.1 0.5 0.1 0.5 0.3 0.1 0.3` denormalizes to the quadrilateral `[[1, 1], [5, 1], [5, 3], [1, 3]]`, giving `boxes = [[1.0, 1.0, 5.0, 3.0]]` and `rboxes[0] = [3.0, 2.0, 4.0, 2.0, 0.0]` (`_oriented_targets`'s own doctest in `lucid_yolo/data/yolo.py`, distinct from the COCO reader's function of the same name).
 
-**Segment.** Not expressible. A label line carries five or nine normalized numbers and never a polygon ring — the format has no rings to rasterize a mask from (`lucid_yolo/data/yolo.py`). `DetectionDataModule` refuses `mask_targets=True` on a YOLO root rather than rasterizing empty masks and reporting a plausible detection number off a segmentation head trained on nothing: "`mask_targets=True is unavailable on a YOLO root: the format carries no per-instance polygon rings, so there is nothing to rasterise masks from`" (`_check_layout_support`, `lucid_yolo/ptl/datamodule.py`).
+**Segment.** Not expressible. A label line carries five or nine normalized numbers and never a polygon ring — the format has no rings to rasterize a mask from (`lucid_yolo/data/yolo.py`). `DetectionDataModule` refuses `mask_targets=True` on a YOLO root rather than rasterizing empty masks and reporting a plausible detection number off a segmentation head trained on nothing: "`mask_targets=True is unavailable on a YOLO root: this reader parses only the detection and oriented label rows, not the polygon-row variant some YOLO exports carry, so it has no per-instance rings to rasterise masks from. Train segmentation from a COCO-format root, or drop mask_targets`" (`_check_layout_support`, `lucid_yolo/ptl/datamodule.py`).
 
 ### Resolving which format a bare root uses
 

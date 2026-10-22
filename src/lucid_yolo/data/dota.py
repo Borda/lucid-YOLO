@@ -68,9 +68,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch import Tensor
 
-from lucid_yolo.data.rotated_geom import polygons_to_rboxes
+from lucid_yolo.data._common import _POINT_DIM, _QUAD_CORNERS
 from lucid_yolo.data.targets import Targets
-from lucid_yolo.data.transforms import boxes_from_polygons
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -104,10 +103,6 @@ _LABEL_BY_NAME: dict[str, int] = {name: label for label, name in enumerate(DOTA_
 _FIELDS_PER_OBJECT = 10
 #: The leading fields that spell out the quadrilateral.
 _COORD_FIELDS = 8
-#: Corner count of the quadrilateral form of a rotated box.
-_QUAD_CORNERS = 4
-#: Column count of a point ``(x, y)``.
-_POINT_DIM = 2
 #: Accepted spellings of the ``difficult`` flag, mapped to their boolean meaning.
 _DIFFICULT_VALUES = {"0": False, "1": True}
 #: A metadata header line: an alphabetic key (optionally quoted, possibly with spaces as in
@@ -215,11 +210,9 @@ def dota_targets(objects: Sequence[DotaObject], *, keep_difficult: bool) -> Targ
     kept = [obj for obj in objects if keep_difficult or not obj.difficult]
     if not kept:
         return Targets.empty()
-    quads = [obj.polygon for obj in kept]
-    return Targets(
-        boxes=boxes_from_polygons(quads),
-        labels=torch.tensor([obj.label for obj in kept], dtype=torch.int64),
-        rboxes=polygons_to_rboxes(torch.stack(quads, dim=0)),
+    return Targets.from_quads(
+        [obj.polygon for obj in kept],
+        torch.tensor([obj.label for obj in kept], dtype=torch.int64),
         # Carried, never acted on here (A39). Under `keep_difficult=True` this is the only
         # thing that still distinguishes a difficult instance from an ordinary one, and A48
         # makes the evaluation loader depend on that distinction surviving to the metric.

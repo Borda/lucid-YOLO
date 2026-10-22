@@ -105,6 +105,7 @@ from fuse_augmentations import (  # type: ignore[import-untyped]
 )
 from torch import Tensor
 
+from lucid_yolo.data._common import _DEFAULT_PAD_VALUE, _POINT_DIM, _uniform
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.rotated_aug import check_rotated_pairing, clip_rboxes_to_canvas, rbox_envelopes, warp_rboxes
 from lucid_yolo.data.targets import Targets
@@ -112,33 +113,12 @@ from lucid_yolo.data.transforms import apply_affine_to_points, boxes_from_polygo
 
 __all__ = ["AffineParams", "RandomAffine"]
 
-#: Default pad colour: mid-grey ``114/255`` per the YOLO-lineage convention (matches letterbox).
-_DEFAULT_PAD_VALUE = 114.0 / 255.0
 #: Lower bound on the sampled scale factor, keeping the matrix invertible (``> 0``).
 _MIN_SCALE = 1e-3
-#: Reused axis-size guards.
-_POINT_DIM = 2
 #: XOR salt separating the discarded-gate stream's seed from the caller's own, so the two
 #: streams are decorrelated while both remain a function of the one seed the caller set.
 #: An arbitrary constant -- nothing downstream reads a gate value (L-32).
 _GATE_SEED_SALT = 0x9E3779B97F4A7C15
-
-
-def _uniform(low: float, high: float, generator: torch.Generator | None) -> float:
-    """Sample one float uniformly from ``[low, high]`` (returns ``low`` when degenerate).
-
-    Args:
-        low: Inclusive lower bound.
-        high: Inclusive upper bound; when ``<= low`` the bound ``low`` is returned
-            directly so a zeroed range (e.g. ``degrees=0``) is exact.
-        generator: Optional RNG for reproducible sampling.
-
-    Returns:
-        A single sampled value as a Python float.
-    """
-    if high <= low:
-        return float(low)
-    return float(torch.empty((), dtype=torch.float64).uniform_(low, high, generator=generator).item())
 
 
 @dataclass(frozen=True)

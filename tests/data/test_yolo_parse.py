@@ -22,9 +22,10 @@ from pathlib import Path
 
 import pytest
 import torch
+from PIL import Image
 from torchvision.io import write_png
 
-from lucid_yolo.data import yolo as yolo_data
+from lucid_yolo.data import _image as image_data
 from lucid_yolo.data.layout import resolve_yolo_split
 from lucid_yolo.data.rotated_aug import rbox_envelopes
 from lucid_yolo.data.targets import Targets
@@ -511,6 +512,24 @@ class TestDatasetRoundTrip:
         assert image.dtype == torch.float32
         assert targets.boxes.tolist() == [_DETECTION_BOX]
 
+    def test_16_bit_png_scales_by_its_own_depth(self, tmp_path: Path) -> None:
+        """A 16-bit PNG reads into ``[0, 1]`` by its own maximum, 65535, rather than by 255.
+
+        The YOLO reader decodes exactly as the COCO one does, so it carried the same defect: a
+        ``uint16`` code of 60000 divided by 255 read as 235.3 and saturated to white in the
+        uint8 transport. Scaled by its own depth it is the 0.9155 grey it was saved as.
+        """
+        images, labels = tmp_path / "images", tmp_path / "labels"
+        images.mkdir()
+        labels.mkdir()
+        deep = Image.new("I;16", (_WIDTH, _HEIGHT))
+        deep.putdata([60000] * (_WIDTH * _HEIGHT))
+        deep.save(images / "deep.png")
+
+        image, _ = YoloDetectionDataset(images, labels, list(_NAMES), allow_missing_labels=True)[0]
+
+        assert image.max().item() == pytest.approx(60000 / 65535)
+
     def test_opt_in_cache_decodes_once_and_keeps_returned_images_independent(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -521,13 +540,13 @@ class TestDatasetRoundTrip:
         """
         root = _build_root(tmp_path, [_DETECTION_ROW], seed=1)
         calls: list[str] = []
-        incumbent = yolo_data.read_image
+        incumbent = image_data.read_image
 
         def counted_read_image(path: str, mode: object) -> torch.Tensor:
             calls.append(path)
             return incumbent(path, mode)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(yolo_data, "read_image", counted_read_image)
+        monkeypatch.setattr(image_data, "read_image", counted_read_image)
         dataset = YoloDetectionDataset.from_root(root, "train", cache_images=True)
         assert len(calls) == len(dataset)
         assert dataset._image_cache is not None

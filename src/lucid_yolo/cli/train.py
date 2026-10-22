@@ -188,6 +188,12 @@ class DetectionCLI(LightningCLI):
     (see the module docstring for the ADR-001 rationale).
     """
 
+    @staticmethod
+    def subcommands() -> dict[str, set[str]]:
+        """Expose training and validation with Lightning's argument skip sets."""
+        commands = LightningCLI.subcommands()
+        return {name: commands[name] for name in ("fit", "validate")}
+
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
         """Add the ``variant`` argument and link it onto the model and datamodule.
 
@@ -431,7 +437,7 @@ def main(args: ArgsType = None) -> int:
         seed_everything_default=0,
         parser_kwargs={
             subcommand: {"default_config_files": [str(packaged_config(_DEFAULT_CONFIG))]}
-            for subcommand in ("fit", "validate", "test", "predict")
+            for subcommand in ("fit", "validate")
         },
         args=args,
     )

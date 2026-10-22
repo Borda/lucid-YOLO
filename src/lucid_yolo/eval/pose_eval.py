@@ -88,6 +88,8 @@ def run(
     limit: int,
     output: Path | None,
     eval_backend: str = "faster_coco_eval",
+    ann_file: Path | None = None,
+    images_dir: Path | None = None,
 ) -> int:
     """Run the dual-path keypoint evaluation for an already-loaded checkpoint.
 
@@ -105,6 +107,8 @@ def run(
             statistics are unaffected either way — they stay on hand-driven
             ``faster_coco_eval`` (A73), the box branch's own protocol, not this
             report's.
+        ann_file: Annotation JSON override; defaults to annotations/person_keypoints_val2017.json under data_root.
+        images_dir: Image directory override; defaults to val2017 under data_root.
 
     Returns:
         ``0`` on success; ``1`` when the checkpoint's point count is not COCO's.
@@ -130,8 +134,8 @@ def run(
             f"checkpoint has K={num_keypoints}"
         )
         return 1
-    ann_file = data_root / "annotations" / "person_keypoints_val2017.json"
-    images_dir = data_root / "val2017"
+    ann_file = data_root / "annotations" / "person_keypoints_val2017.json" if ann_file is None else ann_file
+    images_dir = data_root / "val2017" if images_dir is None else images_dir
     images, targets, label_to_category = load_eval_annotations(ann_file, with_keypoints=True)
     if limit:
         images = images[:limit]

@@ -19,9 +19,11 @@ from pathlib import Path
 
 import pytest
 import torch
-from torchvision.io import write_png
+from PIL import Image
+from torchvision.io import ImageReadMode, read_image, write_png
 
 from lucid_yolo.data.letterbox import Letterbox
+from lucid_yolo.data.targets import Targets
 from lucid_yolo.eval import annotations
 from lucid_yolo.eval.annotations import (
     EvalImage,
@@ -29,6 +31,7 @@ from lucid_yolo.eval.annotations import (
     empty_target,
     letterboxed_batches,
     load_eval_annotations,
+    read_letterboxed_image,
 )
 
 _TARGET_KEYS = {"boxes", "labels", "iscrowd", "area"}
@@ -387,3 +390,48 @@ def test_letterboxed_batches_stack_and_carry_original_sizes(tmp_path: Path) -> N
     assert [sizes for _, _, sizes in batches] == [[(6, 10), (8, 12)], [(5, 5)]]
     assert batches[0][0].shape[1:] == (3, 32, 32)
     assert batches[0][0].max() <= 1.0
+
+
+def test_16_bit_png_letterboxes_by_its_own_depth(tmp_path: Path) -> None:
+    """A 16-bit PNG reaches the model scaled by its own maximum, 65535, rather than by 255.
+
+    ``read_image`` decodes such a file to ``uint16``; divided by the 8-bit 255, a code of
+    60000 read as 235.3, far outside the unit range the model was trained on. The canvas
+    matches the image side, so no padding enters the extremes being compared.
+    """
+    side = 8
+    deep = Image.new("I;16", (side, side))
+    deep.putdata([60000] * (side * side))
+    deep.save(tmp_path / "deep.png")
+
+    image, orig_size = read_letterboxed_image(tmp_path / "deep.png", Letterbox(side))
+
+    assert orig_size == (side, side)
+    assert image.min().item() == pytest.approx(60000 / 65535)
+    assert image.max().item() == pytest.approx(60000 / 65535)
+
+
+def test_8_bit_png_letterboxes_as_code_over_255_bit_for_bit(tmp_path: Path) -> None:
+    """Every 8-bit code letterboxes exactly as the fixed ``/ 255.0`` scale always produced.
+
+    The oracle restates the pre-fix computation on the same file and the same letterbox,
+    so the comparison is exact equality over all 256 codes through an upscale and a pad,
+    independent of whether the resample itself is exact.
+    """
+    codes = torch.arange(256, dtype=torch.uint8).reshape(1, 16, 16).expand(3, 16, 16).contiguous()
+    path = tmp_path / "flat.png"
+    write_png(codes, str(path))
+    letterbox = Letterbox((32, 48))
+    expected, _ = letterbox(read_image(str(path), ImageReadMode.RGB).to(torch.float32) / 255.0, Targets.empty())
+
+    image, orig_size = read_letterboxed_image(path, letterbox)
+
+    assert orig_size == (16, 16)
+    assert torch.equal(image, expected)
+
+
+def test_read_letterboxed_image_names_missing_file(tmp_path: Path) -> None:
+    """A missing file fails as an ``OSError`` naming the path, not a bare decoder error."""
+    missing = tmp_path / "absent.png"
+    with pytest.raises(OSError, match=r"absent\.png"):
+        read_letterboxed_image(missing, Letterbox(8))

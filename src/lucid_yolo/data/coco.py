@@ -119,10 +119,10 @@ from typing import TYPE_CHECKING, cast
 import torch
 from torch import Tensor
 from torch.utils.data import Dataset
-from torchvision.io import ImageReadMode, read_image
 from tqdm.auto import tqdm
 
-from lucid_yolo.data.rotated_geom import polygons_to_rboxes
+from lucid_yolo.data._common import _QUAD_CORNERS
+from lucid_yolo.data._image import decode_rgb, to_unit_float
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.data.transforms import GeometricTransform, boxes_from_polygons
 
@@ -136,8 +136,6 @@ __all__ = ["CocoDetectionDataset", "build_scale_policy", "parse_coco_keypoints"]
 _POINT_STRIDE = 2
 #: Minimum vertices for a polygon to bound any area.
 _MIN_RING_POINTS = 3
-#: Vertices of the quadrilateral an oriented annotation encodes its rotated box as.
-_QUAD_CORNERS = 4
 #: Values per COCO keypoint: ``x``, ``y`` and visibility.
 _KEYPOINT_STRIDE = 3
 #: Coordinate values retained from each COCO keypoint triplet.
@@ -147,8 +145,6 @@ _KEYPOINT_COORDS = 2
 #: the file's own schema instead of hard-coded per dataset.
 _LEFT = "left"
 _RIGHT = "right"
-#: 8-bit image scale factor mapping ``uint8`` pixels into ``[0, 1]`` float.
-_UINT8_MAX = 255.0
 #: Channels of the RGB tensor the image cache retains: its bytes per pixel at 8 bits.
 _RGB_CHANNELS = 3
 #: Bytes per gigabyte (decimal) in the image cache's size report.
@@ -513,27 +509,25 @@ class CocoDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             file_name: Image file name relative to the images directory.
 
         Returns:
-            A ``(3, H, W)`` float32 tensor scaled into ``[0, 1]``.
+            A ``(3, H, W)`` float32 tensor scaled into ``[0, 1]`` by the decoded depth's own
+            maximum (:func:`~lucid_yolo.data._image.to_unit_float`): ``code / 255`` for an
+            8-bit source, ``code / 65535`` for a 16-bit PNG.
 
         Raises:
             OSError: If the file is missing or cannot be decoded; the offending
                 path is named in the message.
         """
         raw = self._image_cache[file_name] if self._image_cache is not None else self._decode_image(file_name)
-        return raw.to(torch.float32) / _UINT8_MAX
+        return to_unit_float(raw)
 
     def _decode_image(self, file_name: str) -> Tensor:
         """Decode ``file_name`` into the RGB tensor the cache retains, at the source's own depth.
 
         An 8-bit source decodes to ``uint8``; a 16-bit PNG decodes to ``uint16``, two bytes
-        per channel. Both the cached and the uncached path scale the result the same way.
+        per channel. Scaling waits for :meth:`_load_image`, which divides either depth by its
+        own maximum, so a cached and an uncached draw of the same file are equal.
         """
-        path = self._images_dir / file_name
-        try:
-            raw = read_image(str(path), ImageReadMode.RGB)
-        except (RuntimeError, OSError) as error:
-            raise OSError(f"failed to read image {path}: {error}") from error
-        return cast("Tensor", raw)
+        return decode_rgb(self._images_dir / file_name)
 
     def _build_targets(self, annotations: Sequence[dict[str, object]], record: _ImageRecord) -> Targets:
         """Assemble the :class:`~lucid_yolo.data.targets.Targets` for one image.
@@ -828,18 +822,9 @@ def _oriented_targets(
             f"{file_name}: oriented reading needs a {_QUAD_CORNERS}-point ring per instance; "
             f"got ring sizes {sorted(sides)}"
         )
-    boxes = boxes_from_polygons(rings)
-    rboxes = polygons_to_rboxes(torch.stack(rings, dim=0))
     if keypoints is not None and keypoint_vis is not None:
-        return Targets(
-            boxes=boxes,
-            labels=labels,
-            rboxes=rboxes,
-            difficult=difficult,
-            keypoints=keypoints,
-            keypoint_vis=keypoint_vis,
-        )
-    return Targets(boxes=boxes, labels=labels, rboxes=rboxes, difficult=difficult)
+        return Targets.from_quads(rings, labels, difficult=difficult, keypoints=keypoints, keypoint_vis=keypoint_vis)
+    return Targets.from_quads(rings, labels, difficult=difficult)
 
 
 def _build_category_maps(categories: list[dict[str, object]]) -> tuple[dict[int, int], dict[int, int]]:

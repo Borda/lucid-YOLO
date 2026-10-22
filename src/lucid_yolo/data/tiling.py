@@ -118,10 +118,6 @@ DIFFICULT_AREA_FRACTION = 0.7
 
 #: Column count of a window ``(x0, y0, x1, y1)``.
 _WINDOW_DIM = 4
-#: Column count of an ``xyxy`` axis-aligned box.
-_BOX_DIM = 4
-#: Corner count of the quadrilateral form of a rotated box.
-_QUAD_CORNERS = 4
 #: Minimum vertex count for a polygon to enclose any area.
 _MIN_AREA_CORNERS = 3
 

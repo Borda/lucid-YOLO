@@ -14,6 +14,7 @@ import pytest
 import torch
 
 from lucid_yolo.data import Targets, _hsv_cuda
+from lucid_yolo.data._quantization import _PIXEL_QUANT_MAX
 from lucid_yolo.data.augment import _jitter_hsv_batch
 from lucid_yolo.ptl import datamodule
 
@@ -174,7 +175,7 @@ def test_launch_passes_transport_scale_and_covers_tail_pixels(
     _hsv_cuda._guarded_launch(images, gains)
     ((grid, args, kwargs),) = kernel.launches
     assert grid == (2,)
-    assert args[3:] == (257, 257, _hsv_cuda._BLOCK_SIZE, float(datamodule._PIXEL_QUANT_MAX))
+    assert args[3:] == (257, 257, _hsv_cuda._BLOCK_SIZE, float(_PIXEL_QUANT_MAX))
     assert kwargs == {"enable_fp_fusion": False, "num_warps": 4}
 
 

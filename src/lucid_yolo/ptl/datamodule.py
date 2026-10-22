@@ -77,7 +77,7 @@ Batch contract:
     * **Transport form** (what :func:`collate_detection` returns): the equal-sized
       (letterboxed) images stacked and quantized into a single
       ``(B, C, img_size, img_size)`` **uint8** tensor — each post-augmentation float
-      pixel in ``[0, 1]`` rounded to a ``1/255`` step (:data:`_PIXEL_QUANT_MAX`) —
+      pixel in ``[0, 1]`` rounded to a ``1/255`` step (:data:`~lucid_yolo.data._quantization._PIXEL_QUANT_MAX`) —
       paired with a :class:`PackedTargets`, the batch's ragged per-image
       :class:`~lucid_yolo.data.targets.Targets` flattened into a fixed set of
       dense tensors. A worker ships each distinct tensor as its own shared-memory
@@ -127,8 +127,9 @@ from torch.utils.data import DataLoader, Dataset, get_worker_info
 from tqdm.auto import tqdm
 
 from lucid_yolo.assign.grid import require_grid_side
-from lucid_yolo.data._quantization import _PIXEL_QUANT_MAX
-from lucid_yolo.data.affine import _DEFAULT_PAD_VALUE, RandomAffine
+from lucid_yolo.data._common import _DEFAULT_PAD_VALUE, _POINT_DIM
+from lucid_yolo.data._quantization import _dequantize_images, _quantize_images
+from lucid_yolo.data.affine import RandomAffine
 from lucid_yolo.data.augment import HorizontalFlip, HSVJitter, HSVParams, _jitter_hsv_batch
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.layout import DatasetLayout, detect_layout, resolve_split
@@ -149,9 +150,6 @@ __all__ = [
     "unpack_masks",
     "unpack_targets",
 ]
-
-#: Column count of a polygon point ``(x, y)`` — the width of a packed ring row.
-_POINT_DIM = 2
 
 #: Either layout's reader. Both yield ``(image, Targets)`` samples and size the same way, which
 #: is what lets the augmentation pipeline, the collate and every consumer stay layout-blind.
@@ -709,7 +707,7 @@ def collate_detection(
     Returns:
         A ``(images, packed)`` pair: ``images`` is the batch quantized to a
         ``(B, C, H, W)`` **uint8** tensor (float ``[0, 1]`` pixels rounded to
-        ``1/255`` steps — :data:`_PIXEL_QUANT_MAX` — for a 4x-smaller IPC hop) and
+        ``1/255`` steps — :data:`~lucid_yolo.data._quantization._PIXEL_QUANT_MAX` — for a 4x-smaller IPC hop) and
         ``packed`` is the batch's targets as a :class:`PackedTargets`. The transfer
         hook (or :func:`unpack_batch`) restores float32 ``[0, 1]`` images on the
         destination device.
@@ -786,11 +784,6 @@ def _collate_training(batch: Sequence[_TrainingSample], *, mask_targets: bool = 
     return images, packed
 
 
-def _quantize_images(images: Tensor) -> Tensor:
-    """Round augmented float pixels to the existing uint8 transport codes."""
-    return images.mul(_PIXEL_QUANT_MAX).round().clamp_(0, _PIXEL_QUANT_MAX).to(torch.uint8)
-
-
 def _restore_images(
     images: Tensor, packed: PackedTargets, dtype: torch.dtype, *, channels_last: bool = False
 ) -> Tensor:
@@ -849,30 +842,6 @@ def _transport_survives(plugin: Precision) -> bool:
     probe = (torch.zeros(1, dtype=_DEFERRED_IMAGE_DTYPE), torch.zeros(1, dtype=_DEFERRED_GAIN_DTYPE))
     images, gains = cast("tuple[Tensor, Tensor]", plugin.convert_input(probe))
     return images.dtype == _DEFERRED_IMAGE_DTYPE and gains.dtype == _DEFERRED_GAIN_DTYPE
-
-
-def _dequantize_images(images: Tensor, dtype: torch.dtype = torch.float32) -> Tensor:
-    """Restore uint8 transport images to floating-point ``[0, 1]``; pass floats through.
-
-    The inverse of the :func:`collate_detection` quantization: uint8 codes cast to
-    ``dtype`` and divide by :data:`_PIXEL_QUANT_MAX`. The ``0``…``255`` codes and the
-    divisor are exactly representable in float16/bfloat16, so a half-precision
-    ``dtype`` keeps the same ``1/510`` quantization bound. An already-float tensor (a
-    direct, non-quantized feed) is returned untouched — its own dtype preserved — so
-    the restore is safe to run over either form.
-
-    Args:
-        images: A ``(B, C, H, W)`` uint8 transport batch or an already-float batch.
-        dtype: Floating-point dtype for the restored images (default
-            ``torch.float32``); used only on the uint8 dequantization path.
-
-    Returns:
-        The images in ``[0, 1]`` at ``dtype`` (dequantized when the input was uint8,
-        otherwise the input unchanged).
-    """
-    if images.dtype == torch.uint8:
-        return images.to(dtype).div(_PIXEL_QUANT_MAX)
-    return images
 
 
 def unpack_batch(
@@ -1006,7 +975,7 @@ class _TrainPipeline(Dataset[_TrainingSample]):
             sequence is not — the copy-paste probability is *consulted* as always,
             it simply never fires.
         polygon_free: The same suppression for the same reason, reached the other way:
-            a base whose *format* carries no rings rather than whose modality does not.
+            a base whose *reader* yields no rings rather than whose modality does not.
             The YOLO reading is one (WP-099: ``polygons`` is always empty there), and
             unlike the oriented case copy-paste would not raise on it — it would find no
             paste candidates and quietly do nothing, having already decoded a whole extra
@@ -1486,15 +1455,17 @@ class DetectionDataModule(LightningDataModule):
             return
         if self._mask_targets:
             raise ValueError(
-                "mask_targets=True is unavailable on a YOLO root: the format carries no "
-                "per-instance polygon rings, so there is nothing to rasterise masks from. "
-                "Train segmentation from a COCO-format root, or drop mask_targets"
+                "mask_targets=True is unavailable on a YOLO root: this reader parses only the "
+                "detection and oriented label rows, not the polygon-row variant some YOLO exports "
+                "carry, so it has no per-instance rings to rasterise masks from. Train segmentation "
+                "from a COCO-format root, or drop mask_targets"
             )
         if self._keypoint_targets:
             raise ValueError(
-                "keypoint_targets=True is unavailable on a YOLO root: the format's label rows "
-                "carry a class and a box and no point fields at all, so there is nothing to "
-                "read keypoints from. Train pose from a COCO-format root, or drop keypoint_targets"
+                "keypoint_targets=True is unavailable on a YOLO root: this reader parses only the "
+                "detection and oriented label rows, not the pose-row variant with point fields some "
+                "YOLO exports carry, so it has no keypoints to read. Train pose from a COCO-format "
+                "root, or drop keypoint_targets"
             )
 
     @property

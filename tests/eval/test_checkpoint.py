@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import pickle
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -45,7 +46,6 @@ from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-    from pathlib import Path
 
     from torch import Tensor
 
@@ -188,6 +188,50 @@ def _checkpoint_dict(module: DetectionLitModule, **extra: object) -> dict[str, o
     return payload | extra
 
 
+@pytest.mark.parametrize("shadow_kind", ["missing", "empty", "partial"])
+def test_invalid_ema_shadow_names_checkpoint(tmp_path: Path, shadow_kind: str) -> None:
+    """EMA refusals identify the actual file without requiring a payload path field."""
+    module = _module()
+    shadow = _full_shadow(module)
+    if shadow_kind == "partial":
+        del shadow[sorted(shadow)[0]]
+    entry: dict[str, object] = {"num_updates": 1}
+    if shadow_kind != "missing":
+        entry["shadow"] = {} if shadow_kind == "empty" else shadow
+    path = tmp_path / "invalid-ema.ckpt"
+    torch.save(_checkpoint_dict(module, callbacks={"EMACallback": entry}), path)
+
+    with pytest.raises(ValueError) as refusal:
+        loader.load_eval_module(path, use_ema=True)
+
+    assert str(path) in str(refusal.value)
+    assert ("omits" if shadow_kind == "partial" else "carries no shadow") in str(refusal.value)
+
+
+@pytest.mark.parametrize(
+    ("callbacks", "phrase"),
+    [
+        pytest.param({"ModelCheckpoint": {}}, "no callback entry names", id="no-ema-entry"),
+        pytest.param({"EMACallback": {}, _PARAMETRIZED_KEY: {}}, "2 callback entries naming", id="two-ema-entries"),
+    ],
+)
+def test_unresolvable_ema_entry_names_checkpoint(tmp_path: Path, callbacks: dict[str, object], phrase: str) -> None:
+    """A missing or ambiguous EMA callback entry is refused naming the file it was read from.
+
+    Both refusals fire while resolving the callback key, before any shadow is read, so a
+    checkpoint whose entries carry nothing else is enough; the path is the one passed to
+    the loader, which is what an operator holding several runs' checkpoints acts on.
+    """
+    path = tmp_path / "unresolvable-ema.ckpt"
+    torch.save(_checkpoint_dict(_module(), callbacks=callbacks), path)
+
+    with pytest.raises(ValueError) as refusal:
+        loader.load_eval_module(path, use_ema=True)
+
+    assert str(path) in str(refusal.value)
+    assert phrase in str(refusal.value)
+
+
 class _CreatesADirectoryWhenReconstructed:
     """A harmless planted object whose *reconstruction* is visible on the filesystem.
 
@@ -243,7 +287,7 @@ class TestOverlayEma:
             name: buffer.clone() for name, buffer in module.named_buffers() if not buffer.is_floating_point()
         }
 
-        state_key = loader._overlay_ema(module, _payload(_full_shadow(module)))
+        state_key = loader._overlay_ema(module, _payload(_full_shadow(module)), Path("model.ckpt"))
 
         assert state_key == "EMACallback"
         overlaid = _float_snapshot(module)
@@ -264,7 +308,9 @@ class TestOverlayEma:
         """
         module = _module()
 
-        state_key = loader._overlay_ema(module, _payload(_full_shadow(module), state_key=_PARAMETRIZED_KEY))
+        state_key = loader._overlay_ema(
+            module, _payload(_full_shadow(module), state_key=_PARAMETRIZED_KEY), Path("model.ckpt")
+        )
 
         assert state_key == _PARAMETRIZED_KEY
 
@@ -284,7 +330,7 @@ class TestOverlayEma:
         module = _module()
 
         with pytest.raises(ValueError, match="carries no shadow"):
-            loader._overlay_ema(module, _payload(shadow))
+            loader._overlay_ema(module, _payload(shadow), Path("model.ckpt"))
 
     def test_no_entry_naming_callback_raises_and_lists_what_there(self) -> None:
         """A checkpoint saved without the EMA callback names the callbacks it does carry.
@@ -296,7 +342,7 @@ class TestOverlayEma:
         module = _module()
 
         with pytest.raises(ValueError, match="no callback entry names"):
-            loader._overlay_ema(module, {"callbacks": {"ModelCheckpoint": {}}})
+            loader._overlay_ema(module, {"callbacks": {"ModelCheckpoint": {}}}, Path("model.ckpt"))
 
     def test_two_entries_naming_callback_raise_rather_than_last_one_winning(self) -> None:
         """Two EMA-ish entries are ambiguous, and ambiguity is refused, not resolved by order.
@@ -316,7 +362,7 @@ class TestOverlayEma:
         }
 
         with pytest.raises(ValueError, match="2 callback entries naming"):
-            loader._overlay_ema(module, payload)
+            loader._overlay_ema(module, payload, Path("model.ckpt"))
 
     def test_partial_shadow_names_what_missing_and_leaves_module_untouched(self) -> None:
         """A shadow short of one tensor refuses **before** copying, so no half-overlaid module exists.
@@ -334,7 +380,7 @@ class TestOverlayEma:
         before = _float_snapshot(module)
 
         with pytest.raises(ValueError, match=f"omits 1 of the module's floating-point.*{dropped}"):
-            loader._overlay_ema(module, _payload(shadow))
+            loader._overlay_ema(module, _payload(shadow), Path("model.ckpt"))
 
         after = _float_snapshot(module)
         assert set(after) == set(before)

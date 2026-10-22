@@ -120,6 +120,8 @@ def run(
     limit: int,
     output: Path | None,
     eval_backend: str = "faster_coco_eval",
+    ann_file: Path | None = None,
+    images_dir: Path | None = None,
 ) -> int:
     """Run the dual-path COCO evaluation for an already-loaded checkpoint.
 
@@ -136,6 +138,8 @@ def run(
         eval_backend: The already-resolved bbox/segm scoring engine (WP-138),
             ``"faster_coco_eval"`` or ``"hotcoco"`` — resolved once by
             :func:`lucid_yolo.cli.eval.evaluate`, not re-probed here.
+        ann_file: Annotation JSON override; defaults to annotations/instances_val2017.json under data_root.
+        images_dir: Image directory override; defaults to val2017 under data_root.
 
     Returns:
         ``0``; a failure here raises rather than returning a code.
@@ -147,8 +151,8 @@ def run(
 
         ```
     """
-    ann_file = data_root / "annotations" / "instances_val2017.json"
-    images_dir = data_root / "val2017"
+    ann_file = data_root / "annotations" / "instances_val2017.json" if ann_file is None else ann_file
+    images_dir = data_root / "val2017" if images_dir is None else images_dir
     # Whether the ground truth needs masks at all is the checkpoint's property, not the
     # caller's: --masks false can decline them, but nothing opts a detector *into* them.
     segmentation = module.task == "segment" and masks

@@ -60,6 +60,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
+from lucid_yolo.data._common import _uniform
 from lucid_yolo.data.rasterize import rasterize_polygon as _rasterize_polygon
 from lucid_yolo.data.targets import Targets
 
@@ -69,30 +70,6 @@ __all__ = ["CopyPaste", "CopyPasteParams", "Mixup", "MixupParams"]
 _PAIR_IMAGE_COUNT = 2
 #: Smallest positive float32 magnitude, used to keep the Beta divisor finite.
 _TINY = torch.finfo(torch.float32).tiny
-
-
-def _uniform(low: float, high: float, generator: torch.Generator | None) -> float:
-    """Sample one float uniformly from ``[low, high]`` (returns ``low`` when degenerate).
-
-    Args:
-        low: Inclusive lower bound.
-        high: Inclusive upper bound; when ``<= low`` the bound ``low`` is returned
-            directly so a zeroed probability is exact.
-        generator: Optional RNG for reproducible sampling.
-
-    Returns:
-        A single sampled value as a Python float.
-
-    Examples:
-        ```pycon
-        >>> _uniform(0.25, 0.25, None)
-        0.25
-
-        ```
-    """
-    if high <= low:
-        return float(low)
-    return float(torch.empty((), dtype=torch.float64).uniform_(low, high, generator=generator).item())
 
 
 @dataclass(frozen=True)

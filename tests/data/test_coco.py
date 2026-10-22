@@ -30,11 +30,12 @@ import pytest
 import torch
 from PIL import Image
 from pytorch_lightning import LightningModule, Trainer
+from torchvision.io import write_png
 
 from lucid_yolo.cli import data as data_cli
 from lucid_yolo.data import Targets, boxes_from_polygons
+from lucid_yolo.data import _image as image_data
 from lucid_yolo.data import check as check_data
-from lucid_yolo.data import coco as coco_data
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.ptl import datamodule as dm
 from lucid_yolo.ptl.datamodule import (
@@ -107,13 +108,13 @@ def test_opt_in_cache_decodes_once_and_keeps_returned_images_independent(
     """The eager cache pays one decode per file and never exposes mutable cached storage."""
     split = detseg_fixture_dir / "train"
     calls: list[str] = []
-    incumbent = coco_data.read_image
+    incumbent = image_data.read_image
 
     def counted_read_image(path: str, mode: object) -> torch.Tensor:
         calls.append(path)
         return incumbent(path, mode)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(coco_data, "read_image", counted_read_image)
+    monkeypatch.setattr(image_data, "read_image", counted_read_image)
     dataset = CocoDetectionDataset(split, split / "_annotations.coco.json", cache_images=True)
     assert len(calls) == len(dataset)
     assert dataset._image_cache is not None
@@ -147,13 +148,13 @@ def test_opt_in_cache_deduplicates_repeated_coco_file_names(
     annotation_file = tmp_path / "instances.json"
     annotation_file.write_text(json.dumps(payload))
     calls: list[str] = []
-    incumbent = coco_data.read_image
+    incumbent = image_data.read_image
 
     def counted_read_image(path: str, mode: object) -> torch.Tensor:
         calls.append(path)
         return incumbent(path, mode)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(coco_data, "read_image", counted_read_image)
+    monkeypatch.setattr(image_data, "read_image", counted_read_image)
     dataset = CocoDetectionDataset(split, annotation_file, cache_images=True)
     first, second = (index for index, name in enumerate(dataset.file_names) if name == duplicate["file_name"])
 
@@ -226,7 +227,7 @@ class TestImageCacheReport:
         def failing_read_image(path: str, mode: object) -> torch.Tensor:
             raise RuntimeError("simulated decode failure")
 
-        monkeypatch.setattr(coco_data, "read_image", failing_read_image)
+        monkeypatch.setattr(image_data, "read_image", failing_read_image)
 
         with pytest.warns(UserWarning, match=rf"\({expected:,} bytes\)"), pytest.raises(OSError, match="simulated"):
             dataset.cache_images(progress=True)
@@ -271,6 +272,59 @@ def test_16_bit_png_reads_same_cached_or_not(tmp_path: Path) -> None:
     assert cached._image_cache is not None
     assert cached._image_cache["deep.png"].dtype == torch.uint16
     assert torch.equal(cached[0][0], uncached[0][0])
+
+
+def _single_image_annotations(root: Path, file_name: str, *, height: int, width: int) -> Path:
+    """Write an ``instances.json`` naming one unannotated image of the given size.
+
+    Examples:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     path = _single_image_annotations(Path(tmp), "a.png", height=4, width=6)
+        ...     json.loads(path.read_text())["images"][0]["file_name"]
+        'a.png'
+    """
+    payload = {
+        "categories": [{"id": 1}],
+        "images": [{"id": 1, "file_name": file_name, "height": height, "width": width}],
+        "annotations": [],
+    }
+    annotation_file = root / "instances.json"
+    annotation_file.write_text(json.dumps(payload), encoding="utf-8")
+    return annotation_file
+
+
+def test_16_bit_png_scales_by_its_own_depth(tmp_path: Path) -> None:
+    """A 16-bit PNG reads into ``[0, 1]`` by its own maximum, 65535, rather than by 255.
+
+    ``read_image`` decodes such a file to ``uint16``. Divided by the 8-bit 255, a code of
+    60000 read as 235.3, which the uint8 transport then clamped to white after HSV and mixup
+    had already run on it; scaled by its own depth it is the 0.9155 grey it was saved as.
+    """
+    deep = Image.new("I;16", (6, 4))
+    deep.putdata([60000] * 24)
+    deep.save(tmp_path / "deep.png")
+    annotation_file = _single_image_annotations(tmp_path, "deep.png", height=4, width=6)
+
+    image, _ = CocoDetectionDataset(tmp_path, annotation_file)[0]
+
+    assert image.max().item() == pytest.approx(60000 / 65535)
+
+
+def test_8_bit_png_scales_by_255_bit_for_bit(tmp_path: Path) -> None:
+    """Every 8-bit code reads back as exactly ``code / 255.0``, the value it always read as.
+
+    The depth-aware scale divides by ``iinfo(uint8).max``, which is 255: every pixel this
+    reader produced before the 16-bit fix, and every golden recorded from one, must survive
+    it unchanged, so all 256 codes are compared for exact equality rather than closeness.
+    """
+    codes = torch.arange(256, dtype=torch.uint8).reshape(1, 16, 16).expand(3, 16, 16).contiguous()
+    write_png(codes, str(tmp_path / "flat.png"))
+    annotation_file = _single_image_annotations(tmp_path, "flat.png", height=16, width=16)
+
+    image, _ = CocoDetectionDataset(tmp_path, annotation_file)[0]
+
+    assert torch.equal(image, codes.to(torch.float32) / 255.0)
 
 
 def test_boxes_xyxy_within_bounds(detseg_fixture_dir: Path) -> None:
@@ -1350,6 +1404,19 @@ def _write_fake_coco_root(root: Path, train: int, val: int) -> None:
     _write_fake_split(root / "val2017", annotations / "instances_val2017.json", val)
 
 
+#: Annotation payloads that parse as a JSON object yet cannot be read: a list section held
+#: as something else. A ``null`` ``images`` used to raise from the count and abort the whole
+#: check; a string ``annotations`` used to pass it.
+_MALFORMED_SECTION_PAYLOADS = [
+    pytest.param({"images": None}, id="images-null"),
+    pytest.param({"images": [], "annotations": "x"}, id="annotations-string"),
+]
+
+#: Annotation file bytes that are not UTF-8 (``0xff`` never starts a UTF-8 sequence), so the
+#: read fails before any JSON is parsed.
+_INVALID_UTF8 = b"\xff\xfe{"
+
+
 class TestCheckData:
     """Tests for ``check_data.check_coco_root``."""
 
@@ -1369,3 +1436,192 @@ class TestCheckData:
     def test_fails_on_missing_root(self, tmp_path: Path) -> None:
         """A root without the expected directories is reported invalid."""
         assert not check_data.check_coco_root(tmp_path / "absent").ok
+
+    def test_real_2017_spelling_keeps_published_names_and_counts(self, tmp_path: Path) -> None:
+        """A root in COCO 2017's own spelling is checked under those names against the published counts.
+
+        WP-099e pinned ``train2017``/``val2017`` and 118,287 / 5,000 as one published fact.
+        Resolving the other spellings the layout probe accepts must not loosen that for the
+        dataset the numbers were published for.
+        """
+        _write_fake_coco_root(tmp_path, train=2, val=1)
+
+        result = check_data.check_coco_root(tmp_path)
+
+        assert [split.name for split in result.splits] == ["train2017", "val2017"]
+        assert result.splits[0].problems == [f"train2017: expected {check_data.COCO_TRAIN_COUNT} images, found 2"]
+
+
+class TestCheckDataPlainSpelling:
+    """A COCO-format root in a spelling other than COCO 2017's: presence and parseability only."""
+
+    @pytest.fixture
+    def plain_root(self, tmp_path: Path) -> Path:
+        """Build ``train/`` and ``val/`` beside ``annotations/instances_{train,val}.json``."""
+        _write_fake_split(tmp_path / "train", tmp_path / "annotations" / "instances_train.json", 2)
+        _write_fake_split(tmp_path / "val", tmp_path / "annotations" / "instances_val.json", 1)
+        return tmp_path
+
+    def test_passes_without_published_counts(self, plain_root: Path) -> None:
+        """The spelling ``build-tiles`` writes passes under its own split names.
+
+        COCO 2017's totals describe COCO 2017's image set and are no fact about any other
+        root; holding a tiles root to them failed the OBB tier's pre-flight on a tree that
+        trains.
+        """
+        result = check_data.check_coco_root(plain_root)
+
+        assert result.ok, [split.problems for split in result.splits]
+        assert [split.name for split in result.splits] == ["train", "val"]
+
+    def test_spare_image_on_disk_not_fault(self, plain_root: Path) -> None:
+        """An unannotated image file beside the annotated ones leaves the root valid.
+
+        The reader opens only the images its annotation file names, so the annotation-vs-disk
+        parity the COCO 2017 check holds is a count, and counts belong to the published layout.
+        """
+        (plain_root / "val" / "spare.jpg").touch()
+
+        assert check_data.check_coco_root(plain_root).ok
+
+    def test_reports_unparsable_annotation(self, plain_root: Path) -> None:
+        """An annotation file that is not JSON is that split's FAIL line, naming the file."""
+        (plain_root / "annotations" / "instances_val.json").write_text("{ not json", encoding="utf-8")
+
+        result = check_data.check_coco_root(plain_root)
+
+        assert not result.ok
+        assert (
+            result.splits[1]
+            .problems[0]
+            .startswith(f"annotation file failed to parse: {plain_root / 'annotations' / 'instances_val.json'}")
+        )
+
+    def test_cli_infers_and_passes_it(self, plain_root: Path) -> None:
+        """``lucid-data check --data_root <plain root>`` exits 0 with no flag at all."""
+        assert data_cli.main(["check", "--data_root", str(plain_root)]) == 0
+
+    @pytest.mark.parametrize("payload", _MALFORMED_SECTION_PAYLOADS)
+    def test_malformed_section_fails_naming_file(
+        self, plain_root: Path, payload: dict[str, object], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An instances file with a list section held as anything else is a located FAIL, never a traceback.
+
+        The root passes untouched, so exit 1 is reachable only through this file; the call
+        returning at all is what shows the remaining checks were not aborted.
+        """
+        annotation_file = plain_root / "annotations" / "instances_val.json"
+        annotation_file.write_text(json.dumps(payload), encoding="utf-8")
+
+        assert data_cli.main(["check", "--data_root", str(plain_root)]) == 1
+        assert f"  FAIL annotation file failed to parse: {annotation_file}" in capsys.readouterr().out
+
+    def test_invalid_utf8_fails_naming_file(self, plain_root: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """An instances file of bytes that do not decode as UTF-8 is a located FAIL, never a traceback.
+
+        The decode error is raised by the read, not the JSON parser, so it escaped a handler
+        that caught only ``json.JSONDecodeError``; ``lucid-data`` has no handler of its own, so
+        the call returning is what shows it was caught.
+        """
+        annotation_file = plain_root / "annotations" / "instances_val.json"
+        annotation_file.write_bytes(_INVALID_UTF8)
+
+        assert data_cli.main(["check", "--data_root", str(plain_root)]) == 1
+        assert f"  FAIL annotation file failed to parse: {annotation_file}" in capsys.readouterr().out
+
+
+class TestCheckDataKeypoints:
+    """``keypoints=True`` adds the pose tier's ``person_keypoints_*.json`` files to the COCO check."""
+
+    @pytest.fixture
+    def coco_root(self, tmp_path: Path) -> Path:
+        """Build a COCO 2017-spelled root of two training images and one validation image."""
+        _write_fake_coco_root(tmp_path, train=2, val=1)
+        return tmp_path
+
+    def test_missing_files_named(self, coco_root: Path) -> None:
+        """Both splits' absent keypoint files are reported, each by its full path.
+
+        The layout resolves only the ``instances_`` spelling, so a pose run whose config was
+        never pointed at the keypoint files fails at dataset construction, after the queue;
+        this is where that gets caught before it.
+        """
+        annotations = coco_root / "annotations"
+
+        result = check_data.check_coco_root(coco_root, expected_train=2, expected_val=1, keypoints=True)
+
+        assert not result.ok
+        assert result.problems == [
+            f"annotation file missing: {annotations / 'person_keypoints_train2017.json'}",
+            f"annotation file missing: {annotations / 'person_keypoints_val2017.json'}",
+        ]
+
+    def test_parseable_files_pass_and_are_noted(self, coco_root: Path) -> None:
+        """Present, parseable keypoint files pass, and the report says they were read."""
+        (coco_root / "annotations" / "person_keypoints_train2017.json").write_text(json.dumps({"images": []}))
+        (coco_root / "annotations" / "person_keypoints_val2017.json").write_text(json.dumps({"images": []}))
+
+        result = check_data.check_coco_root(coco_root, expected_train=2, expected_val=1, keypoints=True)
+
+        assert result.ok, result.problems
+        assert result.notes == [
+            "keypoint annotations parse: person_keypoints_train2017.json",
+            "keypoint annotations parse: person_keypoints_val2017.json",
+        ]
+
+    def test_unparsable_file_reported(self, coco_root: Path) -> None:
+        """A keypoint file that is not JSON fails the check, naming the file."""
+        (coco_root / "annotations" / "person_keypoints_train2017.json").write_text("{ not json")
+        (coco_root / "annotations" / "person_keypoints_val2017.json").write_text(json.dumps({"images": []}))
+
+        result = check_data.check_coco_root(coco_root, expected_train=2, expected_val=1, keypoints=True)
+
+        assert not result.ok
+        assert result.problems[0].startswith("annotation file failed to parse: ")
+
+    def test_cli_carries_flag_through(self, tmp_path: Path) -> None:
+        """``lucid-data check --keypoints true`` reaches the keypoint files of a plain-spelled root.
+
+        jsonargparse derives the flag from ``check_dataset``'s signature, so only an end-to-end
+        parse proves it arrives. The root passes without the flag and lacks only the validation
+        keypoint file, so exit 1 is reachable only through the flag having been honoured.
+        """
+        _write_fake_split(tmp_path / "train", tmp_path / "annotations" / "instances_train.json", 2)
+        _write_fake_split(tmp_path / "val", tmp_path / "annotations" / "instances_val.json", 1)
+        (tmp_path / "annotations" / "person_keypoints_train.json").write_text(json.dumps({"images": []}))
+
+        assert data_cli.main(["check", "--data_root", str(tmp_path), "--keypoints", "true"]) == 1
+
+    @pytest.mark.parametrize("payload", _MALFORMED_SECTION_PAYLOADS)
+    def test_malformed_section_fails_naming_file(
+        self, tmp_path: Path, payload: dict[str, object], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A keypoint file with a list section held as anything else is a located FAIL, never a traceback.
+
+        The plain-spelled root and its training keypoint file pass, so exit 1 is reachable
+        only through the validation keypoint file, which is the one the FAIL line names.
+        """
+        _write_fake_split(tmp_path / "train", tmp_path / "annotations" / "instances_train.json", 2)
+        _write_fake_split(tmp_path / "val", tmp_path / "annotations" / "instances_val.json", 1)
+        (tmp_path / "annotations" / "person_keypoints_train.json").write_text(json.dumps({"images": []}))
+        keypoint_file = tmp_path / "annotations" / "person_keypoints_val.json"
+        keypoint_file.write_text(json.dumps(payload), encoding="utf-8")
+
+        assert data_cli.main(["check", "--data_root", str(tmp_path), "--keypoints", "true"]) == 1
+        assert f"  FAIL annotation file failed to parse: {keypoint_file}" in capsys.readouterr().out
+
+    def test_invalid_utf8_fails_naming_file(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """A keypoint file of bytes that do not decode as UTF-8 is a located FAIL, never a traceback.
+
+        The plain-spelled root and its training keypoint file pass, so exit 1 is reachable
+        only through the validation keypoint file; ``lucid-data`` has no handler of its own,
+        so the call returning is what shows the decode error was caught.
+        """
+        _write_fake_split(tmp_path / "train", tmp_path / "annotations" / "instances_train.json", 2)
+        _write_fake_split(tmp_path / "val", tmp_path / "annotations" / "instances_val.json", 1)
+        (tmp_path / "annotations" / "person_keypoints_train.json").write_text(json.dumps({"images": []}))
+        keypoint_file = tmp_path / "annotations" / "person_keypoints_val.json"
+        keypoint_file.write_bytes(_INVALID_UTF8)
+
+        assert data_cli.main(["check", "--data_root", str(tmp_path), "--keypoints", "true"]) == 1
+        assert f"  FAIL annotation file failed to parse: {keypoint_file}" in capsys.readouterr().out

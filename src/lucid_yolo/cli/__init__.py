@@ -16,8 +16,9 @@ Four entry points, one parser stack:
 ``lucid-predict``
     Detections for a single image (:mod:`lucid_yolo.cli.predict`) — the other reading of
     a checkpoint. Where ``lucid-eval`` answers "how good is this model", this answers
-    "what is in this picture", and reads its task from the same place: a checkpoint whose
-    task is not ``detect`` is refused by name rather than run as a detector (WP-089).
+    "what is in this picture", and reads its task from the same place: ``detect`` supplies
+    boxes, ``segment`` adds instance masks, ``obb`` supplies rotated boxes and ``keypoints``
+    adds point sets. Unknown tasks are refused by name.
 
 Why one package:
     The wiring used to be spread across ``lucid_yolo/ptl/cli.py``, a console script in
@@ -44,9 +45,27 @@ Why jsonargparse:
     ``--data_root`` is now the only spelling any shipped command answers to (WP-110).
 """
 
-from lucid_yolo.cli.data import main as data_main
-from lucid_yolo.cli.eval import main as eval_main
-from lucid_yolo.cli.predict import main as predict_main
-from lucid_yolo.cli.train import main as train_main
+import warnings
+
+# Imported ahead of the block below, never inside it: `catch_warnings` restores the filter
+# list it found on entry, so the filters torch installs on its first import would be
+# discarded with the block if that first import happened there.
+import torch  # noqa: F401
+
+# fvcore.nn.focal_loss scripts its loss functions while it is imported, which these imports
+# reach through the model builder. The filter lives only as long as the block, so usage text
+# prints without that dependency's FutureWarning while every later `torch.jit.script` call
+# -- a library user's own included -- still warns.
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message=r"^`torch\.jit\.script` is deprecated\. Please switch to `torch\.compile` or `torch\.export`\.$",
+        category=FutureWarning,
+        module=r"^torch\.jit\._script$",
+    )
+    from lucid_yolo.cli.data import main as data_main
+    from lucid_yolo.cli.eval import main as eval_main
+    from lucid_yolo.cli.predict import main as predict_main
+    from lucid_yolo.cli.train import main as train_main
 
 __all__ = ["data_main", "eval_main", "predict_main", "train_main"]

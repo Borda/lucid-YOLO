@@ -802,15 +802,30 @@ class TestBackendDefaults:
 
         assert default == "faster_coco_eval"
 
-    def test_cli_default_auto(self) -> None:
+    def test_cli_default_auto(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """``lucid-eval`` defaults ``--eval_backend`` to ``auto``, not to the library default.
 
-        The half the prose used to omit. ``auto`` is a resolution rule rather than
-        an engine, so the two tests below say what it resolves to.
+        The signature uses an unset sentinel to distinguish omission from an
+        explicitly supplied option. Check the effective resolution rule and the
+        engine forwarded to scoring, rather than that internal representation.
         """
-        default = inspect.signature(cli_eval.evaluate).parameters["eval_backend"].default
+        module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=1)
+        requested_backends: list[str] = []
 
-        assert default == "auto"
+        def resolve(requested: str) -> tuple[str, None]:
+            requested_backends.append(requested)
+            return "faster_coco_eval", None
+
+        def score(_module: object, _info: object, **kwargs: object) -> int:
+            assert kwargs["eval_backend"] == "faster_coco_eval"
+            return 0
+
+        monkeypatch.setattr(cli_eval, "load_eval_module", lambda *args, **kwargs: (module, {}))
+        monkeypatch.setattr(cli_eval, "_resolve_eval_backend", resolve)
+        monkeypatch.setattr(cli_eval.detect_eval, "run", score)
+
+        assert cli_eval.evaluate(tmp_path / "model.ckpt", tmp_path) == 0
+        assert requested_backends == ["auto"]
 
     def test_auto_takes_hotcoco_when_hotcoco_usable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With a usable hotcoco, ``auto`` resolves to hotcoco -- silently, and with no reason recorded.

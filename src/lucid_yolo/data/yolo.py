@@ -107,13 +107,13 @@ import torch
 import yaml
 from torch import Tensor
 from torch.utils.data import Dataset
-from torchvision.io import ImageReadMode, read_image
 from tqdm.auto import tqdm
 
+from lucid_yolo.data._common import _POINT_DIM, _QUAD_CORNERS
+from lucid_yolo.data._image import decode_rgb, to_unit_float
 from lucid_yolo.data.layout import DATA_YAML_NAME, resolve_yolo_split
-from lucid_yolo.data.rotated_geom import polygons_to_rboxes
 from lucid_yolo.data.targets import Targets
-from lucid_yolo.data.transforms import GeometricTransform, boxes_from_polygons
+from lucid_yolo.data.transforms import GeometricTransform
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -137,15 +137,9 @@ _SPLIT_KEYS: tuple[str, ...] = ("train", "val", "test")
 _DETECTION_FIELDS = 5
 #: Fields on an oriented row: the class index and four normalized ``(x, y)`` corners.
 _ORIENTED_FIELDS = 9
-#: Corner count of the quadrilateral form of a rotated box.
-_QUAD_CORNERS = 4
-#: Column count of a point ``(x, y)``.
-_POINT_DIM = 2
 #: Directory component naming images, and the one naming their labels beside it.
 _IMAGES_COMPONENT = "images"
 _LABELS_COMPONENT = "labels"
-#: 8-bit image scale factor mapping ``uint8`` pixels into ``[0, 1]`` float.
-_UINT8_MAX = 255.0
 #: Bytes per gigabyte (decimal) in the image cache's size report.
 _BYTES_PER_GB = 1e9
 
@@ -491,26 +485,25 @@ class YoloDetectionDataset(Dataset[tuple[Tensor, Targets]]):
             path: Path to the image file.
 
         Returns:
-            A ``(3, H, W)`` float32 tensor scaled into ``[0, 1]``.
+            A ``(3, H, W)`` float32 tensor scaled into ``[0, 1]`` by the decoded depth's own
+            maximum (:func:`~lucid_yolo.data._image.to_unit_float`): ``code / 255`` for an
+            8-bit source, ``code / 65535`` for a 16-bit PNG.
 
         Raises:
             OSError: If the file is missing or cannot be decoded; the path is named.
         """
         raw = self._image_cache[path] if self._image_cache is not None else self._decode_image(path)
-        return raw.to(torch.float32) / _UINT8_MAX
+        return to_unit_float(raw)
 
     @staticmethod
     def _decode_image(path: Path) -> Tensor:
         """Decode ``path`` into the RGB tensor the cache retains, at the source's own depth.
 
         An 8-bit source decodes to ``uint8``; a 16-bit PNG decodes to ``uint16``, two bytes
-        per channel. Both the cached and the uncached path scale the result the same way.
+        per channel. Scaling waits for :meth:`_load_image`, which divides either depth by its
+        own maximum, so a cached and an uncached draw of the same file are equal.
         """
-        try:
-            raw = read_image(str(path), ImageReadMode.RGB)
-        except (RuntimeError, OSError) as error:
-            raise OSError(f"failed to read image {path}: {error}") from error
-        return cast("Tensor", raw)
+        return decode_rgb(path)
 
     def _load_targets(self, image_path: Path, *, height: int, width: int) -> Targets:
         """Parse one image's label file, applying the missing-file policy.
@@ -1030,8 +1023,4 @@ def _oriented_targets(rows: Sequence[_Row], labels: Tensor, *, height: int, widt
     """
     scale = torch.tensor([width, height], dtype=torch.float32)
     rings = [torch.tensor(row.coords, dtype=torch.float32).reshape(_QUAD_CORNERS, _POINT_DIM) * scale for row in rows]
-    return Targets(
-        boxes=boxes_from_polygons(rings),
-        labels=labels,
-        rboxes=polygons_to_rboxes(torch.stack(rings, dim=0)),
-    )
+    return Targets.from_quads(rings, labels)

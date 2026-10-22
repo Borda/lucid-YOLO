@@ -6,6 +6,10 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Added
 
+- **`lucid-eval --ann_file` and `--images_dir`** override a COCO tier's annotation JSON and image directory independently; defaults are unchanged (WP-202).
+
+- **`lucid-data check --keypoints true`** also requires each split's `person_keypoints_*.json` to exist and parse, so a pose config pointing elsewhere is caught before the run is queued (WP-202).
+
 - `capture_network` now replays shared backbone and neck stages for segmentation, independently of `capture_segment_heads`. The default remains off; modified heads/forwards, accumulation and unsupported signatures retain native execution, with transient graph state cleared at fit boundaries (WP-193g).
 
 - **Opt-in CUDA network replay for oriented training.** `--model.capture_network true` records the existing backbone, neck and both oriented head branches, including their angle outputs. The native objective and state updates remain outside capture. Accumulation and overridden objectives keep the native route; the default stays off. The speed claim is limited to a small-batch workload (Nano OBB at batch 4, BF16, one L4): a single batch-8 pair changed fit time by only 4.10%, and replay raised peak reserved memory from 3974 to 4300 MiB, so check throughput and memory on your own batch size. See [WP-200](docs/work_packages/wp-200.md) for complete-fit measurements and limits.
@@ -42,6 +46,20 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Fixed
 
+- **16-bit PNGs scale by their own depth.** Training image readers and the letterboxed reader behind `lucid-eval` and `lucid-predict` divide by the source's own maximum instead of 255, so a 16-bit PNG no longer arrives as values up to 257. `lucid-data build-tiles` refuses a source above 8 bits per channel by name (WP-202).
+
+- **`lucid-data check` accepts plain-spelled COCO roots.** A root written as `train/` and `val/` beside `annotations/instances_*.json`, a `build-tiles` output included, is checked through the layout resolver for presence and parseability instead of being reported missing as `train2017` (WP-202).
+
+- **`lucid-eval` refuses options its checkpoint's task does not use.** An explicitly passed `--split`, `--variant`, `--masks`, `--eval_backend`, `--ann_file` or `--images_dir` that the task ignores is refused by name instead of silently dropped (WP-202).
+
+- **`lucid-predict` help names keypoints, and an unknown checkpoint task is refused.** Previously an unknown task fell back to a 640 px detector default (WP-202).
+
+- **An EMA checkpoint error names the checkpoint path.** The message now names the path passed to the loader (WP-202).
+
+- **CLI help no longer prints the `torch.jit.script` FutureWarning** that importing fvcore raised (WP-202).
+
+- **`lucid-data check` and `--verify` report a malformed annotation file instead of crashing** — invalid UTF-8, invalid JSON, wrong-typed sections or entries — and `--verify` finds a `file_name` that names a subdirectory (WP-202).
+
 - **The compiled detection step survives the alpha schedule.** A 2-epoch smoke run on an A100 with `--model.compile_step true` recompiled the whole region at every epoch: the dual loss read its branch weight as a Python float attribute, the WP-035 schedule rewrites that float per epoch, and Dynamo guards on a float's value — so each epoch paid a fresh compilation and a longer run would have crossed `cache_size_limit` around epoch 7 and silently trained eager from there. The weight now enters the region as a 0-d `float64` tensor built on the host each step and blended inside the loss with the same rounding as the float form, so the total is bit-identical, the compiled graph is reused across the schedule, and the logged `alpha` is unchanged. Eager training is unaffected.
 
 - **`lucid-yolo` exits `0` after a run that completed.** `lucid_yolo.cli.train.main` returned the `DetectionCLI` it built, and the console-script wrapper hands that value to `sys.exit`, which treats any non-integer as failure: every finished `lucid-yolo fit` printed the object and exited `1`, so a shell `&&`, a `subprocess.run(check=True)` or a CI step read a successful training run as a failed one. `main` now returns `0` like the three sibling commands; a failure on the way still raises. Found by the WP-184 Colab gate, whose eager arm "failed" after `Trainer.fit` had stopped at `max_epochs`.
@@ -65,6 +83,12 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 - **A skipped Example is no longer counted as an executed one, and `src/` is scanned.** The doctest audit read `>>>` as coverage, so a docstring whose every line was `# doctest: +SKIP` passed; it also never looked at `src/`, where three shipped functions carried no Example at all. Both are fixed, and a skip now states its reason — before the directive, since a reason after it is not a comment but an unparsable doctest option.
 
 ### Changed
+
+- **`lucid-yolo` exposes only `fit` and `validate`.** Lightning's `test` and `predict` subcommands are gone from its help; `lucid-eval` and `lucid-predict` are the evaluation and inference commands (WP-202).
+
+- **`lucid-data build-tiles` accepts `--data_root`** as an alias of `--root`, matching the other commands (WP-202).
+
+- **The export module docstrings name `KeypointExportGraph`** beside the detect, segment and oriented graphs (WP-202).
 
 - **Rotated-box augmentation batches the existing clipping and refitting arithmetic on CPU.** Finite float32 boxes without gradients are grouped by their current polygon vertex count, evaluated in batches and returned to their original instance rows. Interior boxes remain untouched; single clips, other dtypes, non-finite inputs, gradient-bearing tensors and accelerator tensors retain the scalar route. No angle, visibility or fit convention changes. Five paired complete 20-epoch public-DOTA fits on an isolated L4 at nano OBB / 640 pixels / batch 16 / BF16 with cached images, six workers, mosaic and EMA reduce median paired training time by 10.19% (range 8.68–12.25%), with final training states bit-identical. This throughput benchmark disables validation and checkpointing; larger resolutions/scales are unmeasured.
 

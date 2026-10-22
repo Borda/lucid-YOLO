@@ -16,9 +16,13 @@ the WP-053a defect class: nothing forced the export path to keep computing what 
 checkpoint computes as either side changed. This module is their one shared home
 (roadmap row 112); the task classes here reproduce
 :func:`~lucid_yolo.predict.predict_image`, :func:`~lucid_yolo.predict.predict_segmentation`,
-and :func:`~lucid_yolo.predict.predict_oriented`'s ``"e2e"`` compositions call for
+:func:`~lucid_yolo.predict.predict_oriented` and
+:func:`~lucid_yolo.predict.predict_keypoints`'s ``"e2e"`` compositions call for
 call, so an exported graph and a single-image prediction can be shown to agree
 rather than merely resemble each other.
+
+:class:`DetectExportGraph`, :class:`SegmentExportGraph`, :class:`OrientedExportGraph`
+and :class:`KeypointExportGraph` provide those four task compositions.
 
 **Anchor points and strides are baked into every graph as buffers**, not taken as
 extra inputs. They are arguments to
@@ -108,19 +112,21 @@ ONNX_OPSET = 17
 class E2EExportGraph(nn.Module):
     """A ``deploy()`` view plus its E2E decode, as one exportable module.
 
-    The shared base of the three task graphs below: it bakes the anchor grid for
+    The shared base of :class:`DetectExportGraph`, :class:`SegmentExportGraph`,
+    :class:`OrientedExportGraph` and :class:`KeypointExportGraph`: it bakes the anchor grid for
     one ``canvas`` into buffers and holds the
     :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` every task decodes with, so a
     subclass need only compose its own task's dense outputs into a decoded tuple.
-    ``forward`` is left to subclasses — that is where the three tasks differ, per
+    ``forward`` is left to subclasses — that is where the four tasks differ, per
     the module docstring's compositions — so this class alone is not directly
     exportable.
 
     Args:
         deployed: The ``deploy()`` view whose dense outputs the decode consumes,
             as returned by :meth:`~lucid_yolo.models.build.Detector.deploy`,
-            :meth:`~lucid_yolo.models.build.Segmenter.deploy`, or
-            :meth:`~lucid_yolo.models.build.OrientedDetector.deploy`, matched to
+            :meth:`~lucid_yolo.models.build.Segmenter.deploy`,
+            :meth:`~lucid_yolo.models.build.OrientedDetector.deploy` or
+            :meth:`~lucid_yolo.models.build.KeypointDetector.deploy`, matched to
             the subclass in use.
         canvas: Input canvas ``(height, width)`` in pixels, each divisible by
             every stride in :data:`~lucid_yolo.assign.grid.HEAD_STRIDES`. Baked

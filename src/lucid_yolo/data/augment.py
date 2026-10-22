@@ -47,6 +47,7 @@ import torch
 from fuse_augmentations import permute_keypoint_pairs  # type: ignore[import-untyped]
 from torch import Tensor
 
+from lucid_yolo.data._common import _uniform
 from lucid_yolo.data.rotated_aug import mirror_rboxes
 from lucid_yolo.data.targets import Targets
 
@@ -54,31 +55,6 @@ __all__ = ["FlipParams", "HSVJitter", "HSVParams", "HorizontalFlip", "hsv_to_rgb
 
 #: Channel count of an RGB / HSV image (leading dimension of a CHW tensor).
 _RGB_CHANNELS = 3
-
-
-def _uniform(low: float, high: float, generator: torch.Generator | None) -> float:
-    """Sample one float uniformly from ``[low, high]`` (returns ``low`` when degenerate).
-
-    Args:
-        low: Inclusive lower bound.
-        high: Inclusive upper bound; when ``<= low`` the bound ``low`` is returned
-            directly so a zeroed range (e.g. ``hsv_h=0``) is exact.
-        generator: Optional RNG for reproducible sampling.
-
-    Returns:
-        A single sampled value as a Python float.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> _uniform(1.0, 1.0, None)
-        1.0
-
-        ```
-    """
-    if high <= low:
-        return float(low)
-    return float(torch.empty((), dtype=torch.float64).uniform_(low, high, generator=generator).item())
 
 
 def _keypoint_flip_index(keypoint_flip_pairs: list[tuple[int, int]], keypoint_count: int) -> Tensor:

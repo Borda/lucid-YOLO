@@ -64,8 +64,8 @@ import numpy as np
 import torch
 from faster_coco_eval import mask as coco_mask
 from torch import Tensor  # runtime import: LazyTargets' base class subscripts it
-from torchvision.io import ImageReadMode, read_image
 
+from lucid_yolo.data._image import decode_rgb, to_unit_float
 from lucid_yolo.data.coco import parse_coco_keypoints
 from lucid_yolo.data.targets import Targets
 
@@ -74,9 +74,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lucid_yolo.data.letterbox import Letterbox
-
-#: Divisor mapping ``uint8`` pixel values onto the unit float range the model expects.
-_UINT8_MAX = 255.0
 
 #: Element count of a well-formed COCO ``bbox`` (``[x, y, width, height]``).
 _XYWH_LEN = 4
@@ -549,8 +546,14 @@ def read_letterboxed_image(path: Path, letterbox: Letterbox) -> tuple[Tensor, tu
     validation geometry. :func:`letterboxed_batches` is this function in a loop, and
     single-image inference (:func:`lucid_yolo.predict.predict_image`) is one call of it
     — which is why it is a function rather than three lines inside the batcher. A second
-    copy would be free to read ``ImageReadMode.UNCHANGED``, or to scale by ``256``, and
-    the model would answer plausibly either way.
+    copy would be free to read ``ImageReadMode.UNCHANGED``, or to scale a 16-bit PNG by
+    the 8-bit ``255``, and the model would answer plausibly either way.
+
+    The decode and the scale are the training readers' own
+    (:func:`~lucid_yolo.data._image.decode_rgb`,
+    :func:`~lucid_yolo.data._image.to_unit_float`): codes are divided by their dtype's
+    maximum, so an 8-bit image reads exactly as ``code / 255.0`` and a 16-bit one by
+    ``65535``, as it does in training.
 
     Args:
         path: Image file to read.
@@ -561,6 +564,9 @@ def read_letterboxed_image(path: Path, letterbox: Letterbox) -> tuple[Tensor, tu
         ``(height, width)`` the file decoded to — the frame an inverse letterbox maps
         predictions back onto (A10).
 
+    Raises:
+        OSError: If the file is missing or cannot be decoded; the path is named.
+
     Examples:
         ```pycon
         >>> image, orig_size = read_letterboxed_image(path, letterbox)  # needs an image file  # doctest: +SKIP
@@ -569,9 +575,9 @@ def read_letterboxed_image(path: Path, letterbox: Letterbox) -> tuple[Tensor, tu
 
         ```
     """
-    raw = read_image(str(path), ImageReadMode.RGB)
+    raw = decode_rgb(path)
     orig_size = (int(raw.shape[-2]), int(raw.shape[-1]))
-    letterboxed, _ = letterbox(raw.to(torch.float32) / _UINT8_MAX, Targets.empty())
+    letterboxed, _ = letterbox(to_unit_float(raw), Targets.empty())
     return letterboxed, orig_size
 
 

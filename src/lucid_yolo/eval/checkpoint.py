@@ -107,7 +107,7 @@ def load_eval_module(checkpoint: Path, *, use_ema: bool) -> tuple[DetectionLitMo
     if use_ema:
         # One resolution of the callback's key, used for both lookups: the shadow and the
         # counter that says how many updates produced it must come from the same entry.
-        state_key = _overlay_ema(module, payload)
+        state_key = _overlay_ema(module, payload, checkpoint)
         entry = cast("Mapping[str, Any]", payload["callbacks"][state_key])
         info["ema_updates"] = _required_int(entry, "num_updates", f"{checkpoint} callbacks entry {state_key!r}")
     module.eval()
@@ -242,7 +242,7 @@ def _is_available(device: torch.device) -> bool:
     return True
 
 
-def _ema_state_key(callbacks: dict[str, dict[str, object]]) -> str:
+def _ema_state_key(callbacks: dict[str, dict[str, object]], checkpoint: Path) -> str:
     """Resolve the one ``callbacks`` entry that belongs to the EMA callback.
 
     Lightning keys the ``callbacks`` dict by each callback's ``state_key``, which for a
@@ -253,6 +253,7 @@ def _ema_state_key(callbacks: dict[str, dict[str, object]]) -> str:
 
     Args:
         callbacks: The checkpoint's ``callbacks`` mapping.
+        checkpoint: Path to name when no entry, or more than one, names the EMA callback.
 
     Returns:
         The single key naming the EMA callback.
@@ -263,14 +264,14 @@ def _ema_state_key(callbacks: dict[str, dict[str, object]]) -> str:
     matches = [name for name in callbacks if _EMA_CALLBACK_MARKER in name]
     if len(matches) > 1:
         raise ValueError(
-            f"EMA weights requested but the checkpoint carries {len(matches)} callback entries naming "
+            f"EMA weights requested but {checkpoint} carries {len(matches)} callback entries naming "
             f"{_EMA_CALLBACK_MARKER}: {matches}. Which of them is 'the' EMA shadow is not something this "
             f"loader may decide by iteration order."
         )
     if not matches:
         raise ValueError(
             f"EMA weights requested but no callback entry names {_EMA_CALLBACK_MARKER}; "
-            f"the checkpoint carries {sorted(callbacks)}"
+            f"{checkpoint} carries {sorted(callbacks)}"
         )
     return matches[0]
 
@@ -293,7 +294,7 @@ def _float_tensors(module: DetectionLitModule) -> dict[str, Tensor]:
     return {name: tensor for name, tensor in named if tensor.is_floating_point()}
 
 
-def _overlay_ema(module: DetectionLitModule, payload: dict[str, object]) -> str:
+def _overlay_ema(module: DetectionLitModule, payload: dict[str, object], checkpoint: Path) -> str:
     """Copy the checkpoint's EMA shadow over the module's parameters and buffers.
 
     The callback's key is resolved once and handed back, so the caller's ``num_updates``
@@ -308,6 +309,7 @@ def _overlay_ema(module: DetectionLitModule, payload: dict[str, object]) -> str:
     Args:
         module: The module to overlay in place.
         payload: The raw checkpoint dict.
+        checkpoint: Path to name in every refusal.
 
     Returns:
         The ``callbacks`` key the shadow was taken from.
@@ -318,15 +320,15 @@ def _overlay_ema(module: DetectionLitModule, payload: dict[str, object]) -> str:
             parameter or buffer of ``module``.
     """
     callbacks = cast("dict[str, dict[str, object]]", payload.get("callbacks", {}))
-    state_key = _ema_state_key(callbacks)
+    state_key = _ema_state_key(callbacks, checkpoint)
     shadow = cast("dict[str, Tensor] | None", callbacks[state_key].get("shadow"))
     if not shadow:
-        raise ValueError(f"EMA weights requested but {payload.get('checkpoint', 'the checkpoint')} carries no shadow")
+        raise ValueError(f"EMA weights requested but {checkpoint} carries no shadow")
     tensors = _float_tensors(module)
     missing = sorted(set(tensors) - set(shadow))
     if missing:
         raise ValueError(
-            f"EMA shadow in {payload.get('checkpoint', 'the checkpoint')} covers {len(shadow)} tensors but omits "
+            f"EMA shadow in {checkpoint} covers {len(shadow)} tensors but omits "
             f"{len(missing)} of the module's floating-point parameters and buffers: {missing}. Overlaying it "
             f"would report a mixture of EMA and raw weights under the EMA name."
         )

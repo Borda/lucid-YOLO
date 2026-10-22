@@ -12,6 +12,17 @@ checks that
     * the image count declared inside the annotation JSON matches the number of
       image files on disk.
 
+Those names and counts are COCO 2017's own published fact (WP-099e), so they apply where
+the root is written in COCO 2017's spelling. Each split is resolved through
+:func:`~lucid_yolo.data.layout.resolve_split`, as the reader resolves it; a split that
+resolves to any other spelling the layout table accepts — the plain ``train/`` +
+``annotations/instances_train.json`` a ``lucid-data build-tiles`` run writes, among them —
+is checked for presence and parseability only, under its own split name, since COCO 2017's
+totals (and the annotation-vs-disk parity checked against them) describe a different image
+set. ``keypoints=True`` additionally requires each split's ``person_keypoints_*.json``
+beside its ``instances_*.json`` to exist and parse: the keypoint tier's annotation files,
+which the layout table never resolves on its own.
+
 For DOTA-v1.0 (``--dataset dota``) each split directory must hold ``images/`` and
 ``labelTxt/``, every image must have a label file of the same stem and vice
 versa, and every object line must parse (:mod:`lucid_yolo.data.dota`). The totals
@@ -109,11 +120,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lucid_yolo.data.dota import DOTA_CLASSES, parse_dota_label_file
-from lucid_yolo.data.layout import DATA_YAML_NAME, DatasetLayout, detect_layout
+from lucid_yolo.data.layout import CANDIDATES, DATA_YAML_NAME, DatasetLayout, detect_layout, resolve_split
 from lucid_yolo.data.yolo import IMAGE_SUFFIXES, YoloDataConfig, resolve_split_dirs, scan_yolo_label_file
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     #: One layout's label-directory scan: parse every label file under a directory and return
     #: ``(instances, classes, problems)``, one problem per file that failed to parse. The seam
@@ -146,6 +157,17 @@ DOTA_SPLITS = ("train", "val")
 #: check is for. A ``data.yaml`` may also name a ``test:`` split, and requiring it would fail
 #: an export whose test images were never downloaded for a split no run of this project opens.
 YOLO_SPLITS = ("train", "val")
+#: COCO splits a training run builds, each resolved through the layout table.
+_COCO_SPLITS = ("train", "val")
+#: Annotation-file prefix every ``annotations/`` row of the layout table names, and the one COCO
+#: 2017's pose annotations carry in its place beside it (R12).
+_INSTANCES_PREFIX = "instances_"
+_KEYPOINTS_PREFIX = "person_keypoints_"
+#: Top-level sections of a COCO annotation file that the readers iterate as lists. This check
+#: promises presence and parseability, so a section left out is not malformed -- an absent
+#: ``images`` counts as zero -- but one present in any other form is: counting or reading it
+#: would raise or miscount rather than report.
+_COCO_LIST_SECTIONS = ("images", "annotations", "categories")
 #: Image file suffixes counted on disk (COCO 2017 ships ``.jpg``).
 _IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")
 #: Label file suffix of a DOTA ``labelTxt`` directory.
@@ -163,7 +185,8 @@ class SplitCheck:
 
     Attributes:
         name: Split name (e.g. ``"train2017"``).
-        expected_images: Expected on-disk image count for this split.
+        expected_images: Expected on-disk image count for this split, or ``None`` when the
+            split's spelling publishes none and only presence and parseability are checked.
         found_images: Image files actually found on disk (``-1`` if the directory
             is missing).
         annotation_images: Image entries declared in the annotation JSON (``-1``
@@ -172,7 +195,7 @@ class SplitCheck:
     """
 
     name: str
-    expected_images: int
+    expected_images: int | None
     found_images: int
     annotation_images: int
     problems: list[str]
@@ -271,31 +294,42 @@ def _count_annotation_images(annotation_file: Path) -> tuple[int, str | None]:
     """Return the ``images`` count declared in ``annotation_file`` and any error.
 
     Args:
-        annotation_file: Path to the split's ``instances_*.json``.
+        annotation_file: Path to the split's ``instances_*.json``, or to its
+            ``person_keypoints_*.json`` counterpart.
 
     Returns:
         A ``(count, error)`` pair: ``count`` is the number of image entries (or
-        ``-1`` on failure) and ``error`` is a message when the file is missing or
-        cannot be parsed, else ``None``.
+        ``-1`` on failure) and ``error`` is a message naming the file when it is
+        missing, cannot be parsed, or carries one of :data:`_COCO_LIST_SECTIONS` as
+        anything but a JSON array, else ``None``.
     """
     if not annotation_file.is_file():
         return -1, f"annotation file missing: {annotation_file}"
     try:
         with annotation_file.open(encoding="utf-8") as handle:
             payload = json.load(handle)
-    except (OSError, json.JSONDecodeError) as error:
+    # ValueError covers JSONDecodeError, UnicodeDecodeError and the int-digit limit;
+    # RecursionError covers nesting too deep for the parser.
+    except (OSError, RecursionError, ValueError) as error:
         return -1, f"annotation file failed to parse: {annotation_file} ({error})"
+    if not isinstance(payload, dict):
+        return -1, f"annotation file failed to parse: {annotation_file} (top level is not a JSON object)"
+    for section in _COCO_LIST_SECTIONS:
+        if not isinstance(payload.get(section, []), list):
+            return -1, f"annotation file failed to parse: {annotation_file} ({section} is not a JSON array)"
     return len(payload.get("images", [])), None
 
 
-def check_split(name: str, images_dir: Path, annotation_file: Path, expected_images: int) -> SplitCheck:
+def check_split(name: str, images_dir: Path, annotation_file: Path, expected_images: int | None) -> SplitCheck:
     """Validate one split's image directory and annotation file.
 
     Args:
         name: Split name for messages.
         images_dir: The split's image directory.
         annotation_file: The split's annotation JSON.
-        expected_images: The image count this split must have.
+        expected_images: The image count this split must have, which the annotation file's
+            own count must then match too; ``None`` checks only that both exist and the file
+            parses.
 
     Returns:
         A :class:`SplitCheck` capturing the counts and any problems found.
@@ -314,12 +348,12 @@ def check_split(name: str, images_dir: Path, annotation_file: Path, expected_ima
     found = _count_images(images_dir)
     if found < 0:
         problems.append(f"images directory missing: {images_dir}")
-    elif found != expected_images:
+    elif expected_images is not None and found != expected_images:
         problems.append(f"{name}: expected {expected_images} images, found {found}")
     ann_count, ann_error = _count_annotation_images(annotation_file)
     if ann_error is not None:
         problems.append(ann_error)
-    elif found >= 0 and ann_count != found:
+    elif expected_images is not None and found >= 0 and ann_count != found:
         problems.append(f"{name}: {ann_count} images in annotations, {found} on disk")
     return SplitCheck(
         name=name,
@@ -334,15 +368,25 @@ def check_coco_root(
     data_root: Path,
     expected_train: int = COCO_TRAIN_COUNT,
     expected_val: int = COCO_VAL_COUNT,
+    keypoints: bool = False,
 ) -> DataCheck:
-    """Validate a COCO 2017 root against the blueprint section 14.3 layout.
+    """Validate a COCO-format root: COCO 2017's names and counts where it is spelled so.
+
+    Each split is resolved through :func:`~lucid_yolo.data.layout.resolve_split`. A split that
+    resolves to COCO 2017's own ``{split}2017`` pair — or to nothing, where the resolver falls
+    back to that pair and the check reports it missing — is checked against the blueprint
+    section 14.3 layout, published count included. A split resolving to another spelling is
+    checked for presence and parseability alone, under its own split name.
 
     Args:
-        data_root: Directory holding ``train2017``, ``val2017`` and
-            ``annotations``.
+        data_root: Directory holding the split directories and ``annotations``.
         expected_train: Expected ``train2017`` image count (defaults to the real
-            COCO total, overridable so the logic is testable on a fake layout).
-        expected_val: Expected ``val2017`` image count.
+            COCO total, overridable so the logic is testable on a fake layout). Applies
+            only to a split in COCO 2017's spelling.
+        expected_val: Expected ``val2017`` image count, on the same terms.
+        keypoints: Also require each split's ``person_keypoints_*.json``, beside its
+            ``instances_*.json``, to exist and parse. A missing or unparsable file is a
+            root-level problem; each one that parses is a note.
 
     Returns:
         A :class:`DataCheck` aggregating both splits' outcomes.
@@ -355,10 +399,58 @@ def check_coco_root(
 
         ```
     """
-    annotations = data_root / "annotations"
-    train = check_split("train2017", data_root / "train2017", annotations / "instances_train2017.json", expected_train)
-    val = check_split("val2017", data_root / "val2017", annotations / "instances_val2017.json", expected_val)
-    return DataCheck(splits=[train, val])
+    published = {"train": expected_train, "val": expected_val}
+    resolved = {split: resolve_split(data_root, split) for split in _COCO_SPLITS}
+    published_images, _ = CANDIDATES[0]
+    checks = [
+        check_split(images_dir.name, images_dir, annotation_file, published[split])
+        if images_dir == data_root / published_images.format(split=split)
+        else check_split(split, images_dir, annotation_file, None)
+        for split, (images_dir, annotation_file) in resolved.items()
+    ]
+    if not keypoints:
+        return DataCheck(splits=checks)
+    problems, notes = _check_keypoint_files(annotation_file for _, annotation_file in resolved.values())
+    return DataCheck(splits=checks, problems=problems, notes=notes)
+
+
+def _check_keypoint_files(annotation_files: Iterable[Path]) -> tuple[list[str], list[str]]:
+    """Check the ``person_keypoints_*.json`` beside each split's ``instances_*.json``.
+
+    Args:
+        annotation_files: Each split's resolved instances annotation file, in split order.
+
+    Returns:
+        The problems — a keypoint file missing or failing to parse, or an annotation file with
+        no ``instances_`` spelling to name its keypoint counterpart from — and one note per
+        keypoint file that parsed.
+
+    Examples:
+        ```pycon
+        >>> problems, notes = _check_keypoint_files([Path("/no/annotations/instances_val.json")])
+        >>> problems, notes
+        (['annotation file missing: /no/annotations/person_keypoints_val.json'], [])
+
+        ```
+    """
+    problems: list[str] = []
+    notes: list[str] = []
+    for annotation_file in annotation_files:
+        if not annotation_file.name.startswith(_INSTANCES_PREFIX):
+            problems.append(
+                f"no {_KEYPOINTS_PREFIX}*.json can be named beside {annotation_file}: only an "
+                f"{_INSTANCES_PREFIX}*.json annotation file has a keypoint counterpart"
+            )
+            continue
+        keypoint_file = annotation_file.with_name(
+            _KEYPOINTS_PREFIX + annotation_file.name.removeprefix(_INSTANCES_PREFIX)
+        )
+        _, error = _count_annotation_images(keypoint_file)
+        if error is None:
+            notes.append(f"keypoint annotations parse: {keypoint_file.name}")
+        else:
+            problems.append(error)
+    return problems, notes
 
 
 def _stems(directory: Path, suffixes: tuple[str, ...]) -> set[str] | None:
@@ -881,6 +973,7 @@ def check_dataset(
     expected_images: int | None = None,
     expected_instances: int | None = None,
     expected_classes: int | None = None,
+    keypoints: bool = False,
 ) -> int:
     """Validate a provisioned dataset root against the layout it is written in.
 
@@ -910,6 +1003,10 @@ def check_dataset(
         expected_instances: ``dota`` and ``yolo`` — object-line count to require,
             difficult instances included.
         expected_classes: ``dota`` and ``yolo`` — number of distinct classes to require.
+        keypoints: ``coco`` only — also require each split's ``person_keypoints_*.json``
+            beside its ``instances_*.json`` to exist and parse. Those are the keypoint
+            tier's annotation files, which the layout never resolves on its own, so a pose
+            config left pointing elsewhere is caught here rather than after the run queued.
 
     Returns:
         ``0`` when the layout is valid, ``1`` otherwise — including when the root satisfies
@@ -956,11 +1053,12 @@ def check_dataset(
         if dataset is None:
             print(format_report(DataCheck(splits=[], problems=probe_problems), data_root))
             return 1
-    _check_flags_apply(dataset, oriented, splits, (expected_images, expected_instances, expected_classes))
+    _check_flags_apply(dataset, oriented, splits, (expected_images, expected_instances, expected_classes), keypoints)
     result = _check_root(
         data_root,
         dataset,
         oriented=oriented,
+        keypoints=keypoints,
         splits=splits,
         expected_images=expected_images,
         expected_instances=expected_instances,
@@ -1008,6 +1106,7 @@ def _check_flags_apply(
     oriented: bool,
     splits: tuple[str, ...] | None,
     expectations: tuple[int | None, ...],
+    keypoints: bool = False,
 ) -> None:
     """Reject a flag belonging to a layout other than the one being checked.
 
@@ -1016,6 +1115,7 @@ def _check_flags_apply(
         oriented: The oriented-rows flag.
         splits: The split names stated, or ``None`` for the layout's own.
         expectations: The three ``expected_*`` values.
+        keypoints: The keypoint-annotation flag, which names COCO's own pose files.
 
     Raises:
         ValueError: If a flag applies to no layout in play. The counts are meaningless for
@@ -1046,6 +1146,11 @@ def _check_flags_apply(
             f"splits applies to --dataset {DOTA_DATASET} or --dataset {DatasetLayout.YOLO.value}, "
             f"whose split names are the root's own, not {dataset!r}"
         )
+    if keypoints and dataset != DatasetLayout.COCO.value:
+        raise ValueError(
+            f"keypoints applies to --dataset {DatasetLayout.COCO.value}, whose person_keypoints_*.json "
+            f"files sit beside its instances_*.json, not {dataset!r}"
+        )
 
 
 def _check_root(
@@ -1057,6 +1162,7 @@ def _check_root(
     expected_images: int | None,
     expected_instances: int | None,
     expected_classes: int | None,
+    keypoints: bool = False,
 ) -> DataCheck:
     """Run the check belonging to one layout.
 
@@ -1064,6 +1170,7 @@ def _check_root(
         data_root: Dataset root directory.
         dataset: The layout to check, already validated and resolved.
         oriented: Whether YOLO rows are read as the oriented variant.
+        keypoints: Whether COCO's ``person_keypoints_*.json`` files are checked too.
         splits: Split names to check, or ``None`` to keep the layout's own — which each
             branch names for itself here, since which splits a layout has by default is a
             fact about that layout rather than about this dispatch.
@@ -1090,7 +1197,7 @@ def _check_root(
         ```
     """
     if dataset == DatasetLayout.COCO.value:
-        return check_coco_root(data_root)
+        return check_coco_root(data_root, keypoints=keypoints)
     if dataset == DOTA_DATASET:
         return check_dota_root(
             data_root,

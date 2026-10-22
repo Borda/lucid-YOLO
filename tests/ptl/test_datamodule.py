@@ -26,8 +26,7 @@ import torch
 from torch import Tensor
 from torchvision.io import write_png
 
-from lucid_yolo.data import coco as coco_data
-from lucid_yolo.data import yolo as yolo_data
+from lucid_yolo.data import _image as image_data
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.layout import DATA_YAML_NAME, DatasetLayout
 from lucid_yolo.data.letterbox import Letterbox
@@ -220,14 +219,13 @@ def _datamodule(data_root: Path, **kwargs: object) -> DetectionDataModule:
 def decode_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Record every image decode either reader performs, by the path it was asked to read."""
     calls: list[str] = []
-    incumbent = coco_data.read_image
+    incumbent = image_data.read_image
 
     def counted_read_image(path: str, mode: object) -> Tensor:
         calls.append(path)
         return incumbent(path, mode)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(coco_data, "read_image", counted_read_image)
-    monkeypatch.setattr(yolo_data, "read_image", counted_read_image)
+    monkeypatch.setattr(image_data, "read_image", counted_read_image)
     return calls
 
 
@@ -670,7 +668,10 @@ class TestYoloCapabilities:
             _datamodule(tmp_path, layout="yolo", val_ann_file=tmp_path / "instances_val.json")
 
     def test_copy_paste_suppressed_on_yolo_root(self, tmp_path: Path) -> None:
-        """The format carries no rings, so copy-paste would decode a source sample and paste nothing."""
+        """The reader parses only detection and oriented rows, so there are no rings for copy-paste to paste.
+
+        Left on, copy-paste would decode a whole source sample per draw and find no paste candidates.
+        """
         datamodule = _datamodule(_write_yolo_root(tmp_path), variant=_COPY_PASTE_VARIANT)
         datamodule.setup("fit")
 
