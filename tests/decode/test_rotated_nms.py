@@ -72,12 +72,6 @@ _BAR_EXTENTS = (20.0, 2.0)
 _CENTRE = (32.0, 32.0)
 
 
-@pytest.fixture(autouse=True)
-def _seed_rng() -> None:
-    """Seed the torch RNG so any random input would be deterministic."""
-    torch.manual_seed(0)
-
-
 def _ltrb_from_envelope(envelope: tuple[float, float, float, float], point: Tensor, stride: Tensor) -> Tensor:
     """Return the raw ltrb distances that decode to ``envelope`` from ``point``.
 

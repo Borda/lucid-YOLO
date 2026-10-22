@@ -25,7 +25,9 @@ import re
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
+from scripts.lint._common import REPO_ROOT, add_repo_root_argument, print_failure
+
 DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 
 #: Lowest work-package count ROADMAP.md is allowed to hold. A ratchet, not a target:
@@ -722,20 +724,12 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_DOCS_DIR,
         help=f"docs directory to scan (default: {DEFAULT_DOCS_DIR})",
     )
-    parser.add_argument(
-        "--repo-root",
-        type=Path,
-        default=REPO_ROOT,
-        help=f"repo root, for AGENTS.md and relative-path reporting (default: {REPO_ROOT})",
-    )
+    add_repo_root_argument(parser, "repo root, for AGENTS.md and relative-path reporting")
     args = parser.parse_args(argv)
 
     violations = find_violations(args.docs_dir, args.repo_root)
     if violations:
-        print(f"docs-present audit FAILED: {len(violations)} violation(s)")
-        for item in violations:
-            print(f"  - {item}")
-        return 1
+        return print_failure("docs-present audit", violations)
     print("docs-present audit clean: every governance register check passed")
     return 0
 

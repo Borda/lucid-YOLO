@@ -35,12 +35,6 @@ _BOX_CORNERS = 4
 _SATURATED = 10.0  # sigmoid(+-10) is within 5e-5 of 1/0: a hard prototype edge.
 
 
-@pytest.fixture(autouse=True)
-def _seed() -> None:
-    """Seed the global RNG so the random top-k comparison is reproducible."""
-    torch.manual_seed(0)
-
-
 def _legacy_o2o_topk(scores: torch.Tensor, boxes: torch.Tensor, k: int) -> torch.Tensor:
     """Reimplement the pre-WP-053a ``o2o_topk`` body verbatim, as the reference ranking.
 

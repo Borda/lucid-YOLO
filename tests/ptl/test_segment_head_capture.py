@@ -8,13 +8,14 @@ import dataclasses
 import pickle
 import re
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from itertools import pairwise
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer
 from pytorch_lightning import __version__ as lightning_version
 from pytorch_lightning.accelerators import CUDAAccelerator
@@ -47,15 +48,8 @@ from lucid_yolo.ptl.segment_head_capture import (
 
 
 @pytest.fixture(autouse=True)
-def _determinism() -> Iterator[None]:
+def _deterministic(deterministic_kernels: None) -> None:
     """Use the public-data comparison's deterministic kernel policy."""
-    old = torch.are_deterministic_algorithms_enabled()
-    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-    torch.use_deterministic_algorithms(True)
-    try:
-        yield
-    finally:
-        torch.use_deterministic_algorithms(old, warn_only=warn_only)
 
 
 def _module(**kwargs: object) -> DetectionLitModule:
@@ -384,8 +378,7 @@ def test_branch_dispatch_override_uses_native_route(method: str) -> None:
         assert _head_breach(model.head) is not None
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+@requires_cuda
 @pytest.mark.parametrize(
     "dtype",
     [
@@ -634,8 +627,8 @@ def test_unlisted_stage_type_is_named_not_reported_as_forward_override() -> None
     assert _stage_breach(owner) == "a prediction stage of type Identity is not in the native stage list"
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available() or not _BF16_REPLAY_SUPPORTED, reason="BF16 replay runtime required")
+@requires_cuda
+@pytest.mark.skipif(not _BF16_REPLAY_SUPPORTED, reason="BF16 replay runtime required")
 def test_cuda_partial_batch_uses_native_without_another_recording() -> None:
     """A partial image signature neither overwrites the full recording nor grows its cache."""
     torch.manual_seed(23)
@@ -656,8 +649,8 @@ def test_cuda_partial_batch_uses_native_without_another_recording() -> None:
     replay._segment_head_capture.clear()
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available() or not _BF16_REPLAY_SUPPORTED, reason="BF16 replay runtime required")
+@requires_cuda
+@pytest.mark.skipif(not _BF16_REPLAY_SUPPORTED, reason="BF16 replay runtime required")
 @pytest.mark.parametrize("change", ["hook", "fusion_hook", "storage", "negative_view", "helper", "frozen"])
 def test_cuda_contract_changes_retire_and_keep_native_observability(change: str) -> None:
     """Hooks, storage changes, helper overrides and frozen parameters cannot reuse stale graphs."""
@@ -721,8 +714,7 @@ def test_cuda_contract_changes_retire_and_keep_native_observability(change: str)
         model._segment_head_capture.clear()
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+@requires_cuda
 def test_cuda_fit_replays_through_real_optimizer_callbacks_and_validation() -> None:
     """Replay the real segmentation objective across validation under automatic MuSGD and EMA.
 
@@ -938,8 +930,8 @@ def test_attribute_certificate_keeps_live_buffer_values_and_mode_roundtrip() -> 
     assert certificate.matches(tuple(owner.modules()))
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available() or not _BF16_REPLAY_SUPPORTED, reason="BF16 replay runtime required")
+@requires_cuda
+@pytest.mark.skipif(not _BF16_REPLAY_SUPPORTED, reason="BF16 replay runtime required")
 def test_cuda_second_forward_keeps_first_backward_activations() -> None:
     """A second forward stays native until the first graph's backward consumes its private activations."""
     torch.manual_seed(29)
@@ -982,8 +974,7 @@ def test_lazy_negative_parameter_view_is_not_certified_with_unchanged_storage() 
     assert _parameter_breach(parameters, buffers, torch.device("cpu")) is not None
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+@requires_cuda
 def test_recorded_group_synchronizes_before_buffer_restore() -> None:
     """A warmup failure synchronizes the device before the BatchNorm snapshot is copied back.
 

@@ -11,9 +11,6 @@ determinism.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
-import pytest
 import torch
 from fuse_augmentations import letterbox_matrix  # type: ignore[import-untyped]
 
@@ -24,13 +21,6 @@ _ORIG_H = 500
 _ORIG_W = 800
 _TARGET = 640
 _EXPECTED_R = 0.8
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed every RNG source before each test so generated geometry is deterministic."""
-    torch.manual_seed(0)
-    yield
 
 
 def _random_polygons(n: int, n_points: int = 5) -> list[torch.Tensor]:

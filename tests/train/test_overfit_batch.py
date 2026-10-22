@@ -51,7 +51,6 @@ from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
     from lucid_yolo.data.targets import Targets
@@ -124,13 +123,6 @@ class _StepResult:
     grads_finite: bool
     logits_grad_norm: float
     box_grad_norm: float
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed the global RNG before each test (the run itself is RNG-free)."""
-    torch.manual_seed(0)
-    yield
 
 
 def _first_nonempty_targets(dataset: CocoDetectionDataset, count: int) -> list[Targets]:
@@ -398,7 +390,7 @@ def test_all_leaf_grads_populated(overfit_batch: _Batch) -> None:
 
 
 @pytest.mark.parametrize("alpha", [pytest.param(0.0, id="alpha-o2o-only"), pytest.param(1.0, id="alpha-o2m-only")])
-def test_alpha_extremes_still_train(overfit_batch: _Batch, alpha: float) -> None:
+def test_alpha_extremes_train(overfit_batch: _Batch, alpha: float) -> None:
     """Both branch-weight extremes yield finite loss components and finite gradients."""
     result = _one_step(overfit_batch, alpha=alpha)
     assert result.components_finite

@@ -205,7 +205,7 @@ class TestTaskRefusalMessages:
         for sibling in siblings:
             assert _TASK_ENTRY_POINTS[sibling][0] in message, f"{sibling}'s entry point is unnamed"
 
-    def test_refusal_names_task_checkpoint_actually_carries(self) -> None:
+    def test_refusal_names_task_checkpoint_carries(self) -> None:
         """The message reports the checkpoint's own task, which is what the caller has to act on.
 
         Naming the siblings is only half of a redirection: the caller also needs to know

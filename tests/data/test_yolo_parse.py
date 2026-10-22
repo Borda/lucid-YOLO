@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -61,13 +60,6 @@ _ORIENTED_AXIS_RBOX = [30.0, 20.0, 40.0, 20.0, 0.0]
 _ORIENTED_TILTED_ROW = "1 0.0 0.25 0.2 0.75 0.3 0.5 0.1 0.0"
 _ORIENTED_TILTED_BOX = [0.0, 0.0, 30.0, 30.0]
 _ORIENTED_TILTED_RBOX = [15.0, 15.0, 28.284271, 14.142136, 0.785398]
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed the global RNG before each test (the reader itself draws nothing)."""
-    torch.manual_seed(0)
-    yield
 
 
 def _write_image(path: Path, seed: int | None = None) -> None:

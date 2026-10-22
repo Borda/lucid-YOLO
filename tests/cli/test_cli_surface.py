@@ -479,7 +479,7 @@ class TestDataCommandConfigFlag:
 
         assert exit_code == 1, "the root does not exist, so the check fails -- but it ran"
 
-    def test_invocation_without_config_still_runs(self, tmp_path: Path) -> None:
+    def test_invocation_without_config_runs(self, tmp_path: Path) -> None:
         """Omitting ``--config`` is unaffected by the key the flag adds to the namespace.
 
         The ``None``-valued key is present whether or not the flag was typed, so this is

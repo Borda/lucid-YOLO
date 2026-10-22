@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import copy
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import fields
 from types import SimpleNamespace
 from typing import cast
@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from markers import requires_cuda, skip_unless_bf16_replay
 from pytorch_lightning import Trainer
 from torch.utils.data import DataLoader
 
@@ -26,15 +27,8 @@ from lucid_yolo.ptl.network_capture import _FeatureNetwork, _input_breach, _Netw
 
 
 @pytest.fixture(autouse=True)
-def _deterministic() -> Iterator[None]:
+def _deterministic(deterministic_kernels: None) -> None:
     """Match the deterministic kernel policy of the public-data fits."""
-    enabled = torch.are_deterministic_algorithms_enabled()
-    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-    torch.use_deterministic_algorithms(True)
-    try:
-        yield
-    finally:
-        torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
 
 
 def _pose(**kwargs: object) -> DetectionLitModule:
@@ -101,8 +95,7 @@ def _stem_gradients(model: DetectionLitModule) -> list[str]:
     ]
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA graph replay")
+@requires_cuda
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
 @pytest.mark.parametrize(
     ("loss_fields", "stems_trained"),
@@ -212,8 +205,7 @@ def _step_pair(
     _assert_same_gradients_and_state(native, replayed)
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA graph replay")
+@requires_cuda
 @pytest.mark.parametrize(
     "freeze",
     [
@@ -237,8 +229,7 @@ def test_pose_replay_with_partial_freeze_matches_native(freeze: tuple[str, ...])
         assert all(parameter.grad is None for parameter in getattr(replayed, stage).parameters())
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA graph replay")
+@requires_cuda
 def test_pose_unfreeze_mid_fit_warns_once_and_stays_native() -> None:
     """Unfreezing a stage after recording retires the replay with one warning and keeps native results.
 
@@ -327,8 +318,7 @@ def _pose_batches(layout: str) -> list[tuple[torch.Tensor, list[Targets]]]:
     return batches
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires public CUDA training")
+@requires_cuda
 @pytest.mark.parametrize("precision", ["32-true", "16-mixed", "bf16-mixed"])
 @pytest.mark.parametrize("accumulation", [1, 2])
 @pytest.mark.parametrize("layout", ["uniform", "empty", "short-last", "mixed", "invisible"])
@@ -394,8 +384,7 @@ def test_pose_trainer_matches_native(
     _same_state(*states)
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires public CUDA training")
+@requires_cuda
 def test_pose_trainer_with_optimizer_captures_matches_native(graph_recordings: MagicMock) -> None:
     """The benchmarked combination of network replay, orthogonalization and update capture stays native-exact.
 
@@ -517,8 +506,7 @@ def test_frozen_features_leave_full_native_call_to_owner() -> None:
     assert features is None and holder._disabled and holder._network is None
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA pose dispatch")
+@requires_cuda
 @pytest.mark.parametrize(
     ("location", "reason"),
     [
@@ -748,15 +736,19 @@ def test_native_stem_executor_keeps_every_field_and_call_order() -> None:
             assert _bits_equal(left, right), field.name
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires independent CUDA stem replay")
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+@requires_cuda
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        pytest.param(torch.float32, id="float32"),
+        pytest.param(torch.float16, id="float16"),
+        pytest.param(torch.bfloat16, id="bfloat16", marks=skip_unless_bf16_replay),
+    ],
+)
 def test_pose_stems_replay_through_changing_supervision(
-    dtype: torch.dtype, graph_recordings: MagicMock, bf16_replay_expected: bool, monkeypatch: pytest.MonkeyPatch
+    dtype: torch.dtype, graph_recordings: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Unused point backwards stay absent and resume replay when supervision returns."""
-    if dtype == torch.bfloat16 and not bf16_replay_expected:
-        pytest.skip("BF16 graph replay requires the verified torch 2.9 runtime")
     launches: list[int] = []
     native_replay = torch.cuda.CUDAGraph.replay
 
@@ -803,8 +795,7 @@ def test_pose_stems_replay_through_changing_supervision(
     assert replayed._network_capture._stems == {}
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires differentiable CUDA stem inputs")
+@requires_cuda
 def test_stem_replay_preserves_input_gradients_and_accumulation() -> None:
     """A stem propagates feature gradients without overwriting adopted parameter gradients."""
     torch.manual_seed(42)
@@ -984,8 +975,7 @@ def test_changed_pose_stem_ownership_retires_all_holders() -> None:
     assert holder._disabled and holder._stems == {} and holder._stem_owners is None
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires retirement before CUDA feature replay")
+@requires_cuda
 def test_replaced_pose_stem_keeps_complete_forward_native() -> None:
     """Replacement is detected before recording can leave an obsolete graph pool alive."""
     native, replayed = _frozen_pair(())
@@ -1001,8 +991,7 @@ def test_replaced_pose_stem_keeps_complete_forward_native() -> None:
     assert replayed._network_capture._network is None and replayed._network_capture._stems == {}
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires changed CUDA stem trainability")
+@requires_cuda
 def test_changed_stem_trainability_retires_only_its_recording() -> None:
     """Freezing and unfreezing one point stem preserves native gradients and optimizer state."""
     native, replayed = _frozen_pair(())
@@ -1033,8 +1022,7 @@ def test_changed_stem_trainability_retires_only_its_recording() -> None:
     _same_state(optimizers[0].state_dict(), optimizers[1].state_dict())
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires changed CUDA stem mode")
+@requires_cuda
 def test_changed_stem_mode_retires_only_its_recording() -> None:
     """Switching one recorded point stem to eval retires that stem alone and keeps native parity.
 

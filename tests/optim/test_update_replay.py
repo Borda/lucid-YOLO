@@ -9,25 +9,13 @@ from typing import Any
 
 import pytest
 import torch
+from markers import requires_cuda
+from tensors import assert_bytes
 from torch import Tensor
 
 from lucid_yolo.optim.musgd import MuSGD, _memory_overlaps
 from lucid_yolo.optim.replay import _ACTIVE
 from lucid_yolo.optim.update_replay import _UpdateReplay
-
-
-def assert_bytes(left: Tensor, right: Tensor) -> None:
-    """Compare numerical storage without rounding or hiding signed zero.
-
-    Examples:
-        >>> assert_bytes(torch.tensor([-0.0]), torch.tensor([-0.0]))
-    """
-    assert left.shape == right.shape
-    assert left.dtype == right.dtype
-    assert torch.equal(
-        left.detach().contiguous().reshape(-1).view(torch.uint8),
-        right.detach().contiguous().reshape(-1).view(torch.uint8),
-    )
 
 
 def assert_bytes_except_nan(left: Tensor, right: Tensor) -> None:
@@ -215,8 +203,7 @@ class TestNativeUpdates:
         assert not replay._supported([params[0]], [gradient], [buffer], group)
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="update replay needs CUDA")
+@requires_cuda
 class TestCUDAUpdates:
     @pytest.mark.parametrize("capture_orthogonalization", [False, True])
     def test_new_gradients_rates_and_native_fallbacks_match_bytes(self, capture_orthogonalization: bool) -> None:

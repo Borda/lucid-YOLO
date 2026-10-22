@@ -29,7 +29,9 @@ import re
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
+from scripts.lint._common import REPO_ROOT, print_failure, sorted_rglob
+
 #: Roots scanned when no file is named on the command line.
 DEFAULT_ROOTS = ("src",)
 #: A fence line, opening (with its language) or closing (without one).
@@ -145,7 +147,7 @@ def _default_paths(repo_root: Path) -> list[Path]:
 
         ```
     """
-    return sorted(path for name in DEFAULT_ROOTS for path in (repo_root / name).rglob("*.py"))
+    return [path for name in DEFAULT_ROOTS for path in sorted_rglob(repo_root / name, "*.py")]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -166,10 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     paths = args.files or _default_paths(REPO_ROOT)
     violations = find_violations(paths)
     if violations:
-        print(f"doctest-fence audit FAILED: {len(violations)} violation(s)")
-        for item in violations:
-            print(f"  - {item}")
-        return 1
+        return print_failure("doctest-fence audit", violations)
     print(f"doctest-fence audit clean: {len(paths)} module(s)")
     return 0
 

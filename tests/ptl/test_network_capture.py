@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer
 from pytorch_lightning.accelerators import CUDAAccelerator
 from pytorch_lightning.plugins.precision import MixedPrecision
@@ -39,15 +40,8 @@ from lucid_yolo.ptl.network_capture import _NetworkCapture, _NetworkCaptureLifec
 
 
 @pytest.fixture(autouse=True)
-def _deterministic_kernels() -> Iterator[None]:
-    """Use the deterministic policy of the public-data trajectory comparison."""
-    enabled = torch.are_deterministic_algorithms_enabled()
-    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-    torch.use_deterministic_algorithms(True)
-    try:
-        yield
-    finally:
-        torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
+def _deterministic(deterministic_kernels: None) -> None:
+    """Compare under the deterministic kernel policy of the public-data trajectory comparison."""
 
 
 def _module(**kwargs: object) -> DetectionLitModule:
@@ -291,9 +285,6 @@ def test_both_capture_flags_reach_optimizer_and_callbacks() -> None:
     assert any(isinstance(callback, _NetworkCaptureLifecycle) for callback in model.configure_callbacks())
 
 
-_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
-
-
 def _targets(count: int) -> Targets:
     """Build ``count`` nested boxes of class ids cycling through the four classes.
 
@@ -353,8 +344,7 @@ def _assert_identical(left: object, right: object) -> None:
     torch.testing.assert_close(left, right, rtol=0, atol=0)
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 @pytest.mark.parametrize("dtype", [None, torch.bfloat16, torch.float16])
 @pytest.mark.parametrize("accumulation", [1, 2])
 def test_cuda_replay_matches_eager_updates_and_buffers(
@@ -399,8 +389,7 @@ def test_cuda_replay_matches_eager_updates_and_buffers(
     assert recorded() is None
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 def test_partial_batch_stays_eager_and_reuses_single_recording() -> None:
     """A short last batch does not grow a cache or replace the full-batch graph."""
     model = _module().cuda()
@@ -415,8 +404,7 @@ def test_partial_batch_stays_eager_and_reuses_single_recording() -> None:
     holder.clear()
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 @pytest.mark.parametrize("change", ["hook", "storage", "precision", "batchnorm"])
 def test_mutated_contract_retires_recording(change: str) -> None:
     """Changes hidden from a static graph take the ordinary forward for the rest of the fit."""
@@ -448,8 +436,7 @@ def test_mutated_contract_retires_recording(change: str) -> None:
         holder.clear()
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 def test_failed_recording_restores_rng_and_buffers() -> None:
     """A failed CUDA setup cannot leave warmup's BatchNorm or RNG mutations behind."""
     model = _module().cuda()
@@ -476,8 +463,7 @@ def test_failed_recording_restores_rng_and_buffers() -> None:
     assert holder._network is None
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 @pytest.mark.parametrize("custom", ["root_hook", "forward_override"])
 def test_training_objective_preserves_root_customisations(custom: str) -> None:
     """The tensor-tuple view cannot bypass a hook or an overridden public forward."""
@@ -518,8 +504,7 @@ def test_training_objective_preserves_root_customisations(custom: str) -> None:
             handle.remove()
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 def test_public_forward_never_records() -> None:
     """Prediction and direct callers keep ordinary tensor ownership even when the flag is on."""
     model = _module(capture_network=True).cuda()
@@ -529,8 +514,7 @@ def test_public_forward_never_records() -> None:
         assert output.o2m_cls.shape[0] == 2
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 def test_anomaly_detection_trainer_stays_eager() -> None:
     """The public debug flag keeps backward NaN checks outside CUDA recordings."""
     model = _module(capture_network=True)
@@ -561,8 +545,7 @@ def test_anomaly_detection_trainer_stays_eager() -> None:
     assert model._network_capture._network is None
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 def test_anomaly_detection_retires_existing_recording() -> None:
     """Enabling debug checks after capture releases the graph before the next call."""
     model = _module().cuda()
@@ -580,8 +563,7 @@ def test_anomaly_detection_retires_existing_recording() -> None:
     assert all(torch.isfinite(parameter.grad).all() for parameter in model.parameters() if parameter.grad is not None)
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 @pytest.mark.parametrize("precision", ["bf16-mixed", "16-mixed"])
 @pytest.mark.parametrize("accumulation", [1, 2])
 def test_trainer_activates_once_per_fit_and_cleans_up(
@@ -676,8 +658,7 @@ class _OverflowModule(DetectionLitModule):
         return loss * float("inf") if batch_idx == 0 else loss
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 @pytest.mark.parametrize("accumulation", [1, 2])
 def test_fp16_scaler_recovers_after_overflow(accumulation: int, replay_spy: MagicMock) -> None:
     """An overflow skips one update, then eager and replay recover identical optimizer state.
@@ -725,8 +706,7 @@ def test_fp16_scaler_recovers_after_overflow(accumulation: int, replay_spy: Magi
         assert torch.equal(expected, replay.state_dict()[name]), name
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 def test_two_epoch_replay_with_validation_and_ema_matches_eager(replay_spy: MagicMock) -> None:
     """Train, validate under the EMA shadow, train again: replay stays engaged and tracks eager bit for bit.
 
@@ -747,8 +727,7 @@ def test_two_epoch_replay_with_validation_and_ema_matches_eager(replay_spy: Magi
     _assert_identical(outcomes[0], outcomes[1])
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 def test_resume_from_checkpoint_with_replay_matches_eager(tmp_path: Path, replay_spy: MagicMock) -> None:
     """A fit resumed from a saved checkpoint records afresh and finishes where an eager resume does.
 
@@ -770,8 +749,7 @@ def test_resume_from_checkpoint_with_replay_matches_eager(tmp_path: Path, replay
     _assert_identical(outcomes[0], outcomes[1])
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 def test_load_state_dict_assign_retires_recording_and_matches_eager_gradients() -> None:
     """Assigning checkpoint tensors after recording leaves the graph on stale storage, so it must retire.
 
@@ -795,8 +773,7 @@ def test_load_state_dict_assign_retires_recording_and_matches_eager_gradients() 
     _assert_identical([p.grad for p in eager.parameters()], [p.grad for p in replay.parameters()])
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 @pytest.mark.parametrize("algorithm", ["norm", "value"])
 def test_gradient_clipping_with_replay_matches_eager(
     algorithm: Literal["norm", "value"], replay_spy: MagicMock
@@ -814,8 +791,7 @@ def test_gradient_clipping_with_replay_matches_eager(
     _assert_identical(outcomes[0], outcomes[1])
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 @pytest.mark.parametrize(
     "window",
     [
@@ -902,8 +878,7 @@ def _fit_and_discard(
     return probe.network
 
 
-@pytest.mark.gpu
-@_cuda
+@requires_cuda
 @pytest.mark.parametrize(
     ("module_class", "expectation"),
     [

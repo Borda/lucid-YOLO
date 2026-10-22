@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer, seed_everything
 from pytorch_lightning.plugins.precision import MixedPrecision
 from torch.utils.data import DataLoader
@@ -164,9 +165,17 @@ def test_pose_validation_keeps_native_dispatch_with_certified_criterion() -> Non
     assert torch.isfinite(loss) and not model._loss_capture._disabled
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA execution needs a device")
-@pytest.mark.parametrize("precision", ["32-true", "16-mixed", "bf16-mixed"])
+@requires_cuda
+@pytest.mark.parametrize(
+    "precision",
+    [
+        "32-true",
+        "16-mixed",
+        pytest.param(
+            "bf16-mixed", marks=pytest.mark.skipif(not _BF16_SUPPORTED, reason="BF16 replay requires torch 2.9")
+        ),
+    ],
+)
 @pytest.mark.parametrize("count,visible,records", [(2, True, True), (2, False, True), (0, False, False)])
 def test_pose_cuda_execution_keeps_objective_and_gradient_direction(
     precision: str, count: int, visible: bool, records: bool
@@ -179,8 +188,6 @@ def test_pose_cuda_execution_keeps_objective_and_gradient_direction(
     Besides a batch of visible points, the step runs one whose points are all invisible and one with no
     instances. An empty batch is answered natively, so the recorder only records for the first two.
     """
-    if precision == "bf16-mixed" and not _BF16_SUPPORTED:
-        pytest.skip("BF16 replay requires torch 2.9")
     seed_everything(23)
     batch = _batch(count, visible)
     results = []
@@ -259,8 +266,7 @@ def test_pose_cuda_execution_keeps_objective_and_gradient_direction(
     assert torch.cosine_similarity(native, executed, dim=0) >= 1 - epsilon
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA execution needs a device")
+@requires_cuda
 def test_pose_cuda_execution_composes_with_network_replay() -> None:
     """Pose loss dispatch stays correct alongside the independent backbone/neck network replay.
 
@@ -484,8 +490,7 @@ def test_pose_point_mismatch_clears_recorder_on_fit_exception() -> None:
     assert not model._loss_capture._disabled
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA execution needs a device")
+@requires_cuda
 def test_pose_cuda_point_mismatch_releases_recording() -> None:
     """A recording made before the point-count check raises is released by the fit's exception hook.
 

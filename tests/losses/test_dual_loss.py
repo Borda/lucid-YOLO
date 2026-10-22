@@ -24,12 +24,6 @@ from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.losses import DualBranchLoss, DualLossOutput
 
 
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed every RNG source before each test for deterministic tensors."""
-    torch.manual_seed(0)
-
-
 def _grid_points() -> Tensor:
     """Return the 16 stride-8 anchor centres of a 4x4 grid; x fastest, row-major.
 

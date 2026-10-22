@@ -31,12 +31,6 @@ from lucid_yolo.losses.rle_loss import _MIN_SIGMA, _AffineCoupling, _CouplingCon
 _LAPLACE_ATOL = 1e-5
 
 
-@pytest.fixture(autouse=True)
-def _seed_rng() -> None:
-    """Seed torch so flow initialization and sampled inputs are deterministic."""
-    torch.manual_seed(0)
-
-
 class TestAffineCouplingInvertibility:
     """A single coupling layer's synthesis and inverse are exact inverses."""
 
@@ -241,7 +235,7 @@ class TestVisibilityMasking:
 
         assert torch.equal(loss_occluded, loss_visible)
 
-    def test_no_visible_points_gives_finite_zero_still_attached_to_graph(self) -> None:
+    def test_no_visible_points_gives_finite_zero_attached_to_graph(self) -> None:
         """All-``v=0`` input returns a finite zero, not ``NaN``, still connected to gradients.
 
         Mirrors :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s
@@ -345,7 +339,7 @@ class TestCouplingScaleBound:
 
         assert torch.all(log_scale.abs() <= bound + _LAPLACE_ATOL)
 
-    def test_far_out_residual_still_yields_finite_loss_and_gradient(self) -> None:
+    def test_far_out_residual_yields_finite_loss_and_gradient(self) -> None:
         """The regression this bound exists to prevent, stated as the property that failed.
 
         A residual two orders of magnitude outside the ``O(1)`` range R14's equations are

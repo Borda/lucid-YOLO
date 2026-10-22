@@ -8,21 +8,11 @@ the dtype round-trip, and input-validation errors.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 import pytest
 import torch
 
 from lucid_yolo.optim import orthogonalize
 from lucid_yolo.optim.newton_schulz import _orthogonalize_batched
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed torch before every test so random matrices are reproducible."""
-    torch.manual_seed(0)
-    yield
-
 
 # NOTE (WP-031 tolerance deviation): the R8 coefficient triple
 # (3.4445, -4.7750, 2.0315) is the aggressive Muon quintic. Its scalar map
@@ -194,7 +184,7 @@ class TestEdgeCases:
         assert result.dtype == torch.float64
         assert torch.isfinite(result).all()
 
-    def test_float16_still_promotes_to_float32(self) -> None:
+    def test_float16_promotes_to_float32(self) -> None:
         """A half-precision input is computed at float32, which is the A5/AMP gate.
 
         The float64 fix promotes rather than pins, so this is the half it must not have
@@ -424,7 +414,7 @@ class TestInputValidation:
         with pytest.raises(ValueError, match="steps"):
             orthogonalize(matrix, steps=steps)
 
-    def test_single_step_still_moves_singular_values(self) -> None:
+    def test_single_step_moves_singular_values(self) -> None:
         """``steps=1`` is accepted and is not a no-op, which is what makes 1 the boundary.
 
         The refusal above is a claim about where the usable range starts; asserting the

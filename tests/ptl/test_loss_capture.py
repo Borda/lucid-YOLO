@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer, seed_everything
 from pytorch_lightning.plugins.precision import MixedPrecision
 from torch.utils.data import DataLoader
@@ -32,15 +33,8 @@ from lucid_yolo.ptl.module import DetectionLitModule
 
 
 @pytest.fixture(autouse=True)
-def _deterministic_loss_kernels() -> Iterator[None]:
+def _deterministic(deterministic_kernels: None) -> None:
     """Keep the byte oracle deterministic and restore the caller's numeric policy."""
-    enabled = torch.are_deterministic_algorithms_enabled()
-    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-    torch.use_deterministic_algorithms(True)
-    try:
-        yield
-    finally:
-        torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
 
 
 def _inputs(
@@ -430,16 +424,24 @@ def test_fit_boundaries_reset_holder(hook: str) -> None:
     assert not model._loss_capture._disabled
 
 
-CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
-
-
-@pytest.mark.gpu
-@CUDA
-@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+@requires_cuda
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        pytest.param(torch.float32, id="float32"),
+        pytest.param(
+            torch.bfloat16,
+            id="bfloat16",
+            marks=pytest.mark.skipif(
+                not _BF16_SUPPORTED,
+                reason="BF16 replay begins at the verified 2.9 runtime; separate test proves native fallback",
+            ),
+        ),
+        pytest.param(torch.float16, id="float16"),
+    ],
+)
 def test_variable_target_capacity_matches_native_bits_and_gradients(dtype: torch.dtype) -> None:
     """Growth, shrinkage and empty targets keep each branch's real assignment unchanged."""
-    if dtype == torch.bfloat16 and not _BF16_SUPPORTED:
-        pytest.skip("BF16 replay begins at the verified 2.9 runtime; separate test proves native fallback")
     holder, source = _LossCapture(), DualBranchLoss()
     for count in (3, 1, 0, 7, 2, 0, 9, 1):
         inputs = _inputs(count, dtype=dtype)
@@ -460,8 +462,7 @@ def test_variable_target_capacity_matches_native_bits_and_gradients(dtype: torch
     assert holder._objective is None and holder._workspace is None
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_outputs_survive_replay_and_second_forward_stays_eager() -> None:
     """Saved results own their values and an outstanding backward cannot be overwritten."""
     holder, source, inputs = _LossCapture(), DualBranchLoss(), _inputs(3)
@@ -477,8 +478,7 @@ def test_outputs_survive_replay_and_second_forward_stays_eager() -> None:
     _bits(first.o2m_assign.target_boxes, saved[1])
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("bad,padded", [(3, False), (-1, False), (3, True)])
 def test_current_invalid_labels_fail_before_replay(bad: int, padded: bool) -> None:
     """A valid first call never exempts the next batch, including its padding, from bounds checks."""
@@ -492,8 +492,7 @@ def test_current_invalid_labels_fail_before_replay(bad: int, padded: bool) -> No
         holder.run(source, *inputs)
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_replay_removes_python_assignment_and_scoring_calls() -> None:
     """A silent reversion to eager fails the work-count oracle after a real recording."""
     holder, source = _LossCapture(), DualBranchLoss()
@@ -518,8 +517,7 @@ def test_replay_removes_python_assignment_and_scoring_calls() -> None:
     _native(source, _inputs(2)).total.backward()
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_changed_gain_retires_recording_and_keeps_native_result() -> None:
     """Mutable loss settings cannot silently keep the old graph's constants."""
     holder, source = _LossCapture(), DualBranchLoss()
@@ -572,8 +570,7 @@ def test_cli_forwards_loss_option() -> None:
     assert any(isinstance(callback, _LossCaptureLifecycle) for callback in cli.model.configure_callbacks())
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_partial_batch_and_noncontiguous_inputs_keep_recording() -> None:
     """Unsupported signatures stay native without displacing the normal batch's graph."""
     holder, source = _LossCapture(), DualBranchLoss()
@@ -594,8 +591,7 @@ def test_partial_batch_and_noncontiguous_inputs_keep_recording() -> None:
     assert holder._objective is recording
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_old_bf16_runtime_keeps_native_path() -> None:
     """An unverified BF16 runtime never silently records the operation."""
     holder, source, inputs = _LossCapture(), DualBranchLoss(), _inputs(3, dtype=torch.bfloat16)
@@ -605,8 +601,7 @@ def test_old_bf16_runtime_keeps_native_path() -> None:
     assert holder._objective is None
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_recording_failure_never_publishes_workspace() -> None:
     """A failed recorder clears its buffers and propagates the actionable failure."""
     holder, source = _LossCapture(), DualBranchLoss()
@@ -618,8 +613,7 @@ def test_recording_failure_never_publishes_workspace() -> None:
     assert holder._objective is None and holder._workspace is None and holder._capacity == 0
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_settings_and_implementations_changed_before_capture_stay_observable() -> None:
     """Custom criteria cannot be hidden behind the built-in loss recording."""
 
@@ -634,8 +628,7 @@ def test_settings_and_implementations_changed_before_capture_stay_observable() -
     assert holder._objective is None and holder._disabled
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_public_fit_records_loss_and_releases_owner() -> None:
     """A real automatic Trainer activates replay and clears it after fit completion."""
     seen: list[int] = []
@@ -673,8 +666,7 @@ def test_public_fit_records_loss_and_releases_owner() -> None:
     assert model._loss_capture._objective is None and model._loss_capture._workspace is None
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_custom_callable_without_assignment_attributes_keeps_native_route() -> None:
     """A replacement criterion need not expose the built-in criterion's private fields."""
     source = DualBranchLoss()
@@ -686,8 +678,7 @@ def test_custom_callable_without_assignment_attributes_keeps_native_route() -> N
     assert holder._objective is None
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("record_first", [False, True])
 def test_replaced_public_assigner_entry_stays_observable(record_first: bool) -> None:
     """Recording must not bypass a public assignment override before or after setup."""
@@ -708,8 +699,7 @@ def test_replaced_public_assigner_entry_stays_observable(record_first: bool) -> 
     assert holder._objective is None and holder._disabled
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("collection_enabled", [False, True])
 def test_recording_suspends_collection_and_restores_previous_mode(collection_enabled: bool) -> None:
     """Old graph cycles cannot be destroyed inside capture; the caller retains its GC policy."""
@@ -733,7 +723,7 @@ def test_recording_suspends_collection_and_restores_previous_mode(collection_ena
         gc.enable() if was_enabled else gc.disable()
 
 
-@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=[pytest.mark.gpu, CUDA])])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=requires_cuda)])
 def test_fallback_preserves_keyword_only_custom_criterion(device: str) -> None:
     """A custom loss receives strides by keyword, as it does through the native module."""
     source, holder, inputs = DualBranchLoss(), _LossCapture(), _inputs(2, device=device)
@@ -750,8 +740,7 @@ def test_fallback_preserves_keyword_only_custom_criterion(device: str) -> None:
     assert holder._objective is None
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("record_first", [False, True])
 def test_replaced_empty_assignment_stays_observable(record_first: bool) -> None:
     """Masked capacity cannot hide an override of the native empty-target result."""
@@ -775,8 +764,7 @@ def test_replaced_empty_assignment_stays_observable(record_first: bool) -> None:
     assert holder._objective is None and holder._disabled
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("record_first", [False, True])
 @pytest.mark.parametrize(
     "count,index,value",
@@ -802,8 +790,7 @@ def test_nonfinite_inputs_preserve_native_outputs(count: int, index: int, value:
         assert holder._objective is recording
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("record_first", [False, True])
 def test_empty_targets_keep_native_finite_overflow_behavior(record_first: bool) -> None:
     """Finite decoded coordinates can still overflow area arithmetic on an empty batch."""
@@ -823,8 +810,7 @@ def test_empty_targets_keep_native_finite_overflow_behavior(record_first: bool) 
     assert holder._objective is recording and not holder._pending_backward
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("record_first", [False, True])
 @pytest.mark.parametrize(
     "registration",
@@ -856,8 +842,7 @@ def test_global_module_hooks_keep_native_criterion(registration: str, record_fir
     assert holder._objective is not None
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("mode", ["accumulation_clip", "overflow", "resume_assign", "network"])
 def test_real_trainer_accumulation_amp_and_resume(mode: str, tmp_path: Path) -> None:
     """Real AMP, accumulation, clipping, network replay and resume keep native state bits."""
@@ -978,7 +963,7 @@ def _same_training_state(left: object, right: object) -> None:
         assert left == right
 
 
-@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=[pytest.mark.gpu, CUDA])])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=requires_cuda)])
 @pytest.mark.parametrize("branch", ["o2m_assigner", "o2o_assigner"])
 def test_constructor_valid_tiny_epsilon_keeps_native_loss(device: str, branch: str) -> None:
     """A positive Python epsilon that vanishes in float32 must not justify padded replay."""
@@ -1001,7 +986,7 @@ def test_constructor_valid_tiny_epsilon_keeps_native_loss(device: str, branch: s
     assert holder._objective is None
 
 
-@pytest.fixture(params=["cpu", pytest.param("cuda", marks=[pytest.mark.gpu, CUDA])])
+@pytest.fixture(params=["cpu", pytest.param("cuda", marks=requires_cuda)])
 def replay_device(request: pytest.FixtureRequest) -> str:
     """Run a case through the stubbed CPU recorder, and again through real CUDA graph replay."""
     if request.param == "cpu":
@@ -1179,8 +1164,7 @@ def _swap(index: int, transform: Callable[[torch.Tensor], torch.Tensor]) -> Call
     return change
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize(
     "change",
     [
@@ -1207,8 +1191,7 @@ def test_eligible_rejects_unsupported_inputs(change: Callable[[tuple[torch.Tenso
     assert capture_module._eligible(change(inputs)) is False
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("name,value", [("current_device", 99), ("is_current_stream_capturing", True)])
 def test_eligible_rejects_other_current_device_and_stream_capture(name: str, value: object) -> None:
     """A current device other than the predictions' device, or an open capture, keeps native."""
@@ -1217,8 +1200,7 @@ def test_eligible_rejects_other_current_device_and_stream_capture(name: str, val
         assert capture_module._eligible(inputs) is False
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_other_stream_keeps_native_route_and_recording() -> None:
     """A recording made on one stream is not replayed on another."""
     holder, source = _LossCapture(), DualBranchLoss()

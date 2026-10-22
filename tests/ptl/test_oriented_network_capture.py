@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import copy
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import fields
 from types import SimpleNamespace
 from typing import Any
@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer
 from pytorch_lightning.plugins.precision import MixedPrecision
 from torch.utils.data import DataLoader
@@ -29,15 +30,8 @@ from lucid_yolo.ptl.network_capture import _OrientedNetwork
 
 
 @pytest.fixture(autouse=True)
-def _deterministic_kernels() -> Iterator[None]:
+def _deterministic(deterministic_kernels: None) -> None:
     """Keep native comparisons deterministic and restore the caller's policy afterwards."""
-    enabled = torch.are_deterministic_algorithms_enabled()
-    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-    torch.use_deterministic_algorithms(True)
-    try:
-        yield
-    finally:
-        torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
 
 
 def _oriented(**kwargs: Any) -> DetectionLitModule:
@@ -203,8 +197,7 @@ def test_oriented_cli_accepts_network_replay() -> None:
     assert _oriented_replay_breach(cli.model) is None
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA graph replay")
+@requires_cuda
 @pytest.mark.parametrize("precision", ["32-true", "16-mixed", "bf16-mixed"])
 @pytest.mark.parametrize("layout", ["uniform", "empty", "partial"])
 @pytest.mark.parametrize("accumulation", [1, 2])
@@ -519,8 +512,7 @@ def test_oriented_subclass_override_stays_native() -> None:
     assert _oriented_replay_breach(model) == "the native oriented objective is overridden"
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA training")
+@requires_cuda
 def test_oriented_override_keeps_absent_angle_gradients(graph_recordings: MagicMock) -> None:
     """The public trainer fallback skips angle state instead of materializing zero gradients.
 

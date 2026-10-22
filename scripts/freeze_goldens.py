@@ -48,15 +48,14 @@ Examples:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-#: Repository root (``scripts/`` is one level below it).
-REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root, so `scripts` resolves when run by path
+from scripts._common import REPO_ROOT, digest
 
 #: The ``fuse-augmentations`` subpackage whose presence marks a golden generator-derived.
 #: Not the top-level package: since WP-157 ``lucid_yolo.data`` imports ``fuse_augmentations``
@@ -105,29 +104,6 @@ def frozen_root(goldens_dir: Path) -> Path:
         ```
     """
     return goldens_dir / "frozen"
-
-
-def digest(path: Path) -> str:
-    """Return the SHA-256 hex digest of a file's bytes.
-
-    Args:
-        path: File to hash.
-
-    Returns:
-        The 64-character lowercase hex digest.
-
-    Examples:
-        ```pycon
-        >>> import tempfile
-        >>> with tempfile.TemporaryDirectory() as tmp:
-        ...     sample = Path(tmp) / "f.json"
-        ...     _ = sample.write_bytes(b"{}")
-        ...     digest(sample)[:16]
-        '44136fa355b3678a'
-
-        ```
-    """
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def frozen_files(root: Path) -> list[Path]:

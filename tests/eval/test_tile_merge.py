@@ -237,7 +237,7 @@ class TestCorePartition:
         assert in_core(on_boundary, cores[0]).tolist() == [False]
         assert in_core(on_boundary, cores[1]).tolist() == [True]
 
-    def test_grid_row_sharing_one_origin_still_partitions(self) -> None:
+    def test_grid_row_sharing_one_origin_partitions(self) -> None:
         """Two windows at the same x origin and the same width are the ordinary grid case.
 
         A uniform tiler emits one x origin per column and reuses it down every row, so
@@ -584,7 +584,7 @@ class TestCoordinates:
         assert mapped["rboxes"][0, :2].tolist() == pytest.approx([42.0, 36.0])
         assert mapped["rboxes"][0, 2:].tolist() == pytest.approx([8.0, 4.0, 0.25])
 
-    def test_source_image_whose_detections_all_disowned_still_appears(self, tmp_path: Path) -> None:
+    def test_source_image_whose_detections_all_disowned_appears(self, tmp_path: Path) -> None:
         """Predictions and ground truth align by position, so an empty image is an entry."""
         windows = [*_two_tile_windows(), TileWindow("other.png", (0, 0), (_PATCH, _PATCH), 3)]
         index = load_tile_index(_layout(tmp_path, windows, []))

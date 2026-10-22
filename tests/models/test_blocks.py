@@ -24,12 +24,6 @@ from lucid_yolo.models import (
 )
 
 
-@pytest.fixture(autouse=True)
-def _seed_rng() -> None:
-    """Seed torch RNG so weight init and random inputs are deterministic."""
-    torch.manual_seed(0)
-
-
 def test_primitives() -> None:
     """The three primitives satisfy their shape, wiring, and residual contracts."""
     # --- ConvBNAct: odd kernels preserve size at stride 1, halve at stride 2 ---

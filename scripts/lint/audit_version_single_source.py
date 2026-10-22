@@ -31,7 +31,9 @@ import sys
 import tomllib
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
+from scripts.lint._common import REPO_ROOT, print_failure
+
 DEFAULT_PYPROJECT = REPO_ROOT / "pyproject.toml"
 DEFAULT_INIT = REPO_ROOT / "src" / "lucid_yolo" / "__init__.py"
 DEFAULT_README = REPO_ROOT / "README.md"
@@ -265,10 +267,7 @@ def main(argv: list[str] | None = None) -> int:
 
     violations = find_violations(args.pyproject, args.init, args.readme)
     if violations:
-        print(f"version-single-source-audit FAILED: {len(violations)} violation(s)")
-        for item in violations:
-            print(f"  - {item}")
-        return 1
+        return print_failure("version-single-source-audit", violations)
     print("version-single-source-audit clean: pyproject.toml and __init__.py agree on one version source")
     return 0
 

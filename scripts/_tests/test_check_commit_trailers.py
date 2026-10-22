@@ -215,7 +215,7 @@ def test_signoff_before_separator_passes() -> None:
     assert validator.validate_message(SIGNOFF_BEFORE_SEPARATOR_MESSAGE, VALID_IDS) == []
 
 
-def test_at_sign_beside_signoff_still_fails() -> None:
+def test_at_sign_beside_signoff_fails() -> None:
     """A sign-off line exempts itself only; a mention on another body line is still rejected."""
     violations = validator.validate_message(MENTION_BESIDE_SIGNOFF_MESSAGE, VALID_IDS)
     assert any("'@'" in violation for violation in violations)
@@ -271,7 +271,7 @@ class TestProvenanceDenial:
 
         assert validator.validate_message(message, _registers({1})) == []
 
-    def test_id_inside_denial_still_resolved(self) -> None:
+    def test_id_inside_denial_resolved(self) -> None:
         """A denial explaining itself against an unknown id is refused, not waved through.
 
         The id is a reference rather than a citation, but a reference to a row that
@@ -351,7 +351,7 @@ class TestAssumptionRegister:
 
         assert validator.validate_message(message, VALID_IDS) == []
 
-    def test_malformed_id_still_shape_violation(self) -> None:
+    def test_malformed_id_shape_violation(self) -> None:
         """Shape and membership stay separate messages; `A9x` never reaches the register."""
         message = "fix(data): x\n\nWP: none\nProvenance: R1\nAssumptions: A9x\nGate: t\n"
 
@@ -434,7 +434,7 @@ class TestContributorRange:
 
         assert validator.validate_message(message, _registers({1})) == []
 
-    def test_missing_wp_trailer_still_refused(self) -> None:
+    def test_missing_wp_trailer_refused(self) -> None:
         """Omission is not the relaxation -- `none` states it, absence leaves it unsaid."""
         message = "fix(data): correct the pad value\n\nbody\n\nProvenance: R1\nAssumptions: none\nGate: t.py::x\n"
 
@@ -456,7 +456,7 @@ class TestContributorRange:
 
         assert any("WP" in violation for violation in validator.validate_message(message, _registers({1})))
 
-    def test_non_numeric_wp_still_refused(self) -> None:
+    def test_non_numeric_wp_refused(self) -> None:
         """Only digits or the literal `none`; a free-text row id is not a row id."""
         message = "fix(data): x\n\nWP: maybe\nProvenance: R1\nAssumptions: none\nGate: t.py::x\n"
 
@@ -662,7 +662,7 @@ class TestContributorRange:
         assert f"COMMIT {shas[1][:12]}: SKIP (automation author" in out
         assert "1 message(s) validated, 1 automation commit(s) skipped" in out
 
-    def test_human_commit_beside_skipped_bot_commit_still_refused(
+    def test_human_commit_beside_skipped_bot_commit_refused(
         self,
         capsys: pytest.CaptureFixture[str],
         throwaway_repository: Callable[[Sequence[str | tuple[str, str]]], list[str]],

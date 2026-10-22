@@ -4,7 +4,7 @@ default_install_hook_types: [pre-commit, commit-msg]
 
 # pre-commit.ci runs in a bare container: no `.venv`, no editable install of this
 # package, and no step that could create either. Every `repo: local` hook below is
-# `language: system` with entry `.venv/bin/python`, so all twelve of them fail there
+# `language: system` with entry `.venv/bin/python`, so every one of them fails there
 # with "Executable `.venv/bin/python` not found" -- before running a check. They are
 # skipped rather than rewritten because the coverage is not lost: `lint.yml`'s
 # `precommit` job builds the venv with uv and runs `pre-commit run --all-files` over
@@ -30,10 +30,10 @@ ci:
     - docs-site
     - figure-captions
     - license-headers
-    - no-ipynb-tracked
     - frozen-manifest
     - content-pins
     - version-single-source
+    - model-card-figures
     - commit-trailers-history
     - release-guard
 
@@ -228,17 +228,18 @@ repos:
       # A notebook is committed as a jupytext `.py` source; the `.ipynb` the site
       # renders is written by `make notebooks` into a gitignored directory (WP-188).
       # `check-added-large-files` does not cover it -- a fresh notebook is small -- and
-      # `.gitignore` is not a gate, since `git add -f` walks past it. This reads the
-      # index, so it runs on every commit like the other tree-state checks rather than
-      # on a `files:` filter: pre-commit's staged-path filter is what a forced add
-      # would have to match, and a filter on `\.ipynb$` fires only on the file it
-      # could just as well have refused. Milliseconds: one `git ls-files`.
+      # `.gitignore` is not a gate, since `git add -f` walks past it. A stock `fail` hook
+      # on the path does the job: pre-commit filters on the *staged* paths, so a forced
+      # add matches the pattern at the commit that makes it, and `--all-files` matches
+      # every tracked notebook. It needs no interpreter, so pre-commit.ci runs it too.
       - id: no-ipynb-tracked
         name: "📓 no .ipynb tracked (notebooks are .py sources)"
-        entry: .venv/bin/python scripts/lint/audit_no_notebooks_tracked.py
-        language: system
-        pass_filenames: false
-        always_run: true
+        entry: notebooks are committed as jupytext .py sources; the .ipynb is built by `make notebooks` into a gitignored directory
+        language: fail
+        files: \.ipynb$
+        # `fail` inherits `types: [file]`, which identify tags a symlink as `symlink`, not
+        # `file`; an empty list keeps a staged `x.ipynb` symlink in scope.
+        types: []
       # Every frozen golden must still be the file the release wrote. The golden
       # harness compares each frozen file against its own stored values, so an edit
       # moving both the values and the tolerances is green there by construction --
@@ -350,3 +351,29 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-commit, manual]
+      # A test name states the behaviour; these adverbs only lengthen every `-v` line and
+      # failure header (AGENTS.md sec. 2). Articles are left out on purpose -- `a` and `the`
+      # are too often part of the claim -- and `(\w*_)?` makes the first word after
+      # `test_` count as well as a later one, which the shorter `\w*_` form would miss.
+      - id: test-name-filler-adverbs
+        name: "🪶 no filler adverbs in test names"
+        entry: 'def test_(\w*_)?(still|just|actually|properly|correctly)(_|\()'
+        language: pygrep
+        files: ^(tests|scripts/_tests)/.*\.py$
+      # `tqdm.auto` draws the notebook widget where a notebook runs and the terminal bar
+      # elsewhere; the plain class always draws the terminal bar. Ruff's `TID251` ban in
+      # pyproject.toml covers `src/`, but its per-file ignores exempt exactly these trees, and
+      # `src/lucid_yolo/_viz` (exempt for matplotlib) is listed here for the same reason.
+      - id: tqdm-auto-only
+        name: "📊 progress bars come from tqdm.auto"
+        entry: '^\s*(from tqdm import\b|import tqdm\b(?!\.auto\b))'
+        language: pygrep
+        files: ^(tests|scripts|notebooks|src/lucid_yolo/_viz)/.*\.py$
+      # The wiring-gate figure each model card prints must be the one in the golden it
+      # cites; the cards were hand-copied and the goldens resealed under them (WP-186).
+      - id: model-card-figures
+        name: "🃏 model-card wiring-gate figures match their goldens"
+        entry: .venv/bin/python scripts/lint/audit_model_card_figures.py
+        language: system
+        pass_filenames: false
+        files: ^(docs/model_cards/.*\.md|goldens/gpu/overfit_micro_.*\.json|scripts/lint/audit_model_card_figures\.py)$

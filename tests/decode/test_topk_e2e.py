@@ -30,12 +30,6 @@ _DET_CAP = 300
 _BOX_CORNERS = 4
 
 
-@pytest.fixture(autouse=True)
-def _seed_rng() -> None:
-    """Seed the torch RNG so any random inputs are deterministic."""
-    torch.manual_seed(0)
-
-
 def _grid(height: int, width: int, stride: int = 8) -> tuple[Tensor, Tensor]:
     """Return ``(anchor_points, strides)`` for a single ``(height, width)`` level.
 

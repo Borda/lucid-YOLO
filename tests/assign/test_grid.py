@@ -77,7 +77,7 @@ def test_canvas_strides_do_not_divide_refused(canvas: tuple[int, int]) -> None:
         anchor_grid(canvas, torch.device("cpu"))
 
 
-def test_640_canvas_evaluators_use_still_builds_8400_anchors() -> None:
+def test_640_canvas_guard_leaves_8400_anchors_unchanged() -> None:
     """The guard leaves the deployed canvas untouched, at the size every protocol runs.
 
     A precondition added to a function four call sites already depend on is worth

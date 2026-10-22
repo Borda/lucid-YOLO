@@ -264,7 +264,7 @@ class TestCanonicalGroundTruthMetadata:
         assert stats["AP_large"] == pytest.approx(1.0)
         assert stats["AP_medium"] == pytest.approx(-1.0)  # COCO's empty-bucket sentinel
 
-    def test_visible_extent_still_decides_when_no_area_supplied(self) -> None:
+    def test_visible_extent_decides_when_no_area_supplied(self) -> None:
         """Ground truth with no ``area`` keeps WP-124's reconstruction, and its medium bucket.
 
         The fallback is what every pre-WP-134 caller and every synthetic fixture with

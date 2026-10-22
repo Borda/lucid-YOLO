@@ -262,7 +262,7 @@ def test_malformed_numeric_metadata_refused_naming_annotation(annotation: dict[s
         annotations_to_target([annotation])
 
 
-def test_legal_but_unusual_metadata_still_loads() -> None:
+def test_legal_but_unusual_metadata_loads() -> None:
     """Off-image coordinates, a zero area and the crowd flag are input, not malformed input.
 
     The refusal above must land on values with no reading at all, not on the three

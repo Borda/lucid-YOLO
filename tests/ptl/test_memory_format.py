@@ -35,7 +35,6 @@ from lucid_yolo.models.registry import scale_spec
 from lucid_yolo.ptl import DetectionDataModule, DetectionLitModule, collate_detection
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
 #: Class count of the tiny test head.
@@ -50,13 +49,6 @@ _BATCH_SIZE = 2
 _TASKS = ("detect", "segment", "obb", "keypoints")
 #: The variants small enough to run a full step on CPU in seconds.
 _VARIANTS = ("n", "s")
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed torch before each test so model init and synthetic batches are reproducible."""
-    torch.manual_seed(0)
-    yield
 
 
 def _module(task: str, variant: str) -> DetectionLitModule:

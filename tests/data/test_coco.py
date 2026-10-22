@@ -22,7 +22,6 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
-from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
@@ -54,13 +53,6 @@ _FIXTURE_IMAGE_COUNT = 16
 _EXTENT_TOL = 1e-3
 #: Small square letterbox side keeping the datamodule smoke fast.
 _SMOKE_IMG_SIZE = 64
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed the global RNG before each test (pipelines use explicit generators)."""
-    torch.manual_seed(0)
-    yield
 
 
 def _dataset(fixture_dir: Path, transforms: object = None) -> CocoDetectionDataset:
@@ -687,7 +679,7 @@ class TestRinglessAnnotations:
         assert targets.boxes.shape == (2, 4)
         assert targets.polygons == []
 
-    def test_oriented_reading_still_requires_ring(self, ringless_coco: Path) -> None:
+    def test_oriented_reading_requires_ring(self, ringless_coco: Path) -> None:
         """An oriented reading keeps skipping ringless annotations; it has no other rotated-box source.
 
         Locks in that relaxing the plain/keypoints path did not loosen ``oriented=True``,
@@ -697,7 +689,7 @@ class TestRinglessAnnotations:
 
         assert targets.boxes.shape[0] == 0
 
-    def test_mask_targets_still_raises_without_rings(self, ringless_coco: Path) -> None:
+    def test_mask_targets_raises_without_rings(self, ringless_coco: Path) -> None:
         """Rasterising masks off a ring-free image still raises, not silently returns empty masks.
 
         `instance_mask_targets` is the guard the relaxed parser now depends on to keep a
@@ -1309,9 +1301,7 @@ def test_named_val_worker_count_bounded_by_nothing(detseg_fixture_dir: Path, mon
     assert datamodule.val_dataloader().num_workers == 6
 
 
-def test_auto_chosen_worker_count_still_capped_for_val(
-    detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_auto_chosen_worker_count_capped_for_val(detseg_fixture_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When the count was this class's own guess, the cap still applies (WP-073).
 
     The library owns the consequences of a number it picked, and the resident worker

@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer
 from pytorch_lightning.callbacks import GradientAccumulationScheduler
 from torch.utils.data import DataLoader
@@ -28,19 +29,8 @@ from lucid_yolo.ptl.network_capture import _BF16_REPLAY_SUPPORTED
 
 
 @pytest.fixture(autouse=True)
-def _deterministic(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Restore the caller's deterministic policy and cudnn benchmark flag after each test.
-
-    Lightning's trainer setup writes `torch.backends.cudnn.benchmark` unconditionally, so a fit test would leak it.
-    """
-    monkeypatch.setattr(torch.backends.cudnn, "benchmark", torch.backends.cudnn.benchmark)
-    enabled = torch.are_deterministic_algorithms_enabled()
-    warning = torch.is_deterministic_algorithms_warn_only_enabled()
-    torch.use_deterministic_algorithms(True)
-    try:
-        yield
-    finally:
-        torch.use_deterministic_algorithms(enabled, warn_only=warning)
+def _deterministic(deterministic_kernels_pinning_cudnn_benchmark: None) -> None:
+    """Restore the caller's deterministic policy and cudnn benchmark flag after each test."""
 
 
 def _module(**kwargs: object) -> DetectionLitModule:
@@ -135,8 +125,7 @@ def test_segment_request_preserves_defaults_and_checkpoint_keys() -> None:
         pytest.param(True, torch.bfloat16, id="heads-bf16"),
     ],
 )
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA graph execution")
+@requires_cuda
 def test_segment_shared_replay_preserves_predictions_and_unused_gradients(heads: bool, dtype: torch.dtype) -> None:
     """Changing mask demand keeps every prediction, gradient and BatchNorm byte native."""
     torch.manual_seed(347)
@@ -193,8 +182,7 @@ _HEAD_PRECISION_RETIRE = "capture_segment_heads=True stays eager"
         pytest.param(True, "16-mixed", 1, _HEAD_PRECISION_RETIRE, id="heads-fp16-stay-eager"),
     ],
 )
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires public CUDA training")
+@requires_cuda
 def test_segment_fit_replays_across_empty_partial_validation_and_ema(
     heads: bool, precision: str, accumulation: int, retire: str | None
 ) -> None:
@@ -540,7 +528,6 @@ _LIFECYCLE_FIT = {
     "enable_model_summary": False,
     "num_sanity_val_steps": 0,
 }
-_skip_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires public CUDA training")
 _skip_no_bf16_replay = pytest.mark.skipif(not _BF16_REPLAY_SUPPORTED, reason="BF16 replay requires torch>=2.9")
 
 
@@ -574,8 +561,7 @@ def _fit_batches() -> DataLoader[object]:
     return DataLoader([_batch(), _batch(True), _batch(size=1)], batch_size=None)  # type: ignore[arg-type]
 
 
-@pytest.mark.gpu
-@_skip_no_cuda
+@requires_cuda
 @_skip_no_bf16_replay
 def test_segment_fit_exception_after_recording_releases_both_holders() -> None:
     """A failing step after recording leaves no graph, pending backward or head entry behind."""
@@ -601,8 +587,7 @@ def test_segment_fit_exception_after_recording_releases_both_holders() -> None:
     assert model._segment_head_capture.entries == {}
 
 
-@pytest.mark.gpu
-@_skip_no_cuda
+@requires_cuda
 def test_segment_second_fit_records_once_per_fit() -> None:
     """Fitting the same module twice records its shared features once in each fit."""
     torch.manual_seed(23)
@@ -616,8 +601,7 @@ def test_segment_second_fit_records_once_per_fit() -> None:
     assert counts == [1, 1]
 
 
-@pytest.mark.gpu
-@_skip_no_cuda
+@requires_cuda
 def test_segment_freeze_after_recording_retires_once() -> None:
     """Freezing then releasing the backbone after recording reports a single retirement."""
     torch.manual_seed(23)
@@ -628,8 +612,7 @@ def test_segment_freeze_after_recording_retires_once() -> None:
     assert sum("capture_network=True stays eager" in str(warning.message) for warning in record) == 1
 
 
-@pytest.mark.gpu
-@_skip_no_cuda
+@requires_cuda
 def test_segment_accumulation_change_after_recording_retires_through_holder() -> None:
     """Raising accumulate_grad_batches after epoch one retires the recording with the accumulation reason."""
     torch.manual_seed(23)

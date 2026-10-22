@@ -88,6 +88,12 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 - **`lucid-data build-tiles` accepts `--data_root`** as an alias of `--root`, matching the other commands (WP-202).
 
+- **The declared `jsonargparse` floor is 4.36.** `lucid-eval` and `lucid-predict` import `auto_cli`, which 4.36 is the first release to export; the floor read 4.28 and let an install resolve a version that failed at import (WP-203).
+
+- **`make test` runs under pytest-xdist.** `-n auto` is the default; `PYTEST_XARGS=` runs serially and `COV=` drops the coverage flags. `make golden` now fails where the harness is missing instead of printing a skip line. The `no-ipynb-tracked` hook fires on a staged `.ipynb` path rather than reading the index, and three hooks are new: `test-name-filler-adverbs`, `tqdm-auto-only` and `model-card-figures` (WP-203).
+
+- **CI.** The test matrix is ubuntu on Python 3.11 to 3.13 plus one macOS cell on 3.13, with coverage on ubuntu 3.11 only; goldens run as their own job, the built wheel is smoke-tested in CI and before release, the docs site is built read-only and published by a separate job, and `actionlint`, `zizmor`, a weekly link check and Dependabot for GitHub Actions are added (WP-203).
+
 - **The export module docstrings name `KeypointExportGraph`** beside the detect, segment and oriented graphs (WP-202).
 
 - **Rotated-box augmentation batches the existing clipping and refitting arithmetic on CPU.** Finite float32 boxes without gradients are grouped by their current polygon vertex count, evaluated in batches and returned to their original instance rows. Interior boxes remain untouched; single clips, other dtypes, non-finite inputs, gradient-bearing tensors and accelerator tensors retain the scalar route. No angle, visibility or fit convention changes. Five paired complete 20-epoch public-DOTA fits on an isolated L4 at nano OBB / 640 pixels / batch 16 / BF16 with cached images, six workers, mosaic and EMA reduce median paired training time by 10.19% (range 8.68–12.25%), with final training states bit-identical. This throughput benchmark disables validation and checkpointing; larger resolutions/scales are unmeasured.

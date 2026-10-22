@@ -430,9 +430,7 @@ class TestLayoutDispatch:
         ("layout", "write_root"),
         [("coco", _write_coco_root), ("yolo", _write_yolo_root)],
     )
-    def test_repeat_fit_setup_still_rebuilds_train_pipeline(
-        self, tmp_path: Path, layout: str, write_root: object
-    ) -> None:
+    def test_repeat_fit_setup_rebuilds_train_pipeline(self, tmp_path: Path, layout: str, write_root: object) -> None:
         """Reusing the cached reader keeps ``setup``'s reset: the mosaic probability returns to its start.
 
         The close-mosaic schedule lowers the probability on the live pipeline; a repeat
@@ -678,7 +676,7 @@ class TestYoloCapabilities:
         assert build_scale_policy(_COPY_PASTE_VARIANT)["copy_paste"] > 0.0
         assert datamodule._train._copy_paste_prob == 0.0
 
-    def test_copy_paste_still_runs_on_coco_root(self, tmp_path: Path) -> None:
+    def test_copy_paste_runs_on_coco_root(self, tmp_path: Path) -> None:
         """The suppression is the YOLO path's alone — the COCO pipeline's draw sequence is untouched."""
         datamodule = _datamodule(_write_coco_root(tmp_path), variant=_COPY_PASTE_VARIANT)
         datamodule.setup("fit")

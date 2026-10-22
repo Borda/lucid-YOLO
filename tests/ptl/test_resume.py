@@ -45,9 +45,9 @@ import torch
 from pytorch_lightning import Callback, Trainer, seed_everything
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
+from training import collate_unpacked, tiny_module
 
 from lucid_yolo.data.targets import Targets
-from lucid_yolo.ptl import DetectionLitModule, collate_detection, unpack_batch
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -140,25 +140,6 @@ def _build_samples() -> list[tuple[Tensor, Targets]]:
     return samples
 
 
-def _collate_unpacked(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list[Targets]]:
-    """Collate, then restore the ``list[Targets]`` the module consumes.
-
-    No datamodule is attached to these bare-loader ``Trainer.fit`` runs, so the
-    transfer hook that restores the transport form never fires; this wrapper runs
-    the same collate -> restore round-trip the datamodule performs in production
-    (dequantizing the uint8 images and unpacking the targets) so the module
-    receives its float images and ragged target list.
-
-    Examples:
-        >>> boxes = torch.tensor([[8.0, 8.0, 24.0, 24.0]])
-        >>> sample = (torch.randn(3, 64, 64), Targets(boxes=boxes, labels=torch.tensor([1])))
-        >>> images, targets = _collate_unpacked([sample])
-        >>> images.shape, len(targets)
-        (torch.Size([1, 3, 64, 64]), 1)
-    """
-    return unpack_batch(collate_detection(batch))
-
-
 @pytest.fixture
 def train_loader() -> DataLoader[tuple[Tensor, Targets]]:
     """Return an unshuffled loader over the fixed dataset — identical stream every run."""
@@ -167,18 +148,8 @@ def train_loader() -> DataLoader[tuple[Tensor, Targets]]:
         batch_size=_BATCH_SIZE,
         shuffle=False,
         num_workers=0,
-        collate_fn=_collate_unpacked,
+        collate_fn=collate_unpacked,
     )
-
-
-def _tiny_module() -> DetectionLitModule:
-    """Build an n-scale module with a low channel cap for fast CPU training.
-
-    Examples:
-        >>> _tiny_module().task
-        'detect'
-    """
-    return DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=_NUM_CLASSES)
 
 
 def _trainer(*callbacks: Callback) -> Trainer:
@@ -206,17 +177,19 @@ def test_trajectory_match(train_loader: DataLoader[tuple[Tensor, Targets]], tmp_
     """A resumed run reproduces the reference run's post-checkpoint loss trajectory exactly."""
     seed_everything(_SEED, workers=True)
     reference_recorder = _LossTrajectoryRecorder()
-    _trainer(reference_recorder).fit(_tiny_module(), train_dataloaders=train_loader)
+    _trainer(reference_recorder).fit(tiny_module(max_channels=64), train_dataloaders=train_loader)
 
     seed_everything(_SEED, workers=True)
     interrupted = _trainer(_LossTrajectoryRecorder(), _StopAfterEpoch(_RESUME_EPOCH))
-    interrupted.fit(_tiny_module(), train_dataloaders=train_loader)
+    interrupted.fit(tiny_module(max_channels=64), train_dataloaders=train_loader)
     checkpoint = tmp_path / "epoch2.ckpt"
     interrupted.save_checkpoint(checkpoint)
 
     seed_everything(_SEED, workers=True)
     resumed_recorder = _LossTrajectoryRecorder()
-    _trainer(resumed_recorder).fit(_tiny_module(), train_dataloaders=train_loader, ckpt_path=str(checkpoint))
+    _trainer(resumed_recorder).fit(
+        tiny_module(max_channels=64), train_dataloaders=train_loader, ckpt_path=str(checkpoint)
+    )
 
     post_resume_reference = reference_recorder.losses[_RESUME_EPOCH * _STEPS_PER_EPOCH :]
     assert resumed_recorder.losses == pytest.approx(post_resume_reference, rel=1e-4)
@@ -228,13 +201,13 @@ def test_resume_continues_step_epoch_and_optimizer_state(
     """After resume the global step and epoch continue and MuSGD momentum buffers are restored."""
     seed_everything(_SEED, workers=True)
     interrupted = _trainer(_LossTrajectoryRecorder(), _StopAfterEpoch(_RESUME_EPOCH))
-    interrupted.fit(_tiny_module(), train_dataloaders=train_loader)
+    interrupted.fit(tiny_module(max_channels=64), train_dataloaders=train_loader)
     checkpoint = tmp_path / "epoch2.ckpt"
     interrupted.save_checkpoint(checkpoint)
 
     seed_everything(_SEED, workers=True)
     resumed = _trainer(_LossTrajectoryRecorder())
-    resumed.fit(_tiny_module(), train_dataloaders=train_loader, ckpt_path=str(checkpoint))
+    resumed.fit(tiny_module(max_channels=64), train_dataloaders=train_loader, ckpt_path=str(checkpoint))
 
     assert resumed.global_step == _MAX_EPOCHS * _STEPS_PER_EPOCH
     assert resumed.current_epoch == _MAX_EPOCHS

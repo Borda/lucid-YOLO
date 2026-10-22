@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import io
 import math
-from collections.abc import Iterator
 
 import pytest
 import torch
+from markers import requires_accelerator, requires_cuda
 
 from lucid_yolo.optim import MuSGD, orthogonalize
 from lucid_yolo.optim.newton_schulz import _orthogonalize_batched
@@ -26,13 +26,6 @@ from lucid_yolo.optim.newton_schulz import _orthogonalize_batched
 #: attribute is newer than that, so the one test needing it is gated on the capability
 #: rather than on a version number.
 _GRAD_DTYPE_SUPPORTED = hasattr(torch.Tensor, "grad_dtype")
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed torch before every test so random parameters and grads are reproducible."""
-    torch.manual_seed(0)
-    yield
 
 
 @pytest.fixture
@@ -377,7 +370,7 @@ class TestExactShapeBatching:
             expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
 
-    @pytest.mark.gpu
+    @requires_accelerator
     @pytest.mark.usefixtures("batching_on_every_device")
     def test_device_boundary_forms_separate_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Equal shape and dtype on different devices never share a batch."""
@@ -527,8 +520,7 @@ class TestExactShapeBatching:
             expected_update.add_(nesterov, alpha=w_sgd).add_(start, alpha=weight_decay)
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
 
-    @pytest.mark.gpu
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="the production batching gate is CUDA-only")
+    @requires_cuda
     def test_native_batch_runs_through_production_cuda_gate(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Two equal CUDA matrices take one native batch without widening the device gate."""
         matrices = [torch.nn.Parameter(torch.randn(6, 4, device="cuda")) for _ in range(2)]
@@ -584,7 +576,7 @@ class TestExactShapeBatching:
             torch.testing.assert_close(param.detach(), start - lr * expected_update)
 
     @pytest.mark.usefixtures("batching_on_every_device")
-    def test_interleaved_vector_and_matrix_params_reassemble_correctly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_interleaved_vector_and_matrix_params_reassemble(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Vectors interleaved between equal-shape matrices land at the right param after batching.
 
         ``_step_group`` routes each non-batchable param (a vector) straight to
@@ -629,7 +621,7 @@ class TestExactShapeBatching:
             torch.testing.assert_close(params[index].detach(), starts[index] - lr * expected_update)
 
     @pytest.mark.usefixtures("batching_on_every_device")
-    def test_large_bucket_reassembles_every_index_correctly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_large_bucket_reassembles_every_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A bucket of eight equal-shape matrices reassembles every element correctly.
 
         Every other batching test caps at two or three elements, while a

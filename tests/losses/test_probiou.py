@@ -47,12 +47,6 @@ _PAIRS = [
 _ANGLES = [-math.pi / 4, -0.3, 0.0, 0.5, math.pi / 2, 2.0, 3 * math.pi / 4 - 1e-3]
 
 
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed every RNG source before each test for deterministic tensors."""
-    torch.manual_seed(0)
-
-
 def literal_bhattacharyya(pred: Tensor, target: Tensor) -> Tensor:
     """R17's ``B_D = B1 + B2`` transcribed exactly as the paper writes it.
 

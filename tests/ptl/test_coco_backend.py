@@ -35,12 +35,6 @@ from lucid_yolo.ptl.module import DetectionLitModule
 _BACKEND = "faster_coco_eval"
 
 
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed torch before each test so the random detections are reproducible."""
-    torch.manual_seed(0)
-
-
 def _boxes(count: int) -> torch.Tensor:
     """Build ``count`` valid ``xywh`` boxes.
 
@@ -181,7 +175,7 @@ class TestScoreTypeValidation:
             )
         assert str(hoisted_error.value) == str(stock_error.value)
 
-    def test_float_scores_still_reach_every_annotation(self) -> None:
+    def test_float_scores_reach_every_annotation(self) -> None:
         """The normal path is unchanged: float scores land on the annotations in order.
 
         The guard above sits inside the flattening loop, so this pins that it

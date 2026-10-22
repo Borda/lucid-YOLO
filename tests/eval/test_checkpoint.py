@@ -437,7 +437,7 @@ class TestCheckpointTrust:
         assert not marker.exists(), "the planted reducer ran: the file reached unrestricted pickle"
 
     @pytest.mark.usefixtures("torch_defaults_to_unrestricted")
-    def test_refusal_holds_where_torch_still_defaults_to_unrestricted_loading(self, tmp_path: Path) -> None:
+    def test_refusal_holds_where_torch_defaults_to_unrestricted_loading(self, tmp_path: Path) -> None:
         """On the declared ``torch>=2.4`` floor the restricted read still happens first.
 
         This is the case the installed torch hides. Below 2.6 an unpassed ``weights_only``
@@ -455,7 +455,7 @@ class TestCheckpointTrust:
 
         assert not marker.exists(), "the planted reducer ran: the file reached unrestricted pickle"
 
-    def test_ordinary_checkpoint_still_loads_through_gate(self, tmp_path: Path) -> None:
+    def test_ordinary_checkpoint_loads_through_gate(self, tmp_path: Path) -> None:
         """A checkpoint carrying nothing unusual loads and reports its provenance.
 
         The half of the acceptance check a loader that refused everything would also pass.
@@ -572,7 +572,7 @@ class TestPickDevice:
         assert pick_device("cpu") == torch.device("cpu")
 
     @pytest.mark.usefixtures("no_accelerator")
-    def test_auto_still_falls_back_to_cpu(self) -> None:
+    def test_auto_falls_back_to_cpu(self) -> None:
         """``auto`` answers rather than raising when no accelerator is present.
 
         The guard sits on the explicit branch only, and this is the assertion that says

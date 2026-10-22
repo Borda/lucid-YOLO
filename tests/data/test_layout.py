@@ -99,7 +99,7 @@ def test_datamodule_needs_no_overrides_for_tiled_root(tmp_path: Path) -> None:
     assert (datamodule._val_images_dir, datamodule._val_ann_file) == val
 
 
-def test_explicit_override_still_wins(tmp_path: Path) -> None:
+def test_explicit_override_wins(tmp_path: Path) -> None:
     """Resolution is a default: a caller naming a path gets that path, matched layout or not."""
     _write_layout(tmp_path, "val", "annotations/instances_val.json")
     elsewhere = tmp_path / "elsewhere"

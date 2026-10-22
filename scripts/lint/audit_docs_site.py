@@ -29,7 +29,9 @@ from typing import Any, cast
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
+from scripts.lint._common import REPO_ROOT, print_failure
+
 DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 DEFAULT_MKDOCS_YML = REPO_ROOT / "mkdocs.yml"
 DEFAULT_PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -477,10 +479,7 @@ def main(argv: list[str] | None = None) -> int:
 
     violations = find_violations(args.docs_dir, args.mkdocs_yml, args.pyproject, args.docs_workflow, args.notebooks_dir)
     if violations:
-        print(f"docs-site-audit FAILED: {len(violations)} violation(s)")
-        for item in violations:
-            print(f"  - {item}")
-        return 1
+        return print_failure("docs-site-audit", violations)
     print("docs-site-audit clean: nav, notebook sources, identity fields, and CI wiring all match")
     return 0
 

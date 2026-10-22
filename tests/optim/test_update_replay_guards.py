@@ -9,11 +9,15 @@ import weakref
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
+from functools import partial
 from typing import Any
 
 import numpy as np
 import pytest
 import torch
+from determinism import deterministic_algorithms
+from markers import requires_cuda
+from tensors import assert_bytes
 from torch import Tensor
 
 from lucid_yolo.optim.musgd import MuSGD, _memory_overlaps
@@ -26,20 +30,6 @@ from lucid_yolo.optim.update_replay import (
 )
 
 _SHAPES = ((4, 4), (4,), (8, 4), (4, 4, 3, 3))
-
-
-def assert_bytes(left: Tensor, right: Tensor) -> None:
-    """Compare numerical storage without rounding or hiding signed zero.
-
-    Examples:
-        >>> assert_bytes(torch.tensor([-0.0]), torch.tensor([-0.0]))
-    """
-    assert left.shape == right.shape
-    assert left.dtype == right.dtype
-    assert torch.equal(
-        left.detach().contiguous().reshape(-1).view(torch.uint8),
-        right.detach().contiguous().reshape(-1).view(torch.uint8),
-    )
 
 
 def parameters(device: str, shapes: tuple[tuple[int, ...], ...] = _SHAPES) -> list[torch.nn.Parameter]:
@@ -132,24 +122,6 @@ def high_matmul_precision() -> Iterator[None]:
         torch.set_float32_matmul_precision(legacy)
         for owner, value in zip(owners, backends, strict=True):
             owner.fp32_precision = value
-
-
-@contextmanager
-def deterministic_warn_only() -> Iterator[None]:
-    """Enable deterministic algorithms in warn-only mode, restoring both flags afterwards.
-
-    Examples:
-        >>> with deterministic_warn_only():
-        ...     torch.are_deterministic_algorithms_enabled()
-        True
-    """
-    enabled = torch.are_deterministic_algorithms_enabled()
-    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-    torch.use_deterministic_algorithms(True, warn_only=True)
-    try:
-        yield
-    finally:
-        torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
 
 
 @contextmanager
@@ -395,8 +367,7 @@ class TestRecordingBudget:
         assert not replay.recordings
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="update replay needs CUDA")
+@requires_cuda
 class TestCUDARecordingLifecycle:
     def test_brief_changes_return_to_recording(self, native_calls: list[MuSGD]) -> None:
         """Signature changes shorter than the tolerance run natively, then replay the first recording.
@@ -469,8 +440,7 @@ class TestCUDARecordingLifecycle:
         assert replay.recordings == {id(candidate.param_groups[0]): 1 + _RERECORD_BUDGET}
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="update replay needs CUDA")
+@requires_cuda
 class TestCUDAReplayedStepChecks:
     def test_replay_skips_full_input_check(self, native_calls: list[MuSGD], monkeypatch: pytest.MonkeyPatch) -> None:
         """A step matching its recording replays without the full input scan.
@@ -508,8 +478,7 @@ class TestCUDAReplayedStepChecks:
         assert prepared == [1, 2, 1, 0]
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="update replay needs CUDA")
+@requires_cuda
 class TestCUDAStepGuards:
     def test_autocast_keeps_native_step(self, native_calls: list[MuSGD]) -> None:
         """A step under CUDA autocast runs the native iterator and records nothing.
@@ -562,14 +531,13 @@ class TestCUDAStepGuards:
         assert not candidate._update_replay.entries
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="update replay needs CUDA")
+@requires_cuda
 class TestCUDARecordingKey:
     @pytest.mark.parametrize(
         "change",
         [
             pytest.param(high_matmul_precision, id="matmul-precision"),
-            pytest.param(deterministic_warn_only, id="deterministic-warn-only"),
+            pytest.param(partial(deterministic_algorithms, warn_only=True), id="deterministic-warn-only"),
             pytest.param(other_blas_library, id="blas-library"),
             pytest.param(side_stream, id="stream"),
         ],
@@ -685,8 +653,7 @@ class TestCUDARecordingKey:
         assert prepared == [1, 2, 1, 0]
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="update replay needs CUDA")
+@requires_cuda
 class TestCUDAGradientInputs:
     def test_recorded_gradients_keep_caller_values(self) -> None:
         """The gradients a recording was made from keep their values while later steps replay.
@@ -738,8 +705,7 @@ class TestParameterLayout:
             assert_bytes(restrided, update)
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="update replay needs CUDA")
+@requires_cuda
 class TestCUDAParameterLayout:
     def test_recorded_updates_take_parameter_strides(self) -> None:
         """Every recorded update has its parameter's exact strides, so one foreach call writes them all.

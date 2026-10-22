@@ -216,7 +216,7 @@ def test_nothing_above_threshold_returns_empty_row_aligned_pair(image_file: Path
     assert prediction.masks.dtype == torch.bool
 
 
-def test_oriented_checkpoint_still_refused_by_name(image_file: Path) -> None:
+def test_oriented_checkpoint_refused_by_name(image_file: Path) -> None:
     """An ``obb`` checkpoint is refused by both of these entry points, naming its task.
 
     The oriented head's plain forward returns the same detection output a detector's

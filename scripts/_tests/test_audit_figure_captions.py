@@ -14,9 +14,7 @@ itself would fail on the next commit that touches a figure, not just a new one.
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
-from types import ModuleType
 
 import matplotlib
 import pytest
@@ -24,30 +22,13 @@ import pytest
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+from script_loader import load_script
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AUDIT_PATH = REPO_ROOT / "scripts" / "lint" / "audit_figure_captions.py"
 FIGURES = sorted((REPO_ROOT / "docs" / "figures").glob("*.svg"))
 
 
-def _load_audit() -> ModuleType:
-    """Load ``scripts/lint/audit_figure_captions.py`` as an importable module.
-
-    Examples:
-        >>> module = _load_audit()
-        >>> module.__name__
-        'audit_figure_captions'
-        >>> callable(module.check_captions_match)
-        True
-    """
-    spec = importlib.util.spec_from_file_location("audit_figure_captions", AUDIT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-audit = _load_audit()
+audit = load_script("audit_figure_captions")
 
 
 class TestCheckFiguresPresent:

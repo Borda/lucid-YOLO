@@ -8,6 +8,7 @@ import math
 
 import pytest
 import torch
+from markers import requires_cuda
 
 from lucid_yolo.optim import MuSGD, musgd, orthogonalize
 
@@ -23,7 +24,7 @@ class _StorageOpaqueParameter(torch.nn.Parameter):
 @pytest.fixture(
     params=[
         "cpu",
-        pytest.param("cuda", marks=[pytest.mark.gpu, pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")]),
+        pytest.param("cuda", marks=requires_cuda),
     ]
 )
 def device(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
@@ -234,18 +235,15 @@ def test_mixed_subclass_group_keeps_alias_order(device: str, monkeypatch: pytest
     torch.testing.assert_close(storage, expected)
 
 
-_CUDA_ONLY = [pytest.mark.gpu, pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")]
-
-
 @pytest.mark.parametrize(
     ("device_name", "dtype"),
     [
         pytest.param("cpu", torch.float32, id="cpu-float32"),
         pytest.param("cpu", torch.float64, id="cpu-float64"),
-        pytest.param("cuda", torch.float16, marks=_CUDA_ONLY, id="cuda-float16"),
-        pytest.param("cuda", torch.bfloat16, marks=_CUDA_ONLY, id="cuda-bfloat16"),
-        pytest.param("cuda", torch.float32, marks=_CUDA_ONLY, id="cuda-float32"),
-        pytest.param("cuda", torch.float64, marks=_CUDA_ONLY, id="cuda-float64"),
+        pytest.param("cuda", torch.float16, marks=requires_cuda, id="cuda-float16"),
+        pytest.param("cuda", torch.bfloat16, marks=requires_cuda, id="cuda-bfloat16"),
+        pytest.param("cuda", torch.float32, marks=requires_cuda, id="cuda-float32"),
+        pytest.param("cuda", torch.float64, marks=requires_cuda, id="cuda-float64"),
     ],
 )
 def test_momentum_batches_without_reassociation(

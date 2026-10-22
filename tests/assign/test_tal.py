@@ -210,7 +210,7 @@ def test_conflict_resolution_assigns_highest_t() -> None:
         pytest.param(6, id="k-above-c-below-anchor-count"),
     ],
 )
-def test_all_zero_metric_still_keeps_min_k_c_of_gts_own_candidates(topk: int) -> None:
+def test_all_zero_metric_keeps_min_k_c_of_gts_own_candidates(topk: int) -> None:
     """A ground truth with an all-zero alignment metric keeps ``min(k, c)`` of its candidates.
 
     This is the state the head is in at initialization: ``decode_ltrb`` applies no

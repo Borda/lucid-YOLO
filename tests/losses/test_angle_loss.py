@@ -59,12 +59,6 @@ _EXTREMA = [
 ]
 
 
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed every RNG source before each test for deterministic tensors."""
-    torch.manual_seed(0)
-
-
 def _step_ulps(value: float, steps: int) -> float:
     """Return ``value`` moved ``steps`` float32 ulps, negative steps moving downwards.
 
@@ -376,7 +370,7 @@ def test_background_anchors_of_zero_weight_change_nothing() -> None:
     )
 
 
-def test_no_foreground_gives_exact_zero_still_carries_gradient() -> None:
+def test_no_foreground_gives_exact_zero_with_gradient() -> None:
     """An empty assignment is a zero loss with a zero gradient, not a special case."""
     pred = torch.zeros(0, requires_grad=True)
     empty = torch.zeros(0)

@@ -21,12 +21,6 @@ _S_SCALE = (0.50, 0.50, 1024, (256, 256, 512))
 _M_SCALE = (0.50, 1.00, 512, (512, 512, 512))
 
 
-@pytest.fixture(autouse=True)
-def _seed_rng() -> None:
-    """Seed torch RNG so weight init and random inputs are deterministic."""
-    torch.manual_seed(0)
-
-
 @pytest.mark.parametrize(
     ("depth", "width", "max_channels", "expected_channels"),
     [

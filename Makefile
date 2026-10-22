@@ -8,6 +8,11 @@ MINOR     ?=
 TASK      ?= det
 DATA_ROOT ?=
 DATASET   ?=
+# Coverage flags for `test`; a CI cell that measures nothing passes `COV=`.
+COV       ?= --cov=lucid_yolo --cov-report=term
+# Extra pytest arguments appended to `test`. Defaults to pytest-xdist across every core;
+# `PYTEST_XARGS=` runs serial, which is how a failure is read (xdist interleaves output).
+PYTEST_XARGS ?= -n auto
 
 TAG       ?=
 
@@ -29,17 +34,18 @@ lint: precommit
 #
 # Pytest's exit 5 (nothing collected) used to be swallowed here and reported as a
 # pass, a scaffold from before WP-002 when there were no tests to collect. There are
-# 2668, and WP-168 made this target what CI runs, so the swallow would have meant a
+# thousands now, and WP-168 made this target what CI runs, so the swallow would have meant a
 # job that collected nothing reporting green — the failure this row exists to close.
 test:
-	$(PY) -m pytest -m "not gpu and not data" --doctest-modules --cov=lucid_yolo --cov-report=term src scripts tests
+	$(PY) -m pytest -m "not gpu and not data" --doctest-modules $(COV)$(if $(PYTEST_XARGS), $(PYTEST_XARGS)) src scripts tests
 
 precommit:
 	$(VENV)/bin/pre-commit run --all-files
 
-# Golden gate suite + frozen-golden regression (harness lands in WP-005).
+# Golden gate suite + frozen-golden regression. A missing harness fails here like a
+# missing pytest target would: skipping with an echo kept `make gate` green with nothing checked.
 golden:
-	@if [ -f scripts/check_goldens.py ]; then $(PY) scripts/check_goldens.py; else echo "golden harness not yet installed (WP-005) — skipping"; fi
+	$(PY) scripts/check_goldens.py
 
 gate: precommit test golden
 

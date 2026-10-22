@@ -15,11 +15,12 @@ import re
 import subprocess
 import sys
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from markers import requires_cuda
 from pytorch_lightning import Trainer
 
 from lucid_yolo.ptl import DetectionLitModule
@@ -263,14 +264,10 @@ class TestPrecisionPolicy:
         assert result.stdout.strip() == "True"
 
 
-_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
-
-
 class TestFailedRecording:
     """A recording that fails still drains queued device work before restoring buffers."""
 
-    @pytest.mark.gpu
-    @_cuda
+    @requires_cuda
     def test_synchronizes_before_buffer_restore(self) -> None:
         """A warmup failure synchronizes the device before the BatchNorm snapshot is copied back.
 
@@ -304,16 +301,6 @@ class TestFailedRecording:
         ):
             _NetworkCapture().run(images, (model.backbone, model.neck, model.head), model)
         assert order[:2] == ["synchronize", "restore"]
-
-
-@pytest.fixture
-def _deterministic_kernels() -> Iterator[None]:
-    """Use deterministic kernels so eager and replayed gradients compare exactly."""
-    enabled = torch.are_deterministic_algorithms_enabled()
-    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-    torch.use_deterministic_algorithms(True)
-    yield
-    torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
 
 
 class TestReplayBackwardHold:
@@ -369,9 +356,8 @@ class TestReplayBackwardHold:
         _NetworkCaptureLifecycle().on_train_batch_start(MagicMock(spec=Trainer), model, None, 0)
         assert not model._network_capture._pending_backward
 
-    @pytest.mark.gpu
-    @_cuda
-    @pytest.mark.usefixtures("_deterministic_kernels")
+    @requires_cuda
+    @pytest.mark.usefixtures("deterministic_kernels")
     def test_two_forwards_before_backward_match_eager(self) -> None:
         """Two training forwards before one backward give the eager gradients exactly.
 

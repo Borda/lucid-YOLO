@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-import pytest
 import torch
 from torch import Tensor, nn
 
@@ -37,12 +36,6 @@ _IMG_SIZE = 128
 
 #: The head's level strides, in the (8, 16, 32) order the neck emits.
 _STRIDES = [8, 16, 32]
-
-
-@pytest.fixture(autouse=True)
-def _seed_rng() -> None:
-    """Seed torch RNG so weight init is deterministic across the gate."""
-    torch.manual_seed(0)
 
 
 def _anchor_count() -> int:

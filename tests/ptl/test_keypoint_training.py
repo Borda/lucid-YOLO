@@ -45,7 +45,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 import torch
-from torch import Tensor, nn
+from torch import Tensor
+from training import LogRecorder, has_gradient, tiny_module
 
 from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.data.targets import Targets
@@ -78,24 +79,6 @@ _BOX_GAIN, _CLS_GAIN, _L1_GAIN, _KEYPOINT_GAIN, _ALPHA = 7.5, 0.5, 6.0, 1.0, 0.5
 _LEVERAGE_RTOL = 1e-3
 
 
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed torch before each test so model init and synthetic batches are reproducible."""
-    torch.manual_seed(0)
-
-
-class _LogRecorder:
-    """Stand-in for ``LightningModule.log`` that records every logged scalar."""
-
-    def __init__(self) -> None:
-        self.values: dict[str, float] = {}
-
-    def __call__(self, name: str, value: Tensor, **kwargs: object) -> None:
-        """Record ``value`` under ``name``, ignoring Lightning's keyword arguments."""
-        del kwargs
-        self.values[name] = float(value.detach())
-
-
 def _tiny_module(task: str = "keypoints", keypoint_loss: str = "rle", **overrides: float) -> DetectionLitModule:
     """Build an n-scale module with a low channel cap for fast CPU tests.
 
@@ -118,17 +101,13 @@ def _tiny_module(task: str = "keypoints", keypoint_loss: str = "rle", **override
         "alpha": _ALPHA,
     }
     gains.update(overrides)
-    module = DetectionLitModule(
-        depth=0.34,
-        width=0.25,
-        max_channels=256,
-        num_classes=_NUM_CLASSES,
-        task=task,
+    module = tiny_module(
+        task,
         num_keypoints=_NUM_KEYPOINTS if task == "keypoints" else None,
         keypoint_loss=keypoint_loss,
         **gains,
     )
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
     return module
 
 
@@ -177,20 +156,6 @@ def _boxes_only(targets: list[Targets]) -> list[Targets]:
         [0]
     """
     return [Targets(boxes=target.boxes, labels=target.labels) for target in targets]
-
-
-def _has_gradient(module: nn.Module) -> bool:
-    """Return whether any parameter of ``module`` carries a non-zero gradient.
-
-    Examples:
-        >>> layer = nn.Linear(2, 1)
-        >>> _has_gradient(layer)
-        False
-        >>> layer(torch.ones(1, 2)).backward()
-        >>> _has_gradient(layer)
-        True
-    """
-    return any(parameter.grad is not None and bool(parameter.grad.abs().sum() > 0) for parameter in module.parameters())
 
 
 class TestHeadConstruction:
@@ -346,7 +311,7 @@ class TestKeypointLossSelection:
         effect for the flow.
         """
         module = _tiny_module(keypoint_loss="laplace_nll")
-        recorder = _LogRecorder()
+        recorder = LogRecorder()
         module.log = recorder  # type: ignore[method-assign]
 
         loss = module.training_step(_posed_batch(), 0)
@@ -354,8 +319,8 @@ class TestKeypointLossSelection:
 
         assert bool(torch.isfinite(loss))
         assert loss.ndim == 0
-        assert _has_gradient(module.head.o2o.keypoint_stems)
-        assert _has_gradient(module.head.o2m.keypoint_stems)
+        assert has_gradient(module.head.o2o.keypoint_stems)
+        assert has_gradient(module.head.o2m.keypoint_stems)
         assert math.isfinite(recorder.values["train/keypoint"])
 
 
@@ -374,10 +339,10 @@ class TestTrainingStep:
 
         module.training_step(_posed_batch(), 0).backward()
 
-        assert _has_gradient(module.head.o2o.keypoint_stems)
-        assert _has_gradient(module.head.o2m.keypoint_stems)
+        assert has_gradient(module.head.o2o.keypoint_stems)
+        assert has_gradient(module.head.o2m.keypoint_stems)
         assert module.rle_loss is not None
-        assert _has_gradient(module.rle_loss)
+        assert has_gradient(module.rle_loss)
 
     def test_keypoint_gain_enters_total_at_weight(self) -> None:
         """Zeroing ``keypoint_gain`` drops exactly ``gain * term`` from the total.
@@ -390,7 +355,7 @@ class TestTrainingStep:
         weighted = _tiny_module()
         zeroed = _tiny_module(keypoint_gain=0.0)
         zeroed.load_state_dict(weighted.state_dict())
-        recorder = _LogRecorder()
+        recorder = LogRecorder()
         weighted.log = recorder  # type: ignore[method-assign]
         batch = _posed_batch()
 
@@ -438,7 +403,7 @@ class TestTrainingStep:
         weighted = _tiny_module(oks_gain=1.0)
         default = _tiny_module()
         default.load_state_dict(weighted.state_dict())
-        recorder = _LogRecorder()
+        recorder = LogRecorder()
         weighted.log = recorder  # type: ignore[method-assign]
         batch = _posed_batch()
 
@@ -505,7 +470,7 @@ class TestTrainingStep:
         length zero, which no gather can index. The term has to answer with a real zero.
         """
         module = _tiny_module()
-        recorder = _LogRecorder()
+        recorder = LogRecorder()
         module.log = recorder  # type: ignore[method-assign]
 
         loss = module.training_step((torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE), [Targets.empty()]), 0)
@@ -571,7 +536,7 @@ class TestVisibilityMasking:
         )
         images = torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE)
         module = _tiny_module()
-        recorder = _LogRecorder()
+        recorder = LogRecorder()
         module.log = recorder  # type: ignore[method-assign]
 
         module.training_step((images, [target]), 0)

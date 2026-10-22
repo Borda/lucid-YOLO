@@ -111,7 +111,7 @@ class TestKeypointHyperparameterContract:
                 num_keypoints=17,
             )
 
-    def test_keypoints_task_still_requires_point_count(self) -> None:
+    def test_keypoints_task_requires_point_count(self) -> None:
         """The pre-existing missing-count refusal is untouched by the added one.
 
         Both directions are errors and they must stay distinguishable: this one says the

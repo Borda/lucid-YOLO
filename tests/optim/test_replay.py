@@ -11,6 +11,8 @@ from typing import Any
 
 import pytest
 import torch
+from determinism import deterministic_algorithms
+from markers import requires_cuda
 from torch import Tensor
 
 from lucid_yolo.optim.musgd import MuSGD
@@ -69,13 +71,8 @@ def _deterministic_warn_only() -> Iterator[dict[str, Any]]:
         ...     (torch.are_deterministic_algorithms_enabled(), extra)
         (True, {})
     """
-    enabled = torch.are_deterministic_algorithms_enabled()
-    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-    torch.use_deterministic_algorithms(True, warn_only=True)
-    try:
+    with deterministic_algorithms(warn_only=True):
         yield {}
-    finally:
-        torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
 
 
 @contextmanager
@@ -270,8 +267,7 @@ class TestEagerReplay:
         assert not candidate._orthogonalization_replay.entries
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA replay needs a CUDA device")
+@requires_cuda
 class TestCUDAReplay:
     @pytest.mark.parametrize("shape", [(16, 32), (32, 16), (16, 16), (3, 16, 32), (2, 32, 16)])
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.bfloat16, torch.float16])
@@ -405,13 +401,15 @@ class TestCUDAReplay:
         assert_bytes(actual, orthogonalize(value))
         assert len(owner.entries) == 1
 
+    @pytest.mark.skipif(
+        not hasattr(torch.backends.cuda.matmul, "fp32_precision"),
+        reason="Per-backend precision settings require newer PyTorch",
+    )
     @pytest.mark.parametrize("shape", [(32, 64), (2, 32, 64)])
     @pytest.mark.parametrize("setting", ["global", "cuda"])
     def test_new_precision_api_invalidates_recordings_without_legacy_getter(
         self, shape: tuple[int, ...], setting: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        if not hasattr(torch.backends.cuda.matmul, "fp32_precision"):
-            pytest.skip("Per-backend precision settings require newer PyTorch")
         previous_global = torch.backends.fp32_precision
         previous_cuda = torch.backends.cuda.matmul.fp32_precision
         function = orthogonalize if len(shape) == 2 else _orthogonalize_batched
