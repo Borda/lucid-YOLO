@@ -194,7 +194,7 @@ class EMACallback(Callback):
     leave EMA weights wearing the live model's identity). Checkpoints written by
     :class:`~pytorch_lightning.callbacks.ModelCheckpoint` therefore hold the *raw* trained
     weights in ``state_dict``, with the EMA available separately under this callback's
-    ``state_dict`` — the split :func:`~lucid_yolo.eval.checkpoint.load_checkpoint_model`
+    ``state_dict`` — the split :func:`~lucid_yolo.eval.checkpoint.load_eval_module`
     relies on when it overlays the shadow on request. ``ModelCheckpoint`` saves from
     ``on_validation_end`` too, and Lightning moves it to the end of the callback list, so
     within a single validation the restore runs first; the two facts are recorded together

@@ -6,6 +6,16 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Added
 
+- **`lucid-export`, a fifth command: one checkpoint to one ONNX file.** `lucid-export --checkpoint run.ckpt --output model.onnx` reads the task from the checkpoint and writes its suppression-free graph at opset 17, with `--img_size`, `--canvas "[H, W]"`, `--ema` and `--opset`. The file needs the `onnx` package, which torch's exporter imports to finalise it, so it ships as the `export` extra: `pip install "lucid-yolo[export]"`; without it the command stops before reading the checkpoint and names the extra. The input is a static `(1, 3, H, W)`, there is no dynamic batch, and a segmentation export refuses canvases under 300 anchors (96 px a side and below). An `--output` that is the checkpoint itself — the same path spelled another way, a symbolic link or a hard link to it — is refused before anything is read or written (WP-204).
+
+- **`lucid_yolo.export.graph_from_module`** rebuilds a loaded checkpoint's task graph under a strict key check, so a missing or unexpected weight is refused by name; `lucid-export` and the ONNX gate both go through it (WP-204).
+
+- **A Python API from the top-level package.** `lucid_yolo.load_eval_module`, `pick_device`, `predict_image`, `predict_segmentation`, `predict_oriented`, `predict_keypoints`, `SegmentedPrediction`, `KeypointPrediction`, `score_coco` and `CocoScore` are importable lazily, so `import lucid_yolo` still loads neither torch nor Lightning. The four `predict_*` functions also take a decoded `(3, H, W)` RGB tensor, one image per call, and give the same result as the file path; a float tensor holding a NaN or infinite value is refused. `score_coco` runs the `lucid-eval` COCO protocol for detect, segment and keypoints checkpoints and returns the report; its default engine is `faster_coco_eval`, where `lucid-eval` defaults to `auto` (WP-204).
+
+- **Shared decode building blocks.** `lucid_yolo.decode` exports `RotatedTopKDecoder` (pads to `k` rows and returns anchor indices), `decode_with_coefficients`, `decode_with_keypoints`, `gather_by_anchor`, `gather_keypoint_sets`, `points_to_letterboxed_original` and `MAX_DETECTIONS`; prediction, evaluation and export compose the same functions instead of three copies. Output is unchanged on every path but the one named under Changed (WP-204).
+
+- **Documentation.** An API page for export, `RotatedTopKDecoder` and the decode helpers on the inference page, and in `docs/TRAINING.md` sections on resuming with `lucid-yolo fit --ckpt_path` (now covered by a CLI test), using a checkpoint from Python and exporting to ONNX (WP-204).
+
 - **`lucid-eval --ann_file` and `--images_dir`** override a COCO tier's annotation JSON and image directory independently; defaults are unchanged (WP-202).
 
 - **`lucid-data check --keypoints true`** also requires each split's `person_keypoints_*.json` to exist and parse, so a pose config pointing elsewhere is caught before the run is queued (WP-202).
@@ -46,6 +56,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Fixed
 
+- **The export module docstrings state what the code does.** The segmentation paragraph no longer claims the coefficient gather raises on a padding row, the oriented graph names `RotatedTopKDecoder`, and two stale paragraphs about index `-1` are gone; `EMACallback` names `load_eval_module` (WP-204).
+
 - **16-bit PNGs scale by their own depth.** Training image readers and the letterboxed reader behind `lucid-eval` and `lucid-predict` divide by the source's own maximum instead of 255, so a 16-bit PNG no longer arrives as values up to 257. `lucid-data build-tiles` refuses a source above 8 bits per channel by name (WP-202).
 
 - **`lucid-data check` accepts plain-spelled COCO roots.** A root written as `train/` and `val/` beside `annotations/instances_*.json`, a `build-tiles` output included, is checked through the layout resolver for presence and parseability instead of being reported missing as `train2017` (WP-202).
@@ -83,6 +95,12 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 - **A skipped Example is no longer counted as an executed one, and `src/` is scanned.** The doctest audit read `>>>` as coverage, so a docstring whose every line was `# doctest: +SKIP` passed; it also never looked at `src/`, where three shipped functions carried no Example at all. Both are fixed, and a skip now states its reason — before the directive, since a reason after it is not a comment but an unparsable doctest option.
 
 ### Changed
+
+- **The ONNX graph for oriented detection pads to 300 rows on canvases under 300 anchors.** At 96 px a side and below the graph returned one row per anchor; it now returns `(B, 300, 7)` with zero-score padding rows after the real ones, as the detection graph does. The leading rows are byte-identical, canvases of 128 px and above are unchanged, and `lucid-predict` output is unchanged on every canvas (WP-204).
+
+- **A checkpoint is read once.** `load_eval_module`, and so every command that takes `--checkpoint`, reads the file a single time with `torch.load(..., weights_only=True)` and builds the module from that payload, instead of reading it restricted and then again through Lightning's loader. The file is no longer deserialized twice, a file swapped between two reads can no longer be checked in one form and loaded in another, and a checkpoint missing `hyper_parameters` or `state_dict` is refused with a `ValueError` naming the key and file (WP-204).
+
+- **`Detector`, `Segmenter`, `OrientedDetector` and `KeypointDetector` accept `variant: str | ScaleSpec`**, so a model can be rebuilt at a checkpoint's own multipliers. The three single-head models now share one base class and one deploy view; parameter counts, state-dict keys and FLOPs are identical for every scale and task, and the API page lists `forward` and `deploy` under each class through inherited members (WP-204).
 
 - **`lucid-yolo` exposes only `fit` and `validate`.** Lightning's `test` and `predict` subcommands are gone from its help; `lucid-eval` and `lucid-predict` are the evaluation and inference commands (WP-202).
 

@@ -7,11 +7,14 @@ preprocessing is :func:`~lucid_yolo.eval.annotations.read_letterboxed_image`, th
 read-scale-letterbox chain the evaluator feeds val2017 through; the two decode paths are
 :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` and
 :class:`~lucid_yolo.decode.nms_path.NMSDecoder`, with
-:func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` and
-:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` as their oriented twins; and the
-way back to original pixels is
-:func:`~lucid_yolo.decode.common.to_letterboxed_original`, which recovers the ratio and
-the pads from :class:`~lucid_yolo.data.letterbox.Letterbox`'s own geometry.
+:class:`~lucid_yolo.decode.topk_e2e.RotatedTopKDecoder` and
+:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` as their oriented twins; the
+per-anchor masks and points are gathered through :mod:`lucid_yolo.decode.per_task`, the
+composition :mod:`lucid_yolo.export` and the evaluator decode through too; and the way
+back to original pixels is :func:`~lucid_yolo.decode.common.to_letterboxed_original` and
+its point twin :func:`~lucid_yolo.decode.common.points_to_letterboxed_original`, which
+recover the ratio and the pads from :class:`~lucid_yolo.data.letterbox.Letterbox`'s own
+geometry.
 
 That last one is the point of this module existing rather than a twenty-line script. A
 letterbox inverse written a second time is the WP-053a defect class: two copies of one
@@ -87,7 +90,7 @@ A23, A37, A45, A61, A64.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Protocol
 
 import torch
 
@@ -95,18 +98,19 @@ from lucid_yolo.assign.grid import anchor_grid, require_grid_side
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.decode.common import (
     BOX_CORNERS,
+    COCO_IMG_SIZE,
     RBOX_COLUMNS,
     SCORE_COLUMN,
+    points_to_letterboxed_original,
     rboxes_to_letterboxed_original,
     to_letterboxed_original,
 )
 from lucid_yolo.decode.nms_path import NMSDecoder
+from lucid_yolo.decode.per_task import decode_with_coefficients, decode_with_keypoints
 from lucid_yolo.decode.rotated_nms import RotatedNMSDecoder
-from lucid_yolo.decode.topk_e2e import TopKDecoder
-from lucid_yolo.eval.annotations import read_letterboxed_image
+from lucid_yolo.decode.topk_e2e import RotatedTopKDecoder, TopKDecoder
+from lucid_yolo.eval.annotations import letterbox_image_tensor, read_letterboxed_image
 from lucid_yolo.eval.segment_decode import decode_instance_masks, masks_to_original
-from lucid_yolo.models.heads.keypoint import decode_keypoints
-from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.validate import require_in_range, require_one_of
 
 if TYPE_CHECKING:
@@ -114,6 +118,7 @@ if TYPE_CHECKING:
 
     from torch import Tensor
 
+    from lucid_yolo.decode.common import IndexingDecoder
     from lucid_yolo.models.heads.detect import BranchName, BranchOutput
     from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -303,15 +308,67 @@ def _branch_for(decoder: DecodePath) -> BranchName:
     return "o2o" if decoder == "e2e" else "o2m"
 
 
+@dataclass(frozen=True)
+class _Prepared:
+    """One image read, letterboxed and batched for a single forward pass.
+
+    What every entry point holds between its argument checks and its decode: the batch
+    the module sees, the canvas it fills, the original size the answer goes back to, the
+    letterbox that produced the canvas — whose ``allow_upscale`` the inverse must match —
+    and the canvas's anchor grid on the run device.
+    """
+
+    batch: Tensor
+    canvas: tuple[int, int]
+    orig_size: tuple[int, int]
+    letterbox: Letterbox
+    anchor_points: Tensor
+    strides: Tensor
+
+
+def _prepare(
+    module: DetectionLitModule,
+    task: str,
+    image: Path | Tensor,
+    img_size: int,
+    decoder: DecodePath,
+    conf_threshold: float,
+    device: torch.device | None,
+) -> _Prepared:
+    """Run the preamble all four entry points share, up to the forward pass.
+
+    Refuses a checkpoint of another task by name, refuses out-of-domain arguments, reads
+    (or takes) and letterboxes the image, batches it onto the run device, puts the module there in
+    eval mode — the in-place move the module docstring's *Module ownership* describes —
+    and builds the canvas's anchor grid. One copy rather than four, so a fix to any step
+    reaches every task at once. The forward pass itself stays with each entry point,
+    because the segmentation one calls a different forward.
+    """
+    if module.task != task:
+        raise ValueError(_wrong_task_message(task, module.task))
+    _check_predict_arguments(decoder, conf_threshold, img_size)
+    run_on = torch.device("cpu") if device is None else device
+    letterbox = Letterbox(img_size)
+    if isinstance(image, torch.Tensor):
+        canvas_image, orig_size = letterbox_image_tensor(image, letterbox)
+    else:
+        canvas_image, orig_size = read_letterboxed_image(image, letterbox)
+    batch = canvas_image.unsqueeze(0).to(run_on)
+    canvas = (int(batch.shape[-2]), int(batch.shape[-1]))
+    module.to(run_on).eval()
+    anchor_points, strides = anchor_grid(canvas, run_on)
+    return _Prepared(batch, canvas, orig_size, letterbox, anchor_points, strides)
+
+
 def predict_image(
     module: DetectionLitModule,
-    image: Path,
-    img_size: int = 640,
+    image: Path | Tensor,
+    img_size: int = COCO_IMG_SIZE,
     decoder: DecodePath = "e2e",
     conf_threshold: float = DEFAULT_CONF_THRESHOLD,
     device: torch.device | None = None,
 ) -> Tensor:
-    """Detect objects in one image file and return them in original-image coordinates.
+    """Detect objects in one image and return them in original-image coordinates.
 
     The image is letterboxed into an ``img_size`` square canvas, run through the module
     once, decoded by the selected path, and mapped back onto the original pixel grid by
@@ -323,7 +380,9 @@ def predict_image(
         module: An eval-mode ``detect`` module, as
             :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
             **Mutated in place** — see the module docstring's *Module ownership*.
-        image: Path to the image file to read.
+        image: Path to the image file to read, or an already-decoded ``(3, H, W)`` RGB
+            tensor: ``uint8``/``uint16`` codes, or floating point in ``[0, 1]``
+            (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`).
         img_size: Letterbox side the model sees. Defaults to ``640`` (R1 sec. 4.4).
         decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one
             branch, ``"nms"`` for the confidence-threshold plus class-wise suppression
@@ -342,6 +401,9 @@ def predict_image(
         ValueError: If the module's task is not ``detect``, naming the task it is; or if
             ``decoder``, ``conf_threshold`` or ``img_size`` is outside its domain, per
             :func:`_check_predict_arguments`.
+        ValueError: If a tensor ``image`` is not ``(3, H, W)``, or is floating point
+            outside ``[0, 1]``.
+        TypeError: If a tensor ``image`` holds signed integer or boolean values.
 
     Examples:
         ```pycon
@@ -350,33 +412,20 @@ def predict_image(
 
         ```
     """
-    if module.task != _DETECT_TASK:
-        raise ValueError(_wrong_task_message(_DETECT_TASK, module.task))
-    _check_predict_arguments(decoder, conf_threshold, img_size)
-    run_on = torch.device("cpu") if device is None else device
-    letterbox = Letterbox(img_size)
-    canvas_image, orig_size = read_letterboxed_image(image, letterbox)
-    batch = canvas_image.unsqueeze(0).to(run_on)
-    canvas = (int(batch.shape[-2]), int(batch.shape[-1]))
-
-    module.to(run_on).eval()
+    prepared = _prepare(module, _DETECT_TASK, image, img_size, decoder, conf_threshold, device)
     with torch.no_grad():
         # One branch, not both: the decode below reads a single branch's logits and boxes,
         # and running the other one's stems only to drop them is the cost this asks the
         # module not to pay.
-        branch_out = module.forward_branch(batch, _branch_for(decoder))
-    anchor_points, strides = anchor_grid(canvas, run_on)
-    if decoder == "e2e":
-        detections = TopKDecoder()(branch_out.cls, branch_out.box, anchor_points, strides)
-    else:
-        # Only this path is given the threshold: it decides what enters suppression, and
-        # a box the threshold drops could only ever have been suppressed anyway, so the
-        # survivor set is unchanged and the sort is cheaper. The top-k path's own
-        # threshold merely zeroes scores that the filter below drops regardless, so
-        # handing it the number too would state the same cut in two places.
-        detections = NMSDecoder(conf_threshold=conf_threshold)(branch_out.cls, branch_out.box, anchor_points, strides)
+        branch_out = module.forward_branch(prepared.batch, _branch_for(decoder))
+    detections = _box_decoder(decoder, conf_threshold)(
+        branch_out.cls, branch_out.box, prepared.anchor_points, prepared.strides
+    )
     mapped = to_letterboxed_original(
-        detections.cpu(), orig_size=orig_size, letterboxed_size=canvas, allow_upscale=letterbox.allow_upscale
+        detections.cpu(),
+        orig_size=prepared.orig_size,
+        letterboxed_size=prepared.canvas,
+        allow_upscale=prepared.letterbox.allow_upscale,
     )
     image_detections = mapped[0]
     return image_detections[image_detections[:, SCORE_COLUMN] > conf_threshold]
@@ -417,13 +466,13 @@ class SegmentedPrediction:
 
 def predict_segmentation(
     module: DetectionLitModule,
-    image: Path,
-    img_size: int = 640,
+    image: Path | Tensor,
+    img_size: int = COCO_IMG_SIZE,
     decoder: DecodePath = "e2e",
     conf_threshold: float = DEFAULT_CONF_THRESHOLD,
     device: torch.device | None = None,
 ) -> SegmentedPrediction:
-    """Segment objects in one image file and return boxes and masks in original coordinates.
+    """Segment objects in one image and return boxes and masks in original coordinates.
 
     :func:`predict_image` plus Eq. 7, in the order
     :class:`~lucid_yolo.eval.coco_eval.DualPathEvaluator` established and for its reason:
@@ -445,7 +494,9 @@ def predict_segmentation(
         module: An eval-mode ``segment`` module, as
             :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
             **Mutated in place** — see the module docstring's *Module ownership*.
-        image: Path to the image file to read.
+        image: Path to the image file to read, or an already-decoded ``(3, H, W)`` RGB
+            tensor: ``uint8``/``uint16`` codes, or floating point in ``[0, 1]``
+            (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`).
         img_size: Letterbox side the model sees. Defaults to ``640`` (R1 sec. 4.4).
         decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one
             branch, ``"nms"`` for the confidence-threshold plus class-wise suppression
@@ -465,6 +516,9 @@ def predict_segmentation(
             module claiming that task has no mask coefficients to decode; or if
             ``decoder``, ``conf_threshold`` or ``img_size`` is outside its domain, per
             :func:`_check_predict_arguments`.
+        ValueError: If a tensor ``image`` is not ``(3, H, W)``, or is floating point
+            outside ``[0, 1]``.
+        TypeError: If a tensor ``image`` holds signed integer or boolean values.
 
     Examples:
         ```pycon
@@ -473,16 +527,7 @@ def predict_segmentation(
 
         ```
     """
-    if module.task != _SEGMENT_TASK:
-        raise ValueError(_wrong_task_message(_SEGMENT_TASK, module.task))
-    _check_predict_arguments(decoder, conf_threshold, img_size)
-    run_on = torch.device("cpu") if device is None else device
-    letterbox = Letterbox(img_size)
-    canvas_image, orig_size = read_letterboxed_image(image, letterbox)
-    batch = canvas_image.unsqueeze(0).to(run_on)
-    canvas = (int(batch.shape[-2]), int(batch.shape[-1]))
-
-    module.to(run_on).eval()
+    prepared = _prepare(module, _SEGMENT_TASK, image, img_size, decoder, conf_threshold, device)
     with torch.no_grad():
         # Called directly, with no forward-wrapper. The evaluator's `_SegmentationForward`
         # exists because the evaluator decides *structurally* — by what the forward returns
@@ -494,84 +539,114 @@ def predict_segmentation(
         # The branch-limited twin, because Eq. 7 reads one branch's coefficients: the other
         # branch's coefficient stem is the widest of the optional ones, and it used to be
         # computed here and dropped.
-        branch_out, prototypes = module.forward_segmentation_branch(batch, _branch_for(decoder))
-    anchor_points, strides = anchor_grid(canvas, run_on)
-    detections, anchor_index, coefficients = _decode_with_coefficients(
-        branch_out, decoder, conf_threshold, anchor_points, strides
+        branch_out, prototypes = module.forward_segmentation_branch(prepared.batch, _branch_for(decoder))
+    missing = (
+        f"this checkpoint's task is {_SEGMENT_TASK!r} but its head emits no mask coefficients on the "
+        f"{decoder!r} branch, so Eq. 7 has only one of its two halves. The checkpoint was built "
+        f"without the coefficient stems and cannot produce a mask."
     )
-
-    # One selection, applied to the boxes and to the indices the coefficients are gathered
-    # by, so the two cannot drift apart by a row. Padding rows are excluded explicitly and
-    # not merely by their score: a row with no source anchor is not a detection at any
-    # threshold, and letting one through would gather some real anchor's coefficients.
-    keep = (detections[0, :, SCORE_COLUMN] > conf_threshold) & (anchor_index[0] >= 0)
-    kept = detections[0][keep]
-    canvas_masks = _canvas_masks(prototypes, coefficients[0], anchor_index[0][keep], kept, canvas)
+    kept, coefficients = _decode_indexed(
+        decode_with_coefficients, branch_out, branch_out.coeff, decoder, conf_threshold, prepared, missing
+    )
+    canvas_masks = _canvas_masks(prototypes, coefficients, kept, prepared.canvas)
     mapped = to_letterboxed_original(
-        kept.unsqueeze(0).cpu(), orig_size=orig_size, letterboxed_size=canvas, allow_upscale=letterbox.allow_upscale
+        kept.unsqueeze(0).cpu(),
+        orig_size=prepared.orig_size,
+        letterboxed_size=prepared.canvas,
+        allow_upscale=prepared.letterbox.allow_upscale,
     )
     return SegmentedPrediction(
         detections=mapped[0],
-        masks=masks_to_original(canvas_masks.cpu(), letterbox, orig_size),
+        masks=masks_to_original(canvas_masks.cpu(), prepared.letterbox, prepared.orig_size),
     )
 
 
-def _decode_with_coefficients(
+def _box_decoder(decoder: DecodePath, conf_threshold: float) -> TopKDecoder | NMSDecoder:
+    """Build the axis-aligned decoder the named path reads its branch through.
+
+    Only the suppression path is given the threshold: it decides what enters
+    suppression, and a box the threshold drops could only ever have been suppressed
+    anyway, so the survivor set is unchanged and the sort is cheaper. The top-k path's
+    own threshold merely zeroes scores that every entry point's survivor filter drops
+    regardless, so handing it the number too would state the same cut in two places.
+    """
+    return TopKDecoder() if decoder == "e2e" else NMSDecoder(conf_threshold=conf_threshold)
+
+
+class _IndexedDecode(Protocol):
+    """The call shape of the per-task compositions in :mod:`lucid_yolo.decode.per_task`."""
+
+    def __call__(
+        self,
+        decoder: IndexingDecoder,
+        cls_logits: Tensor,
+        raw_ltrb: Tensor,
+        per_anchor: Tensor,
+        anchor_points: Tensor,
+        strides: Tensor,
+        /,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        """Return the row-aligned detections, anchor indices and gathered per-anchor rows."""
+
+
+def _decode_indexed(
+    compose: _IndexedDecode,
     branch_out: BranchOutput,
+    per_anchor: Tensor | None,
     decoder: DecodePath,
     conf_threshold: float,
-    anchor_points: Tensor,
-    strides: Tensor,
-) -> tuple[Tensor, Tensor, Tensor]:
-    """Decode the selected path and return its detections, anchor indices and coefficients.
+    prepared: _Prepared,
+    missing: str,
+) -> tuple[Tensor, Tensor]:
+    """Decode the selected path with its per-anchor values, and keep the rows worth answering.
 
-    The three still come from one branch, but the branch is chosen upstream rather than
-    here: :func:`_branch_for` names it once and the module runs only that half, so what
-    arrives is a single :class:`~lucid_yolo.models.heads.detect.BranchOutput` with no
-    second branch to pair against. That is a stronger guarantee than the field-by-field
-    discipline this function used to keep — a plausible mask of a *different* object is
-    now unrepresentable because the other branch's coefficients were never computed, not
-    merely because three reads were written to agree.
+    The shared body of :func:`predict_segmentation` and :func:`predict_keypoints`: the
+    branch's per-anchor tensor — mask coefficients or raw point offsets — is checked to
+    exist, ``compose`` (:func:`~lucid_yolo.decode.per_task.decode_with_coefficients` or
+    :func:`~lucid_yolo.decode.per_task.decode_with_keypoints`) ranks the branch and
+    gathers each row's values by its own anchor, and one selection is then applied to
+    the boxes and the gathered rows alike, so the two cannot drift apart by a row.
 
-    ``decoder`` still selects the *decoder*, which is a separate choice from the branch:
-    the two paths rank and suppress differently, and only the second is given the
-    threshold.
+    The values all come from one branch, chosen upstream by :func:`_branch_for`: the
+    module ran only that half, so a plausible mask or pose of a *different* object is
+    unrepresentable here — the other branch's values were never computed. ``decoder``
+    still selects the *decoder*, a separate choice from the branch, per
+    :func:`_box_decoder`.
+
+    The selection is predict's own and stays outside the shared decode: rows at or
+    below ``conf_threshold`` are dropped, and padding rows are excluded explicitly and
+    not merely by their score — a row with no source anchor is not a detection at any
+    threshold. The shared gather zeroes those rows rather than reading a real anchor's
+    values, and dropping them here is what keeps them out of the answer.
+
+    Raises:
+        ValueError: ``missing``, when the branch carries no per-anchor tensor.
     """
-    if decoder == "e2e":
-        detections, anchor_index = TopKDecoder().decode_with_indices(
-            branch_out.cls, branch_out.box, anchor_points, strides
-        )
-    else:
-        # Only this path is given the threshold, for the reason `predict_image` states:
-        # it decides what enters suppression, and the top-k path's own threshold would
-        # merely zero scores the survivor filter drops regardless.
-        detections, anchor_index = NMSDecoder(conf_threshold=conf_threshold).decode_with_indices(
-            branch_out.cls, branch_out.box, anchor_points, strides
-        )
-    coefficients = branch_out.coeff
-    if coefficients is None:
-        raise ValueError(
-            f"this checkpoint's task is {_SEGMENT_TASK!r} but its head emits no mask coefficients on the "
-            f"{decoder!r} branch, so Eq. 7 has only one of its two halves. The checkpoint was built "
-            f"without the coefficient stems and cannot produce a mask."
-        )
-    return detections, anchor_index, coefficients
+    if per_anchor is None:
+        raise ValueError(missing)
+    detections, anchor_index, rows = compose(
+        _box_decoder(decoder, conf_threshold),
+        branch_out.cls,
+        branch_out.box,
+        per_anchor,
+        prepared.anchor_points,
+        prepared.strides,
+    )
+    keep = (detections[0, :, SCORE_COLUMN] > conf_threshold) & (anchor_index[0] >= 0)
+    return detections[0][keep], rows[0][keep]
 
 
 def _canvas_masks(
     prototypes: Tensor,
     coefficients: Tensor,
-    anchor_index: Tensor,
     detections: Tensor,
     canvas: tuple[int, int],
 ) -> Tensor:
     """Assemble the surviving detections' masks on the letterboxed canvas.
 
-    ``anchor_index`` and ``detections`` are the *same* rows in the same order, so entry
-    ``n`` of the gathered coefficients belongs to box ``n``. The gather is a plain
-    :meth:`~torch.Tensor.index_select` rather than the evaluator's clamp-and-zero dance
-    because the padding rows are already gone: the caller filtered them out with the
-    boxes, and there is no fixed output length here to preserve.
+    ``coefficients`` and ``detections`` are the *same* rows in the same order — both
+    selected by :func:`_decode_indexed`'s one filter from the shared gather — so
+    coefficient row ``n`` belongs to box ``n``.
 
     An image with nothing above the threshold returns an empty stack without decoding.
     That is an optimisation and no longer a guard: :func:`decode_instance_masks` used to
@@ -582,26 +657,25 @@ def _canvas_masks(
     """
     if not detections.shape[0]:
         return prototypes.new_zeros((0, *canvas), dtype=torch.bool)
-    gathered = coefficients.index_select(0, anchor_index).unsqueeze(0)
     boxes = detections[:, :BOX_CORNERS].unsqueeze(0)
-    return decode_instance_masks(prototypes, gathered, boxes, image_size=canvas)[0]
+    return decode_instance_masks(prototypes, coefficients.unsqueeze(0), boxes, image_size=canvas)[0]
 
 
 def predict_oriented(
     module: DetectionLitModule,
-    image: Path,
+    image: Path | Tensor,
     img_size: int = DEFAULT_ORIENTED_IMG_SIZE,
     decoder: DecodePath = ORIENTED_DECODE_PATH,
     conf_threshold: float = DEFAULT_CONF_THRESHOLD,
     device: torch.device | None = None,
 ) -> Tensor:
-    """Detect oriented objects in one image file and return them in original coordinates.
+    """Detect oriented objects in one image and return them in original coordinates.
 
     :func:`predict_image`'s shape with R1 Eq. 13 in it, and the same pieces the per-tile
     oriented evaluator (:mod:`lucid_yolo.eval.rotated_eval`) is built from rather than a
     second reading of them: :func:`~lucid_yolo.models.heads.obb.decode_rboxes` turns the
     one-to-one branch's ltrb distances and raw angles into canonical rotated boxes,
-    :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` ranks them, and
+    :class:`~lucid_yolo.decode.topk_e2e.RotatedTopKDecoder` ranks them, and
     :func:`~lucid_yolo.decode.common.rboxes_to_letterboxed_original` lands them on the
     original pixel grid. Nothing here computes a pad, a ratio or a corner.
 
@@ -631,7 +705,9 @@ def predict_oriented(
         module: An eval-mode ``obb`` module, as
             :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
             **Mutated in place** — see the module docstring's *Module ownership*.
-        image: Path to the image file to read.
+        image: Path to the image file to read, or an already-decoded ``(3, H, W)`` RGB
+            tensor: ``uint8``/``uint16`` codes, or floating point in ``[0, 1]``
+            (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`).
         img_size: Letterbox side the model sees. Defaults to
             :data:`DEFAULT_ORIENTED_IMG_SIZE`, the 1024 px the oriented tier trains at
             (R18 sec. 4), not the 640 the COCO tiers use.
@@ -658,6 +734,9 @@ def predict_oriented(
             module claiming the task emits no angles on the branch the selected decoder
             reads; or if ``decoder``, ``conf_threshold`` or ``img_size`` is outside its
             domain, per :func:`_check_predict_arguments`.
+        ValueError: If a tensor ``image`` is not ``(3, H, W)``, or is floating point
+            outside ``[0, 1]``.
+        TypeError: If a tensor ``image`` holds signed integer or boolean values.
 
     Examples:
         ```pycon
@@ -666,24 +745,17 @@ def predict_oriented(
 
         ```
     """
-    if module.task != _OBB_TASK:
-        raise ValueError(_wrong_task_message(_OBB_TASK, module.task))
-    _check_predict_arguments(decoder, conf_threshold, img_size)
-    run_on = torch.device("cpu") if device is None else device
-    letterbox = Letterbox(img_size)
-    canvas_image, orig_size = read_letterboxed_image(image, letterbox)
-    batch = canvas_image.unsqueeze(0).to(run_on)
-    canvas = (int(batch.shape[-2]), int(batch.shape[-1]))
-
-    module.to(run_on).eval()
+    prepared = _prepare(module, _OBB_TASK, image, img_size, decoder, conf_threshold, device)
     with torch.no_grad():
         # One branch, not both: R1 Eq. 13's heading is read from the branch the selected
         # decoder ranks, and the other branch's angle stem used to run and be dropped.
-        branch_out = module.forward_branch(batch, _branch_for(decoder))
-    anchor_points, strides = anchor_grid(canvas, run_on)
-    detections = _decode_oriented(branch_out, decoder, conf_threshold, anchor_points, strides)
+        branch_out = module.forward_branch(prepared.batch, _branch_for(decoder))
+    detections = _decode_oriented(branch_out, decoder, conf_threshold, prepared.anchor_points, prepared.strides)
     mapped = rboxes_to_letterboxed_original(
-        detections.cpu(), orig_size=orig_size, letterboxed_size=canvas, allow_upscale=letterbox.allow_upscale
+        detections.cpu(),
+        orig_size=prepared.orig_size,
+        letterboxed_size=prepared.canvas,
+        allow_upscale=prepared.letterbox.allow_upscale,
     )
     image_detections = mapped[0]
     return image_detections[image_detections[:, RBOX_COLUMNS] > conf_threshold]
@@ -698,8 +770,8 @@ def _decode_oriented(
 ) -> Tensor:
     """Decode the selected oriented path into the fixed-size A45 batch it emits.
 
-    The oriented analogue of :func:`_decode_with_coefficients`, and the branch discipline
-    it used to enforce field by field is now structural: :func:`_branch_for` names the
+    The oriented analogue of :func:`_decode_indexed`, and the branch discipline it used
+    to enforce field by field is now structural: :func:`_branch_for` names the
     branch upstream and the module runs only that half, so the class logits, the ltrb
     distances and the **angles** arrive as one
     :class:`~lucid_yolo.models.heads.detect.BranchOutput` and cannot be mixed. Reading the
@@ -711,9 +783,10 @@ def _decode_oriented(
     nothing, which is R1's claim for the one-to-one branch; ``nms`` is the dense branch's
     comparison baseline and suppresses by exact rotated overlap
     (:class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder`, A61). Only the second is
-    given ``conf_threshold``, for the reason :func:`predict_image` states — it decides what
-    enters suppression, while the top-k path's own threshold would merely zero scores the
-    survivor filter drops regardless.
+    given ``conf_threshold``, for the reason :func:`_box_decoder` states. The two share one
+    call signature, so the choice between them is the only branch here; the top-k one
+    pads to its fixed ``k`` rows with score-zero rows, which :func:`predict_oriented`'s
+    survivor filter drops.
     """
     o2o = decoder == ORIENTED_DECODE_PATH
     angles = branch_out.angle
@@ -724,15 +797,11 @@ def _decode_oriented(
             f"{branch!r} branch, so R1 Eq. 13 has nothing to read. The checkpoint was "
             f"built without the orientation stems and cannot produce a heading."
         )
-    if o2o:
-        rboxes = decode_rboxes(branch_out.box, angles, anchor_points, strides)
-        return o2o_rotated_topk(branch_out.cls, rboxes)
+    rotated = RotatedTopKDecoder() if o2o else RotatedNMSDecoder(conf_threshold=conf_threshold)
     # Annotated rather than returned inline: `nn.Module.__call__` is typed `Any`, and
     # returning it straight would silently widen this function's contract to `Any` too.
-    suppressed: Tensor = RotatedNMSDecoder(conf_threshold=conf_threshold)(
-        branch_out.cls, branch_out.box, angles, anchor_points, strides
-    )
-    return suppressed
+    detections: Tensor = rotated(branch_out.cls, branch_out.box, angles, anchor_points, strides)
+    return detections
 
 
 @dataclass(frozen=True)
@@ -788,25 +857,26 @@ class KeypointPrediction:
 
 def predict_keypoints(
     module: DetectionLitModule,
-    image: Path,
-    img_size: int = 640,
+    image: Path | Tensor,
+    img_size: int = COCO_IMG_SIZE,
     decoder: DecodePath = "e2e",
     conf_threshold: float = DEFAULT_CONF_THRESHOLD,
     device: torch.device | None = None,
 ) -> KeypointPrediction:
-    """Locate objects and their points in one image file, in original-image coordinates.
+    """Locate objects and their points in one image, in original-image coordinates.
 
     :func:`predict_image` plus the point branch, composed the way
     :func:`predict_segmentation` composes the mask branch and for the same reason: the
     point stem is dense over anchors, so the selected path must report the *anchor*
     each surviving row came from and the points are gathered by that index. The
-    decode-then-gather order is :class:`~lucid_yolo.export.KeypointExportGraph`'s and
-    the training module's own ``val/oks_mAP``'s, so all three read one composition.
+    decode-then-gather composition is
+    :func:`~lucid_yolo.decode.per_task.decode_with_keypoints`, the one
+    :class:`~lucid_yolo.export.KeypointExportGraph` and the evaluator decode through too.
 
-    Points are mapped back with :meth:`~lucid_yolo.data.letterbox.Letterbox.inverse_map`
-    -- the same exact analytic inverse the boxes take (A10), applied to the point axis
-    flattened into a plain point list, so a point and the box around it cannot land on
-    two different grids.
+    Points are mapped back with
+    :func:`~lucid_yolo.decode.common.points_to_letterboxed_original` -- the same exact
+    analytic inverse the boxes take (A10), applied to the point axis flattened into a
+    plain point list, so a point and the box around it cannot land on two different grids.
 
     ``K`` is read from the decoded tensor, never assumed. The head's point count is a
     constructor argument (A64) and COCO's 17 is one instantiation of it; a function that
@@ -816,7 +886,9 @@ def predict_keypoints(
         module: An eval-mode ``keypoints`` module, as
             :func:`~lucid_yolo.eval.checkpoint.load_eval_module` returns it.
             **Mutated in place** — see the module docstring's *Module ownership*.
-        image: Path to the image file to read.
+        image: Path to the image file to read, or an already-decoded ``(3, H, W)`` RGB
+            tensor: ``uint8``/``uint16`` codes, or floating point in ``[0, 1]``
+            (:func:`~lucid_yolo.eval.annotations.letterbox_image_tensor`).
         img_size: Letterbox side the model sees. Defaults to ``640`` (R1 sec. 4.4).
         decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one
             branch, ``"nms"`` for the confidence-threshold plus class-wise suppression
@@ -836,6 +908,9 @@ def predict_keypoints(
             a module claiming that task emits no points on the selected branch; or if
             ``decoder``, ``conf_threshold`` or ``img_size`` is outside its domain, per
             :func:`_check_predict_arguments`.
+        ValueError: If a tensor ``image`` is not ``(3, H, W)``, or is floating point
+            outside ``[0, 1]``.
+        TypeError: If a tensor ``image`` holds signed integer or boolean values.
 
     Examples:
         ```pycon
@@ -844,96 +919,31 @@ def predict_keypoints(
 
         ```
     """
-    if module.task != _KEYPOINTS_TASK:
-        raise ValueError(_wrong_task_message(_KEYPOINTS_TASK, module.task))
-    _check_predict_arguments(decoder, conf_threshold, img_size)
-    run_on = torch.device("cpu") if device is None else device
-    letterbox = Letterbox(img_size)
-    canvas_image, orig_size = read_letterboxed_image(image, letterbox)
-    batch = canvas_image.unsqueeze(0).to(run_on)
-    canvas = (int(batch.shape[-2]), int(batch.shape[-1]))
-
-    module.to(run_on).eval()
+    prepared = _prepare(module, _KEYPOINTS_TASK, image, img_size, decoder, conf_threshold, device)
     with torch.no_grad():
         # One branch, not both: the pose is gathered from the branch the selected decoder
         # ranked, and the other branch's point and sigma stems used to run and be dropped.
-        branch_out = module.forward_branch(batch, _branch_for(decoder))
-    anchor_points, strides = anchor_grid(canvas, run_on)
-    detections, anchor_index, raw_points = _decode_with_points(
-        branch_out, decoder, conf_threshold, anchor_points, strides
+        branch_out = module.forward_branch(prepared.batch, _branch_for(decoder))
+    missing = (
+        f"this checkpoint's task is {_KEYPOINTS_TASK!r} but its head emits no points on the "
+        f"{decoder!r} branch. The checkpoint was built without the point stems and cannot "
+        f"produce a pose."
     )
-
-    # One selection for the boxes and for the indices the points are gathered by, so the
-    # two cannot drift by a row. Padding rows go by their missing anchor rather than by
-    # their score: a row with no source anchor is not a detection at any threshold, and
-    # letting one through would gather some real anchor's pose.
-    keep = (detections[0, :, SCORE_COLUMN] > conf_threshold) & (anchor_index[0] >= 0)
-    kept = detections[0][keep]
-    dense_points = decode_keypoints(raw_points, anchor_points, strides)
-    # No dtype cast on the index: both decoders' `decode_with_indices` document a *long*
-    # tensor, so the cast this line used to carry was a no-op that only the keypoint path
-    # had — its mask-path sibling in `_canvas_masks` gathers by the same indices with no
-    # cast at all. Two spellings of one contract invite the reader to believe the paths
-    # differ; they do not.
-    canvas_points = dense_points[0].index_select(0, anchor_index[0][keep])
+    kept, canvas_points = _decode_indexed(
+        decode_with_keypoints, branch_out, branch_out.keypoints, decoder, conf_threshold, prepared, missing
+    )
     mapped = to_letterboxed_original(
-        kept.unsqueeze(0).cpu(), orig_size=orig_size, letterboxed_size=canvas, allow_upscale=letterbox.allow_upscale
+        kept.unsqueeze(0).cpu(),
+        orig_size=prepared.orig_size,
+        letterboxed_size=prepared.canvas,
+        allow_upscale=prepared.letterbox.allow_upscale,
     )
     return KeypointPrediction(
         detections=mapped[0],
-        keypoints=_points_to_original(canvas_points.cpu(), letterbox, orig_size, canvas),
+        keypoints=points_to_letterboxed_original(
+            canvas_points.cpu(),
+            prepared.orig_size,
+            prepared.canvas,
+            allow_upscale=prepared.letterbox.allow_upscale,
+        ),
     )
-
-
-def _decode_with_points(
-    branch_out: BranchOutput,
-    decoder: DecodePath,
-    conf_threshold: float,
-    anchor_points: Tensor,
-    strides: Tensor,
-) -> tuple[Tensor, Tensor, Tensor]:
-    """Decode the selected path and return its detections, anchor indices and raw points.
-
-    :func:`_decode_with_coefficients` for the point stem, and the same rule holds in the
-    same stronger form: the branch is chosen upstream by :func:`_branch_for`, so the three
-    arrive as one :class:`~lucid_yolo.models.heads.detect.BranchOutput` and a plausible
-    pose of a *different* object cannot be assembled here — the other branch's points were
-    never computed.
-    """
-    if decoder == "e2e":
-        detections, anchor_index = TopKDecoder().decode_with_indices(
-            branch_out.cls, branch_out.box, anchor_points, strides
-        )
-    else:
-        detections, anchor_index = NMSDecoder(conf_threshold=conf_threshold).decode_with_indices(
-            branch_out.cls, branch_out.box, anchor_points, strides
-        )
-    raw_points = branch_out.keypoints
-    if raw_points is None:
-        raise ValueError(
-            f"this checkpoint's task is {_KEYPOINTS_TASK!r} but its head emits no points on the "
-            f"{decoder!r} branch. The checkpoint was built without the point stems and cannot "
-            f"produce a pose."
-        )
-    return detections, anchor_index, raw_points
-
-
-def _points_to_original(
-    points: Tensor, letterbox: Letterbox, orig_size: tuple[int, int], canvas: tuple[int, int]
-) -> Tensor:
-    """Map ``(N, K, 2)`` canvas points onto the original pixel grid, keeping the axis shape.
-
-    The inverse takes a flat point list, so the instance and point axes are folded
-    together for the call and restored after. Folding rather than looping is not merely
-    faster: one call means one mapping, so no row can take a different inverse from its
-    neighbour.
-
-    An empty prediction skips the call and returns an empty stack of the right shape --
-    ``K`` survives, since a caller reading :attr:`KeypointPrediction.num_keypoints` on an
-    image with nothing in it should still learn the schema.
-    """
-    if not points.shape[0]:
-        return points
-    instances, num_points, coords = points.shape
-    flat = letterbox.inverse_map(points.reshape(instances * num_points, coords), orig_size, canvas)
-    return flat.reshape(instances, num_points, coords)

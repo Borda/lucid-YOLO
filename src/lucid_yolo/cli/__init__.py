@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Every command this package installs, in one place (WP-096).
 
-Four entry points, one parser stack:
+Five entry points, one parser stack:
 
 ``lucid-yolo``
     Training and validation (:mod:`lucid_yolo.cli.train`) — a
@@ -19,6 +19,12 @@ Four entry points, one parser stack:
     "what is in this picture", and reads its task from the same place: ``detect`` supplies
     boxes, ``segment`` adds instance masks, ``obb`` supplies rotated boxes and ``keypoints``
     adds point sets. Unknown tasks are refused by name.
+``lucid-export``
+    One ONNX file from a checkpoint (:mod:`lucid_yolo.cli.export`) — the deployable
+    reading. It too takes the task from the checkpoint and writes that task's
+    suppression-free graph through :func:`~lucid_yolo.export.graph_from_module` and
+    :func:`~lucid_yolo.export.export_graph`, at a static input shape. Writing the file
+    needs the ``onnx`` package, which the ``export`` extra installs.
 
 Why one package:
     The wiring used to be spread across ``lucid_yolo/ptl/cli.py``, a console script in
@@ -27,12 +33,12 @@ Why one package:
     thirds of its own pipeline. Command surfaces now live here and the modules they drive
     stay where their logic belongs (:mod:`lucid_yolo.data.check`,
     :mod:`lucid_yolo.data.tiles`, :mod:`lucid_yolo.eval.detect_eval`,
-    :mod:`lucid_yolo.eval.rotated_eval`).
+    :mod:`lucid_yolo.eval.rotated_eval`, :mod:`lucid_yolo.export`).
 
 Why jsonargparse:
     ``lucid-yolo`` is a LightningCLI, which is jsonargparse underneath, so the other
-    three commands — ``lucid-data``, ``lucid-eval`` and ``lucid-predict`` — use it
-    directly rather than argparse. Flags and help text are then derived
+    four commands — ``lucid-data``, ``lucid-eval``, ``lucid-predict`` and
+    ``lucid-export`` — use it directly rather than argparse. Flags and help text are then derived
     from the function signatures and their Google docstrings — one description per
     argument, in the docstring the API already required — and every command accepts
     ``--config`` for free, which is how a tier run records what it was given. The
@@ -65,7 +71,8 @@ with warnings.catch_warnings():
     )
     from lucid_yolo.cli.data import main as data_main
     from lucid_yolo.cli.eval import main as eval_main
+    from lucid_yolo.cli.export import main as export_main
     from lucid_yolo.cli.predict import main as predict_main
     from lucid_yolo.cli.train import main as train_main
 
-__all__ = ["data_main", "eval_main", "predict_main", "train_main"]
+__all__ = ["data_main", "eval_main", "export_main", "predict_main", "train_main"]

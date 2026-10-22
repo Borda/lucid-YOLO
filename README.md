@@ -18,14 +18,14 @@ This project rebuilds the methods from the papers alone, deliberately without re
 - **A map of the underdetermined.** A register of numbered assumptions — the mask crop frame, the angle convention, the head's initialization bias — each one a place where two faithful implementations could legitimately diverge. It grows with every work package that meets a new gap, so [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) is the count as well as the content.
 - **A codebase you can read.** No config DSL between you and the architecture, one mechanism per module, and every module citing the equation it implements.
 
-**Non-goals**, stated so nothing here is mistaken for them: matching the paper's headline accuracy (that needs a training budget this project does not have), shipping weights for production use, or being faster than the reference implementation. What is claimed is fidelity of *method*, with the evidence attached.
+**Non-goals**, stated so nothing here is mistaken for them: matching the paper's headline accuracy (that needs a training budget this project does not have), shipping weights for production use, or being faster than the reference implementation. What is claimed is fidelity of *method*, with the evidence attached. What else is not offered is listed under [Not here, and why](#not-here-and-why).
 
 ## 👥 Who this is for
 
 | You are | Start here | What you get |
 | -- | -- | -- |
 | **A student entering computer vision** | [How a modern YOLO works](#how-a-modern-yolo-works) | One readable path from image to detections, with each block, loss and decode step in its own typed module — no config DSL to decode first |
-| **An applied ML engineer** | [Quickstart](#quickstart) | The four commands the wheel installs — `lucid-data`, `lucid-yolo`, `lucid-eval`, `lucid-predict` — cover a whole tier. Lightning underneath, so your callbacks and loggers work as they already do; on accelerators, read the single-device caveat under [what was reproduced](#what-was-reproduced) first |
+| **An applied ML engineer** | [Quickstart](#quickstart) | The five commands the wheel installs — `lucid-data`, `lucid-yolo`, `lucid-eval`, `lucid-predict`, `lucid-export` — cover a whole tier and its ONNX export. Lightning underneath, so your callbacks and loggers work as they already do; on accelerators, read the single-device caveat under [what was reproduced](#what-was-reproduced) first |
 | **A researcher reproducing results** | [What was reproduced](#what-was-reproduced) | Exact recipes, the run behind every number, the criteria each tier had to clear, and the deviations from the paper stated as deviations |
 | **A researcher building on top** | [Customizing it](#customizing-it) | Five scales over one topology, losses and assigners as separate modules, and a frozen-golden gate that tells you when a change moved something it should not have |
 
@@ -150,13 +150,13 @@ pip install "lucid-yolo @ git+https://github.com/Borda/lucid-YOLO@main"
 git clone https://github.com/Borda/lucid-YOLO && cd lucid-YOLO && make setup
 ```
 
-The first form installs the package and its four commands, with the training configs packaged inside it, so a run needs no checkout; `main` can move between releases, so pin a commit SHA in place of `main` when a run must stay reproducible.
+The first form installs the package and its five commands, with the training configs packaged inside it, so a run needs no checkout; `main` can move between releases, so pin a commit SHA in place of `main` when a run must stay reproducible.
 
 **There is no `pip install lucid-yolo` line, and that is deliberate.** The current release cannot be uploaded to PyPI: `fuse-augmentations` is a runtime dependency pinned to a git commit, and a direct reference is legal to build and install and illegal to upload ([docs/DECISIONS.md](docs/DECISIONS.md), D20). PyPI holds only `.devN` pre-release snapshots built by hand, which `pip` skips unless asked and which are older than what this README describes. The day a `fuse-augmentations` 0.12 reaches PyPI that pin becomes a `>=0.12,<0.13` range and this section gets its install line back.
 
 ### Running it
 
-Four commands cover a whole tier. Datasets are never committed and never downloaded by tests — [docs/DATASETS.md](docs/DATASETS.md) says where COCO 2017 and DOTA-v1.0 come from.
+Five commands cover a whole tier, from data to an exported model. Datasets are never committed and never downloaded by tests — [docs/DATASETS.md](docs/DATASETS.md) says where COCO 2017 and DOTA-v1.0 come from.
 
 ```bash
 # 1. get data, and check the layout before spending GPU hours on it
@@ -171,11 +171,24 @@ lucid-eval --checkpoint runs/det.ckpt --data_root /data/coco --output report.jso
 
 # 4. predict on one image
 lucid-predict --checkpoint runs/det.ckpt --image street.jpg
+
+# 5. export the checkpoint to ONNX (needs the extra: pip install "lucid-yolo[export]")
+lucid-export --checkpoint runs/det.ckpt --output det.onnx
 ```
 
-Swap `det_nano_smoke.yaml` for `seg_nano_smoke.yaml`, `obb_nano_smoke.yaml` or `pose_nano_smoke.yaml` and the same four commands train and score the other three tasks. [docs/TRAINING.md](docs/TRAINING.md) carries the full recipe per tier, including the batch-size scaling and the one setting that matters most on a hosted runtime.
+An interrupted run resumes by repeating its `lucid-yolo fit` command with `--ckpt_path <run>/checkpoints/<file>.ckpt`, which continues the step and epoch counters, the EMA shadow, the optimizer momentum and the progressive-loss weight ([docs/TRAINING.md](docs/TRAINING.md), *Resuming an interrupted run*). The export is a static-shape graph with no suppression node; its limits and output layout are under *Exporting to ONNX* in the same page.
+
+Swap `det_nano_smoke.yaml` for `seg_nano_smoke.yaml`, `obb_nano_smoke.yaml` or `pose_nano_smoke.yaml` and the same commands train, score and export the other three tasks. [docs/TRAINING.md](docs/TRAINING.md) carries the full recipe per tier, including the batch-size scaling and the one setting that matters most on a hosted runtime.
 
 **Releases publish no trained weights** (a deliberate policy — see [docs/DECISIONS.md](docs/DECISIONS.md), D14), so every command above takes a checkpoint you trained.
+
+**Check an install without data or weights.** From a development checkout (`make setup`), one command runs every demo notebook under its fast contract: CPU, a synthetic dataset the notebook generates, one epoch on a handful of images, no figures and no network (`notebooks/README.md`, *The fast contract*). It exercises the library path each notebook walks and finishes in well under a minute per notebook; any number it prints is from one epoch on synthetic data and means nothing beyond "the pipeline still runs".
+
+```bash
+.venv/bin/python -m pytest tests/notebooks/test_notebooks_run.py -k test_runs_under_fast_contract
+```
+
+The same fast case is part of `make test` and so of `make gate`. A wheel-only install has no such command, since `scripts/` and `tests/` are not in the wheel; `lucid-yolo --help` and `lucid-data check` are the checks available there.
 
 ### Seeing what the model saw
 
@@ -205,6 +218,24 @@ The architecture is **typed Python, not a config file** ([docs/DECISIONS.md](doc
 | Your own dataset | `--data.data_root` | COCO-JSON and YOLO-txt layouts are both read, and the layout is probed rather than declared. YOLO-txt covers detection and oriented detection only: segmentation and keypoint annotations are refused, so those tasks need COCO-JSON ([docs/DATASETS.md](docs/DATASETS.md)) |
 
 Then run `make gate`. It runs the linters, the type checker, the full offline suite and the frozen goldens — so a change that quietly moved a number you were not editing fails in about two minutes rather than in a training run tomorrow. What it will not tell you is whether the change made the models worse: no learned-quality figure is inside it, and [what a green gate does not say](#what-a-green-gate-does-not-say) is worth reading before trusting one.
+
+<a id="not-here-and-why"></a>
+
+## 🚫 Not here, and why
+
+Things a detector user commonly expects and this project does not offer. Each is either a recorded non-goal, with the decision that makes it one, or plainly not done and not planned anywhere: no decision and no roadmap row covers it, so "not yet" here is a statement of fact and no promise.
+
+| Expectation | Status | Why |
+| -- | -- | -- |
+| Released, pre-trained weights | non-goal | Releases ship no trained checkpoints; source, goldens and the reproduction report are the artifacts (D14, [docs/DECISIONS.md](docs/DECISIONS.md)). Every command above takes a checkpoint you trained. |
+| Image classification | non-goal | "Classification and YOLOE-26 remain out of scope entirely, and no row proposes them" (D21, which restates D1). |
+| YOLOE-26 | non-goal | Out of scope entirely (D1, D21). |
+| Video or stream prediction | not yet, no row | `lucid-predict` takes one image file (`--image`). No decision or roadmap row covers video. |
+| Directory or batch prediction from the command line | not yet, no row | Same: `lucid-predict --image` is one file per call. |
+| Object tracking | not yet, no row | No decision or roadmap row covers it. |
+| Export formats beyond ONNX (TensorRT, CoreML, TFLite) | not yet, no row | No decision or roadmap row covers them. |
+| ONNX export with a dynamic batch or canvas | not yet, no row | `lucid-export` writes one static `(1, 3, H, W)` input per file; a second size is a second export. |
+| Scales `s` to `x` trained | not yet | Only the `n` scale has been trained and measured for the four tiers. |
 
 ## ⚖️ The decisions that shape it
 

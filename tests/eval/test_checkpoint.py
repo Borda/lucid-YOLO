@@ -470,13 +470,52 @@ class TestCheckpointTrust:
         assert info == {"checkpoint": str(path), "epoch": _EPOCH, "global_step": _GLOBAL_STEP, "ema": False}
         assert not loaded.training
 
+    def test_file_deserialized_once_and_restricted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The checkpoint is read by one restricted ``torch.load`` and never handed on.
+
+        Lightning's ``load_from_checkpoint`` reads through ``torch.load`` too, so a loader
+        that built the module that way would show a second call here -- the double read
+        that cost twice the peak host memory and let a file replaced between the reads be
+        checked in one form and loaded in another.
+        """
+        path = tmp_path / "plain.ckpt"
+        torch.save(_checkpoint_dict(_module()), path)
+        reads: list[object] = []
+        real_load = torch.load
+
+        def counting_load(*args: Any, **kwargs: Any) -> Any:
+            reads.append(kwargs.get("weights_only"))
+            return real_load(*args, **kwargs)
+
+        monkeypatch.setattr(torch, "load", counting_load)
+
+        loader.load_eval_module(path, use_ema=False)
+
+        assert reads == [True]
+
+    def test_weights_match_lightning_loader(self, tmp_path: Path) -> None:
+        """The module built from the payload holds what ``load_from_checkpoint`` builds.
+
+        Same hyper-parameters, same tensors: building from the one read changes how many
+        times the file is deserialized, not what comes out of it.
+        """
+        module = _module()
+        path = tmp_path / "plain.ckpt"
+        torch.save(_checkpoint_dict(module), path)
+
+        loaded, _ = loader.load_eval_module(path, use_ema=False)
+        reference = DetectionLitModule.load_from_checkpoint(path, map_location="cpu")
+
+        assert dict(loaded.hparams) == dict(reference.hparams)
+        torch.testing.assert_close(loaded.state_dict(), reference.state_dict(), rtol=0, atol=0)
+
 
 class TestMalformedCheckpointsAreNamed:
     """A checkpoint missing a key the loader reads is named, not indexed into blindly."""
 
     @pytest.mark.parametrize(
         "missing",
-        [pytest.param("epoch", id="epoch"), pytest.param("global_step", id="global_step")],
+        ["epoch", "global_step", "hyper_parameters", "state_dict"],
     )
     def test_missing_provenance_key_names_itself_and_file(self, tmp_path: Path, missing: str) -> None:
         """A checkpoint short of a provenance key raises ``ValueError`` naming it, not ``KeyError``.

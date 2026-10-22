@@ -55,6 +55,7 @@ EXPECTED_SCRIPTS = {
     "lucid-data": "lucid_yolo.cli.data:main",
     "lucid-eval": "lucid_yolo.cli.eval:main",
     "lucid-predict": "lucid_yolo.cli.predict:main",
+    "lucid-export": "lucid_yolo.cli.export:main",
 }
 
 

@@ -32,11 +32,11 @@ runs:
         wheel="$(ls "${GITHUB_WORKSPACE}/${DIST_DIR}"/*.whl)"
         uv venv --python 3.11 "${RUNNER_TEMP}/wheel-smoke-venv"
         uv pip install --python "${RUNNER_TEMP}/wheel-smoke-venv/bin/python" "${wheel}"
-    - name: "🖥️ Run the four console scripts"
+    - name: "🖥️ Run the five console scripts"
       shell: bash
       working-directory: ${{ runner.temp }}
       run: |
-        for cmd in lucid-yolo lucid-data lucid-eval lucid-predict; do
+        for cmd in lucid-yolo lucid-data lucid-eval lucid-predict lucid-export; do
           "wheel-smoke-venv/bin/${cmd}" --help > /dev/null
         done
     - name: "🧾 Load a packaged config through the installed package"

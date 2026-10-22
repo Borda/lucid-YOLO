@@ -84,7 +84,7 @@ import contextlib
 import io
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import torch
@@ -93,10 +93,17 @@ from faster_coco_eval.core import mask as fce_mask
 from torchmetrics.detection import MeanAveragePrecision
 
 from lucid_yolo.assign.grid import HEAD_STRIDES, anchor_grid
-from lucid_yolo.decode.common import BOX_CORNERS, LABEL_COLUMN, SCORE_COLUMN, to_letterboxed_original
+from lucid_yolo.decode.common import (
+    BOX_CORNERS,
+    LABEL_COLUMN,
+    SCORE_COLUMN,
+    gather_by_anchor,
+    points_to_letterboxed_original,
+    to_letterboxed_original,
+)
+from lucid_yolo.decode.per_task import gather_keypoint_sets
 from lucid_yolo.eval.segment_decode import decode_instance_masks, masks_to_original
 from lucid_yolo.models.build import SegmentOutput
-from lucid_yolo.models.heads.keypoint import decode_keypoints
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -104,6 +111,7 @@ if TYPE_CHECKING:
     from torch import Tensor, nn
 
     from lucid_yolo.data.letterbox import Letterbox
+    from lucid_yolo.decode.common import IndexingDecoder
     from lucid_yolo.models.heads.detect import DualHeadOutput
 
 __all__ = [
@@ -1298,26 +1306,6 @@ class _KeypointScorer:
         return {_OKS_PREFIX + key: value for key, value in stats.items()}
 
 
-class _IndexingDecoder(Protocol):
-    """A decoder that reports the source anchor of every detection it emits.
-
-    The interface :class:`DualPathEvaluator` needs from both decoders to evaluate
-    a segmentation model — stated structurally rather than by naming the two
-    concrete classes, so a caller may substitute its own decoder as the
-    detection-only path already allows.
-    """
-
-    def decode_with_indices(
-        self,
-        cls_logits: Tensor,
-        raw_ltrb: Tensor,
-        anchor_points: Tensor,
-        strides: Tensor,
-    ) -> tuple[Tensor, Tensor]:
-        """Return the A9 detections and the anchor index of each of their rows."""
-        ...
-
-
 @dataclass(frozen=True)
 class _BatchGeometry:
     """The per-batch quantities both decode paths share.
@@ -1358,45 +1346,16 @@ def _segment_parts(output: object) -> tuple[DualHeadOutput, Tensor | None]:
     return cast("DualHeadOutput", output), None
 
 
-def _gather_coefficients(coefficients: Tensor, anchor_index: Tensor) -> Tensor:
-    """Select each detection's mask coefficients by its own source anchor index.
-
-    ``anchor_index`` comes from the decoder that produced the detections, so row
-    ``n`` of the result is the coefficient row of the anchor row ``n``'s box came
-    from. Padding rows carry
-    :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX`; they are clamped to a
-    valid gather position and then zeroed, which yields an all-zero coefficient
-    vector, a mask logit of exactly 0, a probability of 0.5, and therefore an
-    empty mask under the strictly-greater A37 threshold. Those rows also carry
-    score 0 and are dropped by :func:`detections_to_predictions` regardless.
-    """
-    real = anchor_index >= 0
-    index = anchor_index.clamp(min=0).unsqueeze(-1).expand(-1, -1, coefficients.shape[-1])
-    gathered = coefficients.gather(1, index)
-    return gathered * real.unsqueeze(-1).to(gathered.dtype)
-
-
 def gather_keypoints(keypoints: Tensor, anchor_index: Tensor) -> Tensor:
     """Select each detection's decoded point set by its own source anchor index.
 
-    :func:`_gather_coefficients` with a ``(K, 2)`` trailing shape instead of a flat
-    coefficient vector, and the same padding contract: rows carrying
-    :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX` are clamped to a valid
-    gather position and then zeroed, so a padding row yields the origin rather
-    than the last anchor's pose. Those rows carry score 0 and are dropped by
-    :func:`detections_to_predictions` regardless.
-
-    Public (WP-137) because :class:`~lucid_yolo.ptl.module.DetectionLitModule`'s
-    own epoch-level ``val/oks_mAP`` needs the identical gather on the identical
-    contract — a second, hand-copied version of this padding rule is exactly the
-    drift this project's own duplication guard exists to catch (WP-109's
-    3-strides lesson, ``docs/ENGINEERING_LOG.md``).
-
-    The input must already be **decoded** — absolute canvas pixels from
-    :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints`, which needs the
-    whole ``(B, A, K, 2)`` dense tensor and the whole anchor grid and offers no
-    per-detection indexing. Decoding after the gather would have to reconstruct
-    each kept row's anchor and stride by hand, which is this index's job.
+    The point-set name of :func:`~lucid_yolo.decode.common.gather_by_anchor`, public since
+    WP-137 because :class:`~lucid_yolo.ptl.module.DetectionLitModule`'s own epoch-level
+    ``val/oks_mAP`` needs the identical gather on the identical contract. It delegates to
+    the shared gather rather than carrying a second copy of its padding rule — the drift
+    this project's duplication guard exists to catch (WP-109's 3-strides lesson). It is a
+    function of its own rather than an alias so the parameter names it has been called by
+    since WP-137 keep binding: ``gather_keypoints(keypoints=..., anchor_index=...)``.
 
     Args:
         keypoints: Decoded dense point coordinates of shape ``(B, A, K, 2)``.
@@ -1408,7 +1367,7 @@ def gather_keypoints(keypoints: Tensor, anchor_index: Tensor) -> Tensor:
     Examples:
         ```pycon
         >>> keypoints = torch.arange(12.0).reshape(1, 3, 2, 2)
-        >>> gathered = gather_keypoints(keypoints, torch.tensor([[2, -1]]))
+        >>> gathered = gather_keypoints(keypoints=keypoints, anchor_index=torch.tensor([[2, -1]]))
         >>> gathered.shape
         torch.Size([1, 2, 2, 2])
         >>> gathered[0, 0]
@@ -1420,11 +1379,7 @@ def gather_keypoints(keypoints: Tensor, anchor_index: Tensor) -> Tensor:
 
         ```
     """
-    real = anchor_index >= 0
-    trailing = keypoints.shape[-2:]
-    index = anchor_index.clamp(min=0)[..., None, None].expand(-1, -1, *trailing)
-    gathered = keypoints.gather(1, index)
-    return gathered * real[..., None, None].to(gathered.dtype)
+    return gather_by_anchor(keypoints, anchor_index)
 
 
 class DualPathEvaluator:
@@ -1675,7 +1630,7 @@ class DualPathEvaluator:
             detections = decoder(cls_logits, raw_ltrb, geometry.anchor_points, geometry.strides)
             mapped = self._to_original(detections, geometry.canvas, geometry.orig_sizes)
             return detections_to_predictions(mapped, self._label_to_category)
-        indexing = cast("_IndexingDecoder", decoder)
+        indexing = cast("IndexingDecoder", decoder)
         detections, anchor_index = indexing.decode_with_indices(
             cls_logits, raw_ltrb, geometry.anchor_points, geometry.strides
         )
@@ -1695,10 +1650,11 @@ class DualPathEvaluator:
         :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` composes the raw
         offsets with the whole anchor grid and has no per-detection indexing, so
         the order is forced: the dense ``(B, A, K, 2)`` tensor is decoded for the
-        batch, and only then does :func:`gather_keypoints` take each kept row.
+        batch, and only then is each kept row taken —
+        :func:`~lucid_yolo.decode.per_task.gather_keypoint_sets`, the composition
+        prediction and export decode through as well.
         """
-        dense = decode_keypoints(keypoints, geometry.anchor_points, geometry.strides)
-        gathered = gather_keypoints(dense, anchor_index)
+        gathered = gather_keypoint_sets(keypoints, anchor_index, geometry.anchor_points, geometry.strides)
         return self._points_to_original(gathered, geometry.canvas, geometry.orig_sizes)
 
     def _path_masks(
@@ -1738,7 +1694,7 @@ class DualPathEvaluator:
         whose detections fill the block sees no change, and never a regression.
         """
         assert geometry.prototypes is not None  # narrowed by the caller's guard
-        gathered = _gather_coefficients(coefficients, anchor_index)
+        gathered = gather_by_anchor(coefficients, anchor_index)
         padded_rows = detections.shape[1]
         masks: list[Tensor] = []
         for image, orig_size in enumerate(geometry.orig_sizes):
@@ -1768,21 +1724,20 @@ class DualPathEvaluator:
     ) -> Tensor:
         """Un-letterbox each image's ``(N, K, 2)`` point sets back to its original coordinates (A10).
 
-        The same inverse the boxes take, applied to bare ``(x, y)`` pairs:
-        :meth:`~lucid_yolo.data.letterbox.Letterbox.inverse_map` is already
-        point-shaped, and :func:`~lucid_yolo.decode.common.to_letterboxed_original`
-        is that call plus the score and class columns a point set does not have.
-        Reaching for the box function here would carry those two columns onto
-        coordinates; writing a second affine would be a second definition of what
-        a letterbox is.
+        One :func:`~lucid_yolo.decode.common.points_to_letterboxed_original` call per
+        image, since each image has its own original size — the same point inverse
+        :func:`~lucid_yolo.predict.predict_keypoints` lands its single image through, so
+        the two cannot disagree by a pad.
         """
         canvas = (int(letterboxed_size[0]), int(letterboxed_size[1]))
+        allow_upscale = self._letterbox.allow_upscale
         mapped = [
-            self._letterbox.inverse_map(
-                image_points.reshape(-1, 2).cpu(),
+            points_to_letterboxed_original(
+                image_points.cpu(),
                 (int(size[0]), int(size[1])),
                 canvas,
-            ).reshape(image_points.shape)
+                allow_upscale=allow_upscale,
+            )
             for image_points, size in zip(points, orig_sizes, strict=True)
         ]
         return torch.stack(mapped)

@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 from jsonargparse import auto_cli
 
 from lucid_yolo.assign.grid import require_grid_side
+from lucid_yolo.decode.common import COCO_IMG_SIZE
 from lucid_yolo.eval import detect_eval, pose_eval, rotated_eval
 from lucid_yolo.eval.checkpoint import load_eval_module
 from lucid_yolo.eval.coco_eval import hotcoco_available
@@ -48,7 +49,7 @@ __all__ = ["DEFAULT_BATCH_SIZE", "DEFAULT_IMG_SIZE", "evaluate", "main"]
 
 #: Letterbox side used when ``img_size`` is not given, per checkpoint task. The oriented
 #: tier trains on 1024 px crops (R18 sec. 4); COCO runs at 640 (R1 sec. 4.4).
-DEFAULT_IMG_SIZE = {"obb": 1024, "detect": 640, "segment": 640, "keypoints": 640}
+DEFAULT_IMG_SIZE = {"obb": 1024, "detect": COCO_IMG_SIZE, "segment": COCO_IMG_SIZE, "keypoints": COCO_IMG_SIZE}
 #: Batch size used when ``batch_size`` is not given. A 1024 px tile is 2.5x the pixels of
 #: a 640 px image, so the oriented default is smaller for the same memory.
 DEFAULT_BATCH_SIZE = {"obb": 8, "detect": 32, "segment": 32, "keypoints": 32}

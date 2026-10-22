@@ -200,6 +200,7 @@ nav:
       - Run it:
           - Launching a training run: TRAINING.md
           - Provisioning the datasets: DATASETS.md
+          - Opt-in CUDA performance flags: advanced/cuda-performance.md
       - Clean-room:
           - Provenance: PROVENANCE.md
           - Assumptions: ASSUMPTIONS.md
@@ -239,6 +240,7 @@ nav:
       - Data: api/data.md
       - Training: api/training.md
       - Inference: api/inference.md
+      - Export: api/export.md
   - Project:
       - Roadmap: ROADMAP.md
       - Logs:

@@ -23,7 +23,14 @@ evaluation loop that filters on score.
 The A9 detection tuple is ``[x1, y1, x2, y2, score, class]`` with ``score`` in
 ``[0, 1]`` and ``class`` the integral class index stored as a float.
 
-Provenance: R3 sec. 4, R1 sec. 3.2.1. Assumptions: A9.
+:class:`RotatedTopKDecoder` is the oriented twin over the same branch: canonical
+rotated boxes from :func:`~lucid_yolo.models.heads.obb.decode_rboxes`, ranked by
+:func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk_with_indices`, padded to the same
+fixed ``k`` rows with the same anchor-index contract, emitting the A45 tuple
+``[cx, cy, w, h, theta, score, class]``. It lives in this module so the structural pin on
+this file's text covers both suppression-free decoders.
+
+Provenance: R3 sec. 4, R1 sec. 3.2.1, R1 Eq. 13. Assumptions: A9, A23, A45.
 """
 
 from __future__ import annotations
@@ -31,13 +38,11 @@ from __future__ import annotations
 import torch
 from torch import Tensor, nn
 
-from lucid_yolo.decode.common import SCORE_COLUMN, pad_anchor_indices, pad_detections
+from lucid_yolo.decode.common import MAX_DETECTIONS, SCORE_COLUMN, pad_anchor_indices, pad_detections
 from lucid_yolo.models.heads.detect import decode_ltrb, o2o_topk_with_indices
+from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk_with_indices
 
-__all__ = ["TopKDecoder"]
-
-#: Default per-image detection cap (R1 sec. 3.2.1, R3 sec. 4, A9).
-_DEFAULT_TOPK = 300
+__all__ = ["RotatedTopKDecoder", "TopKDecoder"]
 
 
 class TopKDecoder(nn.Module):
@@ -75,7 +80,7 @@ class TopKDecoder(nn.Module):
         ```
     """
 
-    def __init__(self, k: int = _DEFAULT_TOPK, conf_threshold: float = 0.0) -> None:
+    def __init__(self, k: int = MAX_DETECTIONS, conf_threshold: float = 0.0) -> None:
         super().__init__()
         self.k = k
         self.conf_threshold = conf_threshold
@@ -207,3 +212,131 @@ class TopKDecoder(nn.Module):
             (detections[..., :SCORE_COLUMN], masked_scores, detections[..., SCORE_COLUMN + 1 :]),
             dim=-1,
         )
+
+
+class RotatedTopKDecoder(nn.Module):
+    """Score-based top-k end-to-end decoder for the one-to-one branch's oriented outputs (A45).
+
+    The oriented twin of :class:`TopKDecoder`, and deliberately the same contract: the
+    one-to-one branch's raw ltrb distances and raw angles (R1 Eq. 13) become canonical
+    rotated boxes through :func:`~lucid_yolo.models.heads.obb.decode_rboxes` (A23), the
+    anchors are ranked purely by classification confidence through
+    :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk_with_indices` — no overlap is
+    computed and no box is dropped for overlapping another — and the result is padded
+    to exactly ``k`` rows, the anchor indices beside it padded with
+    :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX`.
+
+    The padding is what this class adds over calling the ranking directly, which returns
+    ``min(k, A)`` rows: on a canvas with fewer than ``k`` anchors (a side of 96 px or
+    less at the three head strides) the row count would otherwise depend on the canvas,
+    unlike every other decoder's. On a canvas with at least ``k`` anchors the ``k`` rows
+    are the ranking's own, bit for bit. Rows beyond the available anchors carry
+    ``score == 0``, so a caller filtering on score drops them.
+
+    Args:
+        k: Maximum detections kept per image; also the fixed output length. Defaults to
+            :data:`~lucid_yolo.decode.common.MAX_DETECTIONS` (A9).
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> from lucid_yolo.assign.grid import make_anchor_points
+        >>> points, strides = make_anchor_points([(1, 2)], [8])
+        >>> cls_logits = torch.tensor([[[-5.0], [5.0]]])  # anchor 1 is the confident one
+        >>> raw_ltrb = torch.ones(1, 2, 4)
+        >>> raw_angles = torch.zeros(1, 2, 1)
+        >>> detections = RotatedTopKDecoder(k=3)(cls_logits, raw_ltrb, raw_angles, points, strides)
+        >>> detections.shape  # fixed (B, k, 7) even though only 2 anchors exist
+        torch.Size([1, 3, 7])
+        >>> detections[0, 2]  # the padding row: score zero, no box
+        tensor([0., 0., 0., 0., 0., 0., 0.])
+
+        ```
+    """
+
+    def __init__(self, k: int = MAX_DETECTIONS) -> None:
+        super().__init__()
+        self.k = k
+
+    def forward(
+        self,
+        cls_logits: Tensor,
+        raw_ltrb: Tensor,
+        raw_angles: Tensor,
+        anchor_points: Tensor,
+        strides: Tensor,
+    ) -> Tensor:
+        """Decode raw one-to-one outputs into fixed-size top-k oriented detections.
+
+        Args:
+            cls_logits: Raw one-to-one class logits of shape ``(B, A, C)``.
+            raw_ltrb: Raw one-to-one ltrb distances of shape ``(B, A, 4)``.
+            raw_angles: Raw one-to-one angles in radians, shape ``(B, A, 1)`` or
+                ``(B, A)``.
+            anchor_points: Anchor-centre ``(x, y)`` coordinates of shape ``(A, 2)``.
+            strides: Per-anchor level stride of shape ``(A,)``.
+
+        Returns:
+            Detections of shape ``(B, k, 7)`` whose last axis is the A45 tuple
+            ``[cx, cy, w, h, theta, score, class]``, sorted by descending score with
+            score-zero padding rows filling any shortfall below ``k``.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from lucid_yolo.assign.grid import make_anchor_points
+            >>> points, strides = make_anchor_points([(1, 2)], [8])
+            >>> cls_logits, raw_ltrb, raw_angles = torch.zeros(1, 2, 1), torch.zeros(1, 2, 4), torch.zeros(1, 2, 1)
+            >>> RotatedTopKDecoder(k=5)(cls_logits, raw_ltrb, raw_angles, points, strides).shape
+            torch.Size([1, 5, 7])
+
+            ```
+        """
+        detections, _ = self.decode_with_indices(cls_logits, raw_ltrb, raw_angles, anchor_points, strides)
+        return detections
+
+    def decode_with_indices(
+        self,
+        cls_logits: Tensor,
+        raw_ltrb: Tensor,
+        raw_angles: Tensor,
+        anchor_points: Tensor,
+        strides: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        """Decode as :meth:`forward` does, and report the source anchor of each row.
+
+        The whole decode lives here and :meth:`forward` is its detections-only view, as
+        in :class:`TopKDecoder`, so the two cannot report different selections. The
+        indices are what any per-anchor value outside the A45 tuple is gathered by.
+
+        Args:
+            cls_logits: Raw one-to-one class logits of shape ``(B, A, C)``.
+            raw_ltrb: Raw one-to-one ltrb distances of shape ``(B, A, 4)``.
+            raw_angles: Raw one-to-one angles in radians, shape ``(B, A, 1)`` or
+                ``(B, A)``.
+            anchor_points: Anchor-centre ``(x, y)`` coordinates of shape ``(A, 2)``.
+            strides: Per-anchor level stride of shape ``(A,)``.
+
+        Returns:
+            A pair ``(detections, anchor_indices)``: the ``(B, k, 7)`` A45 batch
+            :meth:`forward` returns, and the ``(B, k)`` long tensor naming the anchor each
+            row came from, with :data:`~lucid_yolo.decode.common.PAD_ANCHOR_INDEX` on the
+            padding rows.
+
+        Examples:
+            ```pycon
+            >>> import torch
+            >>> from lucid_yolo.assign.grid import make_anchor_points
+            >>> points, strides = make_anchor_points([(1, 2)], [8])
+            >>> cls_logits = torch.tensor([[[-5.0], [5.0]]])
+            >>> raw_ltrb, raw_angles = torch.ones(1, 2, 4), torch.zeros(1, 2, 1)
+            >>> decoder = RotatedTopKDecoder(k=3)
+            >>> _, anchors = decoder.decode_with_indices(cls_logits, raw_ltrb, raw_angles, points, strides)
+            >>> anchors  # anchor 1 ranks first; the third row is padding
+            tensor([[ 1,  0, -1]])
+
+            ```
+        """
+        rboxes = decode_rboxes(raw_ltrb, raw_angles, anchor_points, strides)
+        detections, anchor_indices = o2o_rotated_topk_with_indices(cls_logits, rboxes, k=self.k)
+        return pad_detections(detections, self.k), pad_anchor_indices(anchor_indices, self.k)

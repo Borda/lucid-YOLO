@@ -178,7 +178,7 @@ from pytorch_lightning.strategies import SingleDeviceStrategy
 from torch import Tensor
 
 from lucid_yolo.assign import make_anchor_points
-from lucid_yolo.decode.common import BOX_CORNERS, SCORE_COLUMN
+from lucid_yolo.decode.common import BOX_CORNERS, MAX_DETECTIONS, SCORE_COLUMN
 from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.eval.coco_eval import (
     COCO_KEYPOINT_OKS_SIGMAS,
@@ -187,7 +187,7 @@ from lucid_yolo.eval.coco_eval import (
     evaluate_keypoints,
     gather_keypoints,
 )
-from lucid_yolo.eval.dota_eval import MAX_DETECTIONS, evaluate_rotated_map, rotated_detections_to_predictions
+from lucid_yolo.eval.dota_eval import evaluate_rotated_map, rotated_detections_to_predictions
 from lucid_yolo.eval.segment_decode import decode_instance_masks
 from lucid_yolo.losses import oriented_loss
 from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
