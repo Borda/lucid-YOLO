@@ -52,7 +52,7 @@ from lucid_yolo.data.coco import CocoDetectionDataset
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode import NMSDecoder, TopKDecoder, gather_by_anchor
-from lucid_yolo.eval import DualPathEvaluator, coco_eval, detections_to_predictions, evaluate_bbox
+from lucid_yolo.eval import DualPathEvaluator, _coco_streaming, coco_eval, detections_to_predictions, evaluate_bbox
 from lucid_yolo.eval.coco_eval import _METRIC_KEYS, COCO_RECALL_GRID, gather_keypoints
 from lucid_yolo.models.heads.detect import DualHeadOutput
 from lucid_yolo.ptl.module import DetectionLitModule
@@ -655,7 +655,7 @@ class TestRecallGridBoundary:
         which would restore the downward bias with nothing to show for it. This substitutes
         exactly that metric and requires the guard to raise.
         """
-        monkeypatch.setattr(coco_eval, "MeanAveragePrecision", _IgnoresRecThresholds)
+        monkeypatch.setattr(_coco_streaming, "MeanAveragePrecision", _IgnoresRecThresholds)
         pred, target = _single_image_gt()
 
         with pytest.raises(RuntimeError, match="rec_thresholds"):

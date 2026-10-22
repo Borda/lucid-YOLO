@@ -167,8 +167,8 @@ Provenance: R1 sec. 3.2, R1 Eq. 2-3, R1 Tables S2/S5. Assumptions: A8.
 
 from __future__ import annotations
 
+import copy
 import warnings
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import torch
@@ -181,9 +181,7 @@ from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.decode.common import BOX_CORNERS, MAX_DETECTIONS, SCORE_COLUMN
 from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.eval.coco_eval import (
-    COCO_KEYPOINT_OKS_SIGMAS,
     COCO_RECALL_GRID,
-    SYMBOL_KEYPOINT_OKS_SIGMA,
     evaluate_keypoints,
     gather_keypoints,
 )
@@ -218,6 +216,24 @@ from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
+from lucid_yolo.ptl._padding import (
+    _BOX_DIM,
+    _KEYPOINT_DIM,
+    StepBatch,
+    _host_split,
+    _split_batch,
+    pad_keypoints,
+    pad_rboxes,
+    pad_targets,
+)
+from lucid_yolo.ptl._task_terms import (
+    _KEYPOINT_LOSSES,
+    _blend,
+    _keypoint_oks_sigmas,
+    _KeypointPositives,
+    _StepContext,
+    normalize_keypoints_to_box,
+)
 from lucid_yolo.ptl.coco_backend import build_mean_average_precision
 from lucid_yolo.ptl.loss_capture import _LossCapture, _LossCaptureLifecycle, _native_loss, _source_signature
 from lucid_yolo.ptl.network_capture import (
@@ -229,6 +245,7 @@ from lucid_yolo.ptl.network_capture import (
 from lucid_yolo.ptl.seg_targets import instance_mask_targets, scale_boxes_to_grid, semantic_target
 from lucid_yolo.ptl.segment_head_capture import _head_breach as _segment_head_breach
 from lucid_yolo.ptl.segment_head_capture import _SegmentHeadCapture, _SegmentHeadCaptureLifecycle
+from lucid_yolo.tasks import TASK_NAMES, Task
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -243,11 +260,12 @@ __all__ = ["DetectionLitModule", "pad_keypoints", "pad_rboxes", "pad_targets"]
 #: Feature-level input-pixel strides of the P3/P4/P5 detection head (8, 16, 32).
 _STRIDES: tuple[int, int, int] = (8, 16, 32)
 
-#: Task names the module accepts. All four are wired: ``"detect"`` is the dual
-#: detection objective alone, ``"segment"`` adds the WP-087 mask terms, ``"obb"``
-#: swaps the two box terms for the WP-088 rotated ones and adds the angle term,
-#: and ``"keypoints"`` adds the WP-132 residual log-likelihood term and the WP-178 OKS term.
-_TASKS: tuple[str, ...] = ("detect", "segment", "obb", "keypoints")
+#: Task names the module accepts, read off :class:`~lucid_yolo.tasks.Task` in registry
+#: order. All four are wired: ``"detect"`` is the dual detection objective alone,
+#: ``"segment"`` adds the WP-087 mask terms, ``"obb"`` swaps the two box terms for the
+#: WP-088 rotated ones and adds the angle term, and ``"keypoints"`` adds the WP-132
+#: residual log-likelihood term and the WP-178 OKS term.
+_TASKS: tuple[str, ...] = TASK_NAMES
 
 #: Tasks whose epoch validation metric accumulates rank-local Python lists rather than a
 #: gathering :class:`~torchmetrics.Metric`, and which therefore refuse to run distributed
@@ -256,70 +274,6 @@ _TASKS: tuple[str, ...] = ("detect", "segment", "obb", "keypoints")
 #: ``docs/TRAINING.md`` single-device note cannot drift from each other.
 _RANK_LOCAL_VAL_TASKS: frozenset[str] = frozenset({"obb", "keypoints"})
 
-
-def _keypoint_oks_sigmas(num_keypoints: int | None) -> tuple[float, ...]:
-    """Pick the per-keypoint OKS sigma vector for a point count (A67, WP-137).
-
-    :data:`~lucid_yolo.eval.coco_eval.COCO_KEYPOINT_OKS_SIGMAS` only when the count
-    matches COCO's own 17-point human schema exactly, and
-    :data:`~lucid_yolo.eval.coco_eval.SYMBOL_KEYPOINT_OKS_SIGMA` (A67's uniform
-    sigma) repeated for every other count — the choice ``scripts/overfit_micro.py``'s
-    synthetic gate makes for its 7-point symbol schema, shared from one place. One
-    function serves both consumers on purpose: the ``val/oks_mAP`` evaluator and the
-    :class:`~lucid_yolo.losses.oks_loss.OKSLoss` training term (WP-178) must score
-    against the **same** tolerances, or the loss would pull towards a target the
-    metric does not measure.
-
-    Args:
-        num_keypoints: The schema's point count, or ``None`` for a module with no
-            point stem (an empty vector).
-
-    Returns:
-        A length-``K`` tuple of sigmas.
-
-    Examples:
-        ```pycon
-        >>> _keypoint_oks_sigmas(3)
-        (0.072, 0.072, 0.072)
-        >>> len(_keypoint_oks_sigmas(17)), _keypoint_oks_sigmas(17)[0]
-        (17, 0.026)
-        >>> _keypoint_oks_sigmas(None)
-        ()
-
-        ```
-    """
-    if num_keypoints == len(COCO_KEYPOINT_OKS_SIGMAS):
-        return COCO_KEYPOINT_OKS_SIGMAS
-    return (SYMBOL_KEYPOINT_OKS_SIGMA,) * (num_keypoints or 0)
-
-
-#: Keypoint objectives a ``"keypoints"`` run may select between, each mapped to the
-#: class that implements it (WP-135). ``"rle"`` is R14's full residual
-#: log-likelihood and the default every existing config, checkpoint and accepted
-#: result was produced with; ``"laplace_nll"`` is R14 Table 7's own flow-free
-#: control, present so WP-125 can state a direction of effect rather than a bare
-#: number. Keyed by plain strings for the reason ``_TASKS`` and
-#: ``ROTATED_IOU_FORMS`` are: the value arrives from YAML. One mapping rather than a
-#: name tuple beside a constructor branch, so the accepted set and the thing each
-#: name builds cannot drift apart.
-_KEYPOINT_LOSSES: dict[str, type[RLELoss] | type[LaplaceNLLLoss]] = {
-    "rle": RLELoss,
-    "laplace_nll": LaplaceNLLLoss,
-}
-
-#: Column count of an ``xyxy`` axis-aligned box.
-_BOX_DIM = 4
-
-#: Column count of a long-edge rotated box ``(cx, cy, w, h, theta)``.
-_RBOX_DIM = 5
-
-#: Coordinate count of a keypoint ``(x, y)``.
-_KEYPOINT_DIM = 2
-
-#: Floor, in input pixels, on the per-axis box extent :func:`normalize_keypoints_to_box`
-#: divides by. One pixel: a box thinner than that carries no pose worth a frame, and the
-#: unclamped division would answer a finite annotation with an infinity.
-_MIN_BOX_EXTENT = 1.0
 
 #: Column index of the integral class label within the A9 detection tuple.
 _LABEL_COLUMN = 5
@@ -331,394 +285,34 @@ _LABEL_COLUMN = 5
 _VAL_SEGM_MAX_DET = 100
 
 
-def pad_targets(targets: list[Targets]) -> tuple[Tensor, Tensor, Tensor]:
-    """Pad a ragged batch of per-image targets into dense ground-truth tensors.
-
-    The batch's :class:`~lucid_yolo.data.targets.Targets` each carry their own
-    instance count, so they are padded to the batch maximum ``N_max`` and paired
-    with a boolean mask marking the real (non-padding) rows — the dense form the
-    :class:`~lucid_yolo.losses.dual_loss.DualBranchLoss` assigners consume. An image
-    with no instances contributes an all-``False`` mask row (no positives), and a
-    batch in which *every* image is empty yields ``N_max = 0`` tensors, which the
-    loss handles as its finite no-ground-truth case.
+def _box_predictions(detections: Tensor) -> list[dict[str, Tensor]]:
+    """Keep each image's scored detections, on the host, in the per-image form ``val/mAP`` reads.
 
     Args:
-        targets: Length-``B`` list of per-image targets (the datamodule batch's
-            second element). All tensors must share one device.
+        detections: The ``(B, k, 6)`` decoded A9 batch; a row scoring zero is padding.
 
     Returns:
-        A triple ``(gt_boxes, gt_labels, gt_mask)`` with shapes ``(B, N_max, 4)``
-        float32 ``xyxy`` boxes, ``(B, N_max)`` int64 class ids, and ``(B, N_max)``
-        bool mask. Padding rows are zero boxes / zero labels / ``False`` mask.
+        One ``{"boxes", "scores", "labels"}`` dict per image, holding its kept rows.
 
     Examples:
         ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> a = Targets(boxes=torch.tensor([[0.0, 0.0, 4.0, 4.0]]), labels=torch.tensor([3]))
-        >>> b = Targets.empty()
-        >>> boxes, labels, mask = pad_targets([a, b])
-        >>> boxes.shape, labels.shape, mask.shape
-        (torch.Size([2, 1, 4]), torch.Size([2, 1]), torch.Size([2, 1]))
-        >>> mask.tolist()
-        [[True], [False]]
+        >>> detections = torch.tensor([[[0.0, 0.0, 4.0, 4.0, 0.9, 2.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]])
+        >>> _box_predictions(detections)[0]["labels"]
+        tensor([2])
 
         ```
     """
-    batch_size = len(targets)
-    counts = [int(target.boxes.shape[0]) for target in targets]
-    max_n = max(counts) if counts else 0
-    device = targets[0].boxes.device if targets else torch.device("cpu")
-    gt_boxes = torch.zeros((batch_size, max_n, _BOX_DIM), dtype=torch.float32, device=device)
-    gt_labels = torch.zeros((batch_size, max_n), dtype=torch.int64, device=device)
-    gt_mask = torch.zeros((batch_size, max_n), dtype=torch.bool, device=device)
-    for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
-        if count == 0:
-            continue
-        gt_boxes[index, :count] = target.boxes
-        gt_labels[index, :count] = target.labels
-        gt_mask[index, :count] = True
-    return gt_boxes, gt_labels, gt_mask
-
-
-def pad_rboxes(targets: list[Targets]) -> Tensor:
-    """Pad a ragged batch's rotated boxes into one dense ``(B, N_max, 5)`` tensor (WP-088).
-
-    The rotated companion of :func:`pad_targets`, kept as its own function rather than
-    a fourth element of that tuple: only ``task="obb"`` needs it, and widening a return
-    every caller unpacks would put an oriented concern in the detection path.
-
-    The padding is by the **instance** axis, not by a rotated-box axis of its own. WP-056
-    pins ``rboxes[i]`` to the same object as ``boxes[i]`` and ``labels[i]``, and that
-    pairing is the whole reason the assignment computed on the axis-aligned envelopes may
-    be reused to gather rotated targets. An image whose two axes disagree is therefore a
-    hard error here rather than something to reconcile: whichever way it were resolved,
-    some anchor would be supervised towards another instance's orientation.
-
-    Args:
-        targets: The length-``B`` per-image target list, each carrying one rotated box
-            per instance. All tensors must share one device.
-
-    Returns:
-        ``(B, N_max, 5)`` float32 long-edge rotated boxes on the targets' device, padded
-        with zero rows exactly where :func:`pad_targets` pads with ``False``.
-
-    Raises:
-        ValueError: If any image's rotated-box count differs from its instance count —
-            including the all-important case of *zero* rotated boxes beside real ones,
-            which is what a detection loader hands an oriented run.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> one = Targets(
-        ...     boxes=torch.tensor([[0.0, 0.0, 4.0, 2.0]]),
-        ...     labels=torch.tensor([3]),
-        ...     rboxes=torch.tensor([[2.0, 1.0, 4.0, 2.0, 0.0]]),
-        ... )
-        >>> pad_rboxes([one, Targets.empty()]).shape
-        torch.Size([2, 1, 5])
-        >>> pad_rboxes([Targets(boxes=torch.zeros(1, 4), labels=torch.zeros(1, dtype=torch.int64))])
-        Traceback (most recent call last):
-        ...
-        ValueError: image 0 carries 1 instances but 0 rotated boxes; task='obb' needs one per instance
-
-        ```
-    """
-    counts = [int(target.boxes.shape[0]) for target in targets]
-    for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
-        if int(target.rboxes.shape[0]) != count:
-            raise ValueError(
-                f"image {index} carries {count} instances but {int(target.rboxes.shape[0])} rotated boxes; "
-                f"task='obb' needs one per instance"
-            )
-    max_n = max(counts) if counts else 0
-    device = targets[0].rboxes.device if targets else torch.device("cpu")
-    padded = torch.zeros((len(targets), max_n, _RBOX_DIM), dtype=torch.float32, device=device)
-    for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
-        if count:
-            padded[index, :count] = target.rboxes
-    return padded
-
-
-def pad_keypoints(targets: list[Targets]) -> tuple[Tensor, Tensor]:
-    """Pad a ragged batch's keypoints and visibilities onto the instance axis (WP-132).
-
-    The pose companion of :func:`pad_targets`, and a sibling of :func:`pad_rboxes` in
-    both shape and argument. Like the rotated boxes, keypoints are padded by the
-    **instance** axis rather than by an axis of their own: WP-120 pins
-    ``keypoints[i]`` to the same object as ``boxes[i]`` and ``labels[i]``, and that
-    pairing is the only reason the assignment computed on the boxes may be reused to
-    gather point targets. An image whose two axes disagree is a hard error for the
-    same reason it is one there — whichever way it were reconciled, some anchor would
-    be supervised towards another instance's pose.
-
-    The visibility padding is zeros, which is not merely a filler value: A66 reads
-    ``v == 0`` as "no annotation exists", so
-    :class:`~lucid_yolo.losses.rle_loss.RLELoss` already excludes exactly those
-    points. The padding rows are therefore inert in the loss by the same rule that
-    excludes a genuinely unlabeled point, rather than by a second mechanism that
-    could disagree with it.
-
-    Args:
-        targets: The length-``B`` per-image target list, each carrying one point set
-            per instance. All tensors must share one device.
-
-    Returns:
-        A pair ``(keypoints, visibility)`` of shapes ``(B, N_max, K, 2)`` float32 and
-        ``(B, N_max, K)`` int64, padded with zero coordinates and zero (unlabeled)
-        visibility exactly where :func:`pad_targets` pads with ``False``. ``K`` is
-        the batch's shared point count, and ``0`` for a batch holding no instances
-        at all.
-
-    Raises:
-        ValueError: If any image's keypoint-set count differs from its instance
-            count — including the case of *zero* keypoints beside real instances,
-            which is what a plain detection loader hands a keypoints run — or if two
-            images disagree on ``K``, which no single head could predict for both.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> one = Targets(
-        ...     boxes=torch.tensor([[0.0, 0.0, 4.0, 2.0]]),
-        ...     labels=torch.tensor([3]),
-        ...     keypoints=torch.tensor([[[1.0, 1.0], [3.0, 1.0]]]),
-        ...     keypoint_vis=torch.tensor([[2, 1]]),
-        ... )
-        >>> coords, visibility = pad_keypoints([one, Targets.empty()])
-        >>> coords.shape, visibility.shape
-        (torch.Size([2, 1, 2, 2]), torch.Size([2, 1, 2]))
-        >>> visibility.tolist()  # the padded image is unlabeled everywhere (A66)
-        [[[2, 1]], [[0, 0]]]
-        >>> pad_keypoints([Targets(boxes=torch.zeros(1, 4), labels=torch.zeros(1, dtype=torch.int64))])
-        Traceback (most recent call last):
-        ...
-        ValueError: image 0 carries 1 instances but 0 keypoint sets; task='keypoints' needs one per instance
-
-        ```
-    """
-    counts = [int(target.boxes.shape[0]) for target in targets]
-    for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
-        if int(target.keypoints.shape[0]) != count:
-            raise ValueError(
-                f"image {index} carries {count} instances but {int(target.keypoints.shape[0])} keypoint sets; "
-                f"task='keypoints' needs one per instance"
-            )
-    point_counts = {int(target.keypoints.shape[1]) for target in targets if target.keypoints.shape[0]}
-    if len(point_counts) > 1:
-        raise ValueError(f"the batch's images disagree on the keypoint count K: {sorted(point_counts)}")
-    num_points = point_counts.pop() if point_counts else 0
-    max_n = max(counts) if counts else 0
-    device = targets[0].keypoints.device if targets else torch.device("cpu")
-    coords = torch.zeros((len(targets), max_n, num_points, _KEYPOINT_DIM), dtype=torch.float32, device=device)
-    visibility = torch.zeros((len(targets), max_n, num_points), dtype=torch.int64, device=device)
-    for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
-        if count:
-            coords[index, :count] = target.keypoints
-            visibility[index, :count] = target.keypoint_vis
-    return coords, visibility
-
-
-def normalize_keypoints_to_box(points: Tensor, boxes: Tensor) -> Tensor:
-    """Map absolute point pixels into their instance's box frame (A71, WP-132).
-
-    The frame :class:`~lucid_yolo.losses.rle_loss.RLELoss` needs and this project's
-    decode does not produce. R14 predicts ``sigma_hat`` through a sigmoid, so
-    ``sigma_hat`` lies in ``(0, 1)`` by construction (R14 sec. 3.3), and the residual
-    it scales is ``x_bar = (mu_g - mu_hat) / sigma_hat``. A scale bounded above by 1
-    is only expressive in a frame whose errors are ``O(1)``: fed absolute pixels, the
-    *smallest* residual the model can express for a 40 px error is 40, and an early
-    prediction on the far side of a 256 px canvas reaches into the hundreds. R14 never
-    states the frame — it works top-down on a person crop resized to a fixed input, so
-    the crop *is* the normalization and the paper has no occasion to name it. This
-    function supplies the dense-detector equivalent: the assigned ground-truth box
-    plays the part R14's crop plays.
-
-    Measured, not reasoned: run un-normalized, the keypoint term enters at 1300 of a
-    1342 total loss and the flow's coupling layers overflow to non-finite on the
-    second step. See A71 and the ``#wp-132`` log entry.
-
-    Normalization is per axis — ``x`` by the box width, ``y`` by its height — which is
-    exactly what resizing a crop to a fixed input does, rather than the single
-    ``sqrt(area)`` scalar OKS uses. The two agree on a square object and differ only in
-    how an elongated one distributes its tolerance; per-axis is the one that makes the
-    frame an actual crop.
-
-    The translation term cancels: the loss reads ``mu_hat`` and ``mu_gt`` only through
-    their difference, and both are mapped by the same box. It is applied anyway, so the
-    returned values mean what the name says — ``0`` at the box's top-left corner, ``1``
-    at its bottom-right, a point outside the box outside ``[0, 1]`` — rather than being
-    a bare division that happens to be sufficient.
-
-    Args:
-        points: ``(..., K, 2)`` absolute point coordinates in input pixels, as
-            :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` returns them.
-        boxes: ``(..., 4)`` ``xyxy`` boxes in input pixels, aligned with ``points`` on
-            every leading axis — one box per point set.
-
-    Returns:
-        The points in their box's frame, shaped as given. A box narrower than one pixel
-        on an axis is treated as one pixel wide there: a degenerate box carries no pose
-        to normalize by, and the alternative is a division that returns infinity for a
-        finite annotation.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> points = torch.tensor([[[10.0, 20.0], [30.0, 40.0]]])
-        >>> boxes = torch.tensor([[10.0, 20.0, 30.0, 40.0]])
-        >>> normalize_keypoints_to_box(points, boxes)  # corner to corner
-        tensor([[[0., 0.],
-                 [1., 1.]]])
-
-        ```
-    """
-    origin = boxes[..., :2].unsqueeze(-2)
-    extent = (boxes[..., 2:] - boxes[..., :2]).clamp(min=_MIN_BOX_EXTENT).unsqueeze(-2)
-    return (points - origin) / extent
-
-
-#: A step batch. The datamodule's transfer hook produces the three-element form; the
-#: two-element form is the hand-built feed a direct caller passes to
-#: :meth:`DetectionLitModule.training_step`.
-StepBatch = tuple[Tensor, list["Targets"]] | tuple[Tensor, list["Targets"], list[Tensor] | None]
-
-
-def _host_split(tensors: list[Tensor]) -> tuple[Tensor, ...]:
-    """Move a batch's per-image tensors to the host in one transfer rather than one each.
-
-    Every validation accumulator needs its ground truth on the host. Moving each
-    image's tensor on its own issues one device-to-host transfer per image per
-    field, and what each one carries is a few kilobytes against the accelerator's
-    fixed per-transfer latency -- a batch of 16 with three fields is 48 transfers
-    for a payload that fits in one. Concatenating along the batch axis pays that
-    latency once and splits the result back into the same per-image pieces, with
-    the same values in the same order (WP-163).
-
-    Args:
-        tensors: One tensor per image, agreeing on every dimension after the
-            first. An empty list returns an empty tuple.
-
-    Returns:
-        The same tensors, on the host, in the order given.
-
-    Examples:
-        ```pycon
-        >>> _host_split([torch.tensor([[1.0, 2.0]]), torch.zeros(0, 2)])
-        (tensor([[1., 2.]]), tensor([], size=(0, 2)))
-        >>> _host_split([])
-        ()
-
-        ```
-    """
-    if not tensors:
-        return ()
-    host = torch.cat(tensors).cpu()
-    pieces: list[Tensor] = []
-    start = 0
-    for tensor in tensors:
-        stop = start + int(tensor.shape[0])
-        pieces.append(host[start:stop])
-        start = stop
-    return tuple(pieces)
-
-
-def _split_batch(batch: StepBatch) -> tuple[Tensor, list[Targets], list[Tensor] | None]:
-    """Split a step batch into images, targets and the loader's mask stacks.
-
-    :meth:`~lucid_yolo.ptl.datamodule.DetectionDataModule.on_after_batch_transfer`
-    hands over a third element — the per-image instance masks a segmentation loader
-    rasterised in its workers, or ``None``. A two-element batch is still accepted so
-    that a hand-built ``(images, targets)`` feed (every direct-call test, every
-    script that drives the module without the datamodule) keeps working and simply
-    rasterises in the step, as it always did.
-
-    Args:
-        batch: The ``(images, targets)`` or ``(images, targets, masks)`` step batch.
-
-    Returns:
-        The ``(images, targets, masks)`` triple, with ``masks`` ``None`` when the
-        batch carried none.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> images, targets, masks = _split_batch((torch.zeros(1, 3, 4, 4), []))
-        >>> masks is None
-        True
-
-        ```
-    """
-    images, targets, *rest = batch
-    return images, targets, rest[0] if rest else None
-
-
-@dataclass(frozen=True)
-class _StepContext:
-    """Everything one step computed once and its task-conditional terms may read.
-
-    The three tasks need overlapping but different slices of a step: the mask terms
-    want the prototypes and the ground-truth boxes in pixels, the oriented terms want
-    the raw angles and the anchor grid, and neither wants the other's. Passing them as
-    positional arguments put :meth:`DetectionLitModule._task_extra_loss` at seven
-    required parameters before the oriented path added any, and the eighth would have
-    been a lint failure standing in for a design one — a dispatch point whose signature
-    grows with every task is a dispatch point that will eventually be typed wrongly.
-
-    Attributes:
-        head_out: The dense dual-head output of this step's forward.
-        seg_out: The segmentation forward output, or ``None`` for a task with no
-            mask branches.
-        targets: The batch's ragged per-image targets.
-        gt_boxes: ``(B, N, 4)`` padded ground-truth boxes in input pixels.
-        gt_rboxes: ``(B, N, 5)`` padded rotated ground truths, or ``None`` when the
-            task does not supervise orientation.
-        gt_keypoints: ``(B, N, K, 2)`` padded point ground truths in input pixels,
-            or ``None`` when the task does not supervise pose.
-        gt_keypoint_vis: ``(B, N, K)`` padded COCO visibilities paired with
-            ``gt_keypoints``, or ``None`` alongside it.
-        anchor_points: ``(A, 2)`` anchor centres in input pixels.
-        strides: ``(A,)`` per-anchor level stride.
-        image_size: The batch's ``(height, width)`` in input pixels.
-        masks: The loader's per-image instance masks, or ``None`` to rasterise them
-            in the step.
-    """
-
-    head_out: DualHeadOutput
-    seg_out: SegmentOutput | None
-    targets: list[Targets]
-    gt_boxes: Tensor
-    gt_rboxes: Tensor | None
-    gt_keypoints: Tensor | None
-    gt_keypoint_vis: Tensor | None
-    anchor_points: Tensor
-    strides: Tensor
-    image_size: tuple[int, int]
-    masks: list[Tensor] | None
-
-
-@dataclass(frozen=True)
-class _KeypointPositives:
-    """One branch's assigned positives, gathered once for every pose term to score (WP-178).
-
-    Attributes:
-        predicted: ``(P, K, 2)`` decoded points of the positives, in input pixels.
-        raw_sigma: ``(P, K, 2)`` raw, unactivated per-axis sigma of the positives.
-        annotated: ``(P, K, 2)`` ground-truth points of each positive's assigned
-            instance, in input pixels.
-        frame: ``(P, 4)`` ``xyxy`` box of each positive's assigned instance, in
-            input pixels — the A71 frame for the RLE term, the A75 area for OKS.
-        visibility: ``(P, K)`` int64 visibility of the assigned instance's points.
-    """
-
-    predicted: Tensor
-    raw_sigma: Tensor
-    annotated: Tensor
-    frame: Tensor
-    visibility: Tensor
+    preds = []
+    for image_detections in detections.cpu():
+        kept = image_detections[image_detections[:, SCORE_COLUMN] > 0.0]
+        preds.append(
+            {
+                "boxes": kept[:, :BOX_CORNERS],
+                "scores": kept[:, SCORE_COLUMN],
+                "labels": kept[:, _LABEL_COLUMN].long(),
+            }
+        )
+    return preds
 
 
 def _validate_task_arguments(task: str, num_keypoints: int | None, rotated_iou_form: str, keypoint_loss: str) -> None:
@@ -1159,6 +753,7 @@ class DetectionLitModule(LightningModule):
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
         _validate_replay_options(task, compile_step, capture_network, capture_loss, capture_segment_heads)
         self.save_hyperparameters()
+        task = self._record_plain_task(task)
         self._capture_loss, self._capture_loss_active = capture_loss, False
         self._capture_network, self._capture_network_active = capture_network, False
         self._network_capture, self._loss_capture = _NetworkCapture(), _LossCapture()
@@ -1317,6 +912,32 @@ class DetectionLitModule(LightningModule):
         #: Per-image-size cache of ``(anchor_points, stride_per_anchor)`` on CPU.
         self._anchor_cache: dict[tuple[int, int], tuple[Tensor, Tensor]] = {}
 
+    def _record_plain_task(self, task: str) -> str:
+        """Overwrite the recorded ``task`` with its plain spelling, after ``save_hyperparameters``, and return it.
+
+        The plain spelling, even when a :class:`~lucid_yolo.tasks.Task` member was passed:
+        a checkpoint loads under ``torch.load(weights_only=True)``, whose restricted
+        unpickler refuses a ``Task`` in ``hparams["task"]``. Normalizing the constructor's
+        local before the call is not enough, because ``save_hyperparameters`` merges every
+        subclass ``__init__`` frame's arguments over this one's, ``**kwargs`` contents
+        included, so a subclass forwarding ``task=Task.DETECT`` records the member. Both
+        records the call wrote are corrected: ``hparams``, which the checkpoint stores, and
+        the initial snapshot a logger writes, retaken the way ``save_hyperparameters``
+        itself takes it.
+
+        Args:
+            task: The constructor's ``task`` argument, a plain name or a ``Task`` member.
+
+        Returns:
+            The plain task name.
+        """
+        plain = Task(task).value
+        if "task" in self.hparams:
+            # A hyperparameter dict given without ``task`` (LightningCLI's path) stays as given.
+            self.hparams["task"] = plain
+            self._hparams_initial = copy.deepcopy(self.hparams)
+        return plain
+
     def _init_segmentation(self, task: str, num_classes: int, capture_segment_heads: bool) -> None:
         """Build segmentation in its existing initialization order and retain its scheduling request."""
         self._segment_head_capture = _SegmentHeadCapture(capture_segment_heads)
@@ -1407,34 +1028,68 @@ class DetectionLitModule(LightningModule):
         on_cuda = self._trainer is not None and isinstance(self._trainer.accelerator, CUDAAccelerator)
         if on_cuda:
             self.to(memory_format=torch.channels_last)
-        self._capture_network_active = (
-            self._capture_network
-            and on_cuda
-            and self._trainer is not None
-            and isinstance(self.trainer.strategy, SingleDeviceStrategy)
-            and self.automatic_optimization
-        )
-        if self._capture_network and not self._capture_network_active and stage == "fit":
-            warnings.warn(
-                "capture_network=True is ignored outside single-device CUDA automatic optimization",
-                UserWarning,
-                stacklevel=2,
-            )
-        self._capture_loss_active = (
-            self._capture_loss
-            and on_cuda
-            and self._trainer is not None
-            and isinstance(self.trainer.strategy, SingleDeviceStrategy)
-            and self.automatic_optimization
-        )
-        if self._capture_loss and not self._capture_loss_active and stage == "fit":
-            warnings.warn(
-                "capture_loss=True is ignored outside single-device CUDA automatic optimization",
-                UserWarning,
-                stacklevel=2,
-            )
+        self._capture_network_active = self._replay_active(self._capture_network, on_cuda)
+        self._warn_ignored_replay(self._capture_network, self._capture_network_active, "capture_network", stage)
+        self._capture_loss_active = self._replay_active(self._capture_loss, on_cuda)
+        self._warn_ignored_replay(self._capture_loss, self._capture_loss_active, "capture_loss", stage)
         if self._compile_step and not self._compile_step_resolved:
             self._compile_objective(on_cuda)
+        self._refuse_rank_local_validation(stage)
+
+    def _replay_active(self, requested: bool, on_cuda: bool) -> bool:
+        """Decide whether one opted-in CUDA recording runs for the stage being set up.
+
+        ``capture_network`` and ``capture_loss`` share the condition: single-device CUDA
+        automatic optimization.
+
+        Args:
+            requested: The constructor flag.
+            on_cuda: Whether the attached trainer's accelerator is CUDA.
+
+        Returns:
+            Whether the recording is active.
+        """
+        return (
+            requested
+            and on_cuda
+            and self._trainer is not None
+            and isinstance(self.trainer.strategy, SingleDeviceStrategy)
+            and self.automatic_optimization
+        )
+
+    @staticmethod
+    def _warn_ignored_replay(requested: bool, active: bool, flag: str, stage: str) -> None:
+        """Warn at ``fit`` that an opted-in recording :meth:`_replay_active` refused will not run.
+
+        :meth:`setup` calls this only after storing the activation, the order it kept while
+        the check was inline, so a filter raising the warning as an error cannot leave a
+        flag still on from an earlier run. ``stacklevel=3`` names the caller of
+        :meth:`setup`, the frame the warning named while it was raised in :meth:`setup`
+        itself.
+
+        Args:
+            requested: The constructor flag.
+            active: What :meth:`_replay_active` decided for it.
+            flag: The flag's name, as the warning spells it.
+            stage: The Trainer stage being set up.
+        """
+        if requested and not active and stage == "fit":
+            warnings.warn(
+                f"{flag}=True is ignored outside single-device CUDA automatic optimization",
+                UserWarning,
+                stacklevel=3,
+            )
+
+    def _refuse_rank_local_validation(self, stage: str) -> None:
+        """Refuse an ``"obb"`` or ``"keypoints"`` run spanning processes; :meth:`setup` states why.
+
+        Args:
+            stage: The Trainer stage being set up; ``"predict"`` is exempt.
+
+        Raises:
+            RuntimeError: If the task is ``"obb"`` or ``"keypoints"`` and the trainer spans
+                more than one process.
+        """
         if stage == "predict" or self.task not in _RANK_LOCAL_VAL_TASKS:
             return
         # Reached only for the two guarded tasks, and Lightning calls `setup` with the
@@ -2017,23 +1672,9 @@ class DetectionLitModule(LightningModule):
         detections, anchor_indices = self._val_decoder.decode_with_indices(
             head_out.o2o_cls, head_out.o2o_box, anchor_points, strides
         )
-        preds = []
-        for image_detections in detections.cpu():
-            kept = image_detections[image_detections[:, SCORE_COLUMN] > 0.0]
-            preds.append(
-                {
-                    "boxes": kept[:, :BOX_CORNERS],
-                    "scores": kept[:, SCORE_COLUMN],
-                    "labels": kept[:, _LABEL_COLUMN].long(),
-                }
-            )
+        preds = _box_predictions(detections)
         if self.task != "obb":
-            host_boxes = _host_split([t.boxes for t in targets])
-            host_labels = _host_split([t.labels for t in targets])
-            ground_truth = [
-                {"boxes": boxes, "labels": labels} for boxes, labels in zip(host_boxes, host_labels, strict=True)
-            ]
-            self._val_map.update(preds, ground_truth)
+            self._update_val_map(preds, targets)
         if self._val_segm is not None and seg_out is not None and masks is not None:
             image_size = (int(images.shape[-2]), int(images.shape[-1]))
             self._update_val_segm(seg_out, detections, anchor_indices, targets, masks, image_size)
@@ -2042,6 +1683,20 @@ class DetectionLitModule(LightningModule):
         if self._task == "keypoints":
             self._update_val_keypoints(head_out, detections, anchor_indices, targets, anchor_points, strides)
         return loss
+
+    def _update_val_map(self, preds: list[dict[str, Tensor]], targets: list[Targets]) -> None:
+        """Accumulate one batch's kept boxes and its ground truth, moved to the host, for the epoch ``val/mAP``.
+
+        Args:
+            preds: The batch's per-image kept detections, as :func:`_box_predictions` builds them.
+            targets: The batch's per-image ground truth, carrying ``boxes`` and ``labels``.
+        """
+        host_boxes = _host_split([t.boxes for t in targets])
+        host_labels = _host_split([t.labels for t in targets])
+        ground_truth = [
+            {"boxes": boxes, "labels": labels} for boxes, labels in zip(host_boxes, host_labels, strict=True)
+        ]
+        self._val_map.update(preds, ground_truth)
 
     def _update_val_rotated(
         self, head_out: DualHeadOutput, targets: list[Targets], anchor_points: Tensor, strides: Tensor
@@ -2552,9 +2207,9 @@ class DetectionLitModule(LightningModule):
         assert context.gt_rboxes is not None  # the step pads them for exactly this task
         o2m = self._branch_oriented_terms(head_out.o2m_box, o2m_angle, out.o2m_assign, context)
         o2o = self._branch_oriented_terms(head_out.o2o_box, o2o_angle, out.o2o_assign, context)
-        rbox = alpha * o2m.rbox + (1.0 - alpha) * o2o.rbox
-        rl1 = alpha * o2m.rl1 + (1.0 - alpha) * o2o.rl1
-        angle = alpha * o2m.angle + (1.0 - alpha) * o2o.angle
+        rbox = _blend(alpha, o2m.rbox, o2o.rbox)
+        rl1 = _blend(alpha, o2m.rl1, o2o.rl1)
+        angle = _blend(alpha, o2m.angle, o2o.angle)
         batch_size = len(context.targets)
         self.log(f"{stage}/rbox", rbox, batch_size=batch_size)
         self.log(f"{stage}/rl1", rl1, batch_size=batch_size)
@@ -2662,7 +2317,7 @@ class DetectionLitModule(LightningModule):
             return self._paired_keypoint_terms(context, out)
         o2m_rle, o2m_oks = self._score_branch(o2m_points, o2m_sigma, out.o2m_assign, context)
         o2o_rle, o2o_oks = self._score_branch(o2o_points, o2o_sigma, out.o2o_assign, context)
-        return alpha * o2m_rle + (1.0 - alpha) * o2o_rle, alpha * o2m_oks + (1.0 - alpha) * o2o_oks
+        return _blend(alpha, o2m_rle, o2o_rle), _blend(alpha, o2m_oks, o2o_oks)
 
     def _paired_keypoint_terms(self, context: _StepContext, out: DualLossOutput) -> tuple[Tensor, Tensor]:
         """Score the two existing pose branches with one shared density batch.
@@ -2689,8 +2344,8 @@ class DetectionLitModule(LightningModule):
         left_rle, right_rle = self.rle_loss._forward_pair(*arguments)
         alpha = out.alpha
         return (
-            alpha * left_rle + (1.0 - alpha) * right_rle,
-            alpha * self._oks_on(left) + (1.0 - alpha) * self._oks_on(right),
+            _blend(alpha, left_rle, right_rle),
+            _blend(alpha, self._oks_on(left), self._oks_on(right)),
         )
 
     def _score_branch(
@@ -2901,7 +2556,7 @@ class DetectionLitModule(LightningModule):
             padded_masks[index, : image_masks.shape[0]] = image_masks
         o2m_mask = self._branch_mask_loss(prototypes, o2m_coeff, out.o2m_assign, padded_masks, grid_boxes)
         o2o_mask = self._branch_mask_loss(prototypes, o2o_coeff, out.o2o_assign, padded_masks, grid_boxes)
-        mask_term = out.alpha * o2m_mask + (1.0 - out.alpha) * o2o_mask
+        mask_term = _blend(out.alpha, o2m_mask, o2o_mask)
         return mask_term, self._semantic_term(seg_out, masks, targets)
 
     @staticmethod

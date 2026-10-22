@@ -36,6 +36,7 @@ from lucid_yolo.data import Targets, boxes_from_polygons
 from lucid_yolo.data import _image as image_data
 from lucid_yolo.data import check as check_data
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
+from lucid_yolo.ptl import _pipeline
 from lucid_yolo.ptl import datamodule as dm
 from lucid_yolo.ptl.datamodule import (
     DetectionDataModule,
@@ -1183,7 +1184,7 @@ def _draw_after_init(monkeypatch: pytest.MonkeyPatch, pipeline: object, seed: in
         >>> callable(_draw_after_init)  # needs a live pipeline built by a datamodule
         True
     """
-    monkeypatch.setattr(dm, "get_worker_info", lambda: _StubWorkerInfo(pipeline, seed))
+    monkeypatch.setattr(_pipeline, "get_worker_info", lambda: _StubWorkerInfo(pipeline, seed))
     dm._init_worker(0)
     return float(torch.rand((), generator=pipeline._generator))
 
@@ -1214,7 +1215,7 @@ def test_init_worker_caps_threads_without_seedable_dataset(
 ) -> None:
     """No ``_generator`` to seed (val pipeline, or num_workers=0) still caps the worker's threads."""
     capped: list[int] = []
-    monkeypatch.setattr(dm, "get_worker_info", worker_info)
+    monkeypatch.setattr(_pipeline, "get_worker_info", worker_info)
     monkeypatch.setattr(torch, "set_num_threads", capped.append)
     dm._init_worker(0)
     assert capped == [1]

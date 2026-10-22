@@ -9,7 +9,8 @@ term), the :func:`~lucid_yolo.ptl.module.pad_targets` ragged-to-dense contract
 automatic-optimization wiring proved by a ``fast_dev_run`` Lightning smoke run,
 the ``alpha`` delegation seam (WP-035), and the task conditioning: an invalid
 task is rejected, the ``_task_extra_loss`` stub is an inert zero for every task,
-and a ``segment`` module trains identically to a ``detect`` module.
+and a ``segment`` module trains identically to a ``detect`` module. ``setup``'s
+warning for an opted-in recording it cannot activate names the line that called it.
 
 The module is built at n-scale multipliers with a low channel cap and a 160-px
 input so the real backbone/neck/head stack runs in a couple of seconds on CPU.
@@ -21,6 +22,7 @@ Batches are synthetic tensors plus hand-built :class:`~lucid_yolo.data.targets.T
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -403,6 +405,44 @@ def test_compile_step_on_cpu_trainer_warns_once_and_stays_eager(monkeypatch: pyt
     assert len(record) == 1
     assert module._objective == module._detect_objective
     assert torch.equal(total, expected)
+
+
+@pytest.mark.parametrize("flag", ["capture_network", "capture_loss"])
+def test_ignored_capture_warning_names_setup_caller(flag: str) -> None:
+    """An opted-in recording ``setup`` cannot activate warns at the line that called ``setup``.
+
+    The activation check runs in a helper one frame below ``setup``, so its ``stacklevel``
+    has to skip that frame too: pointing into the module instead would break a user's
+    warning filter keyed on their own calling module. A detached module is never on
+    CUDA, so either flag warns at ``fit``.
+    """
+    module = tiny_module(**{flag: True})
+
+    with pytest.warns(UserWarning, match=f"{flag}=True is ignored outside") as record:
+        module.setup("fit")
+
+    assert [warning.filename for warning in record] == [__file__]
+
+
+@pytest.mark.parametrize("flag", ["capture_network", "capture_loss"])
+def test_ignored_capture_clears_activation_before_warning(flag: str) -> None:
+    """A recording ``setup`` refuses is switched off even when its warning is raised as an error.
+
+    A module reused across trainers can arrive at ``setup`` with the flag still on from a
+    run that activated it. The activation is decided and stored before the warning is
+    emitted, so a filter promoting that warning to an exception cannot leave the stale
+    ``True`` behind for the next step to record under. A detached module is never on
+    CUDA, so either flag is refused at ``fit``.
+    """
+    module = tiny_module(**{flag: True})
+    setattr(module, f"_{flag}_active", True)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(UserWarning, match=f"{flag}=True is ignored outside"):
+            module.setup("fit")
+
+    assert getattr(module, f"_{flag}_active") is False
 
 
 class TestHostSplit:

@@ -421,6 +421,50 @@ class Targets:
         if not present:
             return _empty_keypoints(), _empty_keypoint_vis()
 
+        # Called for its refusal: the rows joined below carry their K, so the count is not needed.
+        Targets._shared_keypoint_count(present)
+        return (
+            torch.cat([target.keypoints for target in present], dim=0),
+            torch.cat([target.keypoint_vis for target in present], dim=0),
+        )
+
+    @staticmethod
+    def _shared_keypoint_count(items: Sequence[Targets]) -> int:
+        """Return the point count ``K`` that every item carrying point sets agrees on.
+
+        An instance-free item holds the canonical ``(0, 0, 2)`` empty, whose point axis is
+        ``0`` rather than its batch's ``K``, so only items with at least one point set have a
+        say. Both batch-level joins read ``K`` here: :meth:`concat`, which keeps only those
+        items, and the loader's packed transport
+        (:func:`~lucid_yolo.ptl.datamodule.pack_targets`), which reshapes the empties to it.
+
+        Args:
+            items: The targets being joined, in order.
+
+        Returns:
+            The shared ``K``, or ``0`` when no item carries a point set.
+
+        Raises:
+            ValueError: If two items carrying point sets disagree on ``K``.
+
+        Examples:
+            ```pycon
+            >>> posed = Targets(
+            ...     boxes=torch.zeros((1, 4)),
+            ...     labels=torch.tensor([0]),
+            ...     keypoints=torch.zeros((1, 3, 2)),
+            ...     keypoint_vis=torch.ones((1, 3), dtype=torch.int64),
+            ... )
+            >>> Targets._shared_keypoint_count([posed, Targets.empty()])
+            3
+            >>> Targets._shared_keypoint_count([Targets.empty()])
+            0
+
+            ```
+        """
+        present = [target for target in items if target.keypoints.shape[0] > 0]
+        if not present:
+            return 0
         keypoint_count = present[0].keypoints.shape[1]
         for target in present[1:]:
             other_count = target.keypoints.shape[1]
@@ -428,10 +472,7 @@ class Targets:
                 raise ValueError(
                     f"cannot concat targets with differing keypoint counts: {keypoint_count} and {other_count}"
                 )
-        return (
-            torch.cat([target.keypoints for target in present], dim=0),
-            torch.cat([target.keypoint_vis for target in present], dim=0),
-        )
+        return keypoint_count
 
     @classmethod
     def empty(cls) -> Targets:

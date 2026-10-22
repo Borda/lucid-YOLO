@@ -36,10 +36,10 @@ from typing import TYPE_CHECKING
 from jsonargparse import auto_cli
 
 from lucid_yolo.assign.grid import require_grid_side
-from lucid_yolo.decode.common import COCO_IMG_SIZE
 from lucid_yolo.eval import detect_eval, pose_eval, rotated_eval
 from lucid_yolo.eval.checkpoint import load_eval_module
 from lucid_yolo.eval.coco_eval import hotcoco_available
+from lucid_yolo.tasks import Task
 from lucid_yolo.validate import require_at_least, require_one_of
 
 if TYPE_CHECKING:
@@ -47,12 +47,20 @@ if TYPE_CHECKING:
 
 __all__ = ["DEFAULT_BATCH_SIZE", "DEFAULT_IMG_SIZE", "evaluate", "main"]
 
-#: Letterbox side used when ``img_size`` is not given, per checkpoint task. The oriented
-#: tier trains on 1024 px crops (R18 sec. 4); COCO runs at 640 (R1 sec. 4.4).
-DEFAULT_IMG_SIZE = {"obb": 1024, "detect": COCO_IMG_SIZE, "segment": COCO_IMG_SIZE, "keypoints": COCO_IMG_SIZE}
-#: Batch size used when ``batch_size`` is not given. A 1024 px tile is 2.5x the pixels of
-#: a 640 px image, so the oriented default is smaller for the same memory.
-DEFAULT_BATCH_SIZE = {"obb": 8, "detect": 32, "segment": 32, "keypoints": 32}
+#: Row order of the two tables below: the oriented task first, then every other task in
+#: registry order. Kept rather than tidied because the order is visible: ``lucid-eval``,
+#: ``lucid-predict`` and ``lucid-export`` list these keys, in this order, in the refusal
+#: they raise for an unknown task.
+_TABLE_ORDER: tuple[Task, ...] = (Task.OBB, *(task for task in Task if task is not Task.OBB))
+
+#: Letterbox side used when ``img_size`` is not given, per checkpoint task, read off
+#: :attr:`~lucid_yolo.tasks.TaskSpec.img_size`. The oriented tier trains on 1024 px crops
+#: (R18 sec. 4); COCO runs at 640 (R1 sec. 4.4).
+DEFAULT_IMG_SIZE: dict[str, int] = {task.value: task.spec.img_size for task in _TABLE_ORDER}
+#: Batch size used when ``batch_size`` is not given, read off
+#: :attr:`~lucid_yolo.tasks.TaskSpec.eval_batch_size`. A 1024 px tile is 2.5x the pixels
+#: of a 640 px image, so the oriented default is smaller for the same memory.
+DEFAULT_BATCH_SIZE: dict[str, int] = {task.value: task.spec.eval_batch_size for task in _TABLE_ORDER}
 
 
 def _resolve_eval_backend(requested: str) -> tuple[str, str | None]:
@@ -212,8 +220,11 @@ def evaluate(  # noqa: PLR0913 - Explicit CLI options supply jsonargparse's flag
     # Refused rather than defaulted: the dispatch below ends in the detection protocol, so
     # a task this command implements nothing for would be *scored* as detection — a report
     # carrying one protocol's numbers under another's name, which is unfalsifiable from the
-    # file. The four are read off the defaults table rather than restated here, so a fifth
-    # task arrives with its own defaults or does not arrive at all.
+    # file. The four are read off the defaults table, and the table off the task registry,
+    # so a fifth task arrives with its own defaults or does not arrive at all. It is then
+    # accepted here, and the dispatch below must learn its protocol in the same change or
+    # score it as detection; `tests/test_tasks.py` pins the four members so that a fifth is
+    # a deliberate edit rather than a silent one.
     require_one_of("task", task, tuple(DEFAULT_IMG_SIZE))
     # None distinguishes omission from explicitly passing even a protocol's default,
     # including values supplied by --config. Validate before backend setup or scoring.

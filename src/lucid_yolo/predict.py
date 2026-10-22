@@ -111,6 +111,7 @@ from lucid_yolo.decode.rotated_nms import RotatedNMSDecoder
 from lucid_yolo.decode.topk_e2e import RotatedTopKDecoder, TopKDecoder
 from lucid_yolo.eval.annotations import letterbox_image_tensor, read_letterboxed_image
 from lucid_yolo.eval.segment_decode import decode_instance_masks, masks_to_original
+from lucid_yolo.tasks import Task
 from lucid_yolo.validate import require_in_range, require_one_of
 
 if TYPE_CHECKING:
@@ -152,11 +153,10 @@ DECODE_PATHS: tuple[DecodePath, ...] = ("e2e", "nms")
 DEFAULT_CONF_THRESHOLD = 0.25
 
 #: Letterbox side :func:`predict_oriented` defaults to. The oriented tier trains on
-#: 1024 px crops (R18 sec. 4), so an oriented checkpoint has never seen 640. The number
-#: is the one :data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE` gives ``obb``, and a test
-#: pins the two equal rather than either importing the command's table into the library
-#: or letting the pair drift.
-DEFAULT_ORIENTED_IMG_SIZE = 1024
+#: 1024 px crops (R18 sec. 4), so an oriented checkpoint has never seen 640. Read off the
+#: task registry, the row :data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE` gives ``obb``
+#: from too, so the library and the command cannot drift apart.
+DEFAULT_ORIENTED_IMG_SIZE = Task.OBB.spec.img_size
 
 #: The decode path :func:`predict_oriented` defaults to, and the one an oriented tier
 #: report quotes as its headline number: the suppression-free branch is what this
@@ -165,18 +165,6 @@ DEFAULT_ORIENTED_IMG_SIZE = 1024
 #: lifted now that :class:`~lucid_yolo.decode.rotated_nms.RotatedNMSDecoder` suppresses by
 #: rotated overlap rather than by upright envelopes.
 ORIENTED_DECODE_PATH: DecodePath = "e2e"
-
-#: The task :func:`predict_image` serves.
-_DETECT_TASK = "detect"
-
-#: The task :func:`predict_segmentation` serves.
-_SEGMENT_TASK = "segment"
-
-#: The task :func:`predict_oriented` serves.
-_OBB_TASK = "obb"
-
-#: The task :func:`predict_keypoints` serves.
-_KEYPOINTS_TASK = "keypoints"
 
 #: Each task's entry point and what that entry point answers with, in the wording its
 #: siblings' refusals quote. One row per task, and every refusal below is composed from
@@ -188,12 +176,13 @@ _KEYPOINTS_TASK = "keypoints"
 #: all three — without revisiting the three that now had a sibling they never mentioned.
 #: A reader holding a pose checkpoint and calling :func:`predict_image` was told about
 #: segmentation and orientation and not about the function they wanted. A fifth task is
-#: one row here and appears in all four messages at once.
-_TASK_ENTRY_POINTS: dict[str, tuple[str, str]] = {
-    _DETECT_TASK: ("predict_image", "answers with axis-aligned corners and nothing beside them"),
-    _SEGMENT_TASK: ("predict_segmentation", "returns each object's instance mask beside its box"),
-    _OBB_TASK: ("predict_oriented", "returns rotated boxes, a centre and two extents and an angle"),
-    _KEYPOINTS_TASK: ("predict_keypoints", "returns a point set row-aligned with each box"),
+#: one row here and appears in all four messages at once; the keys are
+#: :class:`~lucid_yolo.tasks.Task` members, so the row cannot be keyed by a misspelling.
+_TASK_ENTRY_POINTS: dict[Task, tuple[str, str]] = {
+    Task.DETECT: ("predict_image", "answers with axis-aligned corners and nothing beside them"),
+    Task.SEGMENT: ("predict_segmentation", "returns each object's instance mask beside its box"),
+    Task.OBB: ("predict_oriented", "returns rotated boxes, a centre and two extents and an angle"),
+    Task.KEYPOINTS: ("predict_keypoints", "returns a point set row-aligned with each box"),
 }
 
 
@@ -226,14 +215,17 @@ def _wrong_task_message(handled: str, found: str) -> str:
 
         ```
     """
-    own_function = _TASK_ENTRY_POINTS[handled][0]
+    # Parsed rather than trusted: the message formats ``.value``, because a member's
+    # ``repr`` is ``<Task.OBB: 'obb'>`` and the plain spelling is what a caller typed.
+    handled_task = Task(handled)
+    own_function = _TASK_ENTRY_POINTS[handled_task][0]
     siblings = "; ".join(
-        f"a {task!r} checkpoint goes through {function}, which {answers}"
+        f"a {task.value!r} checkpoint goes through {function}, which {answers}"
         for task, (function, answers) in _TASK_ENTRY_POINTS.items()
-        if task != handled
+        if task != handled_task
     )
     return (
-        f"{own_function} handles task={handled!r}; this checkpoint's task is {found!r}. "
+        f"{own_function} handles task={handled_task.value!r}; this checkpoint's task is {found!r}. "
         f"Each task has its own entry point: {siblings}."
     )
 
@@ -328,7 +320,7 @@ class _Prepared:
 
 def _prepare(
     module: DetectionLitModule,
-    task: str,
+    task: Task,
     image: Path | Tensor,
     img_size: int,
     decoder: DecodePath,
@@ -412,7 +404,7 @@ def predict_image(
 
         ```
     """
-    prepared = _prepare(module, _DETECT_TASK, image, img_size, decoder, conf_threshold, device)
+    prepared = _prepare(module, Task.DETECT, image, img_size, decoder, conf_threshold, device)
     with torch.no_grad():
         # One branch, not both: the decode below reads a single branch's logits and boxes,
         # and running the other one's stems only to drop them is the cost this asks the
@@ -527,7 +519,7 @@ def predict_segmentation(
 
         ```
     """
-    prepared = _prepare(module, _SEGMENT_TASK, image, img_size, decoder, conf_threshold, device)
+    prepared = _prepare(module, Task.SEGMENT, image, img_size, decoder, conf_threshold, device)
     with torch.no_grad():
         # Called directly, with no forward-wrapper. The evaluator's `_SegmentationForward`
         # exists because the evaluator decides *structurally* — by what the forward returns
@@ -541,7 +533,7 @@ def predict_segmentation(
         # computed here and dropped.
         branch_out, prototypes = module.forward_segmentation_branch(prepared.batch, _branch_for(decoder))
     missing = (
-        f"this checkpoint's task is {_SEGMENT_TASK!r} but its head emits no mask coefficients on the "
+        f"this checkpoint's task is {Task.SEGMENT.value!r} but its head emits no mask coefficients on the "
         f"{decoder!r} branch, so Eq. 7 has only one of its two halves. The checkpoint was built "
         f"without the coefficient stems and cannot produce a mask."
     )
@@ -745,7 +737,7 @@ def predict_oriented(
 
         ```
     """
-    prepared = _prepare(module, _OBB_TASK, image, img_size, decoder, conf_threshold, device)
+    prepared = _prepare(module, Task.OBB, image, img_size, decoder, conf_threshold, device)
     with torch.no_grad():
         # One branch, not both: R1 Eq. 13's heading is read from the branch the selected
         # decoder ranks, and the other branch's angle stem used to run and be dropped.
@@ -793,7 +785,7 @@ def _decode_oriented(
     if angles is None:
         branch = ORIENTED_DECODE_PATH if o2o else "one-to-many"
         raise ValueError(
-            f"this checkpoint's task is {_OBB_TASK!r} but its head emits no angles on the "
+            f"this checkpoint's task is {Task.OBB.value!r} but its head emits no angles on the "
             f"{branch!r} branch, so R1 Eq. 13 has nothing to read. The checkpoint was "
             f"built without the orientation stems and cannot produce a heading."
         )
@@ -919,13 +911,13 @@ def predict_keypoints(
 
         ```
     """
-    prepared = _prepare(module, _KEYPOINTS_TASK, image, img_size, decoder, conf_threshold, device)
+    prepared = _prepare(module, Task.KEYPOINTS, image, img_size, decoder, conf_threshold, device)
     with torch.no_grad():
         # One branch, not both: the pose is gathered from the branch the selected decoder
         # ranked, and the other branch's point and sigma stems used to run and be dropped.
         branch_out = module.forward_branch(prepared.batch, _branch_for(decoder))
     missing = (
-        f"this checkpoint's task is {_KEYPOINTS_TASK!r} but its head emits no points on the "
+        f"this checkpoint's task is {Task.KEYPOINTS.value!r} but its head emits no points on the "
         f"{decoder!r} branch. The checkpoint was built without the point stems and cannot "
         f"produce a pose."
     )

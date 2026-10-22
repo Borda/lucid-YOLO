@@ -86,7 +86,6 @@ import torch
 from matplotlib.patches import Circle, Polygon, Rectangle
 from torchvision.io import ImageReadMode, read_image
 
-from lucid_yolo.cli.eval import DEFAULT_IMG_SIZE
 from lucid_yolo.data.coco import CocoDetectionDataset
 from lucid_yolo.data.rotated_geom import rboxes_to_polygons
 from lucid_yolo.decode.common import BOX_CORNERS, DET_WIDTH, LABEL_COLUMN, RBOX_COLUMNS, SCORE_COLUMN
@@ -100,6 +99,7 @@ from lucid_yolo.predict import (
     predict_oriented,
     predict_segmentation,
 )
+from lucid_yolo.tasks import Task
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -164,13 +164,6 @@ _RBOX_LABEL_COLUMN = RBOX_COLUMNS + 1
 #: still drops the score-zero padding rows a report written at ``--conf_threshold 0``
 #: carries.
 _DRAW_EVERYTHING = 0.0
-
-#: The four tasks, named as :attr:`~lucid_yolo.ptl.module.DetectionLitModule.task` and
-#: :data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE` already spell them.
-_DETECT_TASK = "detect"
-_SEGMENT_TASK = "segment"
-_OBB_TASK = "obb"
-_KEYPOINTS_TASK = "keypoints"
 
 #: Radius in pixels of a drawn keypoint marker. Fixed rather than scaled to the box: a
 #: pose figure is read by whether a point sits on its feature, and a marker that grew with
@@ -667,13 +660,14 @@ def _hollow_points(axes: Axes, targets: Targets) -> None:
             )
 
 
-#: Which ground-truth drawer serves which task. The keys are the four task names, so a
-#: task with no drawer is refused by name rather than drawn as boxes.
+#: Which ground-truth drawer serves which task. The keys are the four task names, as plain
+#: strings so the refusal lists their spellings, and a task with no drawer is refused by
+#: name rather than drawn as boxes.
 _GROUND_TRUTH_DRAWERS: dict[str, Callable[[Axes, Targets], None]] = {
-    _DETECT_TASK: _dashed_boxes,
-    _SEGMENT_TASK: _dashed_polygons,
-    _OBB_TASK: _dashed_rotated,
-    _KEYPOINTS_TASK: _hollow_points,
+    Task.DETECT.value: _dashed_boxes,
+    Task.SEGMENT.value: _dashed_polygons,
+    Task.OBB.value: _dashed_rotated,
+    Task.KEYPOINTS.value: _hollow_points,
 }
 
 
@@ -759,7 +753,7 @@ def load_ground_truth(annotations: Path, task: str) -> dict[str, Targets]:
         ```
     """
     dataset = CocoDetectionDataset(
-        annotations.parent, annotations, oriented=task == _OBB_TASK, keypoints=task == _KEYPOINTS_TASK
+        annotations.parent, annotations, oriented=task == Task.OBB, keypoints=task == Task.KEYPOINTS
     )
     return {name: dataset.targets_at(index) for index, name in enumerate(dataset.file_names)}
 
@@ -779,8 +773,8 @@ class RenderOptions:
         decoder: ``"e2e"`` for the suppression-free top-k path over the one-to-one branch,
             ``"nms"`` for the suppression path over the dense one.
         conf_threshold: Detections at or below this score are neither predicted nor drawn.
-        img_size: Letterbox side the model sees, or ``None`` for the task's own default
-            from :data:`~lucid_yolo.cli.eval.DEFAULT_IMG_SIZE`.
+        img_size: Letterbox side the model sees, or ``None`` for the task's own default,
+            :attr:`~lucid_yolo.tasks.TaskSpec.img_size`.
         device: ``auto``, ``cpu``, ``mps`` or ``cuda``, as ``lucid-eval`` spells it.
         ema: Predict with the EMA shadow stored in the checkpoint rather than raw weights,
             as ``lucid-predict`` defaults to.
@@ -883,11 +877,12 @@ def _render_keypoints(module: DetectionLitModule, run: _Run, image: ImageArray, 
 
 #: Which entry point draws which task. The keys are also the script's ``--task`` choices,
 #: so the flag cannot offer a task no renderer serves, and adding one is a single entry.
+#: Plain strings, for the same reason as :data:`_GROUND_TRUTH_DRAWERS`.
 _RENDERERS: dict[str, Callable[[DetectionLitModule, _Run, ImageArray, Axes | None], Axes]] = {
-    _DETECT_TASK: _render_detect,
-    _SEGMENT_TASK: _render_segment,
-    _OBB_TASK: _render_oriented,
-    _KEYPOINTS_TASK: _render_keypoints,
+    Task.DETECT.value: _render_detect,
+    Task.SEGMENT.value: _render_segment,
+    Task.OBB.value: _render_oriented,
+    Task.KEYPOINTS.value: _render_keypoints,
 }
 
 #: The tasks a checkpoint can be drawn through, in a stable order — what a CLI offers as
@@ -924,7 +919,7 @@ def _resolve_run(image: Path, task: str, options: RenderOptions) -> _Run:
     """Settle the letterbox side and the device once the task is known."""
     return _Run(
         image=image,
-        img_size=DEFAULT_IMG_SIZE[task] if options.img_size is None else options.img_size,
+        img_size=Task(task).spec.img_size if options.img_size is None else options.img_size,
         decoder=options.decoder,
         conf_threshold=options.conf_threshold,
         device=pick_device(options.device),

@@ -41,6 +41,7 @@ here is generic over, and three points exercise it as well as seventeen.
 from __future__ import annotations
 
 import math
+import typing
 from typing import TYPE_CHECKING
 
 import pytest
@@ -48,6 +49,7 @@ import torch
 from torch import Tensor
 from training import LogRecorder, has_gradient, tiny_module
 
+import lucid_yolo.ptl
 from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.eval.coco_eval import COCO_KEYPOINT_OKS_SIGMAS, SYMBOL_KEYPOINT_OKS_SIGMA
@@ -744,6 +746,24 @@ class TestLoaderTransport:
         assert packed.keypoints_cat.shape == (0, 0, 2)
         assert packed.keypoints_per_image.tolist() == [0, 0]
 
+    def test_differing_point_counts_refused_naming_both(self) -> None:
+        """Two images whose point sets disagree on ``K`` are refused with both counts named.
+
+        No single head predicts both, so the batch cannot pack. The refusal is the same ``K``
+        read ``Targets.concat`` makes, not a shape error from inside ``torch.cat``.
+        """
+        five_points = Targets(
+            boxes=torch.tensor([[0.0, 0.0, 8.0, 8.0]]),
+            labels=torch.tensor([0]),
+            keypoints=torch.zeros((1, 5, 2)),
+            keypoint_vis=torch.full((1, 5), 2, dtype=torch.int64),
+        )
+        targets = [_posed_targets(1), five_points]
+        images = torch.rand(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
+
+        with pytest.raises(ValueError, match=f"differing keypoint counts: {_NUM_KEYPOINTS} and 5"):
+            collate_detection(list(zip(images, targets, strict=True)))
+
 
 #: The animal fixture's own left/right swap, as named by its 16-point category schema
 #: (``front_elbow_left``/``front_elbow_right`` and the three limb pairs after it). Written
@@ -836,6 +856,19 @@ class TestBoxFrameNormalization:
     the property that motivated it — that what the loss actually receives on a real batch
     is ``O(1)`` and not ``O(10^3)``.
     """
+
+    def test_annotations_resolve_at_runtime(self) -> None:
+        """The public export's annotations resolve, so annotation-reading callers see ``Tensor``.
+
+        ``typing.get_type_hints`` evaluates the postponed annotations against the defining
+        module's globals; a ``Tensor`` imported for type checking only would leave the name
+        unbound there and raise ``NameError`` for every caller that reads them (a doc
+        generator, a runtime type checker), which the function did not do while it lived in
+        :mod:`lucid_yolo.ptl.module`.
+        """
+        hints = typing.get_type_hints(lucid_yolo.ptl.normalize_keypoints_to_box)
+
+        assert hints == {"points": Tensor, "boxes": Tensor, "return": Tensor}
 
     def test_box_corners_map_to_unit_square(self) -> None:
         """The frame is the box: its top-left is the origin, its bottom-right is ``(1, 1)``."""

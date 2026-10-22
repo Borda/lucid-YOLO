@@ -161,7 +161,7 @@ def _checkpoint_filename(task: str, variant: str) -> str:
     was previously recoverable only by opening ``hparams.yaml`` (WP-127).
 
     Args:
-        task: The module's supervision task (``"detect"``, ``"segment"``, or ``"obb"``).
+        task: The module's supervision task, one of :data:`~lucid_yolo.tasks.TASK_NAMES`.
         variant: The scale-registry row letter (e.g. ``"n"``, ``"s"``).
 
     Returns:

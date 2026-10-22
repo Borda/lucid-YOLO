@@ -113,6 +113,7 @@ from lucid_yolo.predict import (
     predict_oriented,
     predict_segmentation,
 )
+from lucid_yolo.tasks import Task
 from lucid_yolo.validate import require_one_of
 
 if TYPE_CHECKING:
@@ -135,15 +136,6 @@ __all__ = [
 #: A detection report carries ``null`` there rather than omitting the key, which would
 #: make "this checkpoint has no masks" and "this report predates masks" the same reading.
 _MASK_FORMAT = "coco-rle"
-
-#: The task whose checkpoints additionally produce masks (WP-090).
-_SEGMENT_TASK = "segment"
-
-#: The task whose checkpoints produce rotated boxes instead of corners (WP-091).
-_OBB_TASK = "obb"
-
-#: The task whose checkpoints additionally produce point sets (WP-152).
-_KEYPOINTS_TASK = "keypoints"
 
 #: Value of a keypoint report's ``keypoints`` key: the layout its ``keypoints`` records
 #: are written in -- one ``[x, y]`` pair per point, in the head's own point order, in
@@ -325,7 +317,7 @@ def predict(
     run_on = pick_device(device)
     records: list[DetectionRecord] | list[OrientedDetectionRecord] | list[KeypointDetectionRecord]
     box_format: str | None = None
-    if task == _OBB_TASK:
+    if task == Task.OBB:
         rotated = predict_oriented(
             module,
             image,
@@ -339,7 +331,7 @@ def predict(
         mask_format: str | None = None
         keypoint_format: str | None = None
         box_format = _OBB_BOX_FORMAT
-    elif task == _KEYPOINTS_TASK:
+    elif task == Task.KEYPOINTS:
         posed = predict_keypoints(
             module,
             image,
@@ -353,7 +345,7 @@ def predict(
         mask_format = None
         keypoint_format = _KEYPOINT_FORMAT
         info["num_keypoints"] = posed.num_keypoints
-    elif task == _SEGMENT_TASK:
+    elif task == Task.SEGMENT:
         prediction = predict_segmentation(
             module,
             image,

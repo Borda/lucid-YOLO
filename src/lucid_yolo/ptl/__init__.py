@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from lucid_yolo.ptl._task_terms import normalize_keypoints_to_box
 from lucid_yolo.ptl.callbacks import CloseMosaicCallback, EMACallback
 from lucid_yolo.ptl.datamodule import (
     DetectionDataModule,
@@ -14,7 +15,6 @@ from lucid_yolo.ptl.datamodule import (
 )
 from lucid_yolo.ptl.module import (
     DetectionLitModule,
-    normalize_keypoints_to_box,
     pad_keypoints,
     pad_rboxes,
     pad_targets,

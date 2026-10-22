@@ -243,6 +243,49 @@ class TestKeypoints:
         assert targets.keypoint_vis.shape == (0, 0)
 
 
+class TestSharedKeypointCount:
+    """The one ``K`` read both batch-level joins share: ``Targets.concat`` and the packed transport."""
+
+    def test_skips_items_without_point_sets(self) -> None:
+        """An empty or box-only item's point axis of ``0`` never outvotes the batch's ``K``."""
+        posed = Targets(
+            boxes=_boxes(2),
+            labels=_labels(2),
+            keypoints=torch.zeros((2, 4, 2)),
+            keypoint_vis=torch.zeros((2, 4), dtype=torch.int64),
+        )
+        box_only = Targets(boxes=_boxes(1), labels=_labels(1))
+        assert Targets._shared_keypoint_count([Targets.empty(), posed, box_only]) == 4
+
+    @pytest.mark.parametrize(
+        "items",
+        [
+            pytest.param([], id="no-items"),
+            pytest.param([Targets.empty(), Targets(boxes=_boxes(1), labels=_labels(1))], id="no-point-sets"),
+        ],
+    )
+    def test_zero_without_point_sets(self, items: list[Targets]) -> None:
+        """A batch that annotates no points at all has ``K = 0``, the item-free batch included."""
+        assert Targets._shared_keypoint_count(items) == 0
+
+    def test_refuses_differing_counts_naming_both(self) -> None:
+        """Two point-carrying items with different ``K`` are refused, the first item's count first."""
+        two_points = Targets(
+            boxes=_boxes(1),
+            labels=_labels(1),
+            keypoints=torch.zeros((1, 2, 2)),
+            keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
+        )
+        three_points = Targets(
+            boxes=_boxes(1),
+            labels=_labels(1),
+            keypoints=torch.zeros((1, 3, 2)),
+            keypoint_vis=torch.zeros((1, 3), dtype=torch.int64),
+        )
+        with pytest.raises(ValueError, match="differing keypoint counts: 2 and 3"):
+            Targets._shared_keypoint_count([two_points, Targets.empty(), three_points])
+
+
 class TestClone:
     """Deep-copy independence."""
 

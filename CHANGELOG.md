@@ -96,6 +96,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Changed
 
+- **A batch whose images carry different keypoint counts now raises `ValueError`.** `pack_targets` and `collate_detection` name both counts, where they used to fail with a `RuntimeError` from `torch.cat`; batches that worked before give the same result (WP-205).
+
 - **The ONNX graph for oriented detection pads to 300 rows on canvases under 300 anchors.** At 96 px a side and below the graph returned one row per anchor; it now returns `(B, 300, 7)` with zero-score padding rows after the real ones, as the detection graph does. The leading rows are byte-identical, canvases of 128 px and above are unchanged, and `lucid-predict` output is unchanged on every canvas (WP-204).
 
 - **A checkpoint is read once.** `load_eval_module`, and so every command that takes `--checkpoint`, reads the file a single time with `torch.load(..., weights_only=True)` and builds the module from that payload, instead of reading it restricted and then again through Lightning's loader. The file is no longer deserialized twice, a file swapped between two reads can no longer be checked in one form and loaded in another, and a checkpoint missing `hyper_parameters` or `state_dict` is refused with a `ValueError` naming the key and file (WP-204).

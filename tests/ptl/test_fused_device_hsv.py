@@ -16,7 +16,7 @@ import torch
 from lucid_yolo.data import Targets, _hsv_cuda
 from lucid_yolo.data._quantization import _PIXEL_QUANT_MAX
 from lucid_yolo.data.augment import _jitter_hsv_batch
-from lucid_yolo.ptl import datamodule
+from lucid_yolo.ptl import _transport, datamodule
 
 _CUDA = pytest.mark.skipif(
     not torch.cuda.is_available()
@@ -296,7 +296,7 @@ def test_literal_pixels_and_single_restore(monkeypatch: pytest.MonkeyPatch) -> N
     def refuse_native(*_args: object) -> torch.Tensor:
         raise AssertionError("the fused entrance must not materialize the native HSV intermediates")
 
-    monkeypatch.setattr(datamodule, "_jitter_hsv_batch", refuse_native)
+    monkeypatch.setattr(_transport, "_jitter_hsv_batch", refuse_native)
     actual = datamodule._restore_images(images, _packed(gains), torch.float32, channels_last=True)
     assert torch.equal(actual.view(torch.int32), expected.view(torch.int32))
     assert actual.is_contiguous(memory_format=torch.channels_last)
@@ -494,7 +494,7 @@ def test_transfer_hook_uses_fusion_and_keeps_targets(
     def refuse_native(*_args: object) -> torch.Tensor:
         raise AssertionError("the transfer hook must reach the fused colour restore")
 
-    monkeypatch.setattr(datamodule, "_jitter_hsv_batch", refuse_native)
+    monkeypatch.setattr(_transport, "_jitter_hsv_batch", refuse_native)
     dm = datamodule.DetectionDataModule(tmp_path, 1, 0, "n", img_size=32, device_hsv=True)
     actual, targets, masks = dm.on_after_batch_transfer((images, packed), 0)
     assert torch.equal(actual.view(torch.int32), expected.view(torch.int32))
