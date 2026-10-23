@@ -211,20 +211,14 @@ def test_oriented_trainer_preserves_native_state(
 ) -> None:
     """Actual replay survives EMA validation and preserves empty-target gradients and temporary fallback.
 
-    A replaying arm that never records names exactly one cause, and the cause is pinned:
-    accumulation is checked before the recorder reads the precision policy, so with both
-    breached the accumulation reason is the one reported. A retirement for an unrelated
-    cause would otherwise satisfy the count while hiding the regression behind it.
+    Both accumulation settings record and replay; accumulation 2 also carries live gradients
+    into each second replay. A replaying arm that never records names exactly one cause, the
+    precision policy, so a retirement for an unrelated cause cannot satisfy the count while
+    hiding the regression behind it.
     """
     torch.manual_seed(42)
     batches = _batches(layout)
-    retirements = (
-        ["accumulate_grad_batches=1"]
-        if accumulation == 2
-        else ["BF16 replay requires"]
-        if precision == "bf16-mixed" and not bf16_replay_expected
-        else []
-    )
+    retirements = ["BF16 replay requires"] if precision == "bf16-mixed" and not bf16_replay_expected else []
     initial = _oriented().state_dict()
     real_replay = torch.cuda.CUDAGraph.replay
     launches: list[int] = []
@@ -275,7 +269,7 @@ def test_oriented_trainer_preserves_native_state(
                     train_dataloaders=DataLoader(copy.deepcopy(batches), batch_size=None),
                     val_dataloaders=DataLoader(copy.deepcopy(batches[:1]), batch_size=None),
                 )
-            recording = capture and accumulation == 1 and (precision != "bf16-mixed" or bf16_replay_expected)
+            recording = capture and (precision != "bf16-mixed" or bf16_replay_expected)
             retired = [
                 str(item.message) for item in caught if str(item.message).startswith("capture_network=True stays")
             ]
@@ -460,7 +454,6 @@ def test_oriented_routing_leaves_cpu_images_native() -> None:
 @pytest.mark.parametrize(
     ("accumulation", "mutate", "recorder_calls", "reason"),
     [
-        pytest.param(2, lambda model: None, 1, "oriented replay requires accumulate_grad_batches=1", id="accumulation"),
         pytest.param(1, _override_objective, 0, "the native oriented objective is overridden", id="objective-override"),
     ],
 )
@@ -469,9 +462,8 @@ def test_oriented_routing_retires_then_runs_native(
 ) -> None:
     """A broken oriented contract retires the recording once and returns the full native call.
 
-    Accumulation retires before dispatch, so the retired recorder is still reached and hands
-    back its eager fallback; an overridden consumer retires before the recorder is reached
-    at all. Either way the output is the module's own forward, run exactly once.
+    An overridden consumer retires before the recorder is reached at all, and the output
+    is the module's own forward, run exactly once.
     """
     model = _routed_oriented(accumulation)
     mutate(model)

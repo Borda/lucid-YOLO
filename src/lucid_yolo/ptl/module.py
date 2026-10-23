@@ -412,13 +412,6 @@ def _pose_head_breach(head: torch.nn.Module, topology: tuple[tuple[object, ...],
     return _head_topology_breach(head, topology, "pose")
 
 
-#: Tasks whose network replay stays eager under gradient accumulation, with the label its
-#: warning names. WP-193d reports the shared recorder's CUDA accumulation checks failing on
-#: the unmodified baseline; detection is absent because whether it must stay eager too is
-#: open in docs/ESCALATION.md (2026-10-20).
-_ACCUMULATION_EAGER_LABELS: dict[str, str] = {"keypoints": "keypoint", "obb": "oriented", "segment": "segmentation"}
-
-
 def _validate_replay_options(
     task: str, compile_step: bool, capture_network: bool, capture_loss: bool, capture_segment_heads: bool
 ) -> None:
@@ -646,7 +639,7 @@ class DetectionLitModule(LightningModule):
             single-device CUDA automatic optimization.
             Pose records backbone, neck and each prediction stem independently, preserving
             absent point-stem gradients when a batch supplies no positives. Pose training stays eager
-            under gradient accumulation, with a fully frozen backbone and neck, or when
+            with a fully frozen backbone and neck, or when
             the head's topology or class forward changed since construction or a head
             module is hooked, overridden or compiled. The trainable set is fixed per fit
             at the first recording: a fully frozen start, or a later freeze or unfreeze
@@ -654,14 +647,14 @@ class DetectionLitModule(LightningModule):
             Each pose stem separately retires its recording if its trainable set or mode changes,
             and replacing a head module retires every recording before shared features run.
             Oriented training records the complete network, including both angle stems,
-            and retains the native classification and oriented objective. Accumulation
-            or an overridden objective keeps it eager. Detection, pose and oriented training
+            and retains the native classification and oriented objective. An overridden
+            objective keeps it eager. Detection, pose and oriented training
             stay eager when the LightningModule carries a hook, overrides
             ``forward`` or is compiled. Segmentation records only backbone and neck,
             leaving all predictions independent; ``capture_segment_heads`` can replay
-            those predictions separately. Segmentation also keeps accumulation native,
-            and retires replay when the head topology/dispatch changes, a head hook is
-            registered, or ``forward_segmentation`` is overridden or compiled.
+            those predictions separately. Segmentation retires replay when the head
+            topology/dispatch changes, a head hook is registered, or ``forward_segmentation``
+            is overridden or compiled.
             Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
             One image signature is recorded per fit; partial batches stay eager and
             changed storage, modes, hooks or precision retire the recording. Warmup
@@ -1250,17 +1243,6 @@ class DetectionLitModule(LightningModule):
             and images.is_cuda
         )
 
-    def _retire_accumulated_replay(self) -> None:
-        """Retire this task's network replay under gradient accumulation, which it was validated without.
-
-        Tasks absent from :data:`_ACCUMULATION_EAGER_LABELS`, detection today, keep replaying.
-        ``stacklevel=4`` names the caller of the training route, as a retirement that route
-        decides itself does.
-        """
-        label = _ACCUMULATION_EAGER_LABELS.get(self._task)
-        if label is not None and self.trainer.accumulate_grad_batches != 1:
-            self._network_capture.retire(f"{label} replay requires accumulate_grad_batches=1", stacklevel=4)
-
     def _training_network(self, images: Tensor) -> DualHeadOutput:
         """Run the dual head through the training recording when its contract holds.
 
@@ -1271,7 +1253,6 @@ class DetectionLitModule(LightningModule):
         """
         head_out: DualHeadOutput
         if self._network_replay_eligible(images):
-            self._retire_accumulated_replay()
             if self._task == "keypoints":
                 self._network_capture.check_stem_owners(self.head)
                 breach = _pose_head_breach(self.head, self._head_topology)
@@ -1501,7 +1482,6 @@ class DetectionLitModule(LightningModule):
         the one-signature-per-fit lifecycle, as for shared pose features.
         """
         if self._network_replay_eligible(images):
-            self._retire_accumulated_replay()
             breach = _segment_head_breach(self.head) or _head_topology_breach(
                 self.head, self._head_topology, "segmentation"
             )

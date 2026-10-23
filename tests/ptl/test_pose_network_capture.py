@@ -327,20 +327,14 @@ def test_pose_trainer_matches_native(
 ) -> None:
     """Public pose training keeps flow/optimizer/scaler state through clipped accumulation.
 
-    Accumulation 1 records shared features and eighteen independent stems once and replays every later batch,
-    the empty-supervision batch included, without a retirement warning. Accumulation 2
-    never records and reports exactly the accumulation reason, so a lapse after the first
-    batch cannot pass as parity of two native runs.
+    Both accumulation settings record shared features and eighteen independent stems once and
+    replay every later batch, the empty-supervision batch included, without a retirement
+    warning; accumulation 2 also carries live gradients into each second replay. The record
+    count pins that replay ran, so a lapse cannot pass as parity of two native runs.
     """
     torch.manual_seed(42)
     batches = _pose_batches(layout)
-    retirements = (
-        ["accumulate_grad_batches=1"]
-        if accumulation == 2
-        else ["BF16 replay requires"]
-        if precision == "bf16-mixed" and not bf16_replay_expected
-        else []
-    )
+    retirements = ["BF16 replay requires"] if precision == "bf16-mixed" and not bf16_replay_expected else []
     initial = _pose().state_dict()
     states = []
     for capture in (False, True):
@@ -605,7 +599,6 @@ def _count_backbone_calls(model: DetectionLitModule) -> list[None]:
 @pytest.mark.parametrize(
     ("accumulation", "mutate", "reason"),
     [
-        pytest.param(2, lambda head: None, "keypoint replay requires accumulate_grad_batches=1", id="accumulation"),
         pytest.param(
             1,
             lambda head: head.register_forward_hook(lambda *_: None),

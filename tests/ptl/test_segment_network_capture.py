@@ -165,8 +165,8 @@ def test_segment_shared_replay_preserves_predictions_and_unused_gradients(heads:
         assert (replay._network_capture._network is not None) == (dtype != torch.bfloat16 or _BF16_REPLAY_SUPPORTED)
 
 
-#: Retirement warning of the network holder under gradient accumulation, which segmentation replay lacks validation for.
-_ACCUMULATION_RETIRE = "capture_network=True stays eager: segmentation replay requires accumulate_grad_batches=1"
+#: Setup warning of the head holder under gradient accumulation; the network holder keeps replaying.
+_HEAD_ACCUMULATION_IGNORED = "capture_segment_heads=True is ignored outside .* with accumulate_grad_batches=1"
 #: Retirement warning of the head holder outside BF16 mixed precision.
 _HEAD_PRECISION_RETIRE = "capture_segment_heads=True stays eager"
 
@@ -178,7 +178,8 @@ _HEAD_PRECISION_RETIRE = "capture_segment_heads=True stays eager"
         pytest.param(False, "16-mixed", 1, None, id="network-fp16"),
         pytest.param(False, "32-true", 1, None, id="network-fp32"),
         pytest.param(True, "bf16-mixed", 1, None, id="heads-bf16"),
-        pytest.param(True, "bf16-mixed", 2, _ACCUMULATION_RETIRE, id="heads-bf16-accumulated"),
+        pytest.param(False, "32-true", 2, None, id="network-fp32-accumulated"),
+        pytest.param(True, "bf16-mixed", 2, _HEAD_ACCUMULATION_IGNORED, id="heads-bf16-accumulated"),
         pytest.param(True, "16-mixed", 1, _HEAD_PRECISION_RETIRE, id="heads-fp16-stay-eager"),
     ],
 )
@@ -186,10 +187,12 @@ _HEAD_PRECISION_RETIRE = "capture_segment_heads=True stays eager"
 def test_segment_fit_replays_across_empty_partial_validation_and_ema(
     heads: bool, precision: str, accumulation: int, retire: str | None
 ) -> None:
-    """Real fits preserve MuSGD and EMA through validation and unsupported accumulation or precision.
+    """Real fits preserve MuSGD and EMA through validation, accumulation and unsupported head precision.
 
-    Network-only cells cover every precision; head replay adds the supported bf16 cell, the accumulation
-    retirement and the fp16 retirement, whose warning must name the holder that stays eager.
+    Network-only cells cover every precision and accumulation 2, which carries live gradients
+    into each second replay. Head replay adds the supported bf16 cell, the accumulated cell, where
+    the head holder is ignored at setup while the network keeps replaying, and the fp16
+    retirement, whose warning must name the holder that stays eager.
     """
     torch.manual_seed(23)
     batches = [_batch(), _batch(True), _batch(size=1)]
@@ -247,7 +250,7 @@ def test_segment_fit_replays_across_empty_partial_validation_and_ema(
             )
         assert trainer.state.finished
         feature_records = [call for call in record.call_args_list if type(call.args[0]).__name__ == "_FeatureNetwork"]
-        assert len(feature_records) == int(capture and accumulation == 1 and replays)
+        assert len(feature_records) == int(capture and replays)
         head_records = [call for call in record.call_args_list if type(call.args[0]).__name__ == "_PredictionGroup"]
         assert len(head_records) >= int(combined)
         scaler = getattr(trainer.precision_plugin, "scaler", None)
@@ -263,7 +266,7 @@ def test_segment_fit_replays_across_empty_partial_validation_and_ema(
         assert model._segment_head_capture.entries == {}
     _same(*snapshots)
     assert recordings[:6] == [False] * 6
-    assert recordings[6:] == [accumulation == 1 and replays] * 6
+    assert recordings[6:] == [replays] * 6
 
 
 class _CudaMarked(torch.Tensor):
@@ -289,7 +292,6 @@ _NATIVE_BEFORE_RECORDER = (
 
 #: Reason completing the `capture_network=True stays eager: ` warning of each retiring mode; others run warning-free.
 _RETIRE_REASON = {
-    "accumulate": "segmentation replay requires accumulate_grad_batches=1$",
     "override": "the segmentation forward is overridden or compiled$",
     "head-hook": "a segmentation head module is hooked, overridden or compiled$",
     "head-helper": "a prediction branch overrides its native dispatch$",
@@ -613,12 +615,28 @@ def test_segment_freeze_after_recording_retires_once() -> None:
 
 
 @requires_cuda
-def test_segment_accumulation_change_after_recording_retires_through_holder() -> None:
-    """Raising accumulate_grad_batches after epoch one retires the recording with the accumulation reason."""
-    torch.manual_seed(23)
-    model = _module(capture_network=True)
-    scheduler = GradientAccumulationScheduler({0: 1, 1: 2})
-    trainer = Trainer(**_LIFECYCLE_FIT, precision="16-mixed", callbacks=[scheduler])
-    with pytest.warns(UserWarning, match=_ACCUMULATION_RETIRE):
-        trainer.fit(model, train_dataloaders=_fit_batches())
-    assert model._network_capture._network is None
+def test_segment_accumulation_change_after_recording_keeps_replay_and_matches_native() -> None:
+    """Raising accumulate_grad_batches after epoch one keeps the recording and the native result.
+
+    The recording is made at accumulation 1; epoch two accumulates two batches, so live
+    gradients reach a replay the recording never saw. One recording, no retirement and
+    bitwise-equal weights and optimizer state show the change needs no fallback.
+    """
+    initial = _module().state_dict()
+    snapshots = []
+    for capture in (False, True):
+        torch.manual_seed(23)
+        model = _module(capture_network=capture)
+        model.load_state_dict(initial)
+        scheduler = GradientAccumulationScheduler({0: 1, 1: 2})
+        trainer = Trainer(**_LIFECYCLE_FIT, precision="16-mixed", callbacks=[scheduler])
+        with (
+            _no_retire_warning(),
+            patch("torch.cuda.make_graphed_callables", wraps=torch.cuda.make_graphed_callables) as record,
+        ):
+            trainer.fit(model, train_dataloaders=_fit_batches())
+        feature_records = sum(type(call.args[0]).__name__ == "_FeatureNetwork" for call in record.call_args_list)
+        assert feature_records == int(capture)
+        assert model._network_capture._network is None
+        snapshots.append((copy.deepcopy(model.state_dict()), copy.deepcopy(trainer.optimizers[0].state_dict())))
+    _same(*snapshots)
