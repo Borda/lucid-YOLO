@@ -292,6 +292,8 @@ nav:
               - Engineering: engineering/phase-16-training-throughput.md
           - Phase 17 — R1 pose-objective parity:
               - Engineering: engineering/phase-17-pose-objective-parity.md
-          - Phase 18 — Codebase audit remediation:
-              - Engineering: engineering/phase-18-codebase-audit.md
+          - Phase 18 — CUDA graph replay and pipeline throughput:
+              - Engineering: engineering/phase-18-cuda-replay-throughput.md
+          - Phase 19 — Codebase audit remediation:
+              - Engineering: engineering/phase-19-codebase-audit.md
       - Contributor guide: CONTRIBUTING.md
