@@ -56,6 +56,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Fixed
 
+- **CUDA detection network replay keeps accumulated gradients equal to eager.** With `--model.capture_network true` and `accumulate_grad_batches` above 1, or with any gradient left alive into a replayed step, the accumulated gradients came out wrong from the first replay on. The copy that moves a live gradient out of the recorded buffers now runs before the replay, not inside its backward. Runs at the default `accumulate_grad_batches=1` with Lightning's default `zero_grad` were not affected (WP-206).
+
 - **The export module docstrings state what the code does.** The segmentation paragraph no longer claims the coefficient gather raises on a padding row, the oriented graph names `RotatedTopKDecoder`, and two stale paragraphs about index `-1` are gone; `EMACallback` names `load_eval_module` (WP-204).
 
 - **16-bit PNGs scale by their own depth.** Training image readers and the letterboxed reader behind `lucid-eval` and `lucid-predict` divide by the source's own maximum instead of 255, so a 16-bit PNG no longer arrives as values up to 257. `lucid-data build-tiles` refuses a source above 8 bits per channel by name (WP-202).

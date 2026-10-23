@@ -352,20 +352,20 @@ def test_host_fallback_preserves_current_inputs(_host_recorder: MagicMock, case:
     assert _host_recorder.call_count == 1 and holder._capacity == 4
 
 
-@pytest.mark.parametrize("name,index", [("anchor_points", 4), ("strides", 8)])
+@pytest.mark.parametrize("name,index", [("anchor_points", 4), ("strides", 8), ("alpha", 9)])
 def test_host_unpadded_nonfinite_inputs_replay_with_native_bits(
     _host_recorder: MagicMock, name: str, index: int
 ) -> None:
-    """Anchor points and strides are never padded, so their non-finite values need no fallback.
+    """Anchor points, strides and alpha are never padded, so their non-finite values need no fallback.
 
     Padded rows only meet predictions and target boxes in arithmetic. Anchor points
-    enter comparisons and strides scale each branch's own terms, so replay and the
-    native route must agree even when the values are infinite.
+    enter comparisons, strides scale each branch's own terms and alpha weights the two
+    branches, so replay and the native route must agree even when the values are infinite.
     """
     holder, source = _LossCapture(), DualBranchLoss()
     holder.run(source, *_inputs(3, device="cpu")).total.backward()
     inputs = _inputs(2, device="cpu")
-    inputs[index][0] = float("inf")
+    torch.atleast_1d(inputs[index])[0] = float("inf")  # alpha is 0-dim; the others index as before
     original = capture_module._LossObjective.forward
     with patch.object(capture_module._LossObjective, "forward", autospec=True, side_effect=original) as replayed:
         expected, actual = _native(source, inputs), holder.run(source, *inputs)
@@ -768,10 +768,15 @@ def test_replaced_empty_assignment_stays_observable(record_first: bool) -> None:
 @pytest.mark.parametrize("record_first", [False, True])
 @pytest.mark.parametrize(
     "count,index,value",
-    [(0, 1, float("nan")), (0, 0, float("inf")), (3, 1, float("nan")), (3, 5, float("nan")), (3, 9, float("nan"))],
+    [(0, 1, float("nan")), (0, 0, float("inf")), (3, 1, float("nan")), (3, 5, float("nan"))],
 )
 def test_nonfinite_inputs_preserve_native_outputs(count: int, index: int, value: float, record_first: bool) -> None:
-    """Non-finite values cannot turn masked capacity into extra NaN contributions."""
+    """Non-finite values cannot turn masked capacity into extra NaN contributions.
+
+    The cases are the inputs that meet padded rows: predictions and target boxes, plus the
+    empty-target route. Unpadded inputs replay by contract and are covered by
+    ``test_host_unpadded_nonfinite_inputs_replay_with_native_bits``.
+    """
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
         holder.run(source, *_inputs(3)).total.backward()

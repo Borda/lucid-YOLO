@@ -613,36 +613,39 @@ class _NetworkCapture:
                             for buffer, snapshot in snapshots:
                                 buffer.copy_(snapshot)
                 self._network, self._input, self._state, self._owners = graphed, signature, state, owners
+            self._copy_out_live_gradients()
             outputs = cast("tuple[Tensor, ...]", self._network(images))
         self._await_backward(outputs)
         return rebuild(outputs)
 
     def _await_backward(self, outputs: tuple[Tensor, ...]) -> None:
-        """Guard the static buffers this replay's backward will read and write.
+        """Hold later forwards eager until this replay's backward has read the static buffers.
 
-        The replay's outputs share the graphed function's backward node. Its pre-hook runs
-        just before the replayed backward writes the static gradient buffers; its post-hook
-        runs once that backward has consumed the static activations, and releases the hold
-        that keeps later forwards eager. An output without a backward node (a fully frozen
-        network) leaves nothing to guard.
+        The replay's outputs share the graphed function's backward node; its post-hook runs
+        once that backward has consumed the static activations, and releases the hold. An
+        output without a backward node (a fully frozen network) leaves nothing to guard.
         """
         node = outputs[0].grad_fn
         if node is None:
             return
         self._pending_backward = True
-        node.register_prehook(self._before_replayed_backward)
         node.register_hook(self._backward_replayed)
 
-    def _before_replayed_backward(self, grad_outputs: object) -> None:
-        """Move live parameter gradients out of the storage the replayed backward overwrites.
+    def _copy_out_live_gradients(self) -> None:
+        """Move live parameter gradients out of the storage the next replayed backward overwrites.
 
         A parameter whose ``.grad`` was adopted from the static gradient buffers still
         aliases them, so the next replayed backward would overwrite it and then accumulate
-        onto itself. Any ``.grad`` alive at this point (gradient accumulation, an in-place
+        onto itself. Any ``.grad`` alive before a replay (gradient accumulation, an in-place
         ``zero_grad``, a callback keeping gradients) is copied out first; after
         ``zero_grad(set_to_none=True)`` there is none, and nothing is copied.
+
+        The copy runs at forward time, before the replay. The hold in :meth:`_await_backward`
+        keeps any other replay from running between this forward and its backward, so no
+        gradient can alias the static buffers again before that backward writes them. The
+        same copy made from a pre-hook inside the replayed backward left every accumulated
+        gradient wrong on CUDA (WP-206).
         """
-        del grad_outputs
         network = self._network
         if network is None:
             return

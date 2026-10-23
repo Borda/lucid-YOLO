@@ -320,12 +320,13 @@ class TestReplayBackwardHold:
         output.sum().backward()
         assert (held, holder._pending_backward) == (True, False)
 
-    def test_live_gradient_leaves_storage_before_backward(self) -> None:
-        """A ``.grad`` alive when the replayed backward starts is copied out before that backward.
+    def test_live_gradient_leaves_storage_before_replay(self) -> None:
+        """A ``.grad`` alive when a replay starts is copied out before that replay's backward.
 
         The gradient tensor stands in for one adopted from the static gradient buffers:
         accumulating into it in place would be the silent doubling, so after the backward it
-        must be untouched and the parameter must hold a separate accumulated copy.
+        must be untouched and the parameter must hold a separate accumulated copy. The copy
+        is made at forward time, the order :meth:`_NetworkCapture._run` uses before replaying.
         """
         network = _DetectionNetwork(torch.nn.Linear(3, 3), torch.nn.Identity(), torch.nn.Identity())
         weight = network.backbone.weight
@@ -333,6 +334,7 @@ class TestReplayBackwardHold:
         weight.grad = alias
         holder = _NetworkCapture()
         holder._network = network
+        holder._copy_out_live_gradients()
         output = network.backbone(torch.ones(1, 3))
         holder._await_backward((output,))
         output.sum().backward()
@@ -363,7 +365,9 @@ class TestReplayBackwardHold:
 
         Without the hold, the second call replays into the same static buffers and the
         single backward computes the first call's gradient from the second call's
-        activations.
+        activations. The loss reads all four outputs, as the training loss does: the
+        replayed backward writes a gradient for every recorded parameter, zeros for a
+        branch the loss left unread, where eager leaves that branch at ``grad=None``.
         """
         eager = _module().cuda()
         replay = copy.deepcopy(eager)
@@ -373,10 +377,18 @@ class TestReplayBackwardHold:
         stages = (replay.backbone, replay.neck, replay.head)
         eager_outputs = (eager(first), eager(second))
         replay_outputs = (holder.run(first, stages, replay), holder.run(second, stages, replay))
-        sum(out.o2m_cls.square().mean() + out.o2o_box.square().mean() for out in eager_outputs).backward()
-        sum(out.o2m_cls.square().mean() + out.o2o_box.square().mean() for out in replay_outputs).backward()
-        for left, right in zip(eager.parameters(), replay.parameters(), strict=True):
-            assert torch.equal(left.grad, right.grad)
+        for outputs in (eager_outputs, replay_outputs):
+            sum(
+                tensor.square().mean()
+                for out in outputs
+                for tensor in (out.o2m_cls, out.o2m_box, out.o2o_cls, out.o2o_box)
+            ).backward()
+        torch.testing.assert_close(
+            [parameter.grad for parameter in replay.parameters()],
+            [parameter.grad for parameter in eager.parameters()],
+            rtol=0,
+            atol=0,
+        )
         holder.clear()
 
 

@@ -754,7 +754,10 @@ def test_load_state_dict_assign_retires_recording_and_matches_eager_gradients() 
     """Assigning checkpoint tensors after recording leaves the graph on stale storage, so it must retire.
 
     ``assign=True`` swaps every parameter for a new tensor; a surviving graph would keep reading and
-    writing the old ones, leaving the live parameters without gradients.
+    writing the old ones, leaving the live parameters without gradients. The loss after the swap
+    reads all four outputs, so every parameter takes part eagerly and a missing gradient can only
+    come from a stale graph; a loss reading ``o2m_cls`` alone leaves the other stems at ``None``
+    on the eager reference too.
     """
     eager = _module().cuda()
     replay = copy.deepcopy(eager)
@@ -765,9 +768,11 @@ def test_load_state_dict_assign_retires_recording_and_matches_eager_gradients() 
     for model in (eager, replay):
         model.zero_grad(set_to_none=True)
         model.load_state_dict(copy.deepcopy(eager.state_dict()), assign=True)
-    eager(images).o2m_cls.sum().backward()
+    output = eager(images)
+    (output.o2m_cls.sum() + output.o2m_box.sum() + output.o2o_cls.sum() + output.o2o_box.sum()).backward()
     with pytest.warns(UserWarning, match="stays eager"):
-        _run(holder, replay, images).o2m_cls.sum().backward()
+        output = _run(holder, replay, images)
+    (output.o2m_cls.sum() + output.o2m_box.sum() + output.o2o_cls.sum() + output.o2o_box.sum()).backward()
     assert holder._network is None
     assert all(parameter.grad is not None for parameter in replay.parameters())
     _assert_identical([p.grad for p in eager.parameters()], [p.grad for p in replay.parameters()])
