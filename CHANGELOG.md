@@ -114,6 +114,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Changed
 
+- **Lower segmentation validation peak memory and fewer host syncs per training batch.** Full-canvas mask upsampling and cropping run in chunks of 32; packed targets retain host counts and scatter into padded tensors. Mask and loss values stay byte-identical; the ONNX segmentation graph keeps its single resize (WP-214).
+
 - **`DualBranchLoss` takes one `BranchPrediction` per branch.** **Breaking**: `DualBranchLoss(...)(o2m, o2o, anchor_points, gt_boxes, gt_labels, gt_mask, ...)` takes `lucid_yolo.losses.BranchPrediction(logits, boxes)` for each branch in place of the four positional `o2m_logits, o2m_boxes, o2o_logits, o2o_boxes` tensors, and `DualLossOutput.alpha` is typed `float | Tensor`: the attribute float without an override, the override tensor with one. The arithmetic is unchanged (WP-212).
 
 - **A batch whose images carry different keypoint counts now raises `ValueError`.** `pack_targets` and `collate_detection` name both counts, where they used to fail with a `RuntimeError` from `torch.cat`; batches that worked before give the same result (WP-205).

@@ -22,17 +22,49 @@ indices asserted below are exact, not tolerances.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 import torch
+from torch.nn import functional as F
 
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode.common import to_letterboxed_original
 from lucid_yolo.eval import decode_instance_masks, masks_to_original
+from lucid_yolo.eval.segment_decode import _box_crop
 from lucid_yolo.models.heads.detect import o2o_topk, o2o_topk_with_indices
+from lucid_yolo.models.heads.proto import assemble_masks
 
 _BOX_CORNERS = 4
 _SATURATED = 10.0  # sigmoid(+-10) is within 5e-5 of 1/0: a hard prototype edge.
+
+
+@pytest.mark.parametrize("instances", [0, 1, 33, 300])
+def test_chunked_masks_equal_full_canvas_decode(instances: int) -> None:
+    """Chunk boundaries cannot change any interpolated, cropped or thresholded bit."""
+    torch.manual_seed(214)
+    prototypes = torch.randn(2, 8, 7, 9)
+    coefficients = torch.randn(2, instances, 8)
+    corners = torch.rand(2, instances, 4) * 40 - 4
+    boxes = torch.cat((corners[..., :2], corners[..., :2] + corners[..., 2:].abs()), dim=-1)
+    if instances:
+        probabilities = assemble_masks(prototypes, coefficients).sigmoid()
+        full = F.interpolate(probabilities, size=(31, 37), mode="bilinear", align_corners=False)
+        expected = (full * _box_crop(boxes, (31, 37), prototypes).to(full.dtype)) > 0.5
+    else:
+        expected = torch.zeros(2, 0, 31, 37, dtype=torch.bool)
+    assert torch.equal(decode_instance_masks(prototypes, coefficients, boxes, (31, 37)), expected)
+
+
+def test_mask_upsample_bounds_instance_axis() -> None:
+    """The full-canvas float temporary holds at most 32 masks per image."""
+    prototypes = torch.ones(1, 2, 4, 4)
+    coefficients = torch.ones(1, 300, 2)
+    boxes = torch.full((1, 300, 4), 16.0)
+    with patch("lucid_yolo.eval.segment_decode.F.interpolate", wraps=F.interpolate) as interpolate:
+        decode_instance_masks(prototypes, coefficients, boxes, (16, 16))
+    assert max(call.args[0].shape[1] for call in interpolate.call_args_list) <= 32
 
 
 def _legacy_o2o_topk(scores: torch.Tensor, boxes: torch.Tensor, k: int) -> torch.Tensor:

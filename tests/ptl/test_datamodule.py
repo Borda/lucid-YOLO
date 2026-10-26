@@ -831,7 +831,10 @@ def _assert_batches_identical(left: tuple[Tensor, PackedTargets], right: tuple[T
         if got is None or want is None:
             assert got is want, f"{field.name} is present in one run and absent in the other"
             continue
-        assert torch.equal(got, want), f"{field.name} differs between runs"
+        if isinstance(got, Tensor):
+            assert torch.equal(got, want), f"{field.name} differs between runs"
+        else:
+            assert got == want, f"{field.name} differs between runs"
 
 
 class TestTrainingDeterminism:
@@ -1228,8 +1231,10 @@ class TestPreparedTrainingCache:
             _assert_batches_identical(left_batch, right_batch)
             for field in dataclasses.fields(left_batch[1]):
                 a, b = getattr(left_batch[1], field.name), getattr(right_batch[1], field.name)
-                if a is not None and b is not None:
+                if isinstance(a, Tensor):
                     assert a.shape == b.shape
                     assert torch.equal(
                         a.contiguous().reshape(-1).view(torch.uint8), b.contiguous().reshape(-1).view(torch.uint8)
                     )
+                else:
+                    assert a == b

@@ -64,6 +64,10 @@ class PackedTargets:
     ``list[Targets]`` consumers expect (see :meth:`DetectionDataModule.on_after_batch_transfer`).
     The dataclass is deliberately **not frozen** — PyTorch Lightning moves batches
     across devices with ``apply_to_collection``, which rejects frozen dataclasses.
+    Collation also retains host count tuples and flat padded-row indices privately:
+    restoration reads the tuples without device synchronization, and consumer
+    padding scatters the flat fields using the transported index tensor. Existing
+    count tensor fields remain available to direct callers.
 
     Attributes:
         boxes_cat: ``(sum_N, 4)`` float32 ``xyxy`` boxes of every image, concatenated.
@@ -140,6 +144,57 @@ class PackedTargets:
     rings_per_image: Tensor
     masks_cat: Tensor | None = None
     hsv_gains: Tensor | None = None
+    _host_counts: dict[str, tuple[int, ...]] = field(default_factory=dict)
+    _padding_indices: Tensor | None = None
+
+    def _counts(self, name: str) -> tuple[int, ...]:
+        """Read host metadata, retaining compatibility with manually built transports."""
+        if name not in self._host_counts:
+            self._host_counts[name] = tuple(getattr(self, name).tolist())
+        return self._host_counts[name]
+
+
+class _PackedTargetList(list[Targets]):
+    """Retain flat storage for padding while preserving the consumer's ragged list.
+
+    Only the transfer hook creates this per-step view. Snapshot tensor identities
+    so replacing or reordering a target falls back to ordinary list padding;
+    in-place edits already update the shared packed storage through split views.
+    """
+
+    def __init__(self, targets: list[Targets], packed: PackedTargets) -> None:
+        super().__init__(targets)
+        self._packed = packed
+        self._fields = {
+            name: tuple(getattr(target, name) for target in targets)
+            for name in ("boxes", "labels", "rboxes", "keypoints", "keypoint_vis")
+        }
+        self._mask_values = packed.masks_cat.to(torch.float32) if packed.masks_cat is not None else None
+        self._masks = (
+            list(torch.split(self._mask_values, list(packed._counts("boxes_per_image"))))
+            if self._mask_values is not None
+            else None
+        )
+        self._mask_views = tuple(self._masks or [])
+
+    def _flat_field(self, name: str) -> Tensor | None:
+        """Return flat storage only while the list still names its original views."""
+        original = self._fields[name]
+        if len(self) != len(original) or any(
+            getattr(target, name) is not tensor for target, tensor in zip(self, original, strict=True)
+        ):
+            return None
+        return cast("Tensor", getattr(self._packed, f"{name}_cat"))
+
+    def _flat_masks(self, masks: list[Tensor]) -> Tensor:
+        """Keep edits through float mask views, rebuilding only after replacement."""
+        if (
+            self._mask_values is not None
+            and len(masks) == len(self._mask_views)
+            and all(mask is original for mask, original in zip(masks, self._mask_views, strict=True))
+        ):
+            return self._mask_values
+        return torch.cat(masks)
 
 
 @dataclass
@@ -239,7 +294,10 @@ def pack_targets(targets: list[Targets]) -> PackedTargets:
     polygon_points_cat = torch.cat(rings, dim=0) if rings else boxes_cat.new_zeros((0, _POINT_DIM))
     keypoints_cat, keypoint_vis_cat = _concat_keypoints(targets)
 
-    def counts(values: list[int]) -> Tensor:
+    host_counts: dict[str, tuple[int, ...]] = {}
+
+    def counts(name: str, values: list[int]) -> Tensor:
+        host_counts[name] = tuple(values)
         return torch.tensor(values, dtype=torch.int64, device=boxes_cat.device)
 
     packed_type = _ValidationPackedTargets if all(isinstance(t, _ValidationTargets) for t in targets) else PackedTargets
@@ -247,15 +305,23 @@ def pack_targets(targets: list[Targets]) -> PackedTargets:
         boxes_cat=boxes_cat,
         labels_cat=labels_cat,
         difficult_cat=torch.cat([target.difficult for target in targets], dim=0),
-        boxes_per_image=counts([int(target.boxes.shape[0]) for target in targets]),
+        boxes_per_image=counts("boxes_per_image", [int(target.boxes.shape[0]) for target in targets]),
         rboxes_cat=rboxes_cat,
-        rboxes_per_image=counts([int(target.rboxes.shape[0]) for target in targets]),
+        rboxes_per_image=counts("rboxes_per_image", [int(target.rboxes.shape[0]) for target in targets]),
         keypoints_cat=keypoints_cat,
         keypoint_vis_cat=keypoint_vis_cat,
-        keypoints_per_image=counts([int(target.keypoints.shape[0]) for target in targets]),
+        keypoints_per_image=counts("keypoints_per_image", [int(target.keypoints.shape[0]) for target in targets]),
         polygon_points_cat=polygon_points_cat,
-        points_per_ring=counts([int(ring.shape[0]) for ring in rings]),
-        rings_per_image=counts([len(target.polygons) for target in targets]),
+        points_per_ring=counts("points_per_ring", [int(ring.shape[0]) for ring in rings]),
+        rings_per_image=counts("rings_per_image", [len(target.polygons) for target in targets]),
+    )
+    packed._host_counts = host_counts
+    box_counts = host_counts["boxes_per_image"]
+    width = max(box_counts, default=0)
+    packed._padding_indices = torch.tensor(
+        [image * width + row for image, count in enumerate(box_counts) for row in range(count)],
+        dtype=torch.int64,
+        device=boxes_cat.device,
     )
     if isinstance(packed, _ValidationPackedTargets):
         packed._image_ids = [t._image_id for t in targets if isinstance(t, _ValidationTargets)]
@@ -289,11 +355,11 @@ def unpack_targets(packed: PackedTargets) -> list[Targets]:
 
         ```
     """
-    boxes_per_image = [int(count) for count in packed.boxes_per_image.tolist()]
-    rboxes_per_image = [int(count) for count in packed.rboxes_per_image.tolist()]
-    keypoints_per_image = [int(count) for count in packed.keypoints_per_image.tolist()]
-    rings_per_image = [int(count) for count in packed.rings_per_image.tolist()]
-    points_per_ring = [int(count) for count in packed.points_per_ring.tolist()]
+    boxes_per_image = list(packed._counts("boxes_per_image"))
+    rboxes_per_image = list(packed._counts("rboxes_per_image"))
+    keypoints_per_image = list(packed._counts("keypoints_per_image"))
+    rings_per_image = list(packed._counts("rings_per_image"))
+    points_per_ring = list(packed._counts("points_per_ring"))
 
     boxes = torch.split(packed.boxes_cat, boxes_per_image)
     labels = torch.split(packed.labels_cat, boxes_per_image)
@@ -359,8 +425,8 @@ def unpack_masks(packed: PackedTargets) -> list[Tensor] | None:
     """
     if packed.masks_cat is None:
         return None
-    counts = [int(count) for count in packed.boxes_per_image.tolist()]
-    return [chunk.to(torch.float32) for chunk in torch.split(packed.masks_cat, counts)]
+    counts = list(packed._counts("boxes_per_image"))
+    return list(torch.split(packed.masks_cat.to(torch.float32), counts))
 
 
 @dataclass(frozen=True)

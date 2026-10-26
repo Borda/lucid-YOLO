@@ -994,11 +994,12 @@ def test_collate_batch_small_constant_segment_count() -> None:
     _images, packed = collate_detection([(torch.zeros(3, 8, 8), target) for target in _ragged_targets()])
     packed_tensors = sum(isinstance(getattr(packed, field.name), torch.Tensor) for field in dataclasses.fields(packed))
     segment_count = 1 + packed_tensors  # the stacked images tensor plus the packed target tensors
-    # 13 since WP-132 added the keypoint coordinates, visibilities and per-image count
-    # (was 10, itself up from 9 when WP-088 added the R18 difficult flags). The number is
-    # pinned only to catch a *ragged* modality creeping back in: what matters is that it
-    # does not move with the instance count, which the bound below states.
-    assert segment_count == 13
+    # 14 since WP-214 added the flat padded-row indices, one tensor per batch; 13 since
+    # WP-132 added the keypoint coordinates, visibilities and per-image count (was 10,
+    # itself up from 9 when WP-088 added the R18 difficult flags). The number is pinned
+    # only to catch a *ragged* modality creeping back in: what matters is that it does
+    # not move with the instance count, which the bound below states.
+    assert segment_count == 14
     assert segment_count < 15
 
 

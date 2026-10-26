@@ -138,6 +138,7 @@ from lucid_yolo.ptl._transport import _PROTO_STRIDE as _PROTO_STRIDE  # noqa: PL
 from lucid_yolo.ptl._transport import (
     PackedTargets,
     _collate_training,
+    _PackedTargetList,
     _restore_images,
     _transport_survives,
     collate_detection,
@@ -991,7 +992,11 @@ class DetectionDataModule(LightningDataModule):
         if images.is_cuda:
             images = images.contiguous(memory_format=torch.channels_last)
         if isinstance(targets, PackedTargets):
-            return images, unpack_targets(targets), unpack_masks(targets)
+            restored = unpack_targets(targets)
+            if targets._padding_indices is not None:
+                views = _PackedTargetList(restored, targets)
+                return images, views, views._masks
+            return images, restored, unpack_masks(targets)
         return images, targets, None
 
     def _consumer_dtype(self) -> torch.dtype:

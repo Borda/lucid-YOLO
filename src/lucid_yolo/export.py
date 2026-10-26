@@ -102,7 +102,7 @@ from lucid_yolo.assign.grid import anchor_grid
 from lucid_yolo.decode.common import BOX_CORNERS
 from lucid_yolo.decode.per_task import decode_with_coefficients, decode_with_keypoints
 from lucid_yolo.decode.topk_e2e import RotatedTopKDecoder, TopKDecoder
-from lucid_yolo.eval.segment_decode import decode_instance_masks
+from lucid_yolo.eval.segment_decode import _decode_instance_masks_unchunked
 from lucid_yolo.models.build import Detector, KeypointDetector, OrientedDetector, Segmenter
 from lucid_yolo.models.registry import ScaleSpec
 from lucid_yolo.validate import require_one_of
@@ -253,9 +253,9 @@ class SegmentExportGraph(E2EExportGraph):
     composition — the same decoder call for the boxes, the same
     :meth:`~lucid_yolo.decode.topk_e2e.TopKDecoder.decode_with_indices` source of
     the anchor indices mask coefficients are gathered by, and the same
-    :func:`~lucid_yolo.eval.segment_decode.decode_instance_masks` call with
-    ``(prototypes, coefficients, boxes, image_size=...)`` in that order — with one
-    necessary divergence the module docstring explains: every one of the ``k``
+    mask assembly, resize, crop and threshold operations. Export retains the
+    original single-resize graph while eager decode chunks its full-canvas
+    temporaries. One shape divergence remains: every one of the ``k``
     rows is gathered, padding rows included, because the output shape is fixed.
 
     That divergence is why this graph's supported canvases are narrower than its
@@ -321,7 +321,7 @@ class SegmentExportGraph(E2EExportGraph):
         detections, _, gathered = decode_with_coefficients(
             self.decoder, cls, box, coeff, self.anchor_points, self.strides
         )
-        masks: Tensor = decode_instance_masks(
+        masks: Tensor = _decode_instance_masks_unchunked(
             prototypes, gathered, detections[..., :BOX_CORNERS], image_size=self.canvas
         )
         return detections, masks

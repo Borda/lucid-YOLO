@@ -3,8 +3,8 @@
 
 The ragged-to-dense padding of a batch's per-image
 :class:`~lucid_yolo.data.targets.Targets` onto the instance axis
-(:func:`pad_targets`, :func:`pad_rboxes`, :func:`pad_keypoints`, all three written
-through :func:`_pad_instance_axis`), the step-batch type and its split, and the one
+(:func:`pad_targets`, :func:`pad_rboxes`, :func:`pad_keypoints`, with packed scatter
+or the ragged :func:`_pad_instance_axis` fallback), the step-batch type and its split, and the one
 host transfer the validation accumulators make per field. Every name here stays
 importable from :mod:`lucid_yolo.ptl.module`, where it was defined until the module
 was split by responsibility; the three public padding functions keep their place in
@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor
+
+from lucid_yolo.ptl._transport import PackedTargets, _PackedTargetList
 
 if TYPE_CHECKING:
     from lucid_yolo.data.targets import Targets
@@ -77,6 +79,33 @@ def _pad_instance_axis(
     return padded
 
 
+def _pad_packed_axis(values: Tensor, packed: PackedTargets, dtype: torch.dtype, *, minimum: int = 0) -> Tensor:
+    """Scatter flat packed rows into their final padded positions in one write."""
+    counts = packed._counts("boxes_per_image")
+    width = max(max(counts, default=0), minimum)
+    padded = torch.zeros((len(counts), width, *values.shape[1:]), dtype=dtype, device=values.device)
+    indices = packed._padding_indices
+    assert indices is not None
+    padded.flatten(0, 1).index_copy_(0, indices, values.to(dtype))
+    return padded
+
+
+def _pad_mask_targets(masks: list[Tensor], targets: list[Targets], reference: Tensor) -> Tensor:
+    """Pad current mask stacks once, using packed row positions when still valid."""
+    counts = [int(mask.shape[0]) for mask in masks]
+    if (
+        isinstance(targets, _PackedTargetList)
+        and targets._flat_field("boxes") is not None
+        and tuple(counts) == targets._packed._counts("boxes_per_image")
+    ):
+        # Float mask views share one cast of the packed bool stack. Replacements
+        # rebuild from current slices; ordinary per-pixel edits need no copy.
+        return _pad_packed_axis(targets._flat_masks(masks), targets._packed, reference.dtype, minimum=1)
+    return _pad_instance_axis(
+        masks, counts, max(*counts, 1), tuple(reference.shape[-2:]), reference.dtype, reference.device
+    )
+
+
 def pad_targets(targets: list[Targets]) -> tuple[Tensor, Tensor, Tensor]:
     """Pad a ragged batch of per-image targets into dense ground-truth tensors.
 
@@ -111,6 +140,14 @@ def pad_targets(targets: list[Targets]) -> tuple[Tensor, Tensor, Tensor]:
 
         ```
     """
+    if isinstance(targets, _PackedTargetList):
+        boxes_cat, labels_cat = targets._flat_field("boxes"), targets._flat_field("labels")
+        if boxes_cat is not None and labels_cat is not None:
+            padded_boxes = _pad_packed_axis(boxes_cat, targets._packed, torch.float32)
+            padded_labels = _pad_packed_axis(labels_cat, targets._packed, torch.int64)
+            counts_tensor = targets._packed.boxes_per_image
+            mask = torch.arange(padded_boxes.shape[1], device=padded_boxes.device)[None, :] < counts_tensor[:, None]
+            return padded_boxes, padded_labels, mask
     batch_size = len(targets)
     counts = [int(target.boxes.shape[0]) for target in targets]
     max_n = max(counts) if counts else 0
@@ -178,6 +215,10 @@ def pad_rboxes(targets: list[Targets]) -> Tensor:
                 f"image {index} carries {count} instances but {int(target.rboxes.shape[0])} rotated boxes; "
                 f"task='obb' needs one per instance"
             )
+    if isinstance(targets, _PackedTargetList) and targets._flat_field("boxes") is not None:
+        flat = targets._flat_field("rboxes")
+        if flat is not None:
+            return _pad_packed_axis(flat, targets._packed, torch.float32)
     max_n = max(counts) if counts else 0
     device = targets[0].rboxes.device if targets else torch.device("cpu")
     rboxes = [target.rboxes for target in targets]
@@ -252,6 +293,13 @@ def pad_keypoints(targets: list[Targets]) -> tuple[Tensor, Tensor]:
     point_counts = {int(target.keypoints.shape[1]) for target in targets if target.keypoints.shape[0]}
     if len(point_counts) > 1:
         raise ValueError(f"the batch's images disagree on the keypoint count K: {sorted(point_counts)}")
+    if isinstance(targets, _PackedTargetList) and targets._flat_field("boxes") is not None:
+        flat, visibility = targets._flat_field("keypoints"), targets._flat_field("keypoint_vis")
+        if flat is not None and visibility is not None:
+            return (
+                _pad_packed_axis(flat, targets._packed, torch.float32),
+                _pad_packed_axis(visibility, targets._packed, torch.int64),
+            )
     num_points = point_counts.pop() if point_counts else 0
     max_n = max(counts) if counts else 0
     device = targets[0].keypoints.device if targets else torch.device("cpu")

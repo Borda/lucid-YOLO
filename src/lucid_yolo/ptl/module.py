@@ -217,6 +217,7 @@ from lucid_yolo.ptl._padding import (
     _KEYPOINT_DIM,
     StepBatch,
     _host_split,
+    _pad_mask_targets,
     _split_batch,
     pad_keypoints,
     pad_rboxes,
@@ -2454,10 +2455,7 @@ class DetectionLitModule(LightningModule):
         # Densified once and shared by both branches: the ragged per-image stacks are
         # padded to a single (B, N, Hp, Wp) tensor here rather than inside the branch
         # loss, which would rebuild it for the second branch from the same input.
-        instances = max(*(int(image_masks.shape[0]) for image_masks in masks), 1)
-        padded_masks = prototypes.new_zeros((len(masks), instances, *proto_grid))
-        for index, image_masks in enumerate(masks):
-            padded_masks[index, : image_masks.shape[0]] = image_masks
+        padded_masks = _pad_mask_targets(masks, targets, prototypes)
         o2m_mask = self._branch_mask_loss(prototypes, o2m_coeff, out.o2m_assign, padded_masks, grid_boxes)
         o2o_mask = self._branch_mask_loss(prototypes, o2o_coeff, out.o2o_assign, padded_masks, grid_boxes)
         mask_term = _blend(out.alpha, o2m_mask, o2o_mask)
