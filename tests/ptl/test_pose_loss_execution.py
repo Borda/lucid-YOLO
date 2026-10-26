@@ -15,6 +15,7 @@ from pytorch_lightning.plugins.precision import MixedPrecision
 from torch.utils.data import DataLoader
 
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.losses import BranchPrediction
 from lucid_yolo.ptl.loss_capture import _BF16_SUPPORTED, _LossCaptureLifecycle
 from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -417,10 +418,8 @@ def test_pose_custom_criterion_keeps_native_keywords() -> None:
     calls = []
 
     def criterion(
-        ml: torch.Tensor,
-        mb: torch.Tensor,
-        ol: torch.Tensor,
-        ob: torch.Tensor,
+        o2m: BranchPrediction,
+        o2o: BranchPrediction,
         points: torch.Tensor,
         boxes: torch.Tensor,
         labels: torch.Tensor,
@@ -430,7 +429,7 @@ def test_pose_custom_criterion_keeps_native_keywords() -> None:
         gt_rboxes: torch.Tensor | None,
     ) -> object:
         calls.append(gt_rboxes)
-        return original(ml, mb, ol, ob, points, boxes, labels, mask, strides=strides, gt_rboxes=gt_rboxes)
+        return original(o2m, o2o, points, boxes, labels, mask, strides=strides, gt_rboxes=gt_rboxes)
 
     model.loss = criterion
     with (

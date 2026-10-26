@@ -31,7 +31,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from lucid_yolo.losses.dual_loss import DualBranchLoss
+from lucid_yolo.losses.dual_loss import BranchPrediction, DualBranchLoss
 from lucid_yolo.models.heads.detect import decode_ltrb
 
 _NUM_CLASSES = 6
@@ -99,7 +99,15 @@ def _l1_term(strides: torch.Tensor | None) -> float:
     logits, ltrb, anchor_points, anchor_strides, gt_boxes, gt_labels = _converged_state()
     boxes = decode_ltrb(ltrb, anchor_points, anchor_strides)
     gt_mask = torch.ones(1, 1, dtype=torch.bool)
-    out = DualBranchLoss()(logits, boxes, logits, boxes, anchor_points, gt_boxes, gt_labels, gt_mask, strides=strides)
+    out = DualBranchLoss()(
+        BranchPrediction(logits, boxes),
+        BranchPrediction(logits, boxes),
+        anchor_points,
+        gt_boxes,
+        gt_labels,
+        gt_mask,
+        strides=strides,
+    )
     assert float(out.o2o.box) > 0.0, "no positives assigned — the fixture, not the loss, is at fault"
     return float(out.o2o.l1)
 
@@ -138,7 +146,14 @@ def test_l1_term_measured_in_stride_units(stride: float) -> None:
     gt_mask = torch.ones(1, 1, dtype=torch.bool)
     loss = DualBranchLoss()
 
-    args = (logits, boxes, logits, boxes, anchor_points, gt_boxes, gt_labels, gt_mask)
+    args = (
+        BranchPrediction(logits, boxes),
+        BranchPrediction(logits, boxes),
+        anchor_points,
+        gt_boxes,
+        gt_labels,
+        gt_mask,
+    )
     pixel = loss(*args)
     strided = loss(*args, strides=strides)
 

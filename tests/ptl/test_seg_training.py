@@ -29,7 +29,7 @@ from training import LogRecorder, has_gradient, tiny_module
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.data.targets import Targets
-from lucid_yolo.losses.dual_loss import DualBranchLoss
+from lucid_yolo.losses.dual_loss import BranchPrediction, DualBranchLoss
 from lucid_yolo.losses.mask_loss import instance_mask_loss
 from lucid_yolo.models.build import SegmentOutput
 from lucid_yolo.models.heads.detect import DualHeadOutput, decode_ltrb
@@ -123,10 +123,8 @@ def _reference_detection_loss(module: DetectionLitModule, batch: tuple[Tensor, l
     gt_boxes, gt_labels, gt_mask = pad_targets(targets)
     loss = DualBranchLoss(box_gain=_BOX_GAIN, cls_gain=_CLS_GAIN, l1_gain=_L1_GAIN, alpha=_ALPHA)
     return loss(
-        head_out.o2m_cls,
-        decode_ltrb(head_out.o2m_box, anchor_points, strides),
-        head_out.o2o_cls,
-        decode_ltrb(head_out.o2o_box, anchor_points, strides),
+        BranchPrediction(head_out.o2m_cls, decode_ltrb(head_out.o2m_box, anchor_points, strides)),
+        BranchPrediction(head_out.o2o_cls, decode_ltrb(head_out.o2o_box, anchor_points, strides)),
         anchor_points,
         gt_boxes,
         gt_labels,

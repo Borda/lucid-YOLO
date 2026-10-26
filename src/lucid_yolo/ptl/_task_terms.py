@@ -217,7 +217,9 @@ def _blend(alpha: float | Tensor, o2m: Tensor, o2o: Tensor) -> Tensor:
     every task-conditional term repeats, written once. The expression and its operand
     order are the ones each call site carried, so the result is the same value bit for
     bit; reordering it would not be, because floating-point addition and
-    multiplication do not reassociate.
+    multiplication do not reassociate. A tensor weight is cast separately for each
+    branch, after the complement is formed in double precision, to preserve the
+    float weight's rounding and avoid promoting scalar task losses to float64.
 
     Args:
         alpha: The one-to-many branch weight, as the dual loss output carries it.
@@ -235,4 +237,6 @@ def _blend(alpha: float | Tensor, o2m: Tensor, o2o: Tensor) -> Tensor:
 
         ```
     """
+    if isinstance(alpha, Tensor):
+        return alpha.to(o2m.dtype) * o2m + (1.0 - alpha).to(o2o.dtype) * o2o
     return alpha * o2m + (1.0 - alpha) * o2o

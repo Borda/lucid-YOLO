@@ -26,10 +26,10 @@ from lucid_yolo.assign.tal import TaskAlignedAssigner
 from lucid_yolo.cli.train import DetectionCLI, packaged_config
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.losses import detection_loss
-from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
+from lucid_yolo.losses.dual_loss import BranchPrediction, DualBranchLoss, DualLossOutput
 from lucid_yolo.ptl import loss_capture as capture_module
 from lucid_yolo.ptl.datamodule import DetectionDataModule
-from lucid_yolo.ptl.loss_capture import _BF16_SUPPORTED, _LossCapture, _LossCaptureLifecycle
+from lucid_yolo.ptl.loss_capture import _BF16_SUPPORTED, _LossCapture, _LossCaptureLifecycle, _LossInputs
 from lucid_yolo.ptl.module import DetectionLitModule
 
 pytestmark = pytest.mark.usefixtures("deterministic_kernels")
@@ -90,7 +90,9 @@ def _native(source: DualBranchLoss, inputs: tuple[torch.Tensor, ...]) -> DualLos
         >>> bool(torch.isfinite(_native(DualBranchLoss(), _inputs(0, device="cpu")).total))
         True
     """
-    return source(*inputs[:8], strides=inputs[8], alpha=inputs[9])
+    return source(
+        BranchPrediction(*inputs[:2]), BranchPrediction(*inputs[2:4]), *inputs[4:8], strides=inputs[8], alpha=inputs[9]
+    )
 
 
 def _bits(left: torch.Tensor, right: torch.Tensor) -> None:
@@ -113,6 +115,7 @@ def _same(left: DualLossOutput, right: DualLossOutput) -> None:
         >>> output = _native(DualBranchLoss(), _inputs(0, device="cpu"))
         >>> _same(output, output)
     """
+    assert left.alpha == right.alpha
     for a, b in (
         (left.total, right.total),
         *((getattr(left.o2m, key), getattr(right.o2m, key)) for key in ("total", "box", "cls", "l1")),
@@ -128,7 +131,7 @@ def test_cpu_stays_eager_and_copy_discards_recordings(graph_recordings: MagicMoc
     """The off-device path never asks CUDA to record and keeps the public output."""
     holder, source, inputs = _LossCapture(), DualBranchLoss(), _inputs(3, device="cpu")
     recordings_before = graph_recordings.call_count
-    _same(_native(source, inputs), holder.run(source, *inputs))
+    _same(_native(source, inputs), holder.run(source, _LossInputs(*inputs)))
     assert graph_recordings.call_count == recordings_before
     holder._disabled = True
     for restored in (copy.deepcopy(holder), pickle.loads(pickle.dumps(holder))):
@@ -181,7 +184,7 @@ def test_host_workspace_growth_shrinkage_and_output_ownership(_host_recorder: Ma
         inputs = _inputs(count, device="cpu")
         reference = tuple(value.detach().clone().requires_grad_(value.requires_grad) for value in inputs)
         expected = _native(source, reference)
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
         _same(expected, actual)
         expected.total.backward()
         actual.total.backward()
@@ -199,6 +202,33 @@ def test_host_workspace_growth_shrinkage_and_output_ownership(_host_recorder: Ma
     assert loss_objective(holder) is None and holder._workspace is None
 
 
+def test_recorder_preserves_flat_input_order(_host_recorder: MagicMock) -> None:
+    """The recorder receives ten flat tensors in the pre-refactor positional order."""
+    holder = _LossCapture()
+    inputs = _LossInputs(*_inputs(3, device="cpu"))
+    holder.run(DualBranchLoss(), inputs).total.backward()
+
+    samples = _host_recorder.call_args.args[1]
+    assert type(samples) is tuple and len(samples) == 10
+    assert holder._workspace is not None
+    expected = (*inputs[:5], *holder._workspace, inputs.strides, inputs.alpha)
+    for sample, value in zip(samples, expected, strict=True):
+        _bits(sample, value)
+        assert sample.requires_grad == value.requires_grad
+
+
+def test_replay_records_live_alpha_override(_host_recorder: MagicMock) -> None:
+    """Reusing one recording returns each call's override rather than the stale attribute."""
+    holder, source = _LossCapture(), DualBranchLoss(alpha=0.5)
+    for alpha in (0.8, 0.1, 0.25):
+        inputs = _LossInputs(*_inputs(3, device="cpu"))._replace(alpha=torch.tensor(alpha, dtype=torch.float64))
+        output = holder.run(source, inputs)
+        assert output.alpha is inputs.alpha
+        _same(_native(source, inputs), output)
+        output.total.backward()
+    assert _host_recorder.call_count == 1
+
+
 @pytest.mark.parametrize("collection_enabled", [False, True])
 @pytest.mark.parametrize("failure", ["record", "fence"])
 def test_host_capture_failure_restores_gc_and_releases_workspace(
@@ -214,7 +244,7 @@ def test_host_capture_failure_restores_gc_and_releases_workspace(
             patch("torch.cuda.synchronize", side_effect=RuntimeError("injected host fence failure")),
             pytest.raises(RuntimeError, match="injected host"),
         ):
-            holder.run(DualBranchLoss(), *_inputs(3, device="cpu"))
+            holder.run(DualBranchLoss(), _LossInputs(*_inputs(3, device="cpu")))
         assert gc.isenabled() is collection_enabled
         assert loss_objective(holder) is None and holder._workspace is None
         assert holder._signature is None and holder._capacity == 0
@@ -226,7 +256,7 @@ def test_host_capture_failure_restores_gc_and_releases_workspace(
 def test_host_contract_changes_retire_once(_host_recorder: MagicMock, change: str) -> None:
     """Changed live policies retire a recording before it can reuse stale operations."""
     holder, source = _LossCapture(), DualBranchLoss()
-    holder.run(source, *_inputs(3, device="cpu")).total.backward()
+    holder.run(source, _LossInputs(*_inputs(3, device="cpu"))).total.backward()
     if change == "settings":
         source._o2m_loss.box_gain += 1
     elif change == "custom":
@@ -237,8 +267,8 @@ def test_host_contract_changes_retire_once(_host_recorder: MagicMock, change: st
         elif change == "unreadable":
             precision.side_effect = RuntimeError("policy query failed")
         with pytest.warns(UserWarning, match="stays eager") as warnings:
-            _same(_native(source, _inputs(1, device="cpu")), holder.run(source, *_inputs(1, device="cpu")))
-            holder.run(source, *_inputs(1, device="cpu"))
+            _same(_native(source, _inputs(1, device="cpu")), holder.run(source, _LossInputs(*_inputs(1, device="cpu"))))
+            holder.run(source, _LossInputs(*_inputs(1, device="cpu")))
     assert len(warnings) == 1 and holder._disabled
     assert loss_objective(holder) is None and _host_recorder.call_count == 1
 
@@ -302,7 +332,7 @@ def test_host_replaced_delegated_stage_keeps_native_route(
     """
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
-        holder.run(source, *_inputs(3, device="cpu")).total.backward()
+        holder.run(source, _LossInputs(*_inputs(3, device="cpu"))).total.backward()
     original = getattr(owner, name)
     calls: list[int] = []
 
@@ -311,7 +341,7 @@ def test_host_replaced_delegated_stage_keeps_native_route(
         return original(*args, **kwargs)
 
     with patch.object(owner, name, observed), pytest.warns(UserWarning, match="customized"):
-        actual = holder.run(source, *_inputs(2, device="cpu"))
+        actual = holder.run(source, _LossInputs(*_inputs(2, device="cpu")))
         replaced_calls = len(calls)
         expected = _native(source, _inputs(2, device="cpu"))
     assert replaced_calls > 0
@@ -331,22 +361,22 @@ def test_host_fallback_preserves_current_inputs(_host_recorder: MagicMock, case:
     fallback from a replay at the same capacity, hence the forward-call count.
     """
     holder, source = _LossCapture(), DualBranchLoss()
-    holder.run(source, *_inputs(3, device="cpu")).total.backward()
+    holder.run(source, _LossInputs(*_inputs(3, device="cpu"))).total.backward()
     inputs = _inputs(0 if case == "empty" else 1, batch=1 if case == "shape" else 2, device="cpu")
     original = capture_module._LossObjective.forward
     with patch.object(capture_module._LossObjective, "forward", autospec=True, side_effect=original) as replayed:
         if case == "labels":
             inputs[6][1, 0] = 3
             with pytest.raises(ValueError, match="gt_labels must be"):
-                holder.run(source, *inputs)
+                holder.run(source, _LossInputs(*inputs))
         elif case.startswith("nonfinite_"):
             with torch.no_grad():
                 inputs[_GUARDED_INPUTS[case.removeprefix("nonfinite_")]].view(-1)[0] = float("inf")
-            expected, actual = _native(source, inputs), holder.run(source, *inputs)
+            expected, actual = _native(source, inputs), holder.run(source, _LossInputs(*inputs))
             assert torch.equal(expected.total.isnan(), actual.total.isnan())
             assert torch.equal(expected.o2m_assign.fg_mask, actual.o2m_assign.fg_mask)
         else:
-            _same(_native(source, inputs), holder.run(source, *inputs))
+            _same(_native(source, inputs), holder.run(source, _LossInputs(*inputs)))
     assert replayed.call_count == 0
     assert _host_recorder.call_count == 1 and holder._capacity == 4
 
@@ -362,12 +392,12 @@ def test_host_unpadded_nonfinite_inputs_replay_with_native_bits(
     branches, so replay and the native route must agree even when the values are infinite.
     """
     holder, source = _LossCapture(), DualBranchLoss()
-    holder.run(source, *_inputs(3, device="cpu")).total.backward()
+    holder.run(source, _LossInputs(*_inputs(3, device="cpu"))).total.backward()
     inputs = _inputs(2, device="cpu")
     torch.atleast_1d(inputs[index])[0] = float("inf")  # alpha is 0-dim; the others index as before
     original = capture_module._LossObjective.forward
     with patch.object(capture_module._LossObjective, "forward", autospec=True, side_effect=original) as replayed:
-        expected, actual = _native(source, inputs), holder.run(source, *inputs)
+        expected, actual = _native(source, inputs), holder.run(source, _LossInputs(*inputs))
     assert replayed.call_count == 1, name
     assert torch.equal(expected.total.isnan(), actual.total.isnan())
     _bits(expected.o2m_assign.fg_mask, actual.o2m_assign.fg_mask)
@@ -378,12 +408,12 @@ def test_host_skipped_backward_resets_at_batch_start(_host_recorder: MagicMock) 
     """A skipped backward keeps same-batch calls eager until the automatic next-batch hook."""
     model = DetectionLitModule(0.5, 0.25, 64, 3, capture_loss=True)
     holder, source = model._loss_capture, DualBranchLoss()
-    holder.run(source, *_inputs(3, device="cpu"))
+    holder.run(source, _LossInputs(*_inputs(3, device="cpu")))
     assert holder._pending_backward
-    _same(_native(source, _inputs(1, device="cpu")), holder.run(source, *_inputs(1, device="cpu")))
+    _same(_native(source, _inputs(1, device="cpu")), holder.run(source, _LossInputs(*_inputs(1, device="cpu"))))
     _LossCaptureLifecycle().on_train_batch_start(MagicMock(spec=Trainer), model, None, 1)
     assert not holder._pending_backward
-    holder.run(source, *_inputs(1, device="cpu")).total.backward()
+    holder.run(source, _LossInputs(*_inputs(1, device="cpu"))).total.backward()
     assert _host_recorder.call_count == 1
 
 
@@ -392,7 +422,7 @@ def test_host_old_bf16_contract_stays_native(_host_recorder: MagicMock) -> None:
     holder, source = _LossCapture(), DualBranchLoss()
     with patch.object(capture_module, "_BF16_SUPPORTED", False):
         inputs = _inputs(1, device="cpu", dtype=torch.bfloat16)
-        _same(_native(source, inputs), holder.run(source, *inputs))
+        _same(_native(source, inputs), holder.run(source, _LossInputs(*inputs)))
     _host_recorder.assert_not_called()
     assert holder._workspace is None and not holder._disabled
 
@@ -462,7 +492,7 @@ def test_variable_target_capacity_matches_native_bits_and_gradients(dtype: torch
         reference = tuple(value.detach().clone().requires_grad_(value.requires_grad) for value in inputs)
         with torch.autocast("cuda", enabled=dtype != torch.float32, dtype=dtype, cache_enabled=False):
             expected = _native(source, reference)
-            actual = holder.run(source, *inputs)
+            actual = holder.run(source, _LossInputs(*inputs))
         assert loss_objective(holder) is not None
         _same(expected, actual)
         expected.total.backward()
@@ -480,13 +510,13 @@ def test_variable_target_capacity_matches_native_bits_and_gradients(dtype: torch
 def test_outputs_survive_replay_and_second_forward_stays_eager() -> None:
     """Saved results own their values and an outstanding backward cannot be overwritten."""
     holder, source, inputs = _LossCapture(), DualBranchLoss(), _inputs(3)
-    first = holder.run(source, *inputs)
+    first = holder.run(source, _LossInputs(*inputs))
     saved = first.total.detach().clone(), first.o2m_assign.target_boxes.clone()
-    second = holder.run(source, *_inputs(1))
+    second = holder.run(source, _LossInputs(*_inputs(1)))
     _same(second, _native(source, _inputs(1)))
     first.total.backward()
     assert not holder._pending_backward
-    third = holder.run(source, *_inputs(2))
+    third = holder.run(source, _LossInputs(*_inputs(2)))
     third.total.backward()
     _bits(first.total, saved[0])
     _bits(first.o2m_assign.target_boxes, saved[1])
@@ -497,20 +527,20 @@ def test_outputs_survive_replay_and_second_forward_stays_eager() -> None:
 def test_current_invalid_labels_fail_before_replay(bad: int, padded: bool) -> None:
     """A valid first call never exempts the next batch, including its padding, from bounds checks."""
     holder, source = _LossCapture(), DualBranchLoss()
-    first = holder.run(source, *_inputs(3))
+    first = holder.run(source, _LossInputs(*_inputs(3)))
     first.total.backward()
     inputs = _inputs(1)
     inputs[6][1, 0] = bad
     inputs[7][1, 0] = not padded
     with pytest.raises(ValueError, match="gt_labels must be"):
-        holder.run(source, *inputs)
+        holder.run(source, _LossInputs(*inputs))
 
 
 @requires_cuda
 def test_replay_removes_python_assignment_and_scoring_calls() -> None:
     """A silent reversion to eager fails the work-count oracle after a real recording."""
     holder, source = _LossCapture(), DualBranchLoss()
-    first = holder.run(source, *_inputs(3))
+    first = holder.run(source, _LossInputs(*_inputs(3)))
     first.total.backward()
     codes = {source.o2m_assigner._assign.__code__, source._score.__code__}
     calls: list[str] = []
@@ -522,7 +552,7 @@ def test_replay_removes_python_assignment_and_scoring_calls() -> None:
     previous = sys.getprofile()
     try:
         sys.setprofile(observe)
-        next_output = holder.run(source, *_inputs(2))
+        next_output = holder.run(source, _LossInputs(*_inputs(2)))
         next_output.total.backward()
     finally:
         sys.setprofile(previous)
@@ -535,11 +565,11 @@ def test_replay_removes_python_assignment_and_scoring_calls() -> None:
 def test_changed_gain_retires_recording_and_keeps_native_result() -> None:
     """Mutable loss settings cannot silently keep the old graph's constants."""
     holder, source = _LossCapture(), DualBranchLoss()
-    holder.run(source, *_inputs(3)).total.backward()
+    holder.run(source, _LossInputs(*_inputs(3))).total.backward()
     source._o2m_loss.box_gain = 2.5
     inputs = _inputs(2)
     with pytest.warns(UserWarning, match="settings.*changed"):
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
     assert loss_objective(holder) is None and holder._disabled
     _same(_native(source, inputs), actual)
 
@@ -588,7 +618,7 @@ def test_cli_forwards_loss_option() -> None:
 def test_partial_batch_and_noncontiguous_inputs_keep_recording() -> None:
     """Unsupported signatures stay native without displacing the normal batch's graph."""
     holder, source = _LossCapture(), DualBranchLoss()
-    holder.run(source, *_inputs(3)).total.backward()
+    holder.run(source, _LossInputs(*_inputs(3))).total.backward()
     recording = loss_objective(holder)
     for original_inputs in (_inputs(1, batch=1), _inputs(2)):
         inputs = original_inputs
@@ -597,11 +627,11 @@ def test_partial_batch_and_noncontiguous_inputs_keep_recording() -> None:
             values[0] = values[0].transpose(1, 2).contiguous().transpose(1, 2).detach().requires_grad_()
             inputs = tuple(values)
             assert not inputs[0].is_contiguous()
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
         _same(_native(source, inputs), actual)
         actual.total.backward()
         assert loss_objective(holder) is recording
-    holder.run(source, *_inputs(2)).total.backward()
+    holder.run(source, _LossInputs(*_inputs(2))).total.backward()
     assert loss_objective(holder) is recording
 
 
@@ -610,7 +640,7 @@ def test_old_bf16_runtime_keeps_native_path() -> None:
     """An unverified BF16 runtime never silently records the operation."""
     holder, source, inputs = _LossCapture(), DualBranchLoss(), _inputs(3, dtype=torch.bfloat16)
     with patch("lucid_yolo.ptl.loss_capture._BF16_SUPPORTED", False), torch.autocast("cuda", dtype=torch.bfloat16):
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
         _same(_native(source, inputs), actual)
     assert loss_objective(holder) is None
 
@@ -623,7 +653,7 @@ def test_recording_failure_never_publishes_workspace() -> None:
         patch("torch.cuda.make_graphed_callables", side_effect=RuntimeError("injected recording failure")),
         pytest.raises(RuntimeError, match="injected recording failure"),
     ):
-        holder.run(source, *_inputs(3))
+        holder.run(source, _LossInputs(*_inputs(3)))
     assert loss_objective(holder) is None and holder._workspace is None and holder._capacity == 0
 
 
@@ -637,7 +667,7 @@ def test_settings_and_implementations_changed_before_capture_stay_observable() -
 
     holder, source, inputs = _LossCapture(), CustomLoss(), _inputs(3)
     with pytest.warns(UserWarning, match="customized"):
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
     _same(_native(source, inputs), actual)
     assert loss_objective(holder) is None and holder._disabled
 
@@ -687,7 +717,7 @@ def test_custom_callable_without_assignment_attributes_keeps_native_route() -> N
     holder, inputs = _LossCapture(), _inputs(2)
     criterion = source.__call__
     with pytest.warns(UserWarning, match="customized"):
-        actual = holder.run(criterion, *inputs)
+        actual = holder.run(criterion, _LossInputs(*inputs))
     _same(_native(source, inputs), actual)
     assert loss_objective(holder) is None
 
@@ -698,7 +728,7 @@ def test_replaced_public_assigner_entry_stays_observable(record_first: bool) -> 
     """Recording must not bypass a public assignment override before or after setup."""
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
-        holder.run(source, *_inputs(3)).total.backward()
+        holder.run(source, _LossInputs(*_inputs(3))).total.backward()
     original = TaskAlignedAssigner.__call__
     calls: list[int] = []
 
@@ -707,7 +737,7 @@ def test_replaced_public_assigner_entry_stays_observable(record_first: bool) -> 
         return original(assigner, *args, **kwargs)
 
     with patch.object(TaskAlignedAssigner, "__call__", observed), pytest.warns(UserWarning, match="customized"):
-        actual = holder.run(source, *_inputs(2))
+        actual = holder.run(source, _LossInputs(*_inputs(2)))
     assert len(calls) == 2
     _same(_native(source, _inputs(2)), actual)
     assert loss_objective(holder) is None and holder._disabled
@@ -729,7 +759,7 @@ def test_recording_suspends_collection_and_restores_previous_mode(collection_ena
     try:
         holder = _LossCapture()
         with patch("torch.cuda.make_graphed_callables", record):
-            holder.run(DualBranchLoss(), *_inputs(3)).total.backward()
+            holder.run(DualBranchLoss(), _LossInputs(*_inputs(3))).total.backward()
         assert seen == [False]
         assert gc.isenabled() is collection_enabled
         holder.clear()
@@ -742,14 +772,16 @@ def test_fallback_preserves_keyword_only_custom_criterion(device: str) -> None:
     """A custom loss receives strides by keyword, as it does through the native module."""
     source, holder, inputs = DualBranchLoss(), _LossCapture(), _inputs(2, device=device)
 
-    def criterion(*predictions_and_targets: torch.Tensor, strides: torch.Tensor, alpha: torch.Tensor) -> DualLossOutput:
+    def criterion(
+        *predictions_and_targets: BranchPrediction | torch.Tensor, strides: torch.Tensor, alpha: torch.Tensor
+    ) -> DualLossOutput:
         return source(*predictions_and_targets, strides=strides, alpha=alpha)
 
     if device == "cuda":
         with pytest.warns(UserWarning, match="customized"):
-            actual = holder.run(criterion, *inputs)
+            actual = holder.run(criterion, _LossInputs(*inputs))
     else:
-        actual = holder.run(criterion, *inputs)
+        actual = holder.run(criterion, _LossInputs(*inputs))
     _same(_native(source, inputs), actual)
     assert loss_objective(holder) is None
 
@@ -760,7 +792,7 @@ def test_replaced_empty_assignment_stays_observable(record_first: bool) -> None:
     """Masked capacity cannot hide an override of the native empty-target result."""
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
-        holder.run(source, *_inputs(3)).total.backward()
+        holder.run(source, _LossInputs(*_inputs(3))).total.backward()
     original = TaskAlignedAssigner._empty_result
     calls: list[int] = []
 
@@ -772,7 +804,7 @@ def test_replaced_empty_assignment_stays_observable(record_first: bool) -> None:
         patch.object(TaskAlignedAssigner, "_empty_result", staticmethod(observed)),
         pytest.warns(UserWarning, match="customized"),
     ):
-        actual = holder.run(source, *_inputs(0))
+        actual = holder.run(source, _LossInputs(*_inputs(0)))
     assert len(calls) == 2
     _same(_native(source, _inputs(0)), actual)
     assert loss_objective(holder) is None and holder._disabled
@@ -795,7 +827,7 @@ def test_nonfinite_inputs_preserve_native_outputs(
     """
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
-        holder.run(source, *_inputs(3)).total.backward()
+        holder.run(source, _LossInputs(*_inputs(3))).total.backward()
     recording = loss_objective(holder)
     inputs = _inputs(count)
     with torch.no_grad():
@@ -803,12 +835,12 @@ def test_nonfinite_inputs_preserve_native_outputs(
     expected = _native(source, inputs)
     _same(expected, _native(source, inputs))
     recordings_before = graph_recordings.call_count
-    actual = holder.run(source, *inputs)
+    actual = holder.run(source, _LossInputs(*inputs))
     assert graph_recordings.call_count == recordings_before
     _same(expected, actual)
     assert loss_objective(holder) is recording and not holder._pending_backward
     if recording is not None:
-        holder.run(source, *_inputs(2)).total.backward()
+        holder.run(source, _LossInputs(*_inputs(2))).total.backward()
         assert loss_objective(holder) is recording
 
 
@@ -818,7 +850,7 @@ def test_empty_targets_keep_native_finite_overflow_behavior(record_first: bool, 
     """Finite decoded coordinates can still overflow area arithmetic on an empty batch."""
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
-        holder.run(source, *_inputs(3)).total.backward()
+        holder.run(source, _LossInputs(*_inputs(3))).total.backward()
     recording, inputs = loss_objective(holder), _inputs(0)
     with torch.no_grad():
         inputs[1][0, 0] = torch.tensor([0.0, -2e38, 0.0, 2e38], device="cuda")
@@ -827,7 +859,7 @@ def test_empty_targets_keep_native_finite_overflow_behavior(record_first: bool, 
     _same(expected, _native(source, inputs))
     assert bool(expected.total.isfinite())
     recordings_before = graph_recordings.call_count
-    actual = holder.run(source, *inputs)
+    actual = holder.run(source, _LossInputs(*inputs))
     assert graph_recordings.call_count == recordings_before
     _same(expected, actual)
     assert loss_objective(holder) is recording and not holder._pending_backward
@@ -848,7 +880,7 @@ def test_global_module_hooks_keep_native_criterion(registration: str, record_fir
     """The auxiliary recorder must not introduce hook calls absent from the plain criterion."""
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
-        holder.run(source, *_inputs(3)).total.backward()
+        holder.run(source, _LossInputs(*_inputs(3))).total.backward()
     recording, calls = loss_objective(holder), []
 
     def observe(*args: object) -> None:
@@ -857,11 +889,11 @@ def test_global_module_hooks_keep_native_criterion(registration: str, record_fir
     with getattr(torch.nn.modules.module, registration)(observe):
         inputs = _inputs(3)
         expected = _native(source, inputs)
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
         _same(expected, actual)
         actual.total.backward()
     assert calls == [] and loss_objective(holder) is recording
-    holder.run(source, *_inputs(2)).total.backward()
+    holder.run(source, _LossInputs(*_inputs(2))).total.backward()
     assert loss_objective(holder) is not None
 
 
@@ -1002,9 +1034,9 @@ def test_constructor_valid_tiny_epsilon_keeps_native_loss(device: str, branch: s
     assert bool(torch.isfinite(expected.total))
     if device == "cuda":
         with pytest.warns(UserWarning, match="customized"):
-            actual = holder.run(source, *inputs)
+            actual = holder.run(source, _LossInputs(*inputs))
     else:
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
     _same(expected, actual)
     assert loss_objective(holder) is None
 
@@ -1028,7 +1060,7 @@ def _replay_matches_native(
     """
     reference = tuple(value.detach().clone().requires_grad_(value.requires_grad) for value in inputs)
     expected = _native(source, reference)
-    actual = holder.run(source, *inputs)
+    actual = holder.run(source, _LossInputs(*inputs))
     _same(expected, actual)
     expected.total.backward()
     actual.total.backward()
@@ -1227,13 +1259,13 @@ def test_eligible_rejects_other_current_device_and_stream_capture(name: str, val
 def test_other_stream_keeps_native_route_and_recording(graph_recordings: MagicMock) -> None:
     """A recording made on one stream is not replayed on another."""
     holder, source = _LossCapture(), DualBranchLoss()
-    holder.run(source, *_inputs(3)).total.backward()
+    holder.run(source, _LossInputs(*_inputs(3))).total.backward()
     recording, inputs = loss_objective(holder), _inputs(2)
     other = torch.cuda.Stream()
     other.wait_stream(torch.cuda.current_stream())
     recordings_before = graph_recordings.call_count
     with torch.cuda.stream(other):
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
         expected = _native(source, inputs)
     assert graph_recordings.call_count == recordings_before
     torch.cuda.synchronize()

@@ -48,7 +48,7 @@ from torch.nn import functional as F
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.data.coco import CocoDetectionDataset
 from lucid_yolo.data.letterbox import Letterbox
-from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
+from lucid_yolo.losses.dual_loss import BranchPrediction, DualBranchLoss, DualLossOutput
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -237,7 +237,8 @@ def _components(out: DualLossOutput) -> tuple[Tensor, ...]:
         >>> gt_labels, gt_mask = torch.zeros(1, 1, dtype=torch.int64), torch.ones(1, 1, dtype=torch.bool)
         >>> logits = torch.zeros(1, 1, 4)
         >>> out = DualBranchLoss()(
-        ...     logits, boxes, logits, boxes, anchor_points, gt_boxes, gt_labels, gt_mask, strides=strides
+        ...     BranchPrediction(logits, boxes), BranchPrediction(logits, boxes),
+        ...     anchor_points, gt_boxes, gt_labels, gt_mask, strides=strides
         ... )
         >>> len(_components(out))
         9
@@ -280,7 +281,8 @@ def _step_is_finite(out: DualLossOutput, logits: Tensor, box_raw: Tensor) -> boo
         >>> logits, box_raw = _new_predictions(batch)
         >>> boxes = _decode_boxes(box_raw, batch.anchor_points, batch.strides)
         >>> out = DualBranchLoss()(
-        ...     logits, boxes, logits, boxes, batch.anchor_points, batch.gt_boxes, batch.gt_labels, batch.gt_mask
+        ...     BranchPrediction(logits, boxes), BranchPrediction(logits, boxes),
+        ...     batch.anchor_points, batch.gt_boxes, batch.gt_labels, batch.gt_mask
         ... )
         >>> out.total.backward()
         >>> _step_is_finite(out, logits, box_raw)
@@ -306,7 +308,14 @@ def _run_overfit(batch: _Batch) -> _Trajectory:
     for _ in range(_STEPS):
         optimizer.zero_grad()
         boxes = _decode_boxes(box_raw, batch.anchor_points, batch.strides)
-        out = loss_fn(logits, boxes, logits, boxes, batch.anchor_points, batch.gt_boxes, batch.gt_labels, batch.gt_mask)
+        out = loss_fn(
+            BranchPrediction(logits, boxes),
+            BranchPrediction(logits, boxes),
+            batch.anchor_points,
+            batch.gt_boxes,
+            batch.gt_labels,
+            batch.gt_mask,
+        )
         out.total.backward()
         all_finite = all_finite and _step_is_finite(out, logits, box_raw)
         optimizer.step()
@@ -331,7 +340,14 @@ def _one_step(batch: _Batch, alpha: float) -> _StepResult:
     loss_fn = DualBranchLoss()
     loss_fn.alpha = alpha
     boxes = _decode_boxes(box_raw, batch.anchor_points, batch.strides)
-    out = loss_fn(logits, boxes, logits, boxes, batch.anchor_points, batch.gt_boxes, batch.gt_labels, batch.gt_mask)
+    out = loss_fn(
+        BranchPrediction(logits, boxes),
+        BranchPrediction(logits, boxes),
+        batch.anchor_points,
+        batch.gt_boxes,
+        batch.gt_labels,
+        batch.gt_mask,
+    )
     out.total.backward()
     logits_grad, box_grad = _grad(logits), _grad(box_raw)
     components_finite = all(bool(torch.isfinite(component).all()) for component in _components(out))

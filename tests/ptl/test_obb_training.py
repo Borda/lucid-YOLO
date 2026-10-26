@@ -47,6 +47,7 @@ from lucid_yolo.data.rotated_geom import canonicalize, rboxes_to_polygons
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode.common import rboxes_to_letterboxed_original
 from lucid_yolo.eval.dota_eval import evaluate_rotated_map
+from lucid_yolo.losses import BranchPrediction
 from lucid_yolo.losses.oriented_loss import oriented_branch_terms
 from lucid_yolo.models.heads.detect import decode_ltrb
 from lucid_yolo.ptl import DetectionLitModule, pad_rboxes, pad_targets
@@ -422,7 +423,7 @@ def test_rotated_candidacy_reaches_assigner() -> None:
     assert int(axis_aligned.o2m_assign.fg_mask.sum()) > 0
 
 
-def _dense_inputs(module: DetectionLitModule, images: Tensor, target: Targets) -> tuple[Tensor, ...]:
+def _dense_inputs(module: DetectionLitModule, images: Tensor, target: Targets) -> tuple[BranchPrediction | Tensor, ...]:
     """Return the positional arguments ``DualBranchLoss`` takes for a one-image batch.
 
     Examples:
@@ -430,16 +431,14 @@ def _dense_inputs(module: DetectionLitModule, images: Tensor, target: Targets) -
         >>> images = torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE)
         >>> inputs = _dense_inputs(module, images, _oriented_targets(1))
         >>> len(inputs)
-        9
+        7
     """
     head_out = module(images)
     anchor_points, strides = module._anchor_grid(images.shape[-2], images.shape[-1], images.device)
     gt_boxes, gt_labels, gt_mask = pad_targets([target])
     return (
-        head_out.o2m_cls,
-        decode_ltrb(head_out.o2m_box, anchor_points, strides),
-        head_out.o2o_cls,
-        decode_ltrb(head_out.o2o_box, anchor_points, strides),
+        BranchPrediction(head_out.o2m_cls, decode_ltrb(head_out.o2m_box, anchor_points, strides)),
+        BranchPrediction(head_out.o2o_cls, decode_ltrb(head_out.o2o_box, anchor_points, strides)),
         anchor_points,
         gt_boxes,
         gt_labels,

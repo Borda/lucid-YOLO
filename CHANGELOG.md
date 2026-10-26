@@ -56,6 +56,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Fixed
 
+- **`DualLossOutput.alpha` records the weight the call used.** When a tensor `alpha` override is passed, as the compiled step and loss replay do, the output now carries that tensor instead of the `DualBranchLoss.alpha` attribute, which could disagree with the weight that produced the total (WP-212).
+
 - **Mixed-precision forward passes keep the P5 attention finite.** Logits beyond float16's range no longer turn into NaN through softmax: the logits and softmax are computed in float32 with autocast off in forward and backward under mixed precision. This applies to every task (WP-209).
 
 - **Pose training at 16-mixed keeps the RLE density finite.** A residual beyond float16's range no longer raises from the RLE density: the density is computed in float32 with autocast off (WP-209).
@@ -109,6 +111,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 - **A skipped Example is no longer counted as an executed one, and `src/` is scanned.** The doctest audit read `>>>` as coverage, so a docstring whose every line was `# doctest: +SKIP` passed; it also never looked at `src/`, where three shipped functions carried no Example at all. Both are fixed, and a skip now states its reason — before the directive, since a reason after it is not a comment but an unparsable doctest option.
 
 ### Changed
+
+- **`DualBranchLoss` takes one `BranchPrediction` per branch.** **Breaking**: `DualBranchLoss(...)(o2m, o2o, anchor_points, gt_boxes, gt_labels, gt_mask, ...)` takes `lucid_yolo.losses.BranchPrediction(logits, boxes)` for each branch in place of the four positional `o2m_logits, o2m_boxes, o2o_logits, o2o_boxes` tensors, and `DualLossOutput.alpha` is typed `float | Tensor`: the attribute float without an override, the override tensor with one. The arithmetic is unchanged (WP-212).
 
 - **A batch whose images carry different keypoint counts now raises `ValueError`.** `pack_targets` and `collate_detection` name both counts, where they used to fail with a `RuntimeError` from `torch.cat`; batches that worked before give the same result (WP-205).
 

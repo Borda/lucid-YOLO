@@ -35,6 +35,7 @@ from torch.utils.data import DataLoader, Dataset
 from training import collate_unpacked, tiny_module
 
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.losses import BranchPrediction
 from lucid_yolo.losses.dual_loss import DualLossOutput
 from lucid_yolo.models.heads.detect import decode_ltrb
 from lucid_yolo.optim.musgd import MuSGD
@@ -150,10 +151,8 @@ def _dual_loss_output(module: DetectionLitModule, images: Tensor, targets: list[
     points, strides = module._anchor_grid(images.shape[-2], images.shape[-1], images.device)
     gt_boxes, gt_labels, gt_mask = pad_targets(targets)
     return module.loss(
-        head_out.o2m_cls,
-        decode_ltrb(head_out.o2m_box, points, strides),
-        head_out.o2o_cls,
-        decode_ltrb(head_out.o2o_box, points, strides),
+        BranchPrediction(head_out.o2m_cls, decode_ltrb(head_out.o2m_box, points, strides)),
+        BranchPrediction(head_out.o2o_cls, decode_ltrb(head_out.o2o_box, points, strides)),
         points,
         gt_boxes,
         gt_labels,

@@ -187,7 +187,7 @@ from lucid_yolo.eval.coco_eval import (
 from lucid_yolo.eval.dota_eval import evaluate_rotated_map, rotated_detections_to_predictions
 from lucid_yolo.eval.segment_decode import decode_instance_masks
 from lucid_yolo.losses import oriented_loss
-from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
+from lucid_yolo.losses.dual_loss import BranchPrediction, DualBranchLoss, DualLossOutput
 from lucid_yolo.losses.keypoint_nll_loss import LaplaceNLLLoss
 from lucid_yolo.losses.mask_loss import instance_mask_loss
 from lucid_yolo.losses.oks_loss import OKSLoss
@@ -234,7 +234,13 @@ from lucid_yolo.ptl._task_terms import (
     _StepContext,
     normalize_keypoints_to_box,
 )
-from lucid_yolo.ptl.loss_capture import _LossCapture, _LossCaptureLifecycle, _native_loss, _source_signature
+from lucid_yolo.ptl.loss_capture import (
+    _LossCapture,
+    _LossCaptureLifecycle,
+    _LossInputs,
+    _native_loss,
+    _source_signature,
+)
 from lucid_yolo.ptl.network_capture import (
     _detection_stages,
     _module_breach,
@@ -1185,23 +1191,23 @@ class DetectionLitModule(LightningModule):
         ):
             out = self._loss_capture.run(
                 self.loss,
-                head_out.o2m_cls,
-                o2m_boxes,
-                head_out.o2o_cls,
-                o2o_boxes,
-                anchor_points,
-                gt_boxes,
-                gt_labels,
-                gt_mask,
-                strides,
-                alpha,
+                _LossInputs(
+                    head_out.o2m_cls,
+                    o2m_boxes,
+                    head_out.o2o_cls,
+                    o2o_boxes,
+                    anchor_points,
+                    gt_boxes,
+                    gt_labels,
+                    gt_mask,
+                    strides,
+                    alpha,
+                ),
             )
         else:
             out = self.loss(
-                head_out.o2m_cls,
-                o2m_boxes,
-                head_out.o2o_cls,
-                o2o_boxes,
+                BranchPrediction(head_out.o2m_cls, o2m_boxes),
+                BranchPrediction(head_out.o2o_cls, o2o_boxes),
                 anchor_points,
                 gt_boxes,
                 gt_labels,
@@ -2039,10 +2045,8 @@ class DetectionLitModule(LightningModule):
             o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)
             o2o_boxes = decode_ltrb(head_out.o2o_box, anchor_points, strides)
             out = self.loss(
-                head_out.o2m_cls,
-                o2m_boxes,
-                head_out.o2o_cls,
-                o2o_boxes,
+                BranchPrediction(head_out.o2m_cls, o2m_boxes),
+                BranchPrediction(head_out.o2o_cls, o2o_boxes),
                 anchor_points,
                 gt_boxes,
                 gt_labels,

@@ -13,7 +13,7 @@ from __future__ import annotations
 import gc
 import math
 import warnings
-from typing import cast
+from typing import NamedTuple, cast
 
 import torch
 from torch import Tensor, nn
@@ -24,7 +24,7 @@ from lucid_yolo.assign.stal import SmallTargetAssigner
 from lucid_yolo.assign.tal import AssignResult, _check_labels
 from lucid_yolo.losses import detection_loss
 from lucid_yolo.losses.detection_loss import DetectionBranchLoss, DetectionLossOutput
-from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
+from lucid_yolo.losses.dual_loss import BranchPrediction, DualBranchLoss, DualLossOutput
 from lucid_yolo.ptl._graph_replay import (
     BF16_REPLAY_SUPPORTED,
     ReplayLifecycle,
@@ -36,6 +36,21 @@ from lucid_yolo.ptl._graph_replay import precision_signature as _precision_signa
 
 #: First verified BF16 replay runtime, bound here so a patch of this module reaches the contract gate.
 _BF16_SUPPORTED = BF16_REPLAY_SUPPORTED
+
+
+class _LossInputs(NamedTuple):
+    """Name the recorder's flat inputs in their existing positional order."""
+
+    o2m_logits: Tensor
+    o2m_boxes: Tensor
+    o2o_logits: Tensor
+    o2o_boxes: Tensor
+    anchor_points: Tensor
+    gt_boxes: Tensor
+    gt_labels: Tensor
+    gt_mask: Tensor
+    strides: Tensor
+    alpha: Tensor
 
 
 def _functions(source: DualBranchLoss) -> tuple[object, ...]:
@@ -161,7 +176,7 @@ class _LossObjective(nn.Module):
         source = self.source
         ma = source.o2m_assigner._assign(ml.sigmoid(), mb, points, boxes, labels, mask, check_labels=False)
         oa = source.o2o_assigner._assign(ol.sigmoid(), ob, points, boxes, labels, mask, check_labels=False)
-        out = source._score(ml, mb, ol, ob, ma, oa, strides, alpha)
+        out = source._score(BranchPrediction(ml, mb), BranchPrediction(ol, ob), ma, oa, strides, alpha)
         self.assignments = ma, oa
         return (
             out.total,
@@ -280,27 +295,30 @@ class _LossCapture:
         self._disabled = True
         warnings.warn(f"capture_loss=True stays eager: {reason}", UserWarning, stacklevel=3)
 
-    def run(
-        self,
-        source: DualBranchLoss,
-        ml: Tensor,
-        mb: Tensor,
-        ol: Tensor,
-        ob: Tensor,
-        points: Tensor,
-        boxes: Tensor,
-        labels: Tensor,
-        mask: Tensor,
-        strides: Tensor,
-        alpha: Tensor,
-    ) -> DualLossOutput:
+    def run(self, source: DualBranchLoss, inputs: _LossInputs) -> DualLossOutput:
         """Replay an eligible detection loss, otherwise call its existing public route."""
-        inputs = ml, mb, ol, ob, points, boxes, labels, mask, strides, alpha
+        result = self._run(source, inputs)
+        if result is not None:
+            return result
+        return source(
+            BranchPrediction(inputs.o2m_logits, inputs.o2m_boxes),
+            BranchPrediction(inputs.o2o_logits, inputs.o2o_boxes),
+            inputs.anchor_points,
+            inputs.gt_boxes,
+            inputs.gt_labels,
+            inputs.gt_mask,
+            strides=inputs.strides,
+            alpha=inputs.alpha,
+        )
+
+    def _run(self, source: DualBranchLoss, inputs: _LossInputs) -> DualLossOutput | None:
+        """Check replay eligibility and prepare the masked workspace before execution."""
+        ml, mb, ol, ob, _, boxes, labels, mask, strides, alpha = inputs
         if self._disabled or self._pending_backward or not _eligible(inputs):
-            return source(*inputs[:4], points, boxes, labels, mask, strides=strides, alpha=alpha)
+            return None
         contract = self._contract(source, ml)
         if contract is None:
-            return source(*inputs[:4], points, boxes, labels, mask, strides=strides, alpha=alpha)
+            return None
         state, precision = contract
         signature = (
             tuple(
@@ -313,7 +331,7 @@ class _LossCapture:
             torch.cuda.current_stream(ml.device).cuda_stream,
         )
         if self._signature is not None and signature != self._signature:
-            return source(*inputs[:4], points, boxes, labels, mask, strides=strides, alpha=alpha)
+            return None
         if __debug__:
             _check_labels(labels, mask, ml.shape[-1])
             if ol.shape[-1] != ml.shape[-1]:
@@ -326,7 +344,7 @@ class _LossCapture:
         if boxes.shape[1] == 0 or not bool(
             torch.stack(tuple(value.isfinite().all() for value in (ml, mb, ol, ob, boxes))).all()
         ):
-            return source(*inputs[:4], points, boxes, labels, mask, strides=strides, alpha=alpha)
+            return None
         capacity = max(self._capacity, 1 << (max(1, boxes.shape[1]) - 1).bit_length())
         if capacity != self._capacity:
             self.clear()
@@ -342,6 +360,10 @@ class _LossCapture:
         arguments = (*inputs[:5], *self._workspace, strides, alpha)
         with replay_autocast():
             result = self._replay(source, arguments, capacity, signature, state, precision)
+        return self._recorded_output(result, alpha)
+
+    def _recorded_output(self, result: tuple[Tensor, ...], alpha: Tensor) -> DualLossOutput:
+        """Own replayed outputs and assignments until their backward releases the hold."""
         assert self._objective is not None and self._objective.assignments is not None
         ma, oa = (_copy_assignment(value) for value in self._objective.assignments)
         node = result[0].grad_fn
@@ -350,7 +372,7 @@ class _LossCapture:
         self._pending_backward = True
         node.register_hook(self._backward_done)
         return DualLossOutput(
-            result[0], DetectionLossOutput(*result[1:5]), DetectionLossOutput(*result[5:]), source.alpha, ma, oa
+            result[0], DetectionLossOutput(*result[1:5]), DetectionLossOutput(*result[5:]), alpha, ma, oa
         )
 
     def _contract(self, source: DualBranchLoss, logits: Tensor) -> tuple[tuple[object, ...], tuple[object, ...]] | None:

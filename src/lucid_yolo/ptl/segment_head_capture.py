@@ -413,17 +413,13 @@ class _SegmentHeadCapture:
         except RuntimeError as error:
             self.retire(f"the CUDA precision policy cannot be read ({error})")
             return None
-        reason = _head_breach(module.head, len(features))
-        reason = reason or _feature_breach(features, precision)
+        reason = _head_breach(module.head, len(features)) or _feature_breach(features, precision)
         stages = (module.head, module.proto_fusion, module.protonet, module.semantic)
         if self.owner is not None and tuple(self.owner.children()) != stages:
             reason = "a prediction stage was replaced after recording"
         owner = self.owner if self.owner is not None else nn.ModuleList(stages)
         members = _members(owner)
-        reason = reason or _parameter_breach(members[1], members[2], features[0].device)
-        reason = reason or _stage_breach(owner, members[0])
-        if reason is None and self.owner is None:
-            reason = _storage_breach(owner, features[0].device)
+        reason = self._runner_breach(reason, owner, members, features[0].device)
         state = (_tensor_signature(members[1] + members[2]), precision) if reason is None else None
         if reason is None and self.attributes is not None and not self.attributes.matches(members[0]):
             reason = "prediction attributes or registration names changed after recording"
@@ -437,6 +433,22 @@ class _SegmentHeadCapture:
             self.attributes = _AttributePlan(members[0])
             self.tensors = members[1] + members[2]
         return self
+
+    def _runner_breach(
+        self,
+        reason: str | None,
+        owner: nn.Module,
+        members: tuple[tuple[nn.Module, ...], tuple[Tensor, ...], tuple[Tensor, ...]],
+        device: torch.device,
+    ) -> str | None:
+        """Keep lazy guard order and the stage-replacement warning's precedence."""
+        checks: tuple[Callable[[], str | None], ...] = (
+            lambda: reason,
+            lambda: _parameter_breach(members[1], members[2], device),
+            lambda: _stage_breach(owner, members[0]),
+            lambda: _storage_breach(owner, device) if self.owner is None else None,
+        )
+        return next((breach for check in checks if (breach := check()) is not None), None)
 
     def start_batch(self) -> None:
         """Release holds whose previous training step skipped its backward, so the new batch may replay."""
