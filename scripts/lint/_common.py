@@ -16,11 +16,52 @@ the checker by path, and for the type checker alike.
 from __future__ import annotations
 
 import argparse
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
-#: Repository root (``scripts/lint/`` is two levels below it).
+#: Repository root (``scripts/lint/`` is two levels below it), resolved from this file rather
+#: than from the process. Every checker's paths and ``git`` calls are anchored here: read from
+#: the working directory instead, a checker answers about wherever it happens to be standing —
+#: from a subdirectory it dies on a table it cannot find, and from another checkout it would
+#: validate that checkout's history and report clean.
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+class FenceTracker:
+    r"""Track fenced code using the caller's fence-line grammar.
+
+    ``language`` is ``None`` outside a fence and an empty string for an unlabelled
+    fence. A named ``language`` regex group retains the opening language when present.
+    Every matching line toggles the fence, preserving the checkers' existing rules.
+
+    Examples:
+        >>> fences = FenceTracker(re.compile(r"^```(?P<language>\w*)$"))
+        >>> fences.update("```pycon"), fences.language
+        (True, 'pycon')
+        >>> fences.update(">>> 1"), fences.language
+        (False, 'pycon')
+        >>> fences.update("```"), fences.language
+        (True, None)
+        >>> quoted = FenceTracker(re.compile(r"^\s*(?:>\s*)*(```|~~~)"))
+        >>> quoted.update("> ~~~python"), quoted.language
+        (True, '')
+        >>> quoted.update("> ```"), quoted.language
+        (True, None)
+    """
+
+    def __init__(self, pattern: re.Pattern[str]) -> None:
+        """Start outside any fence, recognizing lines with ``pattern``."""
+        self._pattern = pattern
+        self.language: str | None = None
+
+    def update(self, line: str) -> bool:
+        """Update the open fence and return whether this line is a fence."""
+        match = self._pattern.match(line)
+        if match is None:
+            return False
+        self.language = match.groupdict().get("language", "") if self.language is None else None
+        return True
 
 
 def add_repo_root_argument(parser: argparse.ArgumentParser, purpose: str) -> None:

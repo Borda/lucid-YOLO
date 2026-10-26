@@ -83,8 +83,8 @@ from pathlib import Path
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-#: Repository root (``scripts/`` is one level below it).
-REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root for path-based entry points
+from scripts._common import REPO_ROOT
 
 #: Default changelog consulted for the tag's version section.
 DEFAULT_CHANGELOG = REPO_ROOT / "CHANGELOG.md"

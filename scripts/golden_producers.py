@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import tempfile
 from pathlib import Path
 from types import ModuleType
@@ -71,8 +72,8 @@ from lucid_yolo.models.build import (
 from lucid_yolo.optim import MuSGD
 from lucid_yolo.ptl.datamodule import _host_sample, _TrainPipeline
 
-#: Repository root (``scripts/`` is one level below it).
-REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root for path-based entry points
+from scripts._common import REPO_ROOT
 
 #: Path to the WP-007 synthetic-fixture helpers, loaded by file path.
 _SYNTHETIC_PATH = REPO_ROOT / "tests" / "fixtures" / "synthetic.py"

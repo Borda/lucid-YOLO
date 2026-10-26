@@ -30,7 +30,7 @@ from typing import Any, cast
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
-from scripts.lint._common import REPO_ROOT, print_failure
+from scripts.lint._common import REPO_ROOT, print_failure, sorted_rglob
 
 DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 DEFAULT_MKDOCS_YML = REPO_ROOT / "mkdocs.yml"
@@ -126,7 +126,7 @@ def check_every_docs_page_is_listed_in_the_nav(docs_dir: Path, mkdocs_yml: Path)
     unlisted = [line.strip().lstrip("/") for line in str(config.get("not_in_nav") or "").splitlines() if line.strip()]
     on_disk = {
         rel
-        for rel in (path.relative_to(docs_dir).as_posix() for path in docs_dir.rglob("*.md"))
+        for rel in (path.relative_to(docs_dir).as_posix() for path in sorted_rglob(docs_dir, "*.md"))
         if not any(fnmatch.fnmatch(rel, pattern) for pattern in unlisted)
     }
     in_nav = set(_nav_targets(config["nav"]))

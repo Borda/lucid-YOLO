@@ -30,7 +30,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
-from scripts.lint._common import REPO_ROOT, print_failure, sorted_rglob
+from scripts.lint._common import REPO_ROOT, FenceTracker, print_failure, sorted_rglob
 
 #: Roots scanned when no file is named on the command line.
 DEFAULT_ROOTS = ("src",)
@@ -86,21 +86,19 @@ def docstring_violations(text: str, first_line: int) -> list[tuple[int, str]]:
     """
     violations = []
     lines = text.splitlines()
-    language: str | None = None
+    fences = FenceTracker(FENCE_RE)
     in_bare_run = False
     for offset, line in enumerate(lines):
-        fence = FENCE_RE.match(line)
-        if fence is not None:
+        language = fences.language
+        if fences.update(line):
             in_bare_run = False
             if language is None:
-                language = fence.group("language")
                 continue
             one_blank = offset >= 2 and not lines[offset - 1].strip() and lines[offset - 2].strip()
             if language == "pycon" and not one_blank:
                 violations.append(
                     (first_line + offset, "pycon block needs exactly one blank line before its closing fence")
                 )
-            language = None
             continue
         if not line.strip():
             in_bare_run = False

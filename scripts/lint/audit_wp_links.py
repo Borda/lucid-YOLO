@@ -39,7 +39,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
-from scripts.lint._common import REPO_ROOT, print_failure, sorted_rglob
+from scripts.lint._common import REPO_ROOT, FenceTracker, print_failure, sorted_rglob
 
 DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 
@@ -147,11 +147,10 @@ def mentions(text: str) -> Iterator[tuple[int, int, str]]:
         >>> [wp_id for _, _, wp_id in mentions(text)]
         ['125']
     """
-    offset, fenced = 0, False
+    offset = 0
+    fences = FenceTracker(_FENCE)
     for line in text.splitlines(keepends=True):
-        if _FENCE.match(line):
-            fenced = not fenced
-        elif not fenced and not _SKIP_LINE.match(line):
+        if not fences.update(line) and fences.language is None and not _SKIP_LINE.match(line):
             masked = _SKIP_SPAN.sub(lambda span: " " * len(span.group()), line)
             for match in _MENTION.finditer(masked):
                 yield offset + match.start(), offset + match.end(), match.group(1)

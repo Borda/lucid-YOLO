@@ -43,8 +43,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-#: Repository root (``scripts/lint/`` is two levels below it).
-REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root for path-based entry points
+from scripts.lint._common import REPO_ROOT
 
 #: Default frozen-golden root audited when no ``--frozen-root`` is given.
 DEFAULT_FROZEN_ROOT = REPO_ROOT / "goldens" / "frozen"
