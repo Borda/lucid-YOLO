@@ -24,7 +24,8 @@ import pytest
 import torch
 from pytorch_lightning import Trainer
 from torch import Tensor
-from training import LogRecorder, has_gradient, tiny_module
+from training import LogRecorder, tiny_module
+from training import segment_targets as _synthetic_targets
 
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.assign.tal import AssignResult
@@ -62,37 +63,6 @@ def _tiny_module(task: str = "segment") -> DetectionLitModule:
         'detect'
     """
     return tiny_module(task, box_gain=_BOX_GAIN, cls_gain=_CLS_GAIN, l1_gain=_L1_GAIN, alpha=_ALPHA)
-
-
-def _rectangle_ring(box: Tensor) -> Tensor:
-    """Return the four-point polygon ring tracing an ``xyxy`` box.
-
-    Examples:
-        >>> _rectangle_ring(torch.tensor([0.0, 0.0, 4.0, 2.0]))
-        tensor([[0., 0.],
-                [4., 0.],
-                [4., 2.],
-                [0., 2.]])
-    """
-    x1, y1, x2, y2 = box.tolist()
-    return torch.tensor([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=torch.float32)
-
-
-def _synthetic_targets(num_boxes: int) -> Targets:
-    """Build ``num_boxes`` valid ``xyxy`` targets, each with its own polygon ring.
-
-    Examples:
-        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
-        <torch._C.Generator object at ...>
-        >>> targets = _synthetic_targets(2)
-        >>> targets.boxes.shape, len(targets.polygons)
-        (torch.Size([2, 4]), 2)
-    """
-    top_left = torch.rand(num_boxes, 2) * 80.0
-    size = torch.rand(num_boxes, 2) * 40.0 + 10.0
-    boxes = torch.cat([top_left, top_left + size], dim=1)
-    labels = torch.randint(0, _NUM_CLASSES, (num_boxes,))
-    return Targets(boxes=boxes, labels=labels, polygons=[_rectangle_ring(box) for box in boxes])
 
 
 def _synthetic_batch() -> tuple[Tensor, list[Targets]]:
@@ -151,43 +121,6 @@ def test_segment_loss_exceeds_detection_only_loss() -> None:
 
     assert bool(torch.isfinite(segment_loss)) and segment_loss.ndim == 0
     assert bool(segment_loss.detach() > detect_loss.detach())
-
-
-def test_gradients_reach_every_mask_branch() -> None:
-    """Backward through the segment loss reaches the prototype, auxiliary and coefficient stems.
-
-    Catches an inert ``_task_extra_loss``, a detached mask target path, and a
-    branch left unsupervised — in particular the one-to-one coefficient stem,
-    whose absence from the loss would leave the deployed decode reading
-    never-trained coefficients while every other test still passed.
-    """
-    module = _tiny_module()
-    module.log = LogRecorder()  # type: ignore[method-assign]
-
-    module.training_step(_synthetic_batch(), 0).backward()
-
-    assert has_gradient(module.protonet)
-    assert has_gradient(module.proto_fusion)
-    assert has_gradient(module.semantic)
-    assert has_gradient(module.head.o2o.coeff_stems)
-    assert has_gradient(module.head.o2m.coeff_stems)
-
-
-def test_image_without_instances_gives_finite_zero_mask_term() -> None:
-    """An empty image yields a finite loss and no positives, not a ``0 / 0`` NaN.
-
-    Catches a mean over an empty instance axis: the mask term would be NaN and
-    poison the whole batch's total on the first background-only image.
-    """
-    module = _tiny_module()
-    recorder = LogRecorder()
-    module.log = recorder  # type: ignore[method-assign]
-    batch = (torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE), [Targets.empty()])
-
-    loss = module.training_step(batch, 0)
-
-    assert bool(torch.isfinite(loss))
-    assert recorder.values["train/mask"] == 0.0
 
 
 def test_boxes_without_polygons_rejected() -> None:

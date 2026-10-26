@@ -39,11 +39,11 @@ from pathlib import Path
 import pytest
 import torch
 from torch import Tensor, nn
-from training import LogRecorder, has_gradient, tiny_module
+from training import LogRecorder, tiny_module
+from training import oriented_targets as _oriented_targets
 
 from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.data.coco import build_scale_policy
-from lucid_yolo.data.rotated_geom import canonicalize, rboxes_to_polygons
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode.common import rboxes_to_letterboxed_original
 from lucid_yolo.eval.dota_eval import evaluate_rotated_map
@@ -127,33 +127,6 @@ def _tiny_module(task: str = "obb", **overrides: float) -> DetectionLitModule:
     return tiny_module(task, **gains)
 
 
-def _oriented_targets(num_boxes: int, difficult: Tensor | None = None) -> Targets:
-    """Build elongated, rotated ground truths with envelopes fitted to the same corners.
-
-    Elongation and rotation are load-bearing, not incidental: an axis-aligned or square
-    target sits at the stationary point of both angular terms, where a correctly wired
-    angle stem legitimately receives zero gradient.
-
-    Examples:
-        >>> targets = _oriented_targets(2)
-        >>> targets.boxes.shape, targets.rboxes.shape
-        (torch.Size([2, 4]), torch.Size([2, 5]))
-    """
-    centre = torch.rand(num_boxes, 2) * 60.0 + 50.0
-    long_edge = torch.rand(num_boxes) * 30.0 + 30.0
-    short_edge = torch.rand(num_boxes) * 8.0 + 8.0
-    theta = torch.rand(num_boxes) * 0.9 + 0.2
-    rboxes = canonicalize(torch.stack([centre[:, 0], centre[:, 1], long_edge, short_edge, theta], dim=1))
-    corners = rboxes_to_polygons(rboxes)
-    boxes = torch.cat([corners.amin(dim=1), corners.amax(dim=1)], dim=1)
-    return Targets(
-        boxes=boxes,
-        labels=torch.randint(0, _NUM_CLASSES, (num_boxes,)),
-        rboxes=rboxes,
-        difficult=torch.zeros(num_boxes, dtype=torch.bool) if difficult is None else difficult,
-    )
-
-
 def _oriented_batch() -> tuple[Tensor, list[Targets]]:
     """Build a two-image batch with ragged (2 and 1) instance counts.
 
@@ -164,22 +137,6 @@ def _oriented_batch() -> tuple[Tensor, list[Targets]]:
     """
     images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
     return images, [_oriented_targets(2), _oriented_targets(1)]
-
-
-def test_gradients_reach_both_branches_angle_stems() -> None:
-    """One ``task="obb"`` step leaves non-zero gradients on the o2o *and* o2m angle stems.
-
-    This is the test that would have caught the Phase 8 defect: the stems existed,
-    were constructed, appeared in the state dict and in the parameter count, and
-    received no gradient because nothing in the objective read them.
-    """
-    module = _tiny_module()
-    module.log = LogRecorder()  # type: ignore[method-assign]
-
-    module.training_step(_oriented_batch(), 0).backward()
-
-    assert has_gradient(module.head.o2o.angle_stems)
-    assert has_gradient(module.head.o2m.angle_stems)
 
 
 @pytest.mark.parametrize(
@@ -228,24 +185,6 @@ def test_angle_gain_default_registered_a22_value() -> None:
     ``0.25``, with the run-to-run spread falling from 0.667 to 0.096).
     """
     assert DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=1, task="obb")._angle_gain == 0.25
-
-
-def test_obb_state_dict_detection_state_dict_plus_angle_stems() -> None:
-    """Dropping the angle-stem keys from an ``obb`` module leaves exactly a ``detect`` module's.
-
-    Pins the composition rule WP-087 established: the oriented module builds through
-    :func:`~lucid_yolo.models.build.build_detection_stages` and keeps its stages flat.
-    Nesting an :class:`~lucid_yolo.models.build.OrientedDetector` inside it would
-    prefix every key with that attribute name and invalidate the accepted Det-smoke
-    checkpoint — a change no shape, count or loss value would reveal.
-    """
-    oriented = _tiny_module()
-    detection = _tiny_module(task="detect")
-
-    keys = [key for key in oriented.state_dict() if ".angle_stems." not in key]
-
-    assert keys == list(detection.state_dict())
-    assert any(".angle_stems." in key for key in oriented.state_dict())
 
 
 def test_detect_step_reproduces_pre_change_snapshot(single_threaded: None) -> None:

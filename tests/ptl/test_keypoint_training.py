@@ -48,6 +48,7 @@ import pytest
 import torch
 from torch import Tensor
 from training import LogRecorder, has_gradient, tiny_module
+from training import keypoint_targets as _posed_targets
 
 import lucid_yolo.ptl
 from lucid_yolo.assign.tal import AssignResult
@@ -113,31 +114,6 @@ def _tiny_module(task: str = "keypoints", keypoint_loss: str = "rle", **override
     return module
 
 
-def _posed_targets(num_boxes: int, visibility: Tensor | None = None) -> Targets:
-    """Build boxes with one point set per instance, inside the canvas.
-
-    The points are placed independently of the boxes on purpose: nothing in the
-    objective ties a point to its own box's interior, and a fixture that put them
-    at box centres would let a decode that ignored the anchor grid look correct.
-
-    Examples:
-        >>> targets = _posed_targets(2)
-        >>> targets.boxes.shape, targets.keypoints.shape, targets.keypoint_vis.shape
-        (torch.Size([2, 4]), torch.Size([2, 3, 2]), torch.Size([2, 3]))
-    """
-    top_left = torch.rand(num_boxes, 2) * 80.0
-    size = torch.rand(num_boxes, 2) * 40.0 + 10.0
-    points = torch.rand(num_boxes, _NUM_KEYPOINTS, 2) * float(_IMG_SIZE)
-    return Targets(
-        boxes=torch.cat([top_left, top_left + size], dim=1),
-        labels=torch.randint(0, _NUM_CLASSES, (num_boxes,)),
-        keypoints=points,
-        keypoint_vis=torch.full((num_boxes, _NUM_KEYPOINTS), 2, dtype=torch.int64)
-        if visibility is None
-        else visibility,
-    )
-
-
 def _posed_batch() -> tuple[Tensor, list[Targets]]:
     """Build a two-image batch with ragged (2 and 1) instance counts.
 
@@ -200,7 +176,7 @@ class TestHeadConstruction:
         ``save_hyperparameters`` still recorded a ``K`` the head has no stem to predict,
         leaving a later reader a documented point schema and no points (audit L-25). The
         refusal keeps the state-dict guarantee and drops the silence; the shape half is
-        pinned by ``test_state_dict_detection_state_dict_plus_point_stems_and_flow``.
+        pinned by ``test_task_state_dict_keeps_detection_keys``.
         """
         with pytest.raises(ValueError, match="meaningless for task='detect'"):
             DetectionLitModule(
@@ -217,23 +193,6 @@ class TestHeadConstruction:
         """
         with pytest.raises(ValueError, match="num_keypoints"):
             DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=1, task="keypoints")
-
-    def test_state_dict_detection_state_dict_plus_point_stems_and_flow(self) -> None:
-        """Dropping the point-stem and flow keys from a keypoints module leaves a detect module's.
-
-        Pins the composition rule WP-087 established and WP-088 re-pinned: the pose module
-        builds through :func:`~lucid_yolo.models.build.build_detection_stages` and keeps its
-        stages flat. Nesting a pose-specific container inside it would prefix every key with
-        that attribute name and invalidate the accepted checkpoints — a change no shape,
-        count or loss value would reveal.
-        """
-        posed = _tiny_module()
-        detection = _tiny_module(task="detect")
-
-        keys = [key for key in posed.state_dict() if ".keypoint_stems." not in key and not key.startswith("rle_loss.")]
-
-        assert keys == list(detection.state_dict())
-        assert any(".keypoint_stems." in key for key in posed.state_dict())
 
 
 class TestKeypointLossSelection:
@@ -328,23 +287,6 @@ class TestKeypointLossSelection:
 
 class TestTrainingStep:
     """What one ``task="keypoints"`` step does to the total and to the gradients."""
-
-    def test_gradients_reach_both_branches_point_stems_and_flow(self) -> None:
-        """One step leaves non-zero gradients on both branches' point stems and on the flow.
-
-        This is the test that would have caught the Phase 12 gap: the stems and the loss
-        both existed, were constructed, appeared in the parameter count, and received no
-        gradient because nothing in the objective read them. The flow is asserted beside
-        them because it is the half of R14 that has no other way to be trained.
-        """
-        module = _tiny_module()
-
-        module.training_step(_posed_batch(), 0).backward()
-
-        assert has_gradient(module.head.o2o.keypoint_stems)
-        assert has_gradient(module.head.o2m.keypoint_stems)
-        assert module.rle_loss is not None
-        assert has_gradient(module.rle_loss)
 
     def test_keypoint_gain_enters_total_at_weight(self) -> None:
         """Zeroing ``keypoint_gain`` drops exactly ``gain * term`` from the total.
@@ -454,7 +396,7 @@ class TestTrainingStep:
 
         Its sigma table is the ``val/oks_mAP`` evaluator's own, at the tiny head's ``K``
         (A67's uniform value, since 3 is not COCO's 17), and it lives in a non-persistent
-        buffer so the pinned key set of ``test_state_dict_detection_state_dict_plus_point_stems_and_flow``
+        buffer so the pinned key set of ``test_task_state_dict_keeps_detection_keys``
         is untouched.
         """
         posed = _tiny_module()
@@ -464,21 +406,6 @@ class TestTrainingStep:
         assert posed.oks_loss.k.tolist() == pytest.approx([2.0 * SYMBOL_KEYPOINT_OKS_SIGMA] * _NUM_KEYPOINTS)
         assert detection.oks_loss is None
         assert not any(key.startswith("oks_loss.") for key in posed.state_dict())
-
-    def test_image_without_instances_gives_finite_loss(self) -> None:
-        """An empty batch yields a finite, exactly-zero keypoint term rather than a ``0 / 0`` NaN.
-
-        With no ground truth there are no positives to gather and the padded point axis has
-        length zero, which no gather can index. The term has to answer with a real zero.
-        """
-        module = _tiny_module()
-        recorder = LogRecorder()
-        module.log = recorder  # type: ignore[method-assign]
-
-        loss = module.training_step((torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE), [Targets.empty()]), 0)
-
-        assert bool(torch.isfinite(loss))
-        assert recorder.values["train/keypoint"] == 0.0
 
     def test_image_without_instances_beside_posed_image_trains(self) -> None:
         """``Targets.empty()``'s ``(0, 0, 2)`` points beside a posed image still give a real point term.
