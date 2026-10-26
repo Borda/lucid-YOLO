@@ -35,6 +35,7 @@ import torch
 from torch import Tensor
 
 from lucid_yolo.data.letterbox import Letterbox
+from lucid_yolo.tasks import _MAX_DETECTIONS
 
 __all__ = [
     "BOX_CORNERS",
@@ -82,7 +83,7 @@ PAD_ANCHOR_INDEX = -1
 #: evaluation protocol that reads them (R1 sec. 3.2.1, R3 sec. 4, A9, A47). 300, not
 #: COCO's 100: it is the width the one-to-one branch's top-k emits, and a lower scoring
 #: cap would measure a truncation rather than the model.
-MAX_DETECTIONS = 300
+MAX_DETECTIONS = _MAX_DETECTIONS
 
 #: Evaluation-time confidence threshold of the suppression paths — permissive, so the
 #: mAP integration sees the low-confidence tail. Not a single-image default:

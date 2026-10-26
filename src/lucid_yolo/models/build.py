@@ -57,6 +57,7 @@ from lucid_yolo.models.heads import (
 from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS
 from lucid_yolo.models.neck import DetectionNeck
 from lucid_yolo.models.registry import ScaleSpec, scale_spec
+from lucid_yolo.tasks import Task
 
 __all__ = [
     "Detector",
@@ -75,7 +76,7 @@ __all__ = [
 ]
 
 #: Default detection input side in pixels (square), R1 Table 7 protocol.
-_DEFAULT_IMG_SIZE = 640
+_DEFAULT_IMG_SIZE = Task.DETECT.spec.img_size
 
 #: Default COCO detection class count.
 _DEFAULT_NUM_CLASSES = 80

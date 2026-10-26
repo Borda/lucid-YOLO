@@ -168,8 +168,9 @@ Provenance: R1 sec. 3.2, R1 Eq. 2-3, R1 Tables S2/S5. Assumptions: A8.
 from __future__ import annotations
 
 import copy
+import inspect
 import warnings
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 from pytorch_lightning import Callback, LightningModule
@@ -252,7 +253,8 @@ from lucid_yolo.ptl.segment_head_capture import _SegmentHeadCapture, _SegmentHea
 from lucid_yolo.tasks import TASK_NAMES, Task
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
+    from types import FrameType
 
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
 
@@ -747,7 +749,7 @@ class DetectionLitModule(LightningModule):
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
         _validate_replay_options(task, compile_step, capture_network, capture_loss, capture_segment_heads)
         self.save_hyperparameters()
-        task = self._record_plain_task(task)
+        task = Task(task).value
         self._capture_loss, self._capture_loss_active = capture_loss, False
         self._capture_network, self._capture_network_active = capture_network, False
         self._network_capture, self._loss_capture = _NetworkCapture(), _LossCapture()
@@ -882,31 +884,53 @@ class DetectionLitModule(LightningModule):
         #: Per-image-size cache of ``(anchor_points, stride_per_anchor)`` on CPU.
         self._anchor_cache: dict[tuple[int, int], tuple[Tensor, Tensor]] = {}
 
-    def _record_plain_task(self, task: str) -> str:
-        """Overwrite the recorded ``task`` with its plain spelling, after ``save_hyperparameters``, and return it.
+    def save_hyperparameters(
+        self,
+        *args: Any,
+        ignore: Sequence[str] | str | None = None,
+        frame: FrameType | None = None,
+        logger: bool = True,
+    ) -> None:
+        """Record Lightning hyperparameters, with ``task`` in its plain spelling, on every save.
 
         The plain spelling, even when a :class:`~lucid_yolo.tasks.Task` member was passed:
         a checkpoint loads under ``torch.load(weights_only=True)``, whose restricted
         unpickler refuses a ``Task`` in ``hparams["task"]``. Normalizing the constructor's
-        local before the call is not enough, because ``save_hyperparameters`` merges every
-        subclass ``__init__`` frame's arguments over this one's, ``**kwargs`` contents
-        included, so a subclass forwarding ``task=Task.DETECT`` records the member. Both
-        records the call wrote are corrected: ``hparams``, which the checkpoint stores, and
-        the initial snapshot a logger writes, retaken the way ``save_hyperparameters``
-        itself takes it.
+        local before the call is not enough, because the save merges every subclass
+        ``__init__`` frame's arguments over this one's, ``**kwargs`` contents included, and
+        correcting the record once after the constructor's own call is not enough either,
+        because a subclass may save again after ``super().__init__`` returns. So every save
+        corrects both records it wrote: ``hparams``, which the checkpoint stores, and the
+        initial snapshot a logger writes. The arguments keep Lightning's meaning; with no
+        ``frame``, the caller's frame is passed on, since Lightning would otherwise inspect
+        this override's. A hyperparameter dict given without ``task`` (LightningCLI's path)
+        stays as given.
 
         Args:
-            task: The constructor's ``task`` argument, a plain name or a ``Task`` member.
+            *args: Lightning's positional hyperparameters: argument names, or one dict or namespace.
+            ignore: Argument names Lightning leaves out of the record.
+            frame: The frame whose ``__init__`` arguments are recorded; the caller's when ``None``.
+            logger: Whether the initial snapshot is offered to the logger.
 
-        Returns:
-            The plain task name.
+        Examples:
+            ```pycon
+            >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=3)
+            >>> module.save_hyperparameters({"task": Task.DETECT}, logger=False)
+            >>> type(module.hparams["task"]) is str
+            True
+
+            ```
         """
-        plain = Task(task).value
-        if "task" in self.hparams:
-            # A hyperparameter dict given without ``task`` (LightningCLI's path) stays as given.
-            self.hparams["task"] = plain
+        if frame is None:
+            # Lightning must inspect the original caller, rather than this wrapper.
+            frame = inspect.currentframe()
+            if frame is not None:
+                frame = frame.f_back
+        super().save_hyperparameters(*args, ignore=ignore, frame=frame, logger=logger)
+        recorded_task = self.hparams.get("task")
+        if isinstance(recorded_task, Task):
+            self.hparams["task"] = recorded_task.value
             self._hparams_initial = copy.deepcopy(self.hparams)
-        return plain
 
     def _init_segmentation(self, task: str, num_classes: int, capture_segment_heads: bool) -> None:
         """Build segmentation in its existing initialization order and retain its scheduling request."""
@@ -1580,8 +1604,7 @@ class DetectionLitModule(LightningModule):
         detections, anchor_indices = self._val_decoder.decode_with_indices(
             head_out.o2o_cls, head_out.o2o_box, anchor_points, strides
         )
-        preds = _box_predictions(detections)
-        self._strategy.update_box_validation(self, preds, targets)
+        self._strategy.update_box_validation(self, detections, targets)
         if self._val_segm is not None and seg_out is not None and masks is not None:
             image_size = (int(images.shape[-2]), int(images.shape[-1]))
             self._update_val_segm(seg_out, detections, anchor_indices, targets, masks, image_size)
@@ -1590,11 +1613,14 @@ class DetectionLitModule(LightningModule):
         )
         return loss
 
-    def _update_val_map(self, preds: list[dict[str, Tensor]], targets: list[Targets]) -> None:
+    def _update_val_map(self, detections: Tensor, targets: list[Targets]) -> None:
         """Accumulate one batch's kept boxes and its ground truth, moved to the host, for the epoch ``val/mAP``.
 
+        The host copy of the detections is made here rather than by the caller, so a strategy
+        that keeps no axis-aligned metric never pays for it.
+
         Args:
-            preds: The batch's per-image kept detections, as :func:`_box_predictions` builds them.
+            detections: The ``(B, k, 6)`` decoded A9 batch, reduced by :func:`_box_predictions`.
             targets: The batch's per-image ground truth, carrying ``boxes`` and ``labels``.
         """
         host_boxes = _host_split([t.boxes for t in targets])
@@ -1602,7 +1628,7 @@ class DetectionLitModule(LightningModule):
         ground_truth = [
             {"boxes": boxes, "labels": labels} for boxes, labels in zip(host_boxes, host_labels, strict=True)
         ]
-        self._val_map.update(preds, ground_truth)
+        self._val_map.update(_box_predictions(detections), ground_truth)
 
     def _update_val_rotated(
         self, head_out: DualHeadOutput, targets: list[Targets], anchor_points: Tensor, strides: Tensor

@@ -265,11 +265,29 @@ class _KwargsTaskModule(DetectionLitModule):
         super().__init__(depth=0.34, width=0.25, max_channels=64, num_classes=_NUM_CLASSES, **kwargs)
 
 
+class _ResavedTaskModule(_NamedTaskModule):
+    """Record constructor arguments again after the base constructor returns."""
+
+    def __init__(self, task: str) -> None:
+        super().__init__(task=task)
+        self.save_hyperparameters()
+
+
+class _ResavedKwargsTaskModule(_KwargsTaskModule):
+    """Re-record a member forwarded through keyword arguments."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.save_hyperparameters()
+
+
 @pytest.mark.parametrize(
     "module_cls",
     [
         pytest.param(_NamedTaskModule, id="named-parameter"),
         pytest.param(_KwargsTaskModule, id="kwargs"),
+        pytest.param(_ResavedTaskModule, id="resaved-named-parameter"),
+        pytest.param(_ResavedKwargsTaskModule, id="resaved-kwargs"),
     ],
 )
 class TestSubclassCheckpointTask:
@@ -283,7 +301,9 @@ class TestSubclassCheckpointTask:
 
     def test_saved_task_is_plain_str(self, module_cls: Callable[..., DetectionLitModule], tmp_path: Path) -> None:
         """The checkpoint's ``task`` is exactly ``str``, so the restricted unpickler reads the file."""
-        path = _write_checkpoint(module_cls(task=Task.DETECT), tmp_path / "subclass.ckpt")
+        module = module_cls(task=Task.DETECT)
+        assert type(module.hparams["task"]) is str
+        path = _write_checkpoint(module, tmp_path / "subclass.ckpt")
 
         payload = torch.load(path, map_location="cpu", weights_only=True)
 

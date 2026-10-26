@@ -45,6 +45,9 @@ __all__ = ["TASK_NAMES", "Task", "TaskSpec"]
 #: and scoring defaults, which this leaf cannot import; a test pins the two equal.
 _COCO_IMG_SIZE = 640
 
+#: Per-image detection cap shared by model ranking and decoding (R3 sec. 4, A9).
+_MAX_DETECTIONS = 300
+
 #: Letterbox side of the oriented tier, which trains on 1024 px DOTA tiles (R18 sec. 4),
 #: so an oriented checkpoint has never seen 640.
 _OBB_IMG_SIZE = 1024

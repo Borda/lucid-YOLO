@@ -60,6 +60,7 @@ from torch import Tensor
 
 from lucid_yolo.data.rotated_geom import canonicalize
 from lucid_yolo.models.heads.detect import decode_ltrb, o2o_topk_with_indices
+from lucid_yolo.tasks import _MAX_DETECTIONS
 
 __all__ = ["RBOX_DET_WIDTH", "decode_rboxes", "o2o_rotated_topk", "o2o_rotated_topk_with_indices"]
 
@@ -69,10 +70,8 @@ RBOX_DET_WIDTH = 7
 #: Column count of a long-edge rotated box ``(cx, cy, w, h, theta)``.
 _RBOX_COLUMNS = 5
 
-#: Default per-image detection cap, shared with the axis-aligned path (A9). A literal
-#: rather than an import of :data:`lucid_yolo.decode.common.MAX_DETECTIONS`: ``decode``
-#: imports this package, so the reverse import would be a cycle. A test pins the two equal.
-_DEFAULT_TOPK = 300
+#: Default per-image detection cap, shared with the axis-aligned path (A9).
+_DEFAULT_TOPK = _MAX_DETECTIONS
 
 
 def decode_rboxes(distances: Tensor, angles: Tensor, anchor_points: Tensor, strides: Tensor) -> Tensor:

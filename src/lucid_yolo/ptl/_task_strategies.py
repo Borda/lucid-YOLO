@@ -100,11 +100,9 @@ class _TaskStrategy:
         """Avoid constructing a mask accumulator without mask supervision."""
         return None
 
-    def update_box_validation(
-        self, module: DetectionLitModule, preds: list[dict[str, Tensor]], targets: list[Targets]
-    ) -> None:
+    def update_box_validation(self, module: DetectionLitModule, detections: Tensor, targets: list[Targets]) -> None:
         """Accumulate the batch's box predictions and ground truth."""
-        module._update_val_map(preds, targets)
+        module._update_val_map(detections, targets)
 
     def update_extra_validation(
         self,
@@ -184,10 +182,8 @@ class _OrientedStrategy(_TaskStrategy):
         """Retain the module method whose identity the replay certificate checks."""
         return module._oriented_extra_loss(context, out, stage)
 
-    def update_box_validation(
-        self, module: DetectionLitModule, preds: list[dict[str, Tensor]], targets: list[Targets]
-    ) -> None:
-        """Omit the axis-aligned metric for oriented supervision."""
+    def update_box_validation(self, module: DetectionLitModule, detections: Tensor, targets: list[Targets]) -> None:
+        """Omit the axis-aligned metric, and its host copy of the detections, for oriented supervision."""
 
     def update_extra_validation(
         self,

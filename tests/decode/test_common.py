@@ -13,7 +13,7 @@ detections and entry ``n`` of the indices survive or vanish together.
 
 The same module holds the one per-anchor gather and the point-set letterbox inverse,
 both pinned here against the forms they replaced, and the detection cap and image side
-the ``models`` package cannot import, pinned equal to its literals.
+the ``models`` package reads from the shared task leaf, pinned to the decode defaults.
 """
 
 from __future__ import annotations
@@ -35,8 +35,9 @@ from lucid_yolo.decode.common import (
     points_to_letterboxed_original,
 )
 from lucid_yolo.models.build import count_flops
-from lucid_yolo.models.heads.detect import o2o_topk_with_indices
-from lucid_yolo.models.heads.obb import o2o_rotated_topk_with_indices
+from lucid_yolo.models.heads.detect import o2o_topk, o2o_topk_with_indices
+from lucid_yolo.models.heads.obb import o2o_rotated_topk, o2o_rotated_topk_with_indices
+from lucid_yolo.tasks import Task
 
 
 @pytest.mark.parametrize(
@@ -193,25 +194,27 @@ class TestPointsToLetterboxedOriginal:
 def test_detection_cap_matches_model_ranking_defaults() -> None:
     """The model-side rankings default to the same cap the decoders import.
 
-    ``models`` sits below ``decode`` in the import graph, so the two ranking helpers there
-    cannot import :data:`MAX_DETECTIONS` without a cycle and carry the number as a literal;
-    this pin is what keeps the three equal.
+    ``models`` sits below ``decode`` in the import graph. Both layers must read the
+    same leaf constant, preserving the public decode name as a re-export.
     """
-    defaults = {
+    defaults = [
         parameters["k"].default
         for parameters in (
             inspect.signature(o2o_topk_with_indices).parameters,
+            inspect.signature(o2o_topk).parameters,
             inspect.signature(o2o_rotated_topk_with_indices).parameters,
+            inspect.signature(o2o_rotated_topk).parameters,
         )
-    }
+    ]
 
-    assert defaults == {MAX_DETECTIONS}
+    assert MAX_DETECTIONS == 300
+    assert all(default is MAX_DETECTIONS for default in defaults)
 
 
 def test_flop_measurement_side_matches_coco_img_size() -> None:
     """The FLOP counter measures at the COCO tiers' letterbox side.
 
-    Same layering reason as the detection cap: :mod:`lucid_yolo.models.build` cannot import
-    :data:`COCO_IMG_SIZE`, so its default is pinned equal here.
+    The model default derives from the detection task spec, whose COCO side stays
+    pinned to :data:`COCO_IMG_SIZE`.
     """
-    assert inspect.signature(count_flops).parameters["img_size"].default == COCO_IMG_SIZE
+    assert inspect.signature(count_flops).parameters["img_size"].default == Task.DETECT.spec.img_size == COCO_IMG_SIZE

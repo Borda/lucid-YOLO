@@ -58,6 +58,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Fixed
 
+- **Subclass checkpoints load with `weights_only=True` after repeated hyperparameter saves.** A `DetectionLitModule` subclass calling `save_hyperparameters()` again keeps its task as a plain string in the checkpoint and logger snapshot, even when constructed with a `Task` member (WP-217).
+
 - **`DualLossOutput.alpha` records the weight the call used.** When a tensor `alpha` override is passed, as the compiled step and loss replay do, the output now carries that tensor instead of the `DualBranchLoss.alpha` attribute, which could disagree with the weight that produced the total (WP-212).
 
 - **Mixed-precision forward passes keep the P5 attention finite.** Logits beyond float16's range no longer turn into NaN through softmax: the logits and softmax are computed in float32 with autocast off in forward and backward under mixed precision. This applies to every task (WP-209).
