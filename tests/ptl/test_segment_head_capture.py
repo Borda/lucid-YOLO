@@ -443,6 +443,7 @@ def test_recorded_group_run_replays_when_nothing_forces_native() -> None:
     """
     group = _RecordedGroup.__new__(_RecordedGroup)
     group.pending_backward = False
+    group.parameters = ()
     group.signature = "matching"
     group.spans = MagicMock(reached_by=MagicMock(return_value=False))
     group.adapter = MagicMock(return_value=(torch.zeros(1),))
@@ -475,6 +476,7 @@ def test_recorded_group_output_without_backward_node_never_holds() -> None:
     """
     group = _RecordedGroup.__new__(_RecordedGroup)
     group.pending_backward = False
+    group.parameters = ()
     group.signature = "matching"
     group.spans = MagicMock(reached_by=MagicMock(return_value=False))
     group.adapter = MagicMock(return_value=(torch.ones(3),))

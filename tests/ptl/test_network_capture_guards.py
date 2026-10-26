@@ -31,6 +31,7 @@ from lucid_yolo.ptl.network_capture import (
     _ineligibility,
     _NetworkCapture,
     _NetworkCaptureLifecycle,
+    _StemNetwork,
 )
 
 
@@ -449,3 +450,59 @@ class TestRecordedContractDrift:
         holder = _NetworkCapture()
         holder._input, holder._state, holder._owners = ("shape", ("precision",)), ("state",), (1, 2, 3)
         assert holder._drift(("state",), (1, 2, 3), ("precision",)) is None
+
+
+class TestDryRecordingCycle:
+    """With the recording seam replaced, CPU drives one recording from first forward to ``clear``."""
+
+    @pytest.fixture
+    def _eligible(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pass the CUDA-residency certificate for CPU stages; every other guard of ``_run`` still runs.
+
+        Examples:
+            >>> callable(TestDryRecordingCycle._eligible)
+            True
+        """
+        monkeypatch.setattr("lucid_yolo.ptl.network_capture._ineligibility", lambda network: None)
+
+    @pytest.mark.usefixtures("_eligible")
+    def test_accumulated_microbatches_record_once_and_match_eager(self, dry_recording: MagicMock) -> None:
+        """Two accumulated micro-batches record once, copy the live gradient at forward time and match eager.
+
+        The first forward records and holds; a second forward before its backward stays eager. The
+        second micro-batch's forward replaces the live ``.grad`` with a copy before any backward runs,
+        so the first micro-batch's gradient object is never written again, and the accumulated result
+        equals the same two micro-batches run eagerly. ``clear`` then drops the recording.
+        """
+        stage = torch.nn.Linear(3, 2)
+        reference = copy.deepcopy(stage)
+        holder = _NetworkCapture()
+        eager = MagicMock(side_effect=stage)
+        first, second = torch.linspace(-1.0, 1.0, 12).reshape(4, 3), torch.linspace(2.0, -2.0, 12).reshape(4, 3)
+
+        def replay(images: torch.Tensor) -> torch.Tensor:
+            """Route one micro-batch through the stem holder path, as a pose stem would.
+
+            Examples:
+                >>> callable(replay)
+                True
+            """
+            return holder._run(images, (stage,), eager, lambda: _StemNetwork(stage), lambda outputs: outputs[0])
+
+        output = replay(first)
+        replay(first)
+        held = (holder._pending_backward, eager.call_count)
+        output.sum().backward()
+        live = stage.weight.grad
+        output = replay(second)
+        copied = stage.weight.grad is not live
+        output.sum().backward()
+        reference(first).sum().backward()
+        expected_live = reference.weight.grad.clone()
+        reference(second).sum().backward()
+        holder.clear()
+        assert dry_recording.call_count == 1 and held == (True, 1) and copied
+        assert torch.equal(live, expected_live)
+        assert torch.equal(stage.weight.grad, reference.weight.grad)
+        assert torch.equal(stage.bias.grad, reference.bias.grad)
+        assert not holder._pending_backward and holder._network is None

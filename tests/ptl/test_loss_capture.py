@@ -413,6 +413,21 @@ def test_unsupported_configurations_raise(kwargs: dict[str, object]) -> None:
         DetectionLitModule(0.5, 0.25, 64, 3, capture_loss=True, **kwargs)
 
 
+def test_later_retire_cause_stays_silent() -> None:
+    """Only the first cause of a fit warns; a second retire leaves the retired holder as it is.
+
+    A second retire used to clear the holder again and repeat the warning, about a state nothing
+    could change any more. The network and segmentation-head holders already reported only their
+    first cause; the loss holder now shares that contract.
+    """
+    holder = _LossCapture()
+    with pytest.warns(UserWarning, match=r"^capture_loss=True stays eager: first cause$") as record:
+        holder.retire("first cause")
+        holder.retire("second cause")
+    assert len(record) == 1
+    assert holder._disabled
+
+
 @pytest.mark.parametrize("hook", ["on_fit_start", "on_fit_end", "on_exception"])
 def test_fit_boundaries_reset_holder(hook: str) -> None:
     """Success, reuse and failure all clear the fit's transient owner."""

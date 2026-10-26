@@ -677,9 +677,10 @@ class DetectionLitModule(LightningModule):
             ``capture_orthogonalization``, this has setup and retained-workspace costs.
         capture_segment_heads: Record independent CUDA segmentation prediction groups, including first-order backward.
             Defaults to ``False``. Requires ``task="segment"`` and ``compile_step=False``, PyTorch 2.9 or newer, BF16
-            mixed precision and single-device automatic optimization without accumulation. CPU, MPS, FP32, FP16 and
-            validation keep native execution. ``compile_step=True`` is refused rather than ignored, although it leaves
-            the segment objective eager today, so an accepted configuration keeps its meaning once that is compiled.
+            mixed precision and single-device automatic optimization; gradient accumulation replays too. CPU, MPS,
+            FP32, FP16 and validation keep native execution. ``compile_step=True`` is refused rather than ignored,
+            although it leaves the segment objective eager today, so an accepted configuration keeps its meaning once
+            that is compiled.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,

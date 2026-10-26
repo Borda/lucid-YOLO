@@ -26,6 +26,22 @@ def graph_recordings() -> Iterator[MagicMock]:
 
 
 @pytest.fixture
+def dry_recording() -> Iterator[MagicMock]:
+    """Replace the shared recording seam with the module itself, so a CPU test drives a holder's whole lifecycle.
+
+    The network and segmentation-head holders record only through
+    ``lucid_yolo.ptl._graph_replay.record_graphed``. Returning the module it was given makes
+    every "replay" the native forward and backward on CPU, while recording, the forward-time
+    gradient copy, the backward hold, its release and ``clear`` run as they do in a CUDA fit.
+    Graph numerics are what this cannot show; the ``gpu`` tests own them.
+    """
+    with patch(
+        "lucid_yolo.ptl._graph_replay.record_graphed", side_effect=lambda module, samples, device: module
+    ) as record:
+        yield record
+
+
+@pytest.fixture
 def replay_spy(graph_recordings: MagicMock) -> Iterator[MagicMock]:
     """Count graph recordings and turn a retirement warning into a failure, so replay cannot silently lapse."""
     with warnings.catch_warnings():

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import copy
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager, nullcontext
 from dataclasses import fields
 from types import SimpleNamespace
@@ -22,6 +22,7 @@ from lucid_yolo.cli.train import DetectionCLI, packaged_config
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.models.build import SegmentOutput
 from lucid_yolo.models.heads.detect import DualHeadOutput
+from lucid_yolo.ptl._graph_replay import copy_out_live_gradients
 from lucid_yolo.ptl.callbacks import EMACallback
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.module import DetectionLitModule
@@ -103,6 +104,57 @@ def _batch(empty: bool = False, size: int = 2) -> tuple[torch.Tensor, list[Targe
     return images, targets, masks
 
 
+class _WindowPosition(Callback):
+    """Tell whether the current training batch continues an accumulation window rather than opening one.
+
+    Lightning counts ``batch_idx`` from zero in every epoch and opens a window at each multiple of
+    the accumulation, so a batch at any other index meets gradients its window accumulated.
+
+    Examples:
+        >>> position = _WindowPosition(3)
+        >>> position.on_train_batch_start(None, None, None, 4)
+        >>> position.inside
+        True
+    """
+
+    def __init__(self, accumulation: int) -> None:
+        self.accumulation, self.inside = accumulation, False
+
+    def on_train_batch_start(self, trainer: object, pl_module: object, batch: object, batch_idx: int) -> None:
+        """Record whether this batch follows another batch of the same window."""
+        del trainer, pl_module, batch
+        self.inside = batch_idx % self.accumulation != 0
+
+
+def _live_gradient_spy(
+    seen: set[tuple[int, ...]], position: _WindowPosition
+) -> Callable[[Iterable[torch.Tensor]], None]:
+    """Wrap the forward-time gradient copy so each group replaying onto accumulated gradients is recorded.
+
+    The holder calls the copy only on its replay route, so a group in ``seen`` replayed inside an
+    accumulation window and met the gradients that window's earlier batches left alive. A batch
+    opening a window is not counted: Lightning clears gradients only after the training step's
+    forward, so the previous step's gradients are alive there at every accumulation setting.
+
+    Examples:
+        >>> seen, position = set(), _WindowPosition(3)
+        >>> position.inside = True
+        >>> weight = torch.nn.Parameter(torch.zeros(1))
+        >>> weight.grad = torch.ones(1)
+        >>> _live_gradient_spy(seen, position)([weight])
+        >>> len(seen)
+        1
+    """
+
+    def copy_out(parameters: Iterable[torch.Tensor]) -> None:
+        group = tuple(parameters)
+        if position.inside and any(parameter.grad is not None for parameter in group):
+            seen.add(tuple(id(parameter) for parameter in group))
+        copy_out_live_gradients(group)
+
+    return copy_out
+
+
 def test_segment_request_preserves_defaults_and_checkpoint_keys() -> None:
     """A requested feature recorder adds no parameters and stays inactive off CUDA."""
     native, replay = _module(), _module(capture_network=True)
@@ -165,8 +217,6 @@ def test_segment_shared_replay_preserves_predictions_and_unused_gradients(heads:
         assert (replay._network_capture._network is not None) == (dtype != torch.bfloat16 or _BF16_REPLAY_SUPPORTED)
 
 
-#: Setup warning of the head holder under gradient accumulation; the network holder keeps replaying.
-_HEAD_ACCUMULATION_IGNORED = "capture_segment_heads=True is ignored outside .* with accumulate_grad_batches=1"
 #: Retirement warning of the head holder outside BF16 mixed precision.
 _HEAD_PRECISION_RETIRE = "capture_segment_heads=True stays eager"
 
@@ -179,7 +229,7 @@ _HEAD_PRECISION_RETIRE = "capture_segment_heads=True stays eager"
         pytest.param(False, "32-true", 1, None, id="network-fp32"),
         pytest.param(True, "bf16-mixed", 1, None, id="heads-bf16"),
         pytest.param(False, "32-true", 2, None, id="network-fp32-accumulated"),
-        pytest.param(True, "bf16-mixed", 2, _HEAD_ACCUMULATION_IGNORED, id="heads-bf16-accumulated"),
+        pytest.param(True, "bf16-mixed", 2, None, id="heads-bf16-accumulated"),
         pytest.param(True, "16-mixed", 1, _HEAD_PRECISION_RETIRE, id="heads-fp16-stay-eager"),
     ],
 )
@@ -191,7 +241,7 @@ def test_segment_fit_replays_across_empty_partial_validation_and_ema(
 
     Network-only cells cover every precision and accumulation 2, which carries live gradients
     into each second replay. Head replay adds the supported bf16 cell, the accumulated cell, where
-    the head holder is ignored at setup while the network keeps replaying, and the fp16
+    both holders replay and carry live gradients into each second replay, and the fp16
     retirement, whose warning must name the holder that stays eager.
     """
     torch.manual_seed(23)
@@ -231,7 +281,7 @@ def test_segment_fit_replays_across_empty_partial_validation_and_ema(
             gradient_clip_val=1.0,
         )
         replays = precision != "bf16-mixed" or _BF16_REPLAY_SUPPORTED
-        combined = capture and heads and accumulation == 1 and precision == "bf16-mixed" and _BF16_REPLAY_SUPPORTED
+        combined = capture and heads and precision == "bf16-mixed" and _BF16_REPLAY_SUPPORTED
         expectation = (
             pytest.warns(UserWarning, match=retire)
             if capture and retire
@@ -639,4 +689,63 @@ def test_segment_accumulation_change_after_recording_keeps_replay_and_matches_na
         assert feature_records == int(capture)
         assert model._network_capture._network is None
         snapshots.append((copy.deepcopy(model.state_dict()), copy.deepcopy(trainer.optimizers[0].state_dict())))
+    _same(*snapshots)
+
+
+@requires_cuda
+@_skip_no_bf16_replay
+def test_segment_head_replay_under_accumulation_matches_native() -> None:
+    """Head replay at accumulation 3 ends with the weights, MuSGD, EMA and scaler bytes of a native fit.
+
+    Mirrors ``test_segment_fit_replays_across_empty_partial_validation_and_ema`` with the head holder
+    as the only difference between the arms. Each window opens with a full batch that replays, then
+    a partial batch that misses the recorded signature and accumulates natively, then a second full
+    batch whose replay meets the gradients both left. Every recorded prediction group must replay
+    onto its window's accumulated gradients at least once, so a run whose in-window replay silently
+    went native cannot pass; the gradients leave the static buffers at forward time. The
+    empty-target batch, alone in the last window, leaves mask groups without a backward, so the
+    skipped-backward hold and its release at the next batch run too. The replay arm warns nothing.
+    """
+    torch.manual_seed(23)
+    batches = [_batch(), _batch(size=1), _batch(), _batch(True)]
+    initial = _module().state_dict()
+    snapshots = []
+    for heads in (False, True):
+        torch.manual_seed(23)
+        model = _module(capture_segment_heads=heads, lr=1e-4, warmup_epochs=0.0)
+        model.load_state_dict(initial)
+        ema, position = EMACallback(), _WindowPosition(3)
+        trainer = Trainer(
+            **_LIFECYCLE_FIT,
+            precision="bf16-mixed",
+            accumulate_grad_batches=3,
+            callbacks=[ema, position],
+            gradient_clip_val=1.0,
+        )
+        live: set[tuple[int, ...]] = set()
+        with (
+            warnings.catch_warnings(),
+            patch("torch.cuda.make_graphed_callables", wraps=torch.cuda.make_graphed_callables) as record,
+            patch("lucid_yolo.ptl.segment_head_capture.copy_out_live_gradients", _live_gradient_spy(live, position)),
+        ):
+            warnings.filterwarnings("error", message="capture_segment_heads=True", category=UserWarning)
+            trainer.fit(
+                model,
+                train_dataloaders=DataLoader(batches, batch_size=None),
+                val_dataloaders=DataLoader([_batch()], batch_size=None),
+            )
+        assert trainer.state.finished
+        head_records = [call for call in record.call_args_list if type(call.args[0]).__name__ == "_PredictionGroup"]
+        assert bool(head_records) == heads
+        assert len(live) == len(head_records)
+        scaler = getattr(trainer.precision_plugin, "scaler", None)
+        snapshots.append(
+            (
+                copy.deepcopy(model.state_dict()),
+                copy.deepcopy(trainer.optimizers[0].state_dict()),
+                copy.deepcopy(ema.state_dict()),
+                copy.deepcopy(scaler.state_dict()) if scaler is not None else None,
+            )
+        )
+        assert model._segment_head_capture.entries == {}
     _same(*snapshots)
