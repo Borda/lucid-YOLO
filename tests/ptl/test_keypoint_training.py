@@ -57,7 +57,7 @@ from lucid_yolo.losses.keypoint_nll_loss import LaplaceNLLLoss
 from lucid_yolo.losses.oks_loss import OKSLoss
 from lucid_yolo.losses.rle_loss import RLELoss
 from lucid_yolo.ptl import DetectionLitModule, normalize_keypoints_to_box, pad_keypoints
-from lucid_yolo.ptl import module as ptl_module
+from lucid_yolo.ptl import _validation as validation_metrics
 from lucid_yolo.ptl.datamodule import DetectionDataModule, collate_detection, unpack_targets
 from lucid_yolo.ptl.module import _StepContext
 
@@ -980,7 +980,7 @@ class TestKeypointValidation:
     def test_validation_step_accumulates_and_logs_val_oks_map(self) -> None:
         """One validation step feeds both buffers; epoch end logs and clears them.
 
-        Mirrors :attr:`DetectionLitModule._val_rotated_preds`'s own accumulate-then-
+        Mirrors :attr:`DetectionLitModule._val_rotated`'s own accumulate-then-
         score-once shape (WP-088): OKS is one whole-document matching, not a
         per-batch running average, so there is nothing to update incrementally.
         """
@@ -991,15 +991,15 @@ class TestKeypointValidation:
         with torch.no_grad():
             module.validation_step((images, targets), 0)
 
-        assert len(module._val_keypoint_preds) == len(targets)
-        assert len(module._val_keypoint_targets) == len(targets)
+        assert len(module._val_keypoints._images()[0]) == len(targets)
+        assert len(module._val_keypoints._images()[1]) == len(targets)
 
         module.on_validation_epoch_end()
 
         assert "val/oks_mAP" in module.log.values
         assert math.isfinite(module.log.values["val/oks_mAP"])
-        assert module._val_keypoint_preds == []
-        assert module._val_keypoint_targets == []
+        assert module._val_keypoints.image_count == 0
+        assert module._val_keypoints._images() == ([], [])
 
     def test_validation_step_accepts_image_without_instances(self) -> None:
         """An image with no person beside a posed one is scored, not a crash in the host transfer.
@@ -1015,7 +1015,7 @@ class TestKeypointValidation:
 
         with torch.no_grad():
             module.validation_step((images, targets), 0)
-        stored = [tuple(target["keypoints"].shape) for target in module._val_keypoint_targets]
+        stored = [tuple(target["keypoints"].shape) for target in module._val_keypoints._images()[1]]
         module.on_validation_epoch_end()
 
         assert stored == [(0, 0, 2), (1, _NUM_KEYPOINTS, 2)]
@@ -1056,18 +1056,17 @@ class TestKeypointValidation:
             captured["sigmas"] = sigmas
             return {"AP_all": 0.0}
 
-        monkeypatch.setattr(ptl_module, "evaluate_keypoints", _record_sigmas)
+        monkeypatch.setattr(validation_metrics, "evaluate_keypoints", _record_sigmas)
         module = _tiny_module()  # built at _NUM_KEYPOINTS == 3
-        module._val_keypoint_preds = [{}]
-        module._val_keypoint_targets = [{}]
+        module._val_keypoints.update([], [], [])
 
         module._log_oks_map()
 
         assert tuple(captured["sigmas"]) == (SYMBOL_KEYPOINT_OKS_SIGMA,) * _NUM_KEYPOINTS
 
-        module._num_keypoints = len(COCO_KEYPOINT_OKS_SIGMAS)
-        module._val_keypoint_preds = [{}]
-        module._val_keypoint_targets = [{}]
+        module = tiny_module(task="keypoints", num_keypoints=len(COCO_KEYPOINT_OKS_SIGMAS))
+        module.log = LogRecorder()
+        module._val_keypoints.update([], [], [])
 
         module._log_oks_map()
 

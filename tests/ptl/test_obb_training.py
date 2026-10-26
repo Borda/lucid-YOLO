@@ -542,8 +542,8 @@ def test_epoch_metric_clears_buffers() -> None:
     """The accumulators are emptied at the epoch end, so no epoch scores another's detections."""
     module, _ = _validated_module(_oriented_batch())
 
-    assert module._val_rotated_preds == []
-    assert module._val_rotated_targets == []
+    assert module._val_rotated.image_count == 0
+    assert module._val_rotated._images() == ([], [])
 
 
 def test_rotated_targets_survive_loader_transport_into_metric() -> None:
@@ -563,7 +563,7 @@ def test_rotated_targets_survive_loader_transport_into_metric() -> None:
 
     module.validation_step((images, restored), 0)
 
-    collected = module._val_rotated_targets
+    collected = module._val_rotated._images()[1]
     perfect = [
         {"rboxes": target.rboxes, "scores": torch.ones(target.rboxes.shape[0]), "labels": target.labels}
         for target in targets
@@ -589,7 +589,7 @@ def test_difficult_flags_reach_metric_through_loader() -> None:
     module = _tiny_module().eval()
     module.log = LogRecorder()  # type: ignore[method-assign]
     module.validation_step((images, restored), 0)
-    assert torch.equal(module._val_rotated_targets[0]["difficult"], flagged.difficult)
+    assert torch.equal(module._val_rotated._images()[1][0]["difficult"], flagged.difficult)
 
 
 def test_oriented_train_pipeline_suppresses_copy_paste() -> None:

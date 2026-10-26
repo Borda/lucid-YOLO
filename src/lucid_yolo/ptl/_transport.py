@@ -13,7 +13,7 @@ re-exported by :mod:`lucid_yolo.ptl.datamodule`, which stays the import path.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import cast
 
 import torch
@@ -24,6 +24,7 @@ from lucid_yolo.data._common import _POINT_DIM
 from lucid_yolo.data._quantization import _dequantize_images, _quantize_images
 from lucid_yolo.data.augment import HSVParams, _jitter_hsv_batch
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.ptl._validation import _ValidationTargets
 from lucid_yolo.ptl.seg_targets import instance_mask_targets
 
 #: Image dtype a deferred-HSV batch must still carry when its colour transform runs:
@@ -141,6 +142,13 @@ class PackedTargets:
     hsv_gains: Tensor | None = None
 
 
+@dataclass
+class _ValidationPackedTargets(PackedTargets):
+    """Keep validation identities across worker IPC and Lightning device transfer."""
+
+    _image_ids: list[int] = field(default_factory=list)
+
+
 def _concat_keypoints(targets: list[Targets]) -> tuple[Tensor, Tensor]:
     """Concatenate a batch's point sets and visibilities along the instance axis.
 
@@ -234,7 +242,8 @@ def pack_targets(targets: list[Targets]) -> PackedTargets:
     def counts(values: list[int]) -> Tensor:
         return torch.tensor(values, dtype=torch.int64, device=boxes_cat.device)
 
-    return PackedTargets(
+    packed_type = _ValidationPackedTargets if all(isinstance(t, _ValidationTargets) for t in targets) else PackedTargets
+    packed = packed_type(
         boxes_cat=boxes_cat,
         labels_cat=labels_cat,
         difficult_cat=torch.cat([target.difficult for target in targets], dim=0),
@@ -248,6 +257,9 @@ def pack_targets(targets: list[Targets]) -> PackedTargets:
         points_per_ring=counts([int(ring.shape[0]) for ring in rings]),
         rings_per_image=counts([len(target.polygons) for target in targets]),
     )
+    if isinstance(packed, _ValidationPackedTargets):
+        packed._image_ids = [t._image_id for t in targets if isinstance(t, _ValidationTargets)]
+    return packed
 
 
 def unpack_targets(packed: PackedTargets) -> list[Targets]:
@@ -311,6 +323,11 @@ def unpack_targets(packed: PackedTargets) -> list[Targets]:
                 keypoint_vis=packed.keypoint_vis_cat.new_zeros((0, 0)) if empty_points else keypoint_vis[index],
             )
         )
+    if isinstance(packed, _ValidationPackedTargets):
+        return [
+            _ValidationTargets(**vars(target), _image_id=image_id)
+            for target, image_id in zip(targets, packed._image_ids, strict=True)
+        ]
     return targets
 
 

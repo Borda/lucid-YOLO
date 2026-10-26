@@ -6,6 +6,8 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Added
 
+- **Oriented and keypoint validation run under DDP.** Whole-image records are gathered before the existing rotated mAP and OKS AP scorers run, with repeated sampler-padding images counted once (WP-213).
+
 - **`lucid-export`, a fifth command: one checkpoint to one ONNX file.** `lucid-export --checkpoint run.ckpt --output model.onnx` reads the task from the checkpoint and writes its suppression-free graph at opset 17, with `--img_size`, `--canvas "[H, W]"`, `--ema` and `--opset`. The file needs the `onnx` package, which torch's exporter imports to finalise it, so it ships as the `export` extra: `pip install "lucid-yolo[export]"`; without it the command stops before reading the checkpoint and names the extra. The input is a static `(1, 3, H, W)`, there is no dynamic batch, and a segmentation export refuses canvases under 300 anchors (96 px a side and below). An `--output` that is the checkpoint itself — the same path spelled another way, a symbolic link or a hard link to it — is refused before anything is read or written (WP-204).
 
 - **`lucid_yolo.export.graph_from_module`** rebuilds a loaded checkpoint's task graph under a strict key check, so a missing or unexpected weight is refused by name; `lucid-export` and the ONNX gate both go through it (WP-204).

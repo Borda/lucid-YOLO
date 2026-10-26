@@ -48,7 +48,6 @@ class _TaskStrategy:
 
     __slots__ = ()
     _task: Task
-    rank_local_validation = False
     segmentation = False
     compile_objective = False
     pose_loss_capture = False
@@ -170,7 +169,6 @@ class _OrientedStrategy(_TaskStrategy):
 
     __slots__ = ()
     _task = Task.OBB
-    rank_local_validation = True
 
     def pad_extras(
         self, targets: list[Targets], device: torch.device
@@ -213,7 +211,6 @@ class _KeypointStrategy(_TaskStrategy):
 
     __slots__ = ()
     _task = Task.KEYPOINTS
-    rank_local_validation = True
     pose_loss_capture = True
 
     def pad_extras(

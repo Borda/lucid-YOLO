@@ -148,6 +148,7 @@ from lucid_yolo.ptl._transport import (
 )
 from lucid_yolo.ptl._transport import _DeferredHSVSample as _DeferredHSVSample  # noqa: PLC0414 - re-export
 from lucid_yolo.ptl._transport import _TrainingSample as _TrainingSample  # noqa: PLC0414 - re-export
+from lucid_yolo.ptl._validation import _ValidationDataset
 
 __all__ = [
     "DetectionDataModule",
@@ -1154,7 +1155,7 @@ class DetectionDataModule(LightningDataModule):
             "worker_init_fn": _init_worker if workers else None,
         }
         loader = DataLoader(
-            self._val,
+            _ValidationDataset(self._val) if self._rotated_targets or self._keypoint_targets else self._val,
             shuffle=False,
             **kwargs,  # type: ignore[arg-type]
         )

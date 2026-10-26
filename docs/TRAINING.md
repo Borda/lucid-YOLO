@@ -103,9 +103,11 @@ Two differences from the COCO tiers, forced by the data rather than chosen:
 
 `lucid-eval` picks the rotated protocol from the checkpoint's own task, and with it the 1024 px letterbox and batch 8; an explicit `--img_size` or `--batch_size` still wins.
 
-## 🖥️ Oriented and keypoint runs are single-device
+## 🖥️ Distributed validation
 
-`lucid-yolo fit` refuses `task: obb` and `task: keypoints` on more than one process, and says so at setup rather than partway through the first validation. Their epoch metrics — `val/rotated_mAP` and `val/oks_mAP` — accumulate plain Python lists that nothing gathers, so each rank would score its own shard and log it as the split's number. Average precision ranks every detection of the split against every other by confidence, so per-rank values cannot be averaged back into the right one; a wrong number that looks plausible is worse than a refusal. Leave `trainer.devices` at `1` for these two tasks, or pick a bigger accelerator rather than more of them. Detection and segmentation are unaffected: their metrics are torchmetrics metrics and synchronise across ranks. Whatever the task, a CUDA run trains in `channels_last` memory format automatically — parameters and images both, no flag (D23) — while CPU and MPS keep the default layout.
+All four tasks accept DDP validation. Detection and segmentation use torchmetrics; oriented detection and keypoints gather whole-image records with private torchmetrics metrics before calling the existing rotated mAP and OKS AP scorers. The validation loader carries dataset-position IDs so repeated sampler-padding images are scored once, keeping the first occurrence and the loader's original dataset order. Custom validation loaders for oriented detection or keypoints must retain the datamodule's private indexed targets; a distributed batch without identity is refused rather than silently double-counted. Public sample and batch signatures are unchanged ([WP-213](work_packages/wp-213.md)).
+
+The multi-device proof is scoped to a CPU gloo two-process test; no two-GPU run was made, and a real multi-GPU check remains outstanding. Training recipes remain measured on one device. Whatever the task, CUDA training uses `channels_last` memory format automatically for parameters and images (D23); CPU and MPS retain the default layout.
 
 ## 🎲 What `deterministic: true` and `seed` actually pin
 

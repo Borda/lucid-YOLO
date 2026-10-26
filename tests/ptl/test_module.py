@@ -516,30 +516,16 @@ def _guarded_module(task: str) -> DetectionLitModule:
 
 
 class TestDistributedValidationGuard:
-    """Tasks whose epoch metric accumulates rank-local lists refuse to run multi-process.
-
-    ``val/rotated_mAP`` and ``val/oks_mAP`` are scored off plain Python lists that nothing
-    gathers, so on more than one process each rank would score its own shard and log it as
-    the split's metric (audit A07/M-04). Average precision ranks every detection of the
-    split against every other by confidence, so per-rank values cannot be averaged back into
-    the right number — the run is refused at ``setup`` rather than allowed to log a
-    plausible wrong one. ``detect``/``segment`` use torchmetrics metrics, which synchronise.
-    """
+    """Every task accepts multi-process validation with gathered epoch metrics."""
 
     @pytest.mark.parametrize("task", [pytest.param("obb", id="obb"), pytest.param("keypoints", id="keypoints")])
     @pytest.mark.parametrize("stage", [pytest.param("fit", id="fit"), pytest.param("validate", id="validate")])
-    def test_rejects_multi_process_runs(self, task: str, stage: str) -> None:
-        """A two-process trainer is refused for both guarded tasks, naming the limitation.
-
-        Both ``fit`` and ``validate`` are checked: the metric is computed in the validation
-        epoch end either way, so guarding only the training entry point would leave
-        ``lucid-yolo validate`` free to produce the same rank-local number.
-        """
+    def test_accepts_multi_process_runs(self, task: str, stage: str) -> None:
+        """Both fit and standalone validation accept the distributed scorer."""
         module = _guarded_module(task)
         module._trainer = MagicMock(spec=Trainer, world_size=2)
 
-        with pytest.raises(RuntimeError, match="single-process only"):
-            module.setup(stage)
+        module.setup(stage)
 
     @pytest.mark.parametrize(
         "task",

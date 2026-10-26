@@ -180,11 +180,8 @@ from torch import Tensor
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.decode.common import BOX_CORNERS, MAX_DETECTIONS, SCORE_COLUMN
 from lucid_yolo.decode.topk_e2e import TopKDecoder
-from lucid_yolo.eval.coco_eval import (
-    evaluate_keypoints,
-    gather_keypoints,
-)
-from lucid_yolo.eval.dota_eval import evaluate_rotated_map, rotated_detections_to_predictions
+from lucid_yolo.eval.coco_eval import gather_keypoints
+from lucid_yolo.eval.dota_eval import rotated_detections_to_predictions
 from lucid_yolo.eval.segment_decode import decode_instance_masks
 from lucid_yolo.losses import oriented_loss
 from lucid_yolo.losses.dual_loss import BranchPrediction, DualBranchLoss, DualLossOutput
@@ -234,6 +231,7 @@ from lucid_yolo.ptl._task_terms import (
     _StepContext,
     normalize_keypoints_to_box,
 )
+from lucid_yolo.ptl._validation import _KeypointAP, _RotatedMAP, _ValidationMetric, _ValidationTargets
 from lucid_yolo.ptl.loss_capture import (
     _LossCapture,
     _LossCaptureLifecycle,
@@ -873,28 +871,12 @@ class DetectionLitModule(LightningModule):
         #: untouched metric raises, and a loader without mask targets never feeds it.
         self._val_segm_seen = False
 
-        #: Epoch rotated mAP accumulators, for ``"obb"`` only (WP-088). Plain lists
-        #: rather than a :class:`~torchmetrics.Metric`: the WP-063 protocol is not a
-        #: torchmetrics implementation, it fixes four constants that library defaults
-        #: get wrong (A46-A48), and mAP is not a per-batch quantity that can be
-        #: averaged — the whole epoch's ranked detections have to meet at once. Both
-        #: lists hold CPU tensors and are cleared at every epoch end.
-        self._val_rotated_preds: list[dict[str, Tensor]] = []
-        self._val_rotated_targets: list[dict[str, Tensor]] = []
-
-        #: Epoch OKS accumulators, for ``"keypoints"`` only (WP-137). Plain lists
-        #: for the same reason :attr:`_val_rotated_preds` is one and not a
-        #: :class:`~torchmetrics.Metric`: torchmetrics carries no keypoint/OKS
-        #: support at all (confirmed empty grep of its detection module — no
-        #: "keypoint"/"kpt"/"oks" symbol anywhere, WP-137), so there is no
-        #: per-batch running average to update into; :func:`evaluate_keypoints`
-        #: is COCO's single whole-document matching, scored once per epoch.
-        #: ``val/mAP`` stays computed alongside this (unlike ``"obb"``): the
-        #: person-category box is a real, orthogonal branch on a keypoints
-        #: module, the same "additionally" relationship ``val/segm_mAP`` has to
-        #: ``val/mAP`` rather than ``"obb"``'s "instead of" one.
-        self._val_keypoint_preds: list[dict[str, Tensor]] = []
-        self._val_keypoint_targets: list[dict[str, Tensor]] = []
+        #: Whole-epoch metrics gather complete images before applying the existing protocols.
+        #: Dataset-position order matches the sequential validation loader, including score ties.
+        self._val_rotated = _RotatedMAP(dataset_order=True) if task == "obb" else None
+        self._val_keypoints = (
+            _KeypointAP(_keypoint_oks_sigmas(num_keypoints), dataset_order=True) if task == "keypoints" else None
+        )
 
         #: Per-image-size cache of ``(anchor_points, stride_per_anchor)`` on CPU.
         self._anchor_cache: dict[tuple[int, int], tuple[Tensor, Tensor]] = {}
@@ -980,27 +962,12 @@ class DetectionLitModule(LightningModule):
         and there is nothing to configure on the one backend where the layout pays. A
         module with no trainer attached is left as built.
 
-        ``val/mAP`` and ``val/segm_mAP`` come from :mod:`torchmetrics` metrics, which
-        synchronise across ranks themselves. The oriented and keypoint protocols do not:
-        :attr:`_val_rotated_preds` and :attr:`_val_keypoint_preds` are ordinary Python
-        lists, so on more than one process each rank would score and log its own shard as
-        if it were the whole split. That is not recoverable after the fact — average
-        precision ranks every detection of the split against every other by confidence, so
-        averaging per-rank AP values is a different quantity, not an approximation of the
-        right one. Rather than log a plausible wrong number, these tasks refuse to start
-        distributed; ``"detect"`` and ``"segment"`` are unaffected and stay free to scale.
-
-        Lifting this needs the buffers gathered with image identity (so sampler padding's
-        duplicate images are dropped rather than double-counted) and scored once on one
-        rank — the work is real, so the limit is enforced here instead of assumed.
+        All task metrics gather whole-epoch records across ranks before scoring.
+        Rotated and keypoint metrics also drop sampler padding by dataset identity,
+        retaining the original sequential validation order and scoring protocols.
 
         Args:
-            stage: The Trainer stage being set up (``"fit"``, ``"validate"``, ``"test"`` or
-                ``"predict"``). ``"predict"`` runs no validation protocol and is exempt.
-
-        Raises:
-            RuntimeError: If the task is ``"obb"`` or ``"keypoints"`` and the trainer spans
-                more than one process.
+            stage: The Trainer stage being set up.
 
         Examples:
             ```pycon
@@ -1021,7 +988,6 @@ class DetectionLitModule(LightningModule):
         self._warn_ignored_replay(self._capture_loss, self._capture_loss_active, "capture_loss", stage)
         if self._compile_step and not self._compile_step_resolved:
             self._compile_objective(on_cuda)
-        self._refuse_rank_local_validation(stage)
 
     def _replay_active(self, requested: bool, on_cuda: bool) -> bool:
         """Decide whether one opted-in CUDA recording runs for the stage being set up.
@@ -1065,32 +1031,6 @@ class DetectionLitModule(LightningModule):
                 f"{flag}=True is ignored outside single-device CUDA automatic optimization",
                 UserWarning,
                 stacklevel=3,
-            )
-
-    def _refuse_rank_local_validation(self, stage: str) -> None:
-        """Refuse an ``"obb"`` or ``"keypoints"`` run spanning processes; :meth:`setup` states why.
-
-        Args:
-            stage: The Trainer stage being set up; ``"predict"`` is exempt.
-
-        Raises:
-            RuntimeError: If the task is ``"obb"`` or ``"keypoints"`` and the trainer spans
-                more than one process.
-        """
-        if stage == "predict" or not self._strategy.rank_local_validation:
-            return
-        # Reached only for the two guarded tasks, and Lightning calls `setup` with the
-        # module already attached, so reading the trainer here cannot be the detached case
-        # the `detect`/`segment` early return above keeps free.
-        world_size = self.trainer.world_size
-        if world_size > 1:
-            raise RuntimeError(
-                f"task={self.task!r} validation is single-process only, but the trainer spans "
-                f"{world_size} processes. Its epoch metric accumulates rank-local Python lists "
-                "and never gathers them, so each rank would score its own shard as if it were "
-                "the whole split, and average precision cannot be recovered by averaging "
-                "per-rank values. Re-run with devices=1 (and no distributed strategy), or use "
-                "task='detect'/'segment', whose metrics synchronise across ranks."
             )
 
     def configure_callbacks(self) -> list[Callback]:
@@ -1698,14 +1638,16 @@ class DetectionLitModule(LightningModule):
         assert angles is not None  # an "obb" module always builds the angle stems
         rboxes = decode_rboxes(head_out.o2o_box, angles, anchor_points, strides)
         detections = o2o_rotated_topk(head_out.o2o_cls, rboxes, k=MAX_DETECTIONS)
-        self._val_rotated_preds.extend(rotated_detections_to_predictions(detections.detach()))
+        preds = rotated_detections_to_predictions(detections.detach())
         host_rboxes = _host_split([target.rboxes.detach() for target in targets])
         host_labels = _host_split([target.labels.detach() for target in targets])
         host_difficult = _host_split([target.difficult.detach() for target in targets])
-        self._val_rotated_targets.extend(
+        ground_truth = [
             {"rboxes": rboxes, "labels": labels.to(torch.long), "difficult": difficult}
             for rboxes, labels, difficult in zip(host_rboxes, host_labels, host_difficult, strict=True)
-        )
+        ]
+        assert self._val_rotated is not None
+        self._val_rotated.update(preds, ground_truth, self._validation_ids(targets, self._val_rotated))
 
     def _update_val_keypoints(
         self,
@@ -1756,22 +1698,35 @@ class DetectionLitModule(LightningModule):
         host_keypoints = _host_split([target.keypoints.detach() for target in targets])
         host_visibility = _host_split([target.keypoint_vis.detach() for target in targets])
         host_labels = _host_split([target.labels.detach() for target in targets])
+        preds = []
+        ground_truth = []
         for index in range(len(targets)):
             keep = cpu_detections[index, :, SCORE_COLUMN] > 0.0
-            self._val_keypoint_preds.append(
+            preds.append(
                 {
                     "keypoints": gathered_points[index, keep],
                     "scores": cpu_detections[index, keep, SCORE_COLUMN],
                     "labels": cpu_detections[index, keep, _LABEL_COLUMN].long(),
                 }
             )
-            self._val_keypoint_targets.append(
+            ground_truth.append(
                 {
                     "keypoints": host_keypoints[index],
                     "visibility": host_visibility[index],
                     "labels": host_labels[index].to(torch.long),
                 }
             )
+
+        assert self._val_keypoints is not None
+        self._val_keypoints.update(preds, ground_truth, self._validation_ids(targets, self._val_keypoints))
+
+    def _validation_ids(self, targets: list[Targets], metric: _ValidationMetric) -> list[int]:
+        """Read transported identities; direct single-device callers use running positions."""
+        if all(isinstance(target, _ValidationTargets) for target in targets):
+            return [target._image_id for target in targets if isinstance(target, _ValidationTargets)]
+        if self._trainer is not None and self.trainer.world_size > 1:
+            raise RuntimeError("Distributed task validation requires the datamodule's indexed validation targets")
+        return list(range(metric.image_count, metric.image_count + len(targets)))
 
     def _update_val_segm(
         self,
@@ -1889,10 +1844,17 @@ class DetectionLitModule(LightningModule):
             self.log("val/segm_mAP", self._val_segm.compute()["map"].to(torch.float32), prog_bar=True)
             self._val_segm.reset()
             self._val_segm_seen = False
-        if self._val_rotated_preds:
+        if self._val_rotated is not None and self._any_rank_saw_images(self._val_rotated):
             self._log_rotated_map()
-        if self._val_keypoint_preds:
+        if self._val_keypoints is not None and self._any_rank_saw_images(self._val_keypoints):
             self._log_oks_map()
+
+    def _any_rank_saw_images(self, metric: _ValidationMetric) -> bool:
+        """Make every rank enter compute when any rank has task records."""
+        seen = metric.image_count > 0
+        if self._trainer is None:
+            return seen
+        return bool(self.trainer.strategy.reduce_boolean_decision(seen, all=False))
 
     def _any_rank_saw_masks(self) -> bool:
         """Return whether *any* process fed the segmentation metric this epoch.
@@ -1917,17 +1879,17 @@ class DetectionLitModule(LightningModule):
         this one would improve monotonically for reasons that have nothing to do with
         the model.
         """
-        stats = evaluate_rotated_map(self._val_rotated_preds, self._val_rotated_targets)
+        assert self._val_rotated is not None
+        stats = self._val_rotated.compute()
         self.log("val/rotated_mAP50", torch.tensor(stats["map_50"], dtype=torch.float32), prog_bar=True)
         self.log("val/rotated_mAP", torch.tensor(stats["map"], dtype=torch.float32))
-        self._val_rotated_preds.clear()
-        self._val_rotated_targets.clear()
+        self._val_rotated.reset()
 
     def _log_oks_map(self) -> None:
         """Score the epoch's accumulated keypoints and clear the buffers.
 
         The sigma vector is picked by point count through
-        :func:`_keypoint_oks_sigmas`, not stated at construction — the same rule
+        :func:`_keypoint_oks_sigmas` when the metric is built — the same rule
         the :class:`~lucid_yolo.losses.oks_loss.OKSLoss` training term is built
         with (WP-178), so the metric and the loss agree on every point's
         tolerance. The buffers are cleared unconditionally, the
@@ -1935,11 +1897,10 @@ class DetectionLitModule(LightningModule):
         carried last epoch's detections into this one would improve
         monotonically for reasons that have nothing to do with the model.
         """
-        sigmas = _keypoint_oks_sigmas(self._num_keypoints)
-        stats = evaluate_keypoints(self._val_keypoint_preds, self._val_keypoint_targets, sigmas=sigmas)
+        assert self._val_keypoints is not None
+        stats = self._val_keypoints.compute()
         self.log("val/oks_mAP", torch.tensor(stats["AP_all"], dtype=torch.float32), prog_bar=True)
-        self._val_keypoint_preds.clear()
-        self._val_keypoint_targets.clear()
+        self._val_keypoints.reset()
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         """Return MuSGD, paired with the A8 warmup + linear-decay LR schedule.
