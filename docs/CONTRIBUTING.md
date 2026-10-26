@@ -28,7 +28,7 @@ The third is the only one producing a reviewable artifact rather than a promise,
 
 ### Signing off
 
-Add `-s` to your commit, or write the trailer yourself:
+The full sign-off rule, merges and cherry-picks included, is AGENTS.md sec. 5. For your own commit, add `-s`, or write the trailer yourself:
 
 ```bash
 git commit -s -m "fix(data): ..."

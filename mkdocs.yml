@@ -247,6 +247,7 @@ nav:
           - Research log: RESEARCH_LOG.md
           - Engineering log: ENGINEERING_LOG.md
           - Cross-cutting engineering: engineering/cross-cutting.md
+          - Agent-contract rationale: engineering/agents-rationale.md
           - Escalation log: ESCALATION.md
       # Phase first, as the roadmap numbers them; each phase lists the log pages it has.
       - Phases:
