@@ -181,7 +181,6 @@ from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.decode.common import BOX_CORNERS, MAX_DETECTIONS, SCORE_COLUMN
 from lucid_yolo.decode.topk_e2e import TopKDecoder
 from lucid_yolo.eval.coco_eval import (
-    COCO_RECALL_GRID,
     evaluate_keypoints,
     gather_keypoints,
 )
@@ -226,6 +225,7 @@ from lucid_yolo.ptl._padding import (
     pad_rboxes,
     pad_targets,
 )
+from lucid_yolo.ptl._task_strategies import _STRATEGIES
 from lucid_yolo.ptl._task_terms import (
     _KEYPOINT_LOSSES,
     _blend,
@@ -234,7 +234,6 @@ from lucid_yolo.ptl._task_terms import (
     _StepContext,
     normalize_keypoints_to_box,
 )
-from lucid_yolo.ptl.coco_backend import build_mean_average_precision
 from lucid_yolo.ptl.loss_capture import _LossCapture, _LossCaptureLifecycle, _native_loss, _source_signature
 from lucid_yolo.ptl.network_capture import (
     _detection_stages,
@@ -266,14 +265,6 @@ _STRIDES: tuple[int, int, int] = (8, 16, 32)
 #: WP-088 rotated ones and adds the angle term, and ``"keypoints"`` adds the WP-132
 #: residual log-likelihood term and the WP-178 OKS term.
 _TASKS: tuple[str, ...] = TASK_NAMES
-
-#: Tasks whose epoch validation metric accumulates rank-local Python lists rather than a
-#: gathering :class:`~torchmetrics.Metric`, and which therefore refuse to run distributed
-#: (:meth:`DetectionLitModule.setup`). The list-based accumulators are documented where
-#: they are declared; this names the consequence in one place so the guard and the
-#: ``docs/TRAINING.md`` single-device note cannot drift from each other.
-_RANK_LOCAL_VAL_TASKS: frozenset[str] = frozenset({"obb", "keypoints"})
-
 
 #: Column index of the integral class label within the A9 detection tuple.
 _LABEL_COLUMN = 5
@@ -444,7 +435,7 @@ def _validate_replay_options(
 
 
 def _oriented_helpers() -> tuple[object, ...]:
-    """Read the decode and oriented-loss helpers the native objective calls by global name.
+    """Read the decode, oriented-loss and strategy helpers the native objective calls.
 
     Resolved at call time, so the import-time call that builds :data:`_ORIENTED_HELPERS`
     keeps the originals and every later call sees the current bindings.
@@ -455,6 +446,8 @@ def _oriented_helpers() -> tuple[object, ...]:
         oriented_branch_terms,
         vars(oriented_loss)["square_angle_loss"],
         oriented_loss._no_ground_truth,
+        _STRATEGIES[Task.OBB],
+        type(_STRATEGIES[Task.OBB]).extra_loss,
     )
 
 
@@ -469,6 +462,8 @@ def _oriented_replay_breach(module: DetectionLitModule) -> str | None:
         method = getattr(module, name)
         if getattr(method, "__func__", method) is not expected:
             return "the native oriented objective is overridden"
+    if module._strategy is not _STRATEGIES[Task.OBB]:
+        return "the native oriented objective is overridden"
     if _oriented_helpers() != _ORIENTED_HELPERS:
         return "a native oriented objective helper changed"
     return None if _native_loss(module.loss) else "the native loss or an assignment implementation changed"
@@ -751,7 +746,7 @@ class DetectionLitModule(LightningModule):
         self._capture_loss, self._capture_loss_active = capture_loss, False
         self._capture_network, self._capture_network_active = capture_network, False
         self._network_capture, self._loss_capture = _NetworkCapture(), _LossCapture()
-        self._task, self._num_keypoints = task, num_keypoints
+        self._strategy, self._task, self._num_keypoints = _STRATEGIES[Task(task)], task, num_keypoints
         self._compile_step: bool = compile_step
         self._capture_orthogonalization, self._capture_updates = capture_orthogonalization, capture_updates
         #: The detection objective `_shared_step` calls: the bare bound method until
@@ -854,9 +849,7 @@ class DetectionLitModule(LightningModule):
         #: coordinate frame, different detection cap — but no longer for a third,
         #: silent, arithmetic reason.
         self._val_decoder = TopKDecoder()
-        self._val_map = build_mean_average_precision(
-            backend="faster_coco_eval", box_format="xyxy", rec_thresholds=list(COCO_RECALL_GRID)
-        )
+        self._val_map = self._strategy.build_box_metric()
         self._val_map.warn_on_many_detections = False
 
         #: Epoch mask mAP, for ``"segment"`` only (WP-087). A second metric rather
@@ -867,13 +860,7 @@ class DetectionLitModule(LightningModule):
         #: mis-bucketing the small/medium/large splits. Split in two, each metric's
         #: inputs are self-consistent. ``None`` for a detection module, whose
         #: validation must not pay for mask machinery it has no branch for.
-        self._val_segm = (
-            build_mean_average_precision(
-                backend="faster_coco_eval", iou_type="segm", rec_thresholds=list(COCO_RECALL_GRID)
-            )
-            if task == "segment"
-            else None
-        )
+        self._val_segm = self._strategy.build_mask_metric()
         if self._val_segm is not None:
             self._val_segm.warn_on_many_detections = False
         #: Whether any batch fed :attr:`_val_segm` this epoch — ``compute`` on an
@@ -1084,7 +1071,7 @@ class DetectionLitModule(LightningModule):
             RuntimeError: If the task is ``"obb"`` or ``"keypoints"`` and the trainer spans
                 more than one process.
         """
-        if stage == "predict" or self.task not in _RANK_LOCAL_VAL_TASKS:
+        if stage == "predict" or not self._strategy.rank_local_validation:
             return
         # Reached only for the two guarded tasks, and Lightning calls `setup` with the
         # module already attached, so reading the trainer here cannot be the detached case
@@ -1130,7 +1117,7 @@ class DetectionLitModule(LightningModule):
             on_cuda: Whether the attached trainer's accelerator is CUDA.
         """
         self._compile_step_resolved = True
-        if self._task != "detect":
+        if not self._strategy.compile_objective:
             warnings.warn(
                 f"compile_step=True is ignored for task={self._task!r}: only the 'detect' objective is "
                 "compiled (WP-184); the segment, obb and keypoint terms stay eager",
@@ -1254,11 +1241,7 @@ class DetectionLitModule(LightningModule):
         """
         head_out: DualHeadOutput
         if self._network_replay_eligible(images):
-            if self._task == "keypoints":
-                self._network_capture.check_stem_owners(self.head)
-                breach = _pose_head_breach(self.head, self._head_topology)
-                if breach is not None:
-                    self._network_capture.retire(breach)
+            self._strategy.check_replay_head(self)
             root_hooks = any(
                 (self._forward_hooks, self._forward_pre_hooks, self._backward_hooks, self._backward_pre_hooks)
             )
@@ -1272,21 +1255,18 @@ class DetectionLitModule(LightningModule):
                     reason = "the LightningModule call is compiled"
                 self._network_capture.retire(reason)
                 head_out = self(images)
-            elif self._task == "keypoints":
-                features = self._network_capture.run_features(images, (self.backbone, self.neck))
-                head_out = (
-                    self(images)
-                    if features is None
-                    else cast("DualHeadOutput", self.head(features, _runner=self._network_capture))
-                )
-            elif self._task == "obb":
-                head_out = self._training_oriented_network(images)
             else:
-                eager = cast("Callable[[Tensor], DualHeadOutput]", self)
-                head_out = self._network_capture.run(images, (self.backbone, self.neck, self.head), eager)
+                head_out = self._strategy.training_network(self, images)
         else:
             head_out = self(images)
         return head_out
+
+    def _check_pose_replay_head(self) -> None:
+        """Check pose owners before root-hook guards, retaining the module's certificate binding."""
+        self._network_capture.check_stem_owners(self.head)
+        breach = _pose_head_breach(self.head, self._head_topology)
+        if breach is not None:
+            self._network_capture.retire(breach)
 
     def _training_oriented_network(self, images: Tensor) -> DualHeadOutput:
         """Record the complete oriented network only while its native consumers stay intact."""
@@ -1461,7 +1441,7 @@ class DetectionLitModule(LightningModule):
 
             ```
         """
-        if self._task != "segment":
+        if not self._strategy.segmentation:
             raise ValueError(f"forward_segmentation requires task='segment'; this module's task is {self._task!r}")
         features = self._segmentation_features(images)
         runner = self._segment_head_capture.runner(self, features)
@@ -1580,7 +1560,7 @@ class DetectionLitModule(LightningModule):
 
             ```
         """
-        if self._task != "segment":
+        if not self._strategy.segmentation:
             raise ValueError(
                 f"forward_segmentation_branch requires task='segment'; this module's task is {self._task!r}"
             )
@@ -1654,15 +1634,13 @@ class DetectionLitModule(LightningModule):
             head_out.o2o_cls, head_out.o2o_box, anchor_points, strides
         )
         preds = _box_predictions(detections)
-        if self.task != "obb":
-            self._update_val_map(preds, targets)
+        self._strategy.update_box_validation(self, preds, targets)
         if self._val_segm is not None and seg_out is not None and masks is not None:
             image_size = (int(images.shape[-2]), int(images.shape[-1]))
             self._update_val_segm(seg_out, detections, anchor_indices, targets, masks, image_size)
-        if self._task == "obb":
-            self._update_val_rotated(head_out, targets, anchor_points, strides)
-        if self._task == "keypoints":
-            self._update_val_keypoints(head_out, detections, anchor_indices, targets, anchor_points, strides)
+        self._strategy.update_extra_validation(
+            self, head_out, targets, anchor_points, strides, detections, anchor_indices
+        )
         return loss
 
     def _update_val_map(self, preds: list[dict[str, Tensor]], targets: list[Targets]) -> None:
@@ -1900,10 +1878,7 @@ class DetectionLitModule(LightningModule):
         single process it is the identity, so the accepted single-device behaviour
         is unchanged.
         """
-        if self.task != "obb":
-            computed = self._val_map.compute()
-            self.log("val/mAP", computed["map"].to(torch.float32), prog_bar=True)
-            self._val_map.reset()
+        self._strategy.log_box_validation(self)
         if self._val_segm is not None and self._any_rank_saw_masks():
             self.log("val/segm_mAP", self._val_segm.compute()["map"].to(torch.float32), prog_bar=True)
             self._val_segm.reset()
@@ -2042,13 +2017,8 @@ class DetectionLitModule(LightningModule):
         gt_boxes = gt_boxes.to(images.device)
         gt_labels = gt_labels.to(images.device)
         gt_mask = gt_mask.to(images.device)
-        gt_rboxes = pad_rboxes(targets).to(images.device) if self._task == "obb" else None
-        gt_keypoints, gt_keypoint_vis = None, None
-        if self._task == "keypoints":
-            gt_keypoints, gt_keypoint_vis = pad_keypoints(targets)
-            gt_keypoints = gt_keypoints.to(images.device)
-            gt_keypoint_vis = gt_keypoint_vis.to(images.device)
-        seg_out = self.forward_segmentation(images) if self._task == "segment" else None
+        gt_rboxes, gt_keypoints, gt_keypoint_vis = self._strategy.pad_extras(targets, images.device)
+        seg_out = self._strategy.segmentation_output(self, images)
         # `_objective` is the detection region `compile_step` may compile (WP-184). Detection
         # always calls it; pose calls it only for training steps `_pose_records_loss` routes to
         # the loss recorder, and there it is always the bare method, since `_compile_objective`
@@ -2057,7 +2027,7 @@ class DetectionLitModule(LightningModule):
         # oriented assignment reads `gt_rboxes`, which the region does not take, and
         # segmentation already ran its network in `forward_segmentation`, which the region
         # would run a second time.
-        if self._task == "detect" or self._pose_records_loss(stage):
+        if self._strategy.uses_objective(self, stage):
             # Pose shares the unrotated detection objective, but its ragged point
             # terms remain outside recording and consume the returned assignments.
             # Its native and validation routes retain their existing call signature.
@@ -2113,7 +2083,7 @@ class DetectionLitModule(LightningModule):
         Returns:
             ``True`` when the step should call :attr:`_objective`, else ``False``.
         """
-        if self._task != "keypoints" or not self._capture_loss_active or stage != "train":
+        if not self._strategy.pose_loss_capture or not self._capture_loss_active or stage != "train":
             return False
         if _source_signature(self.loss) is not None:
             return True
@@ -2146,19 +2116,7 @@ class DetectionLitModule(LightningModule):
         Returns:
             A scalar tensor on the prediction device.
         """
-        if self._task == "obb":
-            return self._oriented_extra_loss(context, out, stage)
-        if self._task == "keypoints":
-            keypoint_term, oks_term = self._keypoint_terms(context, out)
-            self.log(f"{stage}/keypoint", keypoint_term, batch_size=len(context.targets))
-            self.log(f"{stage}/oks", oks_term, batch_size=len(context.targets))
-            return self._keypoint_gain * keypoint_term + self._oks_gain * oks_term
-        if context.seg_out is None:
-            return torch.zeros_like(out.total)
-        mask_term, semantic_term = self._segment_terms(context, out)
-        self.log(f"{stage}/mask", mask_term, batch_size=len(context.targets))
-        self.log(f"{stage}/semantic", semantic_term, batch_size=len(context.targets))
-        return self._mask_gain * mask_term + self._semantic_gain * semantic_term
+        return self._strategy.extra_loss(self, context, out, stage)
 
     def _oriented_extra_loss(self, context: _StepContext, out: DualLossOutput, stage: str) -> Tensor:
         """Weight and log the three oriented terms, blended by the WP-035 ``alpha``.

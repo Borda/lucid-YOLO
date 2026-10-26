@@ -81,8 +81,17 @@ from pytorch_lightning.loggers import CSVLogger, Logger, TensorBoardLogger
 from lucid_yolo.models.registry import scale_spec
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.module import DetectionLitModule
+from lucid_yolo.tasks import Task
 
 __all__ = ["DetectionCLI", "default_determinism", "main"]
+
+
+_TARGET_FIELD: dict[Task, str | None] = {
+    Task.DETECT: None,
+    Task.SEGMENT: "mask_targets",
+    Task.OBB: "rotated_targets",
+    Task.KEYPOINTS: "keypoint_targets",
+}
 
 
 def _default_loggers(default_root_dir: str | None) -> list[Logger]:
@@ -227,17 +236,23 @@ class DetectionCLI(LightningCLI):
         # disagree on: a loader that rasterised for a detection run would raise on the
         # first box without a ring, and one that did not for a segmentation run would
         # silently put that CPU work back on the critical path.
-        parser.link_arguments("model.task", "data.mask_targets", compute_fn=lambda task: task == "segment")
+        parser.link_arguments(
+            "model.task", "data.mask_targets", compute_fn=lambda task: _TARGET_FIELD.get(task) == "mask_targets"
+        )
         # The oriented counterpart (WP-088), linked for the same reason: the task already
         # states whether rotated boxes are supervised, and a loader that disagreed would
         # either raise on the first non-quadrilateral ring or hand an obb run empty
         # `rboxes` — which trains the plain detection objective and reports nothing wrong.
-        parser.link_arguments("model.task", "data.rotated_targets", compute_fn=lambda task: task == "obb")
+        parser.link_arguments(
+            "model.task", "data.rotated_targets", compute_fn=lambda task: _TARGET_FIELD.get(task) == "rotated_targets"
+        )
         # And the pose counterpart (WP-132). Same argument a third time: a loader that
         # did not read the point fields would hand a keypoints run boxes alone, which
         # `pad_keypoints` refuses rather than trains on — loud, but loud at the first
         # step of a configured run instead of at the line that configured it.
-        parser.link_arguments("model.task", "data.keypoint_targets", compute_fn=lambda task: task == "keypoints")
+        parser.link_arguments(
+            "model.task", "data.keypoint_targets", compute_fn=lambda task: _TARGET_FIELD.get(task) == "keypoint_targets"
+        )
 
     def _config_value(self, key: str, default: Any) -> Any:
         """Read a top-level key out of the instantiated config, unwrapping the subcommand.

@@ -43,7 +43,9 @@ from lucid_yolo.tasks import Task
 from lucid_yolo.validate import require_at_least, require_one_of
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
+
+    from lucid_yolo.ptl.module import DetectionLitModule
 
 __all__ = ["DEFAULT_BATCH_SIZE", "DEFAULT_IMG_SIZE", "evaluate", "main"]
 
@@ -61,6 +63,14 @@ DEFAULT_IMG_SIZE: dict[str, int] = {task.value: task.spec.img_size for task in _
 #: :attr:`~lucid_yolo.tasks.TaskSpec.eval_batch_size`. A 1024 px tile is 2.5x the pixels
 #: of a 640 px image, so the oriented default is smaller for the same memory.
 DEFAULT_BATCH_SIZE: dict[str, int] = {task.value: task.spec.eval_batch_size for task in _TABLE_ORDER}
+
+
+_EVAL_OPTIONS: dict[Task, frozenset[str]] = {
+    Task.DETECT: frozenset({"eval_backend", "ann_file", "images_dir"}),
+    Task.SEGMENT: frozenset({"masks", "eval_backend", "ann_file", "images_dir"}),
+    Task.OBB: frozenset({"split", "variant"}),
+    Task.KEYPOINTS: frozenset({"eval_backend", "ann_file", "images_dir"}),
+}
 
 
 def _resolve_eval_backend(requested: str) -> tuple[str, str | None]:
@@ -148,6 +158,128 @@ def _check_arguments(batch_size: int | None, img_size: int | None, limit: int) -
         require_grid_side("img_size", img_size)
 
 
+def _resolved_backend(info: dict[str, object], eval_backend: str | None) -> str:
+    """Resolve the COCO backend and report any fallback in metadata and stdout.
+
+    Args:
+        info: Checkpoint provenance extended with the fallback reason, if any.
+        eval_backend: Requested backend, or ``None`` to use automatic selection.
+
+    Returns:
+        The scoring backend selected by the existing availability check.
+    """
+    resolved_backend, fallback_reason = _resolve_eval_backend("auto" if eval_backend is None else eval_backend)
+    if fallback_reason is not None:
+        info["eval_backend_fallback_reason"] = fallback_reason
+        print(
+            f"eval_backend='hotcoco' requested by default but unusable here, using faster_coco_eval: {fallback_reason}"
+        )
+    return resolved_backend
+
+
+def _run_detection(
+    module: DetectionLitModule,
+    info: dict[str, object],
+    *,
+    data_root: Path,
+    img_size: int,
+    batch_size: int,
+    device_name: str,
+    limit: int,
+    output: Path | None,
+    eval_backend: str | None,
+    ann_file: Path | None,
+    images_dir: Path | None,
+    masks: bool | None,
+    **_unused: object,
+) -> int:
+    """Resolve the COCO backend and score boxes and optional segmentation masks."""
+    resolved_backend = _resolved_backend(info, eval_backend)
+    return detect_eval.run(
+        module,
+        info,
+        data_root=data_root,
+        img_size=img_size,
+        batch_size=batch_size,
+        masks=True if masks is None else masks,
+        device_name=device_name,
+        limit=limit,
+        output=output,
+        eval_backend=resolved_backend,
+        ann_file=ann_file,
+        images_dir=images_dir,
+    )
+
+
+def _run_oriented(
+    module: DetectionLitModule,
+    info: dict[str, object],
+    *,
+    data_root: Path,
+    img_size: int,
+    batch_size: int,
+    device_name: str,
+    limit: int,
+    output: Path | None,
+    split: str | None,
+    variant: str | None,
+    **_unused: object,
+) -> int:
+    """Score oriented tiles with their existing split and variant defaults."""
+    return rotated_eval.run(
+        module,
+        info,
+        data_root=data_root,
+        split="val" if split is None else split,
+        variant="n" if variant is None else variant,
+        img_size=img_size,
+        batch_size=batch_size,
+        device_name=device_name,
+        limit=limit,
+        output=output,
+    )
+
+
+def _run_pose(
+    module: DetectionLitModule,
+    info: dict[str, object],
+    *,
+    data_root: Path,
+    img_size: int,
+    batch_size: int,
+    device_name: str,
+    limit: int,
+    output: Path | None,
+    eval_backend: str | None,
+    ann_file: Path | None,
+    images_dir: Path | None,
+    **_unused: object,
+) -> int:
+    """Resolve the COCO backend and score boxes and point sets without mask arguments."""
+    resolved_backend = _resolved_backend(info, eval_backend)
+    return pose_eval.run(
+        module,
+        info,
+        data_root=data_root,
+        img_size=img_size,
+        batch_size=batch_size,
+        device_name=device_name,
+        limit=limit,
+        output=output,
+        eval_backend=resolved_backend,
+        ann_file=ann_file,
+        images_dir=images_dir,
+    )
+
+
+_EVAL_TASKS: dict[Task, Callable[..., int]] = {
+    Task.DETECT: _run_detection,
+    Task.SEGMENT: _run_detection,
+    Task.OBB: _run_oriented,
+    Task.KEYPOINTS: _run_pose,
+}
+
+
 def evaluate(  # noqa: PLR0913 - Explicit CLI options supply jsonargparse's flags and help.
     checkpoint: Path,
     data_root: Path,
@@ -217,74 +349,40 @@ def evaluate(  # noqa: PLR0913 - Explicit CLI options supply jsonargparse's flag
     _check_arguments(batch_size, img_size, limit)
     module, info = load_eval_module(checkpoint, use_ema=ema)
     task = str(module.task)
-    # Refused rather than defaulted: the dispatch below ends in the detection protocol, so
-    # a task this command implements nothing for would be *scored* as detection — a report
-    # carrying one protocol's numbers under another's name, which is unfalsifiable from the
-    # file. The four are read off the defaults table, and the table off the task registry,
-    # so a fifth task arrives with its own defaults or does not arrive at all. It is then
-    # accepted here, and the dispatch below must learn its protocol in the same change or
-    # score it as detection; `tests/test_tasks.py` pins the four members so that a fifth is
-    # a deliberate edit rather than a silent one.
+    # Refused rather than defaulted: an unknown task must never receive detection's
+    # protocol and produce plausible numbers under the wrong task name. _EVAL_TASKS
+    # makes each protocol choice explicit; tests/test_tasks.py::TestTask pins the
+    # declared members, and tests/cli/test_task_dispatch.py pins table exhaustiveness.
     require_one_of("task", task, tuple(DEFAULT_IMG_SIZE))
     # None distinguishes omission from explicitly passing even a protocol's default,
     # including values supplied by --config. Validate before backend setup or scoring.
-    for name, value, applicable in (
-        ("split", split, task == "obb"),
-        ("variant", variant, task == "obb"),
-        ("masks", masks, task == "segment"),
-        ("eval_backend", eval_backend, task != "obb"),
-        ("ann_file", ann_file, task != "obb"),
-        ("images_dir", images_dir, task != "obb"),
+    options = _EVAL_OPTIONS[Task(task)]
+    for name, value in (
+        ("split", split),
+        ("variant", variant),
+        ("masks", masks),
+        ("eval_backend", eval_backend),
+        ("ann_file", ann_file),
+        ("images_dir", images_dir),
     ):
-        if value is not None and not applicable:
+        if value is not None and name not in options:
             raise ValueError(f"{name} is not used by checkpoint task {task!r}")
     info["task"] = task
     resolved_img_size = DEFAULT_IMG_SIZE[task] if img_size is None else img_size
     resolved_batch_size = DEFAULT_BATCH_SIZE[task] if batch_size is None else batch_size
-    if task == "obb":
-        return rotated_eval.run(
-            module,
-            info,
-            data_root=data_root,
-            split="val" if split is None else split,
-            variant="n" if variant is None else variant,
-            img_size=resolved_img_size,
-            batch_size=resolved_batch_size,
-            device_name=device,
-            limit=limit,
-            output=output,
-        )
-    resolved_backend, fallback_reason = _resolve_eval_backend("auto" if eval_backend is None else eval_backend)
-    if fallback_reason is not None:
-        info["eval_backend_fallback_reason"] = fallback_reason
-        print(
-            f"eval_backend='hotcoco' requested by default but unusable here, using faster_coco_eval: {fallback_reason}"
-        )
-    if task == "keypoints":
-        return pose_eval.run(
-            module,
-            info,
-            data_root=data_root,
-            img_size=resolved_img_size,
-            batch_size=resolved_batch_size,
-            device_name=device,
-            limit=limit,
-            output=output,
-            eval_backend=resolved_backend,
-            ann_file=ann_file,
-            images_dir=images_dir,
-        )
-    return detect_eval.run(
+    return _EVAL_TASKS[Task(task)](
         module,
         info,
         data_root=data_root,
         img_size=resolved_img_size,
         batch_size=resolved_batch_size,
-        masks=True if masks is None else masks,
         device_name=device,
         limit=limit,
         output=output,
-        eval_backend=resolved_backend,
+        split=split,
+        variant=variant,
+        masks=masks,
+        eval_backend=eval_backend,
         ann_file=ann_file,
         images_dir=images_dir,
     )
