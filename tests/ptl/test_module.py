@@ -475,6 +475,20 @@ class TestHostSplit:
 
         assert [tuple(piece.shape) for piece in split] == [(0, 4), (0, 4)]
 
+    def test_zero_row_piece_keeps_own_trailing_shape(self) -> None:
+        """An image without instances keeps its canonical empty shape beside images that have points.
+
+        ``Targets.empty()`` carries ``(0, 0, 2)`` keypoints and ``(0, 0)`` visibility whatever the
+        schema's point count, so a keypoint batch mixing it with 17-point images disagrees after the
+        first axis. That piece holds no values, so it is handed back as it is rather than concatenated.
+        """
+        keypoints = [torch.rand(2, 17, 2), torch.zeros(0, 0, 2), torch.rand(1, 17, 2)]
+
+        split = _host_split(keypoints)
+
+        assert [tuple(piece.shape) for piece in split] == [(2, 17, 2), (0, 0, 2), (1, 17, 2)]
+        assert all(torch.equal(got, want) for got, want in zip(split, keypoints, strict=True))
+
 
 def test_validation_ground_truth_matches_per_target_transfer() -> None:
     """WP-163's batched transfer feeds the mAP metric exactly what the per-target one did."""

@@ -480,6 +480,22 @@ class TestTrainingStep:
         assert bool(torch.isfinite(loss))
         assert recorder.values["train/keypoint"] == 0.0
 
+    def test_image_without_instances_beside_posed_image_trains(self) -> None:
+        """``Targets.empty()``'s ``(0, 0, 2)`` points beside a posed image still give a real point term.
+
+        The empty image's point axis disagrees with the schema's, which is what the full
+        ``demo_keypoints`` run's validation tripped on; the training path must pad past it too.
+        """
+        module = _tiny_module()
+        recorder = LogRecorder()
+        module.log = recorder  # type: ignore[method-assign]
+        images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
+
+        loss = module.training_step((images, [Targets.empty(), _posed_targets(1)]), 0)
+
+        assert bool(torch.isfinite(loss))
+        assert recorder.values["train/keypoint"] > 0.0
+
     def test_detection_batch_refused_rather_than_trained_on(self) -> None:
         """Point-free targets under ``task="keypoints"`` raise instead of training on nothing.
 
@@ -984,6 +1000,26 @@ class TestKeypointValidation:
         assert math.isfinite(module.log.values["val/oks_mAP"])
         assert module._val_keypoint_preds == []
         assert module._val_keypoint_targets == []
+
+    def test_validation_step_accepts_image_without_instances(self) -> None:
+        """An image with no person beside a posed one is scored, not a crash in the host transfer.
+
+        A COCO keypoint loader answers an image without annotations with ``Targets.empty()``, whose
+        ``(0, 0, 2)`` keypoints disagree with the batch's point count. The full ``demo_keypoints`` run
+        met exactly that batch in its validation sanity check.
+        """
+        module = _tiny_module()
+        module.eval()
+        images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
+        targets = [Targets.empty(), _posed_targets(1)]
+
+        with torch.no_grad():
+            module.validation_step((images, targets), 0)
+        stored = [tuple(target["keypoints"].shape) for target in module._val_keypoint_targets]
+        module.on_validation_epoch_end()
+
+        assert stored == [(0, 0, 2), (1, _NUM_KEYPOINTS, 2)]
+        assert math.isfinite(module.log.values["val/oks_mAP"])
 
     def test_val_map_stays_beside_val_oks_map_not_replaced_by_it(self) -> None:
         """A keypoints module logs both ``val/mAP`` and ``val/oks_mAP``, unlike ``"obb"``.

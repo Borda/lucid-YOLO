@@ -373,6 +373,38 @@ class TestCouplingScaleBound:
         assert layer.conditioner.scale.requires_grad
 
 
+class TestDensityAutocast:
+    """Large finite residuals retain finite densities and gradients under fp16 autocast."""
+
+    @pytest.mark.parametrize("paired", [False, True])
+    def test_fp16_autocast_keeps_large_residual_loss_and_gradients_finite(self, paired: bool) -> None:
+        """Sigma's floor permits residuals beyond fp16's range in either scoring route."""
+        torch.manual_seed(31)
+        criterion = RLELoss()
+        branches = [
+            (
+                torch.zeros(2, 3, 2, requires_grad=True),
+                torch.full((2, 3, 2), -30.0, requires_grad=True),
+                torch.full((2, 3, 2), 0.5),
+                torch.ones(2, 3, dtype=torch.int64),
+            )
+            for _ in range(2 if paired else 1)
+        ]
+        assert torch.finfo(torch.float16).max < 0.5 / _MIN_SIGMA
+
+        with torch.autocast("cpu", dtype=torch.float16):
+            losses = criterion._forward_pair(*branches) if paired else (criterion(*branches[0]),)
+            loss = sum(losses)
+        loss.backward()
+
+        assert all(torch.isfinite(value) for value in losses)
+        for mu_hat, sigma_raw, _, _ in branches:
+            assert mu_hat.grad is not None and torch.isfinite(mu_hat.grad).all()
+            assert sigma_raw.grad is not None and torch.isfinite(sigma_raw.grad).all()
+        for parameter in criterion.flow.parameters():
+            assert parameter.grad is not None and torch.isfinite(parameter.grad).all()
+
+
 class TestUnlabeledPointsReachNoGradient:
     """A ``v == 0`` point cannot influence the backward pass either (WP-170, A66).
 

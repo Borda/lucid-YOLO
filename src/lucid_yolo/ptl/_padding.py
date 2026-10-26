@@ -279,9 +279,16 @@ def _host_split(tensors: list[Tensor]) -> tuple[Tensor, ...]:
     latency once and splits the result back into the same per-image pieces, with
     the same values in the same order (WP-163).
 
+    Only the tensors holding rows are concatenated. An image without instances may
+    carry a different trailing shape: :meth:`~lucid_yolo.data.targets.Targets.empty`
+    stores ``(0, 0, 2)`` keypoints whatever the schema's point count, so a keypoint
+    batch mixing it with 17-point images disagrees after the first axis. Such a
+    tensor holds no values to transfer and comes back with its own shape (WP-209).
+
     Args:
-        tensors: One tensor per image, agreeing on every dimension after the
-            first. An empty list returns an empty tuple.
+        tensors: One tensor per image. The tensors with at least one row agree on
+            every dimension after the first; a tensor with none may differ. An empty
+            list returns an empty tuple.
 
     Returns:
         The same tensors, on the host, in the order given.
@@ -290,17 +297,21 @@ def _host_split(tensors: list[Tensor]) -> tuple[Tensor, ...]:
         ```pycon
         >>> _host_split([torch.tensor([[1.0, 2.0]]), torch.zeros(0, 2)])
         (tensor([[1., 2.]]), tensor([], size=(0, 2)))
+        >>> [tuple(piece.shape) for piece in _host_split([torch.zeros(2, 17, 2), torch.zeros(0, 0, 2)])]
+        [(2, 17, 2), (0, 0, 2)]
         >>> _host_split([])
         ()
 
         ```
     """
-    if not tensors:
-        return ()
-    host = torch.cat(tensors).cpu()
+    filled = [tensor for tensor in tensors if tensor.shape[0]]
+    host = torch.cat(filled).cpu() if filled else None
     pieces: list[Tensor] = []
     start = 0
     for tensor in tensors:
+        if host is None or not tensor.shape[0]:
+            pieces.append(tensor.cpu())
+            continue
         stop = start + int(tensor.shape[0])
         pieces.append(host[start:stop])
         start = stop

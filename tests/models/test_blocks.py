@@ -8,6 +8,8 @@ expansion ratio, the residual add, and a clean eval-mode forward pass.
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 import torch
 
@@ -22,6 +24,7 @@ from lucid_yolo.models import (
     PSABlock,
     SpatialAttention,
 )
+from lucid_yolo.models.blocks import _FullPrecisionAttentionWeights
 
 
 def test_primitives() -> None:
@@ -151,6 +154,76 @@ def test_spatial_attention_head_convention(channels: int, num_heads: int) -> Non
     assert attn.num_heads == num_heads, "num_heads must be max(1, C // 64)"
     assert attn.head_dim == channels // num_heads, "head_dim must split channels across heads"
     assert attn.key_dim == (channels // num_heads) // 2, "key_dim must be head_dim // 2"
+
+
+def test_spatial_attention_fp16_autocast_keeps_large_logits_finite() -> None:
+    """Logits beyond float16's range must not make the attention output NaN."""
+    torch.manual_seed(0)
+    block = SpatialAttention(256).eval()
+    x = torch.randn(1, 256, 20, 20) * 100
+    with torch.no_grad():
+        qkv = block.qkv(x).view(1, block.num_heads, 2 * block.key_dim + block.head_dim, 400)
+        q = qkv[:, :, : block.key_dim]
+        k = qkv[:, :, block.key_dim : 2 * block.key_dim]
+        logits = q.transpose(-2, -1) @ k
+        assert logits.abs().max() > torch.finfo(torch.float16).max
+        with torch.autocast("cpu", dtype=torch.float16):
+            out = block(x)
+    assert torch.isfinite(out).all(), "fp16 autocast must keep large-logit attention finite"
+
+
+def test_spatial_attention_fp16_gradients_ignore_backward_autocast() -> None:
+    """A recorded backward under autocast must match eager backward bitwise."""
+    torch.manual_seed(0)
+    block = SpatialAttention(128).train()
+    x = torch.randn(2, 128, 8, 8)
+    outside = copy.deepcopy(block)
+    inside = copy.deepcopy(block)
+    with torch.autocast("cpu", dtype=torch.float16):
+        outside_loss = outside(x).float().square().mean()
+    outside_loss.backward()
+    with torch.autocast("cpu", dtype=torch.float16):
+        inside_loss = inside(x).float().square().mean()
+        inside_loss.backward()
+    for (name, outside_param), inside_param in zip(outside.named_parameters(), inside.parameters(), strict=True):
+        assert outside_param.grad is not None, name
+        assert inside_param.grad is not None, name
+        assert torch.equal(outside_param.grad, inside_param.grad), f"{name}: backward autocast changed gradients"
+
+
+def test_spatial_attention_float32_matches_original_computation() -> None:
+    """Float32 outputs and parameter gradients preserve the original computation bitwise."""
+    torch.manual_seed(0)
+    block = SpatialAttention(256).eval()
+    original = copy.deepcopy(block)
+    x = torch.randn(1, 256, 20, 20) * 100
+    n, c, h, w = x.shape
+    qkv = original.qkv(x).view(n, original.num_heads, 2 * original.key_dim + original.head_dim, h * w)
+    q = qkv[:, :, : original.key_dim]
+    k = qkv[:, :, original.key_dim : 2 * original.key_dim]
+    v = qkv[:, :, 2 * original.key_dim :]
+    attn = (q.transpose(-2, -1) @ k) * original.scale
+    attn = attn.softmax(dim=-1)
+    expected = (v @ attn.transpose(-2, -1)).reshape(n, c, h, w)
+    expected = expected + original.pe(v.reshape(n, c, h, w))
+    expected = original.proj(expected)
+    out = block(x)
+    assert torch.equal(out, expected), "float32 attention must match original computation bitwise"
+    out.square().mean().backward()
+    expected.square().mean().backward()
+    for (name, param), original_param in zip(block.named_parameters(), original.parameters(), strict=True):
+        assert param.grad is not None, name
+        assert original_param.grad is not None, name
+        assert torch.equal(param.grad, original_param.grad), f"{name}: float32 gradient changed"
+
+
+def test_full_precision_attention_weights_gradcheck() -> None:
+    """Attention recomputation matches finite-difference derivatives in float64."""
+    torch.manual_seed(0)
+    q = torch.randn(1, 1, 4, 6, dtype=torch.float64, requires_grad=True)
+    k = torch.randn(1, 1, 4, 6, dtype=torch.float64, requires_grad=True)
+    with torch.autocast("cpu", enabled=False):
+        assert torch.autograd.gradcheck(_FullPrecisionAttentionWeights.apply, (q, k, 0.5))
 
 
 @pytest.mark.parametrize(

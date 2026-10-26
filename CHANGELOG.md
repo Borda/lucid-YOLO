@@ -56,6 +56,16 @@ All notable changes to lucid-yolo are documented here, following the Keep a Chan
 
 ### Fixed
 
+- **Mixed-precision forward passes keep the P5 attention finite.** Logits beyond float16's range no longer turn into NaN through softmax: the logits and softmax are computed in float32 with autocast off in forward and backward under mixed precision. This applies to every task (WP-209).
+
+- **Pose training at 16-mixed keeps the RLE density finite.** A residual beyond float16's range no longer raises from the RLE density: the density is computed in float32 with autocast off (WP-209).
+
+- **Keypoint validation accepts an image without people.** A keypoint batch mixing an image with no instances and one with points crashed validation with `torch.cat` "Expected size 17 but got size 0": an empty image's keypoints are stored as `(0, 0, 2)`, and moving the batch to the host concatenated them with the `(n, 17, 2)` of the others. Only tensors holding rows are concatenated now (WP-209).
+
+- **The pose replay comparisons hold on an A100.** The CUDA tests comparing pose replay with native training failed on an A100, where cuDNN runs float32 convolutions in TF32 and autocast rounding sits above the old per-parameter bounds. The float32 comparisons now run with TF32 off, and the mixed-precision and multi-step comparisons are bounded by the one-ulp noise floor measured on that GPU; replay itself is unchanged (WP-209).
+
+- **The keypoint accelerator golden is resealed.** `goldens/gpu/overfit_micro_kp.json` stores `train_oks_ap` 0.582045 ± 0.05, measured on an A100 under torch 2.9.1, on the principal's answer to the 2026-10-24 escalation (WP-209).
+
 - **CUDA detection network replay keeps accumulated gradients equal to eager.** With `--model.capture_network true` and `accumulate_grad_batches` above 1, or with any gradient left alive into a replayed step, the accumulated gradients came out wrong from the first replay on. The copy that moves a live gradient out of the recorded buffers now runs before the replay, not inside its backward. Runs at the default `accumulate_grad_batches=1` with Lightning's default `zero_grad` were not affected (WP-206).
 
 - **The export module docstrings state what the code does.** The segmentation paragraph no longer claims the coefficient gather raises on a padding row, the oriented graph names `RotatedTopKDecoder`, and two stale paragraphs about index `-1` are gone; `EMACallback` names `load_eval_module` (WP-204).
