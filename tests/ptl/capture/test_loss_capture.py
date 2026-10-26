@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from capture_access import loss_objective, network_capture
 from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer, seed_everything
 from pytorch_lightning.plugins.precision import MixedPrecision
@@ -31,10 +32,7 @@ from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.loss_capture import _BF16_SUPPORTED, _LossCapture, _LossCaptureLifecycle
 from lucid_yolo.ptl.module import DetectionLitModule
 
-
-@pytest.fixture(autouse=True)
-def _deterministic(deterministic_kernels: None) -> None:
-    """Keep the byte oracle deterministic and restore the caller's numeric policy."""
+pytestmark = pytest.mark.usefixtures("deterministic_kernels")
 
 
 def _inputs(
@@ -126,14 +124,15 @@ def _same(left: DualLossOutput, right: DualLossOutput) -> None:
             _bits(getattr(a, key), getattr(b, key))
 
 
-def test_cpu_stays_eager_and_copy_discards_recordings() -> None:
+def test_cpu_stays_eager_and_copy_discards_recordings(graph_recordings: MagicMock) -> None:
     """The off-device path never asks CUDA to record and keeps the public output."""
     holder, source, inputs = _LossCapture(), DualBranchLoss(), _inputs(3, device="cpu")
-    with patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("CPU capture")):
-        _same(_native(source, inputs), holder.run(source, *inputs))
+    recordings_before = graph_recordings.call_count
+    _same(_native(source, inputs), holder.run(source, *inputs))
+    assert graph_recordings.call_count == recordings_before
     holder._disabled = True
     for restored in (copy.deepcopy(holder), pickle.loads(pickle.dumps(holder))):
-        assert restored._objective is None and not restored._disabled
+        assert loss_objective(restored) is None and not restored._disabled
 
 
 @pytest.mark.parametrize(
@@ -197,7 +196,7 @@ def test_host_workspace_growth_shrinkage_and_output_ownership(_host_recorder: Ma
     assert holder._workspace is not None
     assert not holder._workspace[2][:, 2:].any()
     holder.clear()
-    assert holder._objective is None and holder._workspace is None
+    assert loss_objective(holder) is None and holder._workspace is None
 
 
 @pytest.mark.parametrize("collection_enabled", [False, True])
@@ -217,7 +216,7 @@ def test_host_capture_failure_restores_gc_and_releases_workspace(
         ):
             holder.run(DualBranchLoss(), *_inputs(3, device="cpu"))
         assert gc.isenabled() is collection_enabled
-        assert holder._objective is None and holder._workspace is None
+        assert loss_objective(holder) is None and holder._workspace is None
         assert holder._signature is None and holder._capacity == 0
     finally:
         gc.enable() if original else gc.disable()
@@ -241,7 +240,7 @@ def test_host_contract_changes_retire_once(_host_recorder: MagicMock, change: st
             _same(_native(source, _inputs(1, device="cpu")), holder.run(source, *_inputs(1, device="cpu")))
             holder.run(source, *_inputs(1, device="cpu"))
     assert len(warnings) == 1 and holder._disabled
-    assert holder._objective is None and _host_recorder.call_count == 1
+    assert loss_objective(holder) is None and _host_recorder.call_count == 1
 
 
 _FLOAT32_TINY = torch.finfo(torch.float32).tiny
@@ -317,7 +316,7 @@ def test_host_replaced_delegated_stage_keeps_native_route(
         expected = _native(source, _inputs(2, device="cpu"))
     assert replaced_calls > 0
     _same(expected, actual)
-    assert holder._objective is None and holder._disabled
+    assert loss_objective(holder) is None and holder._disabled
 
 
 _GUARDED_INPUTS = {"match_logits": 0, "match_boxes": 1, "unique_logits": 2, "unique_boxes": 3, "target_boxes": 5}
@@ -464,7 +463,7 @@ def test_variable_target_capacity_matches_native_bits_and_gradients(dtype: torch
         with torch.autocast("cuda", enabled=dtype != torch.float32, dtype=dtype, cache_enabled=False):
             expected = _native(source, reference)
             actual = holder.run(source, *inputs)
-        assert holder._objective is not None
+        assert loss_objective(holder) is not None
         _same(expected, actual)
         expected.total.backward()
         actual.total.backward()
@@ -474,7 +473,7 @@ def test_variable_target_capacity_matches_native_bits_and_gradients(dtype: torch
             _bits(a.grad, b.grad)
     assert holder._capacity == 16
     holder.clear()
-    assert holder._objective is None and holder._workspace is None
+    assert loss_objective(holder) is None and holder._workspace is None
 
 
 @requires_cuda
@@ -527,7 +526,7 @@ def test_replay_removes_python_assignment_and_scoring_calls() -> None:
         next_output.total.backward()
     finally:
         sys.setprofile(previous)
-    assert holder._objective is not None
+    assert loss_objective(holder) is not None
     assert calls == []
     _native(source, _inputs(2)).total.backward()
 
@@ -541,7 +540,7 @@ def test_changed_gain_retires_recording_and_keeps_native_result() -> None:
     inputs = _inputs(2)
     with pytest.warns(UserWarning, match="settings.*changed"):
         actual = holder.run(source, *inputs)
-    assert holder._objective is None and holder._disabled
+    assert loss_objective(holder) is None and holder._disabled
     _same(_native(source, inputs), actual)
 
 
@@ -590,7 +589,7 @@ def test_partial_batch_and_noncontiguous_inputs_keep_recording() -> None:
     """Unsupported signatures stay native without displacing the normal batch's graph."""
     holder, source = _LossCapture(), DualBranchLoss()
     holder.run(source, *_inputs(3)).total.backward()
-    recording = holder._objective
+    recording = loss_objective(holder)
     for original_inputs in (_inputs(1, batch=1), _inputs(2)):
         inputs = original_inputs
         if inputs[0].shape[0] == 2:
@@ -601,9 +600,9 @@ def test_partial_batch_and_noncontiguous_inputs_keep_recording() -> None:
         actual = holder.run(source, *inputs)
         _same(_native(source, inputs), actual)
         actual.total.backward()
-        assert holder._objective is recording
+        assert loss_objective(holder) is recording
     holder.run(source, *_inputs(2)).total.backward()
-    assert holder._objective is recording
+    assert loss_objective(holder) is recording
 
 
 @requires_cuda
@@ -613,7 +612,7 @@ def test_old_bf16_runtime_keeps_native_path() -> None:
     with patch("lucid_yolo.ptl.loss_capture._BF16_SUPPORTED", False), torch.autocast("cuda", dtype=torch.bfloat16):
         actual = holder.run(source, *inputs)
         _same(_native(source, inputs), actual)
-    assert holder._objective is None
+    assert loss_objective(holder) is None
 
 
 @requires_cuda
@@ -625,7 +624,7 @@ def test_recording_failure_never_publishes_workspace() -> None:
         pytest.raises(RuntimeError, match="injected recording failure"),
     ):
         holder.run(source, *_inputs(3))
-    assert holder._objective is None and holder._workspace is None and holder._capacity == 0
+    assert loss_objective(holder) is None and holder._workspace is None and holder._capacity == 0
 
 
 @requires_cuda
@@ -640,7 +639,7 @@ def test_settings_and_implementations_changed_before_capture_stay_observable() -
     with pytest.warns(UserWarning, match="customized"):
         actual = holder.run(source, *inputs)
     _same(_native(source, inputs), actual)
-    assert holder._objective is None and holder._disabled
+    assert loss_objective(holder) is None and holder._disabled
 
 
 @requires_cuda
@@ -652,7 +651,7 @@ def test_public_fit_records_loss_and_releases_owner() -> None:
         def on_train_batch_end(
             self, trainer: Trainer, pl_module: DetectionLitModule, outputs: object, batch: object, batch_idx: int
         ) -> None:
-            assert pl_module._loss_capture._objective is not None
+            assert loss_objective(pl_module._loss_capture) is not None
             seen.append(pl_module._loss_capture._capacity)
 
     batches = [
@@ -678,7 +677,7 @@ def test_public_fit_records_loss_and_releases_owner() -> None:
     )
     trainer.fit(model, train_dataloaders=loader)
     assert len(seen) == 3 and all(capacity >= 1 for capacity in seen)
-    assert model._loss_capture._objective is None and model._loss_capture._workspace is None
+    assert loss_objective(model._loss_capture) is None and model._loss_capture._workspace is None
 
 
 @requires_cuda
@@ -690,7 +689,7 @@ def test_custom_callable_without_assignment_attributes_keeps_native_route() -> N
     with pytest.warns(UserWarning, match="customized"):
         actual = holder.run(criterion, *inputs)
     _same(_native(source, inputs), actual)
-    assert holder._objective is None
+    assert loss_objective(holder) is None
 
 
 @requires_cuda
@@ -711,7 +710,7 @@ def test_replaced_public_assigner_entry_stays_observable(record_first: bool) -> 
         actual = holder.run(source, *_inputs(2))
     assert len(calls) == 2
     _same(_native(source, _inputs(2)), actual)
-    assert holder._objective is None and holder._disabled
+    assert loss_objective(holder) is None and holder._disabled
 
 
 @requires_cuda
@@ -752,7 +751,7 @@ def test_fallback_preserves_keyword_only_custom_criterion(device: str) -> None:
     else:
         actual = holder.run(criterion, *inputs)
     _same(_native(source, inputs), actual)
-    assert holder._objective is None
+    assert loss_objective(holder) is None
 
 
 @requires_cuda
@@ -776,7 +775,7 @@ def test_replaced_empty_assignment_stays_observable(record_first: bool) -> None:
         actual = holder.run(source, *_inputs(0))
     assert len(calls) == 2
     _same(_native(source, _inputs(0)), actual)
-    assert holder._objective is None and holder._disabled
+    assert loss_objective(holder) is None and holder._disabled
 
 
 @requires_cuda
@@ -785,7 +784,9 @@ def test_replaced_empty_assignment_stays_observable(record_first: bool) -> None:
     "count,index,value",
     [(0, 1, float("nan")), (0, 0, float("inf")), (3, 1, float("nan")), (3, 5, float("nan"))],
 )
-def test_nonfinite_inputs_preserve_native_outputs(count: int, index: int, value: float, record_first: bool) -> None:
+def test_nonfinite_inputs_preserve_native_outputs(
+    count: int, index: int, value: float, record_first: bool, graph_recordings: MagicMock
+) -> None:
     """Non-finite values cannot turn masked capacity into extra NaN contributions.
 
     The cases are the inputs that meet padded rows: predictions and target boxes, plus the
@@ -795,39 +796,41 @@ def test_nonfinite_inputs_preserve_native_outputs(count: int, index: int, value:
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
         holder.run(source, *_inputs(3)).total.backward()
-    recording = holder._objective
+    recording = loss_objective(holder)
     inputs = _inputs(count)
     with torch.no_grad():
         inputs[index].reshape(-1)[0] = value
     expected = _native(source, inputs)
     _same(expected, _native(source, inputs))
-    with patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("non-finite capture")):
-        actual = holder.run(source, *inputs)
+    recordings_before = graph_recordings.call_count
+    actual = holder.run(source, *inputs)
+    assert graph_recordings.call_count == recordings_before
     _same(expected, actual)
-    assert holder._objective is recording and not holder._pending_backward
+    assert loss_objective(holder) is recording and not holder._pending_backward
     if recording is not None:
         holder.run(source, *_inputs(2)).total.backward()
-        assert holder._objective is recording
+        assert loss_objective(holder) is recording
 
 
 @requires_cuda
 @pytest.mark.parametrize("record_first", [False, True])
-def test_empty_targets_keep_native_finite_overflow_behavior(record_first: bool) -> None:
+def test_empty_targets_keep_native_finite_overflow_behavior(record_first: bool, graph_recordings: MagicMock) -> None:
     """Finite decoded coordinates can still overflow area arithmetic on an empty batch."""
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
         holder.run(source, *_inputs(3)).total.backward()
-    recording, inputs = holder._objective, _inputs(0)
+    recording, inputs = loss_objective(holder), _inputs(0)
     with torch.no_grad():
         inputs[1][0, 0] = torch.tensor([0.0, -2e38, 0.0, 2e38], device="cuda")
     assert all(bool(value.isfinite().all()) for value in inputs)
     expected = _native(source, inputs)
     _same(expected, _native(source, inputs))
     assert bool(expected.total.isfinite())
-    with patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("empty capture")):
-        actual = holder.run(source, *inputs)
+    recordings_before = graph_recordings.call_count
+    actual = holder.run(source, *inputs)
+    assert graph_recordings.call_count == recordings_before
     _same(expected, actual)
-    assert holder._objective is recording and not holder._pending_backward
+    assert loss_objective(holder) is recording and not holder._pending_backward
 
 
 @requires_cuda
@@ -846,7 +849,7 @@ def test_global_module_hooks_keep_native_criterion(registration: str, record_fir
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
         holder.run(source, *_inputs(3)).total.backward()
-    recording, calls = holder._objective, []
+    recording, calls = loss_objective(holder), []
 
     def observe(*args: object) -> None:
         calls.append(1)
@@ -857,9 +860,9 @@ def test_global_module_hooks_keep_native_criterion(registration: str, record_fir
         actual = holder.run(source, *inputs)
         _same(expected, actual)
         actual.total.backward()
-    assert calls == [] and holder._objective is recording
+    assert calls == [] and loss_objective(holder) is recording
     holder.run(source, *_inputs(2)).total.backward()
-    assert holder._objective is not None
+    assert loss_objective(holder) is not None
 
 
 @requires_cuda
@@ -892,9 +895,9 @@ def test_real_trainer_accumulation_amp_and_resume(mode: str, tmp_path: Path) -> 
                 self, trainer: Trainer, pl_module: DetectionLitModule, outputs: object, batch: object, batch_idx: int
             ) -> None:
                 if mode == "network":
-                    assert pl_module._network_capture._network is not None
+                    assert network_capture(pl_module)._network is not None
                 if capture:
-                    assert pl_module._loss_capture._objective is not None
+                    assert loss_objective(pl_module._loss_capture) is not None
                     seen.append(pl_module._loss_capture._capacity)
 
         def make_model() -> DetectionLitModule:
@@ -945,8 +948,8 @@ def test_real_trainer_accumulation_amp_and_resume(mode: str, tmp_path: Path) -> 
         assert trainer.optimizers[0].state  # An all-skipped run cannot prove recovery.
         if capture:
             assert len(seen) == (6 if mode == "resume_assign" else 3)
-            assert model._loss_capture._objective is None
-        assert model._network_capture._network is None
+            assert loss_objective(model._loss_capture) is None
+        assert network_capture(model)._network is None
         torch.cuda.synchronize()
         return {
             "model": copy.deepcopy(model.state_dict()),
@@ -1003,7 +1006,7 @@ def test_constructor_valid_tiny_epsilon_keeps_native_loss(device: str, branch: s
     else:
         actual = holder.run(source, *inputs)
     _same(expected, actual)
-    assert holder._objective is None
+    assert loss_objective(holder) is None
 
 
 @pytest.fixture(params=["cpu", pytest.param("cuda", marks=requires_cuda)])
@@ -1085,10 +1088,10 @@ def test_replay_follows_live_branch_weight(replay_device: str) -> None:
         inputs = _inputs(3, device=replay_device)
         inputs = (*inputs[:9], torch.tensor(weight, dtype=torch.float64, device=replay_device))
         totals.append(float(_replay_matches_native(holder, source, inputs).total.detach()))
-        recording = holder._objective
+        recording = loss_objective(holder)
         assert recording is not None
     assert len(set(totals)) == 3
-    assert holder._objective is recording and not holder._disabled
+    assert loss_objective(holder) is recording and not holder._disabled
 
 
 def test_replay_matches_native_top_k_truncation_and_ties(replay_device: str) -> None:
@@ -1126,7 +1129,7 @@ def test_images_without_targets_match_native(replay_device: str, rows: tuple[int
         for assignment in (actual.o2m_assign, actual.o2o_assign):
             assert not assignment.fg_mask[list(rows)].any()
             assert not assignment.align_weights[list(rows)].any()
-    assert holder._objective is not None and holder._capacity == 16
+    assert loss_objective(holder) is not None and holder._capacity == 16
 
 
 @contextmanager
@@ -1221,16 +1224,18 @@ def test_eligible_rejects_other_current_device_and_stream_capture(name: str, val
 
 
 @requires_cuda
-def test_other_stream_keeps_native_route_and_recording() -> None:
+def test_other_stream_keeps_native_route_and_recording(graph_recordings: MagicMock) -> None:
     """A recording made on one stream is not replayed on another."""
     holder, source = _LossCapture(), DualBranchLoss()
     holder.run(source, *_inputs(3)).total.backward()
-    recording, inputs = holder._objective, _inputs(2)
+    recording, inputs = loss_objective(holder), _inputs(2)
     other = torch.cuda.Stream()
     other.wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(other), patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("stream")):
+    recordings_before = graph_recordings.call_count
+    with torch.cuda.stream(other):
         actual = holder.run(source, *inputs)
         expected = _native(source, inputs)
+    assert graph_recordings.call_count == recordings_before
     torch.cuda.synchronize()
     _same(expected, actual)
-    assert holder._objective is recording and not holder._pending_backward
+    assert loss_objective(holder) is recording and not holder._pending_backward

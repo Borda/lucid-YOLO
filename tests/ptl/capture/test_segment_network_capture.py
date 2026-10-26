@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from capture_access import network_capture
 from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer
 from pytorch_lightning.callbacks import GradientAccumulationScheduler
@@ -28,10 +29,7 @@ from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.module import DetectionLitModule
 from lucid_yolo.ptl.network_capture import _BF16_REPLAY_SUPPORTED
 
-
-@pytest.fixture(autouse=True)
-def _deterministic(deterministic_kernels_pinning_cudnn_benchmark: None) -> None:
-    """Restore the caller's deterministic policy and cudnn benchmark flag after each test."""
+pytestmark = pytest.mark.usefixtures("deterministic_kernels_pinning_cudnn_benchmark")
 
 
 def _module(**kwargs: object) -> DetectionLitModule:
@@ -165,7 +163,7 @@ def test_segment_request_preserves_defaults_and_checkpoint_keys() -> None:
         replay.setup("fit")
     with patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("CPU must stay native")):
         assert replay.forward_segmentation(torch.rand(2, 3, 64, 64)).prototypes.shape == (2, 32, 16, 16)
-    assert replay._network_capture._network is None
+    assert network_capture(replay)._network is None
 
 
 @pytest.mark.parametrize(
@@ -214,7 +212,7 @@ def test_segment_shared_replay_preserves_predictions_and_unused_gradients(heads:
                 assert left.grad is None and right.grad is None
                 unused += 1
         assert use_masks or unused > 0, "no mask-only parameter matched the unused-gradient filter"
-        assert (replay._network_capture._network is not None) == (dtype != torch.bfloat16 or _BF16_REPLAY_SUPPORTED)
+        assert (network_capture(replay)._network is not None) == (dtype != torch.bfloat16 or _BF16_REPLAY_SUPPORTED)
 
 
 #: Retirement warning of the head holder outside BF16 mixed precision.
@@ -257,7 +255,7 @@ def test_segment_fit_replays_across_empty_partial_validation_and_ema(
             self, trainer: Trainer, pl_module: DetectionLitModule, outputs: object, batch: object, batch_idx: int
         ) -> None:
             """Record whether the public route owns a real graphed network."""
-            recordings.append(pl_module._network_capture._network is not None)
+            recordings.append(network_capture(pl_module)._network is not None)
 
     for capture in (False, True):
         torch.manual_seed(23)
@@ -312,7 +310,7 @@ def test_segment_fit_replays_across_empty_partial_validation_and_ema(
                 copy.deepcopy(scaler.state_dict()) if scaler is not None else None,
             )
         )
-        assert model._network_capture._network is None
+        assert network_capture(model)._network is None
         assert model._segment_head_capture.entries == {}
     _same(*snapshots)
     assert recordings[:6] == [False] * 6
@@ -402,14 +400,14 @@ def test_segment_host_routing_and_native_fallback(mode: str) -> None:
         context,
         warning,
         patch.object(
-            model._network_capture, "run_features", return_value=features if mode == "record" else None
+            network_capture(model), "run_features", return_value=features if mode == "record" else None
         ) as run,
         patch.object(model.backbone, "forward", wraps=model.backbone.forward) as backbone,
     ):
         actual = model.forward_segmentation(images)
     assert run.call_count == int(expected_call)
     assert backbone.call_count == int(mode != "record")
-    assert model._network_capture.retired == (reason is not None)
+    assert network_capture(model).retired == (reason is not None)
     assert actual.prototypes.shape == (2, 32, 16, 16)
     if mode == "record":
         expected = model.head(features)
@@ -447,7 +445,7 @@ def test_segment_class_level_forward_override_retires_to_native() -> None:
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("overridden forward must stay native")),
     ):
         actual = model.forward_segmentation(images)
-    assert model._network_capture.retired
+    assert network_capture(model).retired
     assert actual.prototypes.shape == (2, 32, 16, 16)
 
 
@@ -462,7 +460,7 @@ def test_segment_head_topology_swap_retires_with_topology_reason() -> None:
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("swapped head must stay native")),
     ):
         actual = model.forward_segmentation(images)
-    assert model._network_capture.retired
+    assert network_capture(model).retired
     assert actual.prototypes.shape == (2, 32, 16, 16)
 
 
@@ -477,14 +475,14 @@ def test_retired_holder_skips_segment_replay_predicates() -> None:
     model._capture_network_active = True
     model._trainer = SimpleNamespace(training=True, accumulate_grad_batches=1)
     with pytest.warns(UserWarning, match="stays eager: a test cause"):
-        model._network_capture.retire("a test cause")
+        network_capture(model).retire("a test cause")
     images = torch.rand(2, 3, 64, 64).as_subclass(_CudaMarked)
     with (
         warnings.catch_warnings(),
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("retired holder must stay native")),
         patch("lucid_yolo.ptl.module._segment_head_breach", autospec=True) as dispatch,
         patch("lucid_yolo.ptl.module._head_topology_breach", autospec=True) as topology,
-        patch.object(model._network_capture, "run_features") as run,
+        patch.object(network_capture(model), "run_features") as run,
     ):
         warnings.simplefilter("error")
         features = model._segmentation_features(images)
@@ -492,7 +490,7 @@ def test_retired_holder_skips_segment_replay_predicates() -> None:
     topology.assert_not_called()
     run.assert_not_called()
     assert len(features) == 3
-    assert model._network_capture.retired
+    assert network_capture(model).retired
 
 
 def test_frozen_segment_features_retire_before_cuda_submission() -> None:
@@ -508,7 +506,7 @@ def test_frozen_segment_features_retire_before_cuda_submission() -> None:
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("frozen stages must stay native")),
     ):
         model.forward_segmentation(images)
-    assert model._network_capture._disabled
+    assert network_capture(model)._disabled
     model.backbone.requires_grad_(True)
     model.neck.requires_grad_(True)
     with (
@@ -517,8 +515,8 @@ def test_frozen_segment_features_retire_before_cuda_submission() -> None:
     ):
         warnings.simplefilter("error")
         model.forward_segmentation(images)
-    assert model._network_capture._disabled
-    assert model._network_capture._network is None
+    assert network_capture(model)._disabled
+    assert network_capture(model)._network is None
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -561,10 +559,10 @@ def test_segment_head_hook_retires_feature_replay_and_stays_observable() -> None
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("custom head must stay native")),
     ):
         model.forward_segmentation(images)
-    assert observed == [True] and model._network_capture._disabled
+    assert observed == [True] and network_capture(model)._disabled
     handle.remove()
     model.forward_segmentation(images)
-    assert model._network_capture._network is None
+    assert network_capture(model)._network is None
 
 
 #: Trainer arguments shared by the CUDA lifecycle fits, which differ only in precision and callbacks.
@@ -634,8 +632,8 @@ def test_segment_fit_exception_after_recording_releases_both_holders() -> None:
     ):
         trainer.fit(model, train_dataloaders=_fit_batches())
     assert any(type(call.args[0]).__name__ == "_FeatureNetwork" for call in record.call_args_list)
-    assert model._network_capture._network is None
-    assert model._network_capture._pending_backward is False
+    assert network_capture(model)._network is None
+    assert network_capture(model)._pending_backward is False
     assert model._segment_head_capture.entries == {}
 
 
@@ -687,7 +685,7 @@ def test_segment_accumulation_change_after_recording_keeps_replay_and_matches_na
             trainer.fit(model, train_dataloaders=_fit_batches())
         feature_records = sum(type(call.args[0]).__name__ == "_FeatureNetwork" for call in record.call_args_list)
         assert feature_records == int(capture)
-        assert model._network_capture._network is None
+        assert network_capture(model)._network is None
         snapshots.append((copy.deepcopy(model.state_dict()), copy.deepcopy(trainer.optimizers[0].state_dict())))
     _same(*snapshots)
 

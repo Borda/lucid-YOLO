@@ -9,12 +9,14 @@ import pickle
 import re
 import warnings
 from collections.abc import Callable
+from functools import partial
 from itertools import pairwise
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from capture_access import recording_synchronize, refuse_precision_query
 from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer
 from pytorch_lightning import __version__ as lightning_version
@@ -46,10 +48,7 @@ from lucid_yolo.ptl.segment_head_capture import (
     _tensor_signature,
 )
 
-
-@pytest.fixture(autouse=True)
-def _deterministic(deterministic_kernels: None) -> None:
-    """Use the public-data comparison's deterministic kernel policy."""
+pytestmark = pytest.mark.usefixtures("deterministic_kernels")
 
 
 def _module(**kwargs: object) -> DetectionLitModule:
@@ -325,11 +324,7 @@ def test_unreadable_precision_policy_retires_with_torch_text(monkeypatch: pytest
     prediction groups went native. Matches the sibling recorder's
     ``test_network_capture_guards.py::TestPrecisionPolicy`` contract.
     """
-
-    def refuse() -> tuple[object, ...]:
-        raise RuntimeError("mix of the legacy and new APIs")
-
-    monkeypatch.setattr("lucid_yolo.ptl.segment_head_capture._precision_signature", refuse)
+    monkeypatch.setattr("lucid_yolo.ptl.segment_head_capture._precision_signature", refuse_precision_query)
     module = _module(capture_segment_heads=True)
     _attach(module)
     holder = module._segment_head_capture
@@ -998,9 +993,7 @@ def test_recorded_group_synchronizes_before_buffer_restore() -> None:
         network(images)
         raise RuntimeError("injected warmup failure")
 
-    def synchronize(device: object = None) -> None:
-        order.append("synchronize")
-        torch.cuda.current_stream().synchronize()
+    synchronize = partial(recording_synchronize, order)
 
     buffer = next(stage.buffers())
     before = buffer.detach().clone()

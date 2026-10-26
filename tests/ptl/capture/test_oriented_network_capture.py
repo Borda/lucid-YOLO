@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from capture_access import cuda_images, network_capture
 from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer
 from pytorch_lightning.plugins.precision import MixedPrecision
@@ -28,10 +29,7 @@ from lucid_yolo.ptl.loss_capture import _source_signature
 from lucid_yolo.ptl.module import _oriented_replay_breach
 from lucid_yolo.ptl.network_capture import _OrientedNetwork
 
-
-@pytest.fixture(autouse=True)
-def _deterministic(deterministic_kernels: None) -> None:
-    """Keep native comparisons deterministic and restore the caller's policy afterwards."""
+pytestmark = pytest.mark.usefixtures("deterministic_kernels")
 
 
 def _oriented(**kwargs: Any) -> DetectionLitModule:
@@ -283,7 +281,7 @@ def test_oriented_trainer_preserves_native_state(
                 active = recording and not (layout == "partial" and index % 3 == 1)
                 assert delta >= 2 if active else delta == 0
             assert trainer.optimizers[0].state
-            assert model._network_capture._network is None
+            assert network_capture(model)._network is None
             scaler = getattr(trainer.precision_plugin, "scaler", None)
             if scaler is not None:
                 assert scaler.get_scale() < 1.0
@@ -353,23 +351,6 @@ def test_oriented_helper_replacement_stays_native(target: str, monkeypatch: pyte
     assert _oriented_replay_breach(model) == "a native oriented objective helper changed"
 
 
-class _CudaFlagged(torch.Tensor):
-    """CPU tensor that reports CUDA residency so the CUDA-gated oriented routing is reachable offline.
-
-    Operations unwrap to plain tensors, so the real model still runs on the CPU. A copy of
-    the pose suite's class: ``tests/`` is not a package, so one test module cannot import
-    another's helpers.
-    """
-
-    is_cuda = True
-
-    @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):  # type: ignore[no-untyped-def]
-        """Run the operation on the underlying data and return an ordinary tensor."""
-        with torch._C.DisableTorchFunctionSubclass():
-            return func(*args, **(kwargs or {}))
-
-
 def _routed_oriented(accumulation: int = 1) -> DetectionLitModule:
     """Build an oriented module that satisfies every training-time gate of the full-network route.
 
@@ -390,7 +371,7 @@ def _cuda_flagged_images() -> torch.Tensor:
         >>> _cuda_flagged_images().is_cuda
         True
     """
-    return torch.rand(2, 3, 64, 64).as_subclass(_CudaFlagged)
+    return cuda_images()
 
 
 def _override_objective(model: DetectionLitModule) -> None:
@@ -417,8 +398,8 @@ def test_oriented_routing_dispatches_full_network_to_recorder() -> None:
     images = _cuda_flagged_images()
     replayed = object()
     with (
-        patch.object(model._network_capture, "run_oriented", return_value=replayed) as oriented,
-        patch.object(model._network_capture, "run") as detect,
+        patch.object(network_capture(model), "run_oriented", return_value=replayed) as oriented,
+        patch.object(network_capture(model), "run") as detect,
         warnings.catch_warnings(),
     ):
         warnings.simplefilter("error")
@@ -439,7 +420,7 @@ def test_oriented_routing_leaves_cpu_images_native() -> None:
     images = torch.rand(2, 3, 64, 64)
     expected = model(images)
     with (
-        patch.object(model._network_capture, "run_oriented") as oriented,
+        patch.object(network_capture(model), "run_oriented") as oriented,
         warnings.catch_warnings(),
     ):
         warnings.simplefilter("error")
@@ -472,12 +453,12 @@ def test_oriented_routing_retires_then_runs_native(
     calls: list[None] = []
     model.backbone.register_forward_hook(lambda *_: calls.append(None))
     with (
-        patch.object(model._network_capture, "run_oriented", wraps=model._network_capture.run_oriented) as spy,
+        patch.object(network_capture(model), "run_oriented", wraps=network_capture(model).run_oriented) as spy,
         pytest.warns(UserWarning, match=f"stays eager: {reason}"),
     ):
         output = model._training_network(images)
     assert spy.call_count == recorder_calls
-    assert model._network_capture._disabled and model._network_capture._network is None
+    assert network_capture(model)._disabled and network_capture(model)._network is None
     assert len(calls) == 1
     _same(
         [getattr(expected, field.name) for field in fields(DualHeadOutput)],

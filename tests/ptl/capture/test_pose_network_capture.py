@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from capture_access import cuda_images, head_topology, network_capture, pose_stems
 from markers import requires_cuda, skip_unless_bf16_replay
 from pytorch_lightning import Trainer
 from torch.utils.data import DataLoader
@@ -25,10 +26,7 @@ from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.module import _POSE_STEM_DISPATCH, _pose_head_breach
 from lucid_yolo.ptl.network_capture import _FeatureNetwork, _input_breach, _NetworkCapture, _NetworkCaptureLifecycle
 
-
-@pytest.fixture(autouse=True)
-def _deterministic(deterministic_kernels: None) -> None:
-    """Match the deterministic kernel policy of the public-data fits."""
+pytestmark = pytest.mark.usefixtures("deterministic_kernels")
 
 
 def _pose(**kwargs: object) -> DetectionLitModule:
@@ -134,7 +132,7 @@ def test_pose_replay_keeps_outputs_gradients_buffers(
             outputs.append([getattr(output, field.name) for field in fields(DualHeadOutput)])
             optimizer.step()
             assert bool(_stem_gradients(model)) is stems_trained
-        assert (replayed._network_capture._network is not None) == (dtype != torch.bfloat16 or bf16_replay_expected)
+        assert (network_capture(replayed)._network is not None) == (dtype != torch.bfloat16 or bf16_replay_expected)
         for left, right in zip(*outputs, strict=True):
             assert (left is None) == (right is None)
             if left is not None:
@@ -224,7 +222,7 @@ def test_pose_replay_with_partial_freeze_matches_native(freeze: tuple[str, ...])
     optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5) for model in (native, replayed)]
     for _ in range(3):
         _step_pair(native, replayed, optimizers)
-    assert replayed._network_capture._network is not None
+    assert network_capture(replayed)._network is not None
     for stage in freeze:
         assert all(parameter.grad is None for parameter in getattr(replayed, stage).parameters())
 
@@ -241,7 +239,7 @@ def test_pose_unfreeze_mid_fit_warns_once_and_stays_native() -> None:
     optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5) for model in (native, replayed)]
     for _ in range(2):
         _step_pair(native, replayed, optimizers)
-    assert replayed._network_capture._network is not None
+    assert network_capture(replayed)._network is not None
     for model in (native, replayed):
         model.backbone.requires_grad_(True)
     with warnings.catch_warnings(record=True) as caught:
@@ -250,7 +248,7 @@ def test_pose_unfreeze_mid_fit_warns_once_and_stays_native() -> None:
             _step_pair(native, replayed, optimizers)
     retired = [str(item.message) for item in caught if str(item.message).startswith("capture_network=True stays")]
     assert len(retired) == 1 and "changed after recording" in retired[0], retired
-    assert replayed._network_capture._disabled and replayed._network_capture._network is None
+    assert network_capture(replayed)._disabled and network_capture(replayed)._network is None
 
 
 def _same_state(left: object, right: object) -> None:
@@ -364,9 +362,9 @@ def test_pose_trainer_matches_native(
         assert all(fragment in message for fragment, message in zip(expected, retired, strict=True)), retired
         assert graph_recordings.call_count == 19 * int(capture and not retirements)
         assert trainer.global_step == (3 + accumulation - 1) // accumulation
-        assert model._network_capture._network is None
-        assert model._network_capture._stems == {}
-        assert model._network_capture._stem_owners is None
+        assert network_capture(model)._network is None
+        assert pose_stems(network_capture(model)) == {}
+        assert network_capture(model)._stem_owners is None
         scaler = getattr(trainer.precision_plugin, "scaler", None)
         states.append(
             (
@@ -440,23 +438,23 @@ def test_pose_cli_accepts_network_capture(capture: bool) -> None:
 def test_pose_head_certificate_survives_copy_and_rejects_overrides() -> None:
     """A native head stays eligible through deepcopy; changed dispatch cannot detach shared features."""
     model = copy.deepcopy(_pose())
-    assert _pose_head_breach(model.head, model._head_topology) is None
+    assert _pose_head_breach(model.head, head_topology(model)) is None
     with patch.object(model.head, "forward", wraps=model.head.forward):
-        assert _pose_head_breach(model.head, model._head_topology) is not None
-    assert _pose_head_breach(model.head, model._head_topology) is None
+        assert _pose_head_breach(model.head, head_topology(model)) is not None
+    assert _pose_head_breach(model.head, head_topology(model)) is None
     with patch.object(type(model.head), "forward", lambda self, values: values):
-        assert _pose_head_breach(model.head, model._head_topology) is not None
+        assert _pose_head_breach(model.head, head_topology(model)) is not None
 
 
 def test_pose_head_certificate_rejects_forward_branch_overrides() -> None:
     """``forward`` only reaches submodules through ``forward_branch``; both dispatch points count."""
     model = copy.deepcopy(_pose())
-    assert _pose_head_breach(model.head, model._head_topology) is None
+    assert _pose_head_breach(model.head, head_topology(model)) is None
     with patch.object(model.head, "forward_branch", wraps=model.head.forward_branch):
-        assert _pose_head_breach(model.head, model._head_topology) is not None
-    assert _pose_head_breach(model.head, model._head_topology) is None
+        assert _pose_head_breach(model.head, head_topology(model)) is not None
+    assert _pose_head_breach(model.head, head_topology(model)) is None
     with patch.object(type(model.head), "forward_branch", lambda self, features, branch: features):
-        assert _pose_head_breach(model.head, model._head_topology) is not None
+        assert _pose_head_breach(model.head, head_topology(model)) is not None
 
 
 @pytest.mark.parametrize(
@@ -484,9 +482,9 @@ def test_altered_pose_head_dispatch_fails_certificate(mutate: Callable[[torch.nn
     Starts from a fresh deepcopy certified clean, applies one mutation, and expects a named breach.
     """
     model = copy.deepcopy(_pose())
-    assert _pose_head_breach(model.head, model._head_topology) is None
+    assert _pose_head_breach(model.head, head_topology(model)) is None
     mutate(model.head)
-    assert _pose_head_breach(model.head, model._head_topology) is not None
+    assert _pose_head_breach(model.head, head_topology(model)) is not None
 
 
 def test_frozen_features_leave_full_native_call_to_owner() -> None:
@@ -520,7 +518,7 @@ def test_pose_hook_retires_features_and_observes_native_root(location: str, reas
     image = torch.rand(2, 3, 64, 64, device="cuda")
     model._training_network(image).o2m_cls.sum().backward()
     model.zero_grad(set_to_none=True)
-    assert model._network_capture._network is not None
+    assert network_capture(model)._network is not None
     calls = []
 
     def observe(module: torch.nn.Module, args: object, output: object) -> None:
@@ -538,24 +536,9 @@ def test_pose_hook_retires_features_and_observes_native_root(location: str, reas
         with pytest.warns(UserWarning, match=f"stays eager: {reason}"):
             model._training_network(image)
         assert calls == [model if location == "global" else model.head]
-        assert model._network_capture._disabled and model._network_capture._network is None
+        assert network_capture(model)._disabled and network_capture(model)._network is None
     finally:
         handle.remove()
-
-
-class _CudaFlagged(torch.Tensor):
-    """CPU tensor that reports CUDA residency so the CUDA-gated pose routing is reachable offline.
-
-    Operations unwrap to plain tensors, so the real model still runs on the CPU.
-    """
-
-    is_cuda = True
-
-    @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):  # type: ignore[no-untyped-def]
-        """Run the operation on the underlying data and return an ordinary tensor."""
-        with torch._C.DisableTorchFunctionSubclass():
-            return func(*args, **(kwargs or {}))
 
 
 def _routed_pose(accumulation: int = 1) -> DetectionLitModule:
@@ -578,7 +561,7 @@ def _cuda_flagged_images() -> torch.Tensor:
         >>> _cuda_flagged_images().is_cuda
         True
     """
-    return torch.rand(2, 3, 64, 64).as_subclass(_CudaFlagged)
+    return cuda_images()
 
 
 def _count_backbone_calls(model: DetectionLitModule) -> list[None]:
@@ -621,12 +604,12 @@ def test_pose_routing_retires_then_runs_native(
     images = _cuda_flagged_images()
     calls = _count_backbone_calls(model)
     with (
-        patch.object(model._network_capture, "run_features", wraps=model._network_capture.run_features) as spy,
+        patch.object(network_capture(model), "run_features", wraps=network_capture(model).run_features) as spy,
         pytest.warns(UserWarning, match=f"stays eager: {reason}"),
     ):
         output = model._training_network(images)
     spy.assert_called_once_with(images, (model.backbone, model.neck))
-    assert model._network_capture._disabled and model._network_capture._network is None
+    assert network_capture(model)._disabled and network_capture(model)._network is None
     assert len(calls) == 1
     assert output.o2m_cls.shape[0] == 2
 
@@ -641,12 +624,12 @@ def test_retired_holder_skips_pose_replay_predicates() -> None:
     torch.manual_seed(42)
     model = _routed_pose()
     with pytest.warns(UserWarning, match="stays eager: a test cause"):
-        model._network_capture.retire("a test cause")
+        network_capture(model).retire("a test cause")
     images = _cuda_flagged_images()
     with (
         patch("lucid_yolo.ptl.module._pose_head_breach", autospec=True) as breach,
-        patch.object(model._network_capture, "check_stem_owners") as owners,
-        patch.object(model._network_capture, "run_features") as run,
+        patch.object(network_capture(model), "check_stem_owners") as owners,
+        patch.object(network_capture(model), "run_features") as run,
     ):
         output = model._training_network(images)
     breach.assert_not_called()
@@ -661,7 +644,7 @@ def test_pose_routing_falls_back_when_features_are_absent() -> None:
     model = _routed_pose()
     images = _cuda_flagged_images()
     calls = _count_backbone_calls(model)
-    with patch.object(model._network_capture, "run_features", return_value=None) as spy, warnings.catch_warnings():
+    with patch.object(network_capture(model), "run_features", return_value=None) as spy, warnings.catch_warnings():
         warnings.simplefilter("error")
         output = model._training_network(images)
     spy.assert_called_once_with(images, (model.backbone, model.neck))
@@ -679,7 +662,7 @@ def test_pose_routing_dispatches_shared_features_to_native_head() -> None:
     expected = model.head(features)
     calls = _count_backbone_calls(model)
     with (
-        patch.object(model._network_capture, "run_features", return_value=features) as spy,
+        patch.object(network_capture(model), "run_features", return_value=features) as spy,
         warnings.catch_warnings(),
     ):
         warnings.simplefilter("error")
@@ -697,7 +680,7 @@ def test_pose_routing_leaves_cpu_images_native() -> None:
     """Images that are not on CUDA never reach the recorder, however many gates pass."""
     torch.manual_seed(42)
     model = _routed_pose()
-    with patch.object(model._network_capture, "run_features") as spy:
+    with patch.object(network_capture(model), "run_features") as spy:
         output = model._training_network(torch.rand(2, 3, 64, 64))
     spy.assert_not_called()
     assert output.o2m_cls.shape[0] == 2
@@ -758,7 +741,7 @@ def test_pose_stems_replay_through_changing_supervision(
     optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5, momentum=0.9) for model in (native, replayed)]
     for iteration, point_branches in enumerate((("o2m", "o2o"), (), ("o2m",), ("o2m", "o2o"))):
         previous_launches = len(launches)
-        replayed._network_capture.start_batch()
+        network_capture(replayed).start_batch()
         image = torch.rand(2, 3, 64, 64, device="cuda").contiguous(memory_format=torch.channels_last)
         names = ["o2m_cls", "o2o_cls"] + [f"{branch}_keypoints" for branch in point_branches]
         for model, optimizer in zip((native, replayed), optimizers, strict=True):
@@ -774,7 +757,7 @@ def test_pose_stems_replay_through_changing_supervision(
             assert len(launches) - previous_launches >= 19 + 1 + 6 + 3 * len(point_branches)
         _assert_same_gradients_and_state(native, replayed)
         _same_state(optimizers[0].state_dict(), optimizers[1].state_dict())
-        holders = replayed._network_capture._stems
+        holders = pose_stems(network_capture(replayed))
         assert len(holders) == 18
         assert all(holder._network is not None for holder in holders.values())
         assert graph_recordings.call_count == 19
@@ -782,10 +765,10 @@ def test_pose_stems_replay_through_changing_supervision(
             stem = getattr(replayed.head, branch).keypoint_stems[0]
             assert all((parameter.grad is not None) == (branch in point_branches) for parameter in stem.parameters())
             assert holders[id(stem)]._pending_backward == (branch not in point_branches)
-    restored = copy.deepcopy(replayed._network_capture)
-    assert restored._network is None and restored._stems == {}
-    replayed._network_capture.clear()
-    assert replayed._network_capture._stems == {}
+    restored = copy.deepcopy(network_capture(replayed))
+    assert restored._network is None and pose_stems(restored) == {}
+    network_capture(replayed).clear()
+    assert pose_stems(network_capture(replayed)) == {}
 
 
 @requires_cuda
@@ -803,7 +786,7 @@ def test_stem_replay_preserves_input_gradients_and_accumulation() -> None:
         assert _bits_equal(left.grad, right.grad)
         for expected, actual in zip(native.parameters(), replayed.parameters(), strict=True):
             assert _bits_equal(expected.grad, actual.grad)
-        assert holder._stems[id(replayed)]._network is not None
+        assert pose_stems(holder)[id(replayed)]._network is not None
     actual = holder.stem(replayed, right.detach())
     assert _bits_equal(native(right.detach()), actual)
 
@@ -826,7 +809,7 @@ def test_stem_dispatch_override_before_construction_stays_observable(owner: type
 
     with patch.object(owner, name, custom):
         model = _pose()
-        assert _pose_head_breach(model.head, model._head_topology) == "the native pose stem dispatch changed"
+        assert _pose_head_breach(model.head, head_topology(model)) == "the native pose stem dispatch changed"
 
 
 def test_stem_holder_dispatch_and_lifetime_without_cuda() -> None:
@@ -836,9 +819,9 @@ def test_stem_holder_dispatch_and_lifetime_without_cuda() -> None:
     feature = _cuda_flagged_images()
     with patch.object(_NetworkCapture, "_run", autospec=True, return_value=feature) as run:
         assert parent.stem(stem, feature) is feature
-        child = parent._stems[id(stem)]
+        child = pose_stems(parent)[id(stem)]
         assert parent.stem(stem, feature) is feature
-        assert len(parent._stems) == 1
+        assert len(pose_stems(parent)) == 1
         assert run.call_args.args[0] is child
         assert run.call_args.kwargs == {"allow_input_grad": True}
         _, stages, eager, build, rebuild = run.call_args.args[1:]
@@ -849,9 +832,9 @@ def test_stem_holder_dispatch_and_lifetime_without_cuda() -> None:
     child._pending_backward = True
     parent.start_batch()
     assert not child._pending_backward
-    assert copy.deepcopy(parent)._stems == {}
+    assert pose_stems(copy.deepcopy(parent)) == {}
     parent.clear()
-    assert parent._stems == {}
+    assert pose_stems(parent) == {}
 
 
 def test_stem_feature_gradient_permission_does_not_change_image_guard() -> None:
@@ -889,7 +872,7 @@ def test_stem_bypass_runs_native_without_holder(
     with patch.object(_NetworkCapture, "_run", autospec=True) as run, torch.set_grad_enabled(grad):
         result = parent.stem(stage, feature)
     assert result is feature
-    assert parent._stems == {}
+    assert pose_stems(parent) == {}
     run.assert_not_called()
 
 
@@ -904,7 +887,7 @@ def test_recorded_stem_switched_to_eval_reaches_drift_check() -> None:
     feature = _cuda_flagged_images()
     with patch.object(_NetworkCapture, "_run", autospec=True, return_value=feature) as run:
         parent.stem(stage, feature)
-        parent._stems[id(stage)]._network = torch.nn.Identity()
+        pose_stems(parent)[id(stage)]._network = torch.nn.Identity()
         stage.eval()
         parent.stem(stage, feature)
     assert run.call_count == 2
@@ -926,7 +909,7 @@ def test_stem_retirement_warning_names_stem_and_caller() -> None:
         parent.stem(stage, feature)
     match = r"keeps pose stem o2m\.keypoint_stems\.0 eager while the shared features and the other stems keep replaying"
     with pytest.warns(UserWarning, match=match) as caught:
-        parent._stems[id(stage)].retire("a test cause")
+        pose_stems(parent)[id(stage)].retire("a test cause")
     assert caught[0].filename == __file__
 
 
@@ -948,9 +931,9 @@ def test_lifecycle_releases_stem_holders(finish: Callable[[_NetworkCaptureLifecy
     """
     holder = _NetworkCapture()
     holder.check_stem_owners(_pose().head)
-    holder._stems[1] = _NetworkCapture("stem")
+    pose_stems(holder)[1] = _NetworkCapture("stem")
     finish(_NetworkCaptureLifecycle(), SimpleNamespace(_network_capture=holder))
-    assert holder._stems == {}
+    assert pose_stems(holder) == {}
     assert holder._stem_owners is None
 
 
@@ -959,13 +942,13 @@ def test_changed_pose_stem_ownership_retires_all_holders() -> None:
     model = _pose()
     holder = _NetworkCapture()
     holder.check_stem_owners(model.head)
-    holder._stems[1] = _NetworkCapture()
+    pose_stems(holder)[1] = _NetworkCapture()
     holder.check_stem_owners(model.head)
-    assert not holder._disabled and len(holder._stems) == 1
+    assert not holder._disabled and len(pose_stems(holder)) == 1
     model.head.o2m.keypoint_stems[0] = copy.deepcopy(model.head.o2m.keypoint_stems[0])
     with pytest.warns(UserWarning, match="pose head module was replaced"):
         holder.check_stem_owners(model.head)
-    assert holder._disabled and holder._stems == {} and holder._stem_owners is None
+    assert holder._disabled and pose_stems(holder) == {} and holder._stem_owners is None
 
 
 @requires_cuda
@@ -974,14 +957,14 @@ def test_replaced_pose_stem_keeps_complete_forward_native() -> None:
     native, replayed = _frozen_pair(())
     optimizers = [torch.optim.SGD(model.parameters(), lr=1e-5) for model in (native, replayed)]
     _step_pair(native, replayed, optimizers)
-    assert len(replayed._network_capture._stems) == 18
+    assert len(pose_stems(network_capture(replayed))) == 18
     replacement = copy.deepcopy(native.head.o2m.keypoint_stems[0])
     native.head.o2m.keypoint_stems[0] = copy.deepcopy(replacement)
     replayed.head.o2m.keypoint_stems[0] = copy.deepcopy(replacement)
     with pytest.warns(UserWarning, match="pose head module was replaced"):
         _step_pair(native, replayed, optimizers)
-    assert replayed._network_capture._disabled
-    assert replayed._network_capture._network is None and replayed._network_capture._stems == {}
+    assert network_capture(replayed)._disabled
+    assert network_capture(replayed)._network is None and pose_stems(network_capture(replayed)) == {}
 
 
 @requires_cuda
@@ -1000,18 +983,18 @@ def test_changed_stem_trainability_retires_only_its_recording() -> None:
     assert "o2m.keypoint_stems.0" in str(retired[0].message)
     assert "changed after recording" in str(retired[0].message)
     assert not retired[0].filename.endswith("detect.py")
-    capture = replayed._network_capture
+    capture = network_capture(replayed)
     frozen = id(replayed.head.o2m.keypoint_stems[0])
     assert capture._network is not None
-    assert capture._stems[frozen]._disabled and capture._stems[frozen]._network is None
-    assert sum(child._disabled for child in capture._stems.values()) == 1
-    assert sum(child._network is not None for child in capture._stems.values()) == len(capture._stems) - 1
+    assert pose_stems(capture)[frozen]._disabled and pose_stems(capture)[frozen]._network is None
+    assert sum(child._disabled for child in pose_stems(capture).values()) == 1
+    assert sum(child._network is not None for child in pose_stems(capture).values()) == len(pose_stems(capture)) - 1
     for model in (native, replayed):
         model.head.o2m.keypoint_stems[0].requires_grad_(True)
     with warnings.catch_warnings():
         warnings.filterwarnings("error", message="capture_network=True")
         _step_pair(native, replayed, optimizers)
-    assert capture._stems[frozen]._disabled
+    assert pose_stems(capture)[frozen]._disabled
     _same_state(optimizers[0].state_dict(), optimizers[1].state_dict())
 
 
@@ -1029,7 +1012,7 @@ def test_changed_stem_mode_retires_only_its_recording() -> None:
         model.head.o2m.keypoint_stems[0].eval()
     with pytest.warns(UserWarning, match=r"keeps pose stem o2m\.keypoint_stems\.0 eager"):
         _step_pair(native, replayed, optimizers)
-    capture = replayed._network_capture
+    capture = network_capture(replayed)
     assert capture._network is not None
-    assert capture._stems[id(replayed.head.o2m.keypoint_stems[0])]._disabled
+    assert pose_stems(capture)[id(replayed.head.o2m.keypoint_stems[0])]._disabled
     _same_state(optimizers[0].state_dict(), optimizers[1].state_dict())

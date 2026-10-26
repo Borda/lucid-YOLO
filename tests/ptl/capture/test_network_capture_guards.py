@@ -16,10 +16,12 @@ import subprocess
 import sys
 import warnings
 from collections.abc import Callable
+from functools import partial
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from capture_access import network_capture, recording_synchronize, refuse_precision_query
 from markers import requires_cuda
 from pytorch_lightning import Trainer
 
@@ -232,11 +234,7 @@ class TestPrecisionPolicy:
         Losing the text leaves a user unable to tell a mixed legacy/new precision API
         from any other reason the step went eager.
         """
-
-        def refuse() -> tuple[object, ...]:
-            raise RuntimeError("mix of the legacy and new APIs")
-
-        monkeypatch.setattr("lucid_yolo.ptl.network_capture._precision_signature", refuse)
+        monkeypatch.setattr("lucid_yolo.ptl.network_capture._precision_signature", refuse_precision_query)
         model = _module()
         images = torch.zeros(1, 3, 64, 64)
         eager = MagicMock(return_value="eager output")
@@ -283,9 +281,7 @@ class TestFailedRecording:
             network(images)
             raise RuntimeError("injected warmup failure")
 
-        def synchronize(device: object = None) -> None:
-            order.append("synchronize")
-            torch.cuda.current_stream().synchronize()
+        synchronize = partial(recording_synchronize, order)
 
         buffer = next(model.backbone.buffers())
         original_copy = buffer.copy_
@@ -355,9 +351,9 @@ class TestReplayBackwardHold:
         keep every later forward of the fit eager.
         """
         model = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=4, capture_network=True)
-        model._network_capture._pending_backward = True
+        network_capture(model)._pending_backward = True
         _NetworkCaptureLifecycle().on_train_batch_start(MagicMock(spec=Trainer), model, None, 0)
-        assert not model._network_capture._pending_backward
+        assert not network_capture(model)._pending_backward
 
     @requires_cuda
     @pytest.mark.usefixtures("deterministic_kernels")

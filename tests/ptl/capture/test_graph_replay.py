@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import torch
+from capture_access import pose_stems
 from torch import nn
 
 from lucid_yolo.ptl import network_capture
@@ -188,7 +189,7 @@ def test_network_clear_releases_everything_and_raises_first_failure(
         holder.clear()
     second.clear.assert_called_once_with()
     drain.assert_called_once_with(_DEVICE)
-    assert holder._stems == {} and "forward" not in vars(recording)
+    assert pose_stems(holder) == {} and "forward" not in vars(recording)
 
 
 @pytest.mark.parametrize(

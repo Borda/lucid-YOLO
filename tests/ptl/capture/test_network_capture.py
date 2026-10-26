@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from capture_access import network_capture
 from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer
 from pytorch_lightning.accelerators import CUDAAccelerator
@@ -38,10 +39,7 @@ from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.module import StepBatch
 from lucid_yolo.ptl.network_capture import _NetworkCapture, _NetworkCaptureLifecycle
 
-
-@pytest.fixture(autouse=True)
-def _deterministic(deterministic_kernels: None) -> None:
-    """Compare under the deterministic kernel policy of the public-data trajectory comparison."""
+pytestmark = pytest.mark.usefixtures("deterministic_kernels")
 
 
 def _module(**kwargs: object) -> DetectionLitModule:
@@ -126,12 +124,12 @@ def test_copy_and_pickle_discard_transient_recordings() -> None:
 def test_fit_boundaries_clear_recording(hook: str) -> None:
     """Success, failure and reuse of the same module all discard the previous recording."""
     model = _module(capture_network=True)
-    model._network_capture._disabled = True
-    model._network_capture._input = ("old fit",)
+    network_capture(model)._disabled = True
+    network_capture(model)._input = ("old fit",)
     args = (MagicMock(spec=Trainer), model)
     getattr(_NetworkCaptureLifecycle(), hook)(*args, *([RuntimeError("abort")] if hook == "on_exception" else []))
-    assert model._network_capture._input is None
-    assert not model._network_capture._disabled
+    assert network_capture(model)._input is None
+    assert not network_capture(model)._disabled
 
 
 def test_bf16_gate_tracks_torch_2_9(bf16_replay_expected: bool) -> None:
@@ -232,7 +230,7 @@ def test_cpu_images_bypass_recording_when_capture_is_active() -> None:
     model._trainer = MagicMock(spec=Trainer, training=True)
     images = torch.rand(2, 3, 64, 64)
     points, strides = model._anchor_grid(64, 64, images.device)
-    with patch.object(model._network_capture, "run", side_effect=AssertionError("CPU images must stay eager")):
+    with patch.object(network_capture(model), "run", side_effect=AssertionError("CPU images must stay eager")):
         head_out, _ = model._detect_objective(
             images,
             points,
@@ -494,7 +492,7 @@ def test_training_objective_preserves_root_customisations(custom: str) -> None:
                 torch.empty(2, 0, dtype=torch.bool, device="cuda"),
                 model._alpha_tensor(images.device),
             )
-        assert model._network_capture._disabled
+        assert network_capture(model)._disabled
         if custom == "root_hook":
             calls.assert_called_once()
         else:
@@ -509,7 +507,7 @@ def test_public_forward_never_records() -> None:
     """Prediction and direct callers keep ordinary tensor ownership even when the flag is on."""
     model = _module(capture_network=True).cuda()
     model._capture_network_active = True
-    with patch.object(model._network_capture, "run", side_effect=AssertionError("public forward must stay eager")):
+    with patch.object(network_capture(model), "run", side_effect=AssertionError("public forward must stay eager")):
         output = model(torch.randn(2, 3, 64, 64, device="cuda"))
         assert output.o2m_cls.shape[0] == 2
 
@@ -542,7 +540,7 @@ def test_anomaly_detection_trainer_stays_eager() -> None:
     assert trainer.optimizers[0].state
     assert not torch.equal(initial, next(model.parameters()).detach().cpu())
     assert all(torch.isfinite(value).all() for value in model.state_dict().values())
-    assert model._network_capture._network is None
+    assert network_capture(model)._network is None
 
 
 @requires_cuda
@@ -604,7 +602,7 @@ def test_trainer_activates_once_per_fit_and_cleans_up(
             bf16_gated = precision == "bf16-mixed" and not bf16_replay_expected
             expected = 0 if bf16_gated else fit_index + 1
             assert record.call_count == expected
-            assert replay._network_capture._network is None
+            assert network_capture(replay)._network is None
             for name, tensor in eager.state_dict().items():
                 assert torch.equal(tensor, replay.state_dict()[name]), name
             assert optimizers[0].keys() == optimizers[1].keys()
@@ -842,7 +840,7 @@ class _RecordingProbe(Callback):
 
     def on_train_batch_end(self, trainer: Trainer, pl_module: Any, outputs: Any, batch: Any, batch_idx: int) -> None:
         """Remember the recording once a training step has created it."""
-        recorded = pl_module._network_capture._network
+        recorded = network_capture(pl_module)._network
         if recorded is not None:
             self.network = weakref.ref(recorded)
 
