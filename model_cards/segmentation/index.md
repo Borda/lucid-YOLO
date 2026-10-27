@@ -65,7 +65,7 @@ COCO's documented composition limits apply to this model directly: category freq
 | Hardware | one unrecorded Colab GPU (`default_root_dir` under `/content/`); the model was not logged, and no per-epoch timing was recorded |
 | EMA | decay 0.9999, tau 2000 |
 
-The wiring gate that precedes any COCO launch is `scripts/overfit_micro.py --task segment`: 100 images, 592 instances, 4 classes, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train mask IoU **0.8146** against a 0.7 floor (`goldens/gpu/overfit_micro_seg.json`).
+The wiring gate that precedes any COCO launch is `scripts/overfit_micro.py --task segment`: 100 images, 592 instances, 4 classes, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train mask IoU **0.8649 ± 0.05** against a 0.7 floor (`goldens/gpu/overfit_micro_seg.json`).
 
 ## 📈 Training curves
 

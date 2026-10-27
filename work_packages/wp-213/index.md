@@ -1,0 +1,23 @@
+# WP-213 — distributed obb and keypoint validation
+
+> Engineering log · [Phase 19 — Codebase audit remediation](https://borda.github.io/lucid-YOLO/engineering/phase-19-codebase-audit/)
+>
+> 🔗 Depends on [WP-212](https://borda.github.io/lucid-YOLO/work_packages/wp-212/) · Needed by [WP-214](https://borda.github.io/lucid-YOLO/work_packages/wp-214/)
+>
+> ⬅️ [WP-212](https://borda.github.io/lucid-YOLO/work_packages/wp-212/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-214](https://borda.github.io/lucid-YOLO/work_packages/wp-214/) ➡️
+
+
+<a id="wp-213"></a>
+
+## WP-213 — distributed obb and keypoint validation
+
+**Finding.** U6 found rotated and keypoint validation accumulated rank-local Python lists. Their strategies therefore refused multi-process setup rather than log each rank's shard as the split's AP. Averaging rank-local AP cannot reconstruct the whole split's confidence ranking.
+
+**Change.** Private per-task torchmetrics metrics gather lossless tensor records through list states with `dist_reduce_fx="cat"`, then call the existing rotated mAP and OKS AP scorers. Image identities retain their first occurrence so DistributedSampler padding counts once. Direct metric callers retain input order; the module restores its existing sequential dataset-position order after gathering, preserving tied-score ordering. Private validation target and packed-target subclasses carry dataset positions across worker and device transfer without changing public signatures. All ranks participate when any rank has images; reset clears epoch state. The obb/keypoints setup refusal is lifted; unrelated replay and prefetch restrictions remain.
+
+**Verification.**
+
+- **CPU.** `make gate` green on this commit's tree. Regressions: `test_single_process_matches_list_accumulator`, `test_deduplication_keeps_first_image_and_input_order`, `test_record_transport_preserves_tensor_precision`, `test_validation_identity_survives_worker_and_device_transport` and `test_module_metric_retains_validation_identity`. The former refusal test becomes `test_accepts_multi_process_runs`, covering fit and standalone validation for both tasks.
+- **Distributed.** The multi-device proof is a CPU gloo two-process test, `test_gloo_matches_full_validation_set`: both tasks compare padded shards, conflicting duplicate predictions and an empty rank against full-set scoring with exact float equality. It runs in `make gate` (CPU-only, no `gpu` mark) and passes there.
+- **Accelerators.** `make gate-gpu` green on an A100 (py3.11, torch 2.9.1+cu129) at the stack's tip `72b5505`, the tree [WP-218](https://borda.github.io/lucid-YOLO/work_packages/wp-218/) left: 359 passed and 2 skipped (a `grad_dtype` case that needs a newer torch, and a replay test that needs two CUDA devices), every notebook in full, `demo_obb` on DOTA-v1.0 among them, and 55/55 accelerator goldens. `tests/ptl -m "gpu or data"` also passed on Colab's py3.13 / torch 2.11 (242 passed). The same selection on this package's own commit, `197b846`, passed in that session too (242 passed). The single-device goldens stayed bit-exact. No two-GPU run was made, so the NCCL path itself is untested: the gloo proxy above covers the same gather and deduplication on CPU, and a real multi-GPU check remains outstanding.
+

@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
   
@@ -33,10 +33,10 @@
   
 
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -696,6 +696,34 @@
     
   
     Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/cuda-performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Opt-in CUDA performance flags
   
 
     
@@ -2058,6 +2086,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2268,6 +2324,34 @@
     
   
     Cross-cutting engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/agents-rationale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent-contract rationale
   
 
     
@@ -4121,6 +4205,182 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3_19" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3_19" id="__nav_5_3_19_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 18 — CUDA graph replay and pipeline throughput
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_3_19_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3_19">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 18 — CUDA graph replay and pipeline throughput
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-18-cuda-replay-throughput/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3_20" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3_20" id="__nav_5_3_20_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 19 — Codebase audit remediation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_3_20_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3_20">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 19 — Codebase audit remediation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-19-codebase-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -4494,7 +4754,7 @@
 </tr>
 </tbody>
 </table>
-<p>The wiring gate that precedes any COCO launch is <code>scripts/overfit_micro.py --task keypoints</code>: 100 images, 548 instances, 1 class, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train OKS AP <strong>0.3357</strong> against a 0.30 floor (<code>goldens/gpu/overfit_micro_kp.json</code>) — a floor set low relative to the sibling gates' because OKS at A67's uniform sigma is a cliff on symbols a few dozen pixels across, not because the loop learns less.</p>
+<p>The wiring gate that precedes any COCO launch is <code>scripts/overfit_micro.py --task keypoints</code>: 100 images, 548 instances, 1 class, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train OKS AP <strong>0.5820 ± 0.05</strong> against a 0.30 floor (<code>goldens/gpu/overfit_micro_kp.json</code>, resealed by <a href="../../work_packages/wp-209/">WP-209</a> on an A100 under torch 2.9.1; the figure first stood at 0.3357 in <a href="../../work_packages/wp-132/">WP-132</a>, rose to 0.5747 once <a href="../../work_packages/wp-169/">WP-169</a> fixed the assigner, as <a href="../../work_packages/wp-167/">WP-167</a> measured, fell to 0.4919 with <a href="../../work_packages/wp-183/">WP-183</a>'s dense box terms, and reads 0.5820 on the same GPU model with no change to the per-step arithmetic, inside the 0.49–0.73 spread a seed sweep measured on unchanged code) — a floor set low relative to the sibling gates' because OKS at A67's uniform sigma is a cliff on symbols a few dozen pixels across, not because the loop learns less.</p>
 <h2 id="training-curves">📈 Training curves<a class="headerlink" href="#training-curves" title="Permanent link">&para;</a></h2>
 <p><img alt="Pose-smoke training curves" src="../../figures/pose_smoke_training.svg" /></p>
 <p><em>Run v11, four panels. The validation box mAP50-95 (the same E2E proxy the other three tiers log); epoch-mean loss totals; the one-to-one branch's pre-gain box/classification/L1 components; and the RLE keypoint term, train and validation.</em></p>
@@ -4542,7 +4802,7 @@
 <p><strong>Uniform-weight visibility policy is untested against the alternative.</strong> <code>v=1</code> (occluded) and <code>v=2</code> (visible) supervise identically (A66); no ablation here measures whether down-weighting occluded points would change the result.</p>
 <p><strong>The gain is un-tuned.</strong> <code>keypoint_gain = 1.0</code> is the deliberately unoptimized starting point (A68) — this run is evidence the value does not swamp or get swamped by the detection objective, not evidence it is well-balanced. No sweep has run.</p>
 <p><strong>One flow, not measured against two.</strong> The one-to-many and one-to-one branches share a single RLE flow (A69) rather than training one each; whether that matters is untested, and the overfit gate cannot tell, since a 100-image memorization run drives both branches to the same near-zero residual.</p>
-<p><strong>One device, and reproducibility narrower than <code>deterministic: true</code> reads.</strong> This tier trained on a single unrecorded Colab GPU; no run in this project has spanned more than one accelerator. For this task it could not have: <code>lucid-yolo fit</code> <strong>refuses <code>task: keypoints</code> on more than one process</strong> at setup, because <code>val/oks_mAP</code> accumulates plain Python lists nothing gathers across ranks and a per-rank average precision cannot be averaged back into the split's. <code>default_determinism</code> (<code>cli/train.py</code>) resolves <code>deterministic</code> to <code>"warn_only"</code> whenever MPS is the auto-picked accelerator — MPS ships no deterministic kernel for some backwards this model hits — so an Apple-silicon run is reproducible only up to those kernels while CPU and CUDA keep strict <code>True</code>. Separately, the seed reproduces a run only at the same <code>--data.num_workers</code>: 0 workers replays one augmentation stream byte for byte, <code>N</code> workers replays a different one re-seeded per worker and per epoch (<a href="../../work_packages/wp-079/">WP-079</a>). Both are determined by <code>seed</code>; 32 workers does not reproduce 0.</p>
+<p><strong>One device, and reproducibility narrower than <code>deterministic: true</code> reads.</strong> This tier trained on a single unrecorded Colab GPU; no run in this project has spanned more than one accelerator. Keypoint validation now accepts DDP and gathers complete image records, deduplicated by dataset identity before OKS scoring (<a href="../../work_packages/wp-213/">WP-213</a>). Its multi-device check is a CPU gloo two-process test; no two-GPU run was made, and a real multi-GPU check remains outstanding. <code>default_determinism</code> (<code>cli/train.py</code>) resolves <code>deterministic</code> to <code>"warn_only"</code> whenever MPS is the auto-picked accelerator — MPS ships no deterministic kernel for some backwards this model hits — so an Apple-silicon run is reproducible only up to those kernels while CPU and CUDA keep strict <code>True</code>. Separately, the seed reproduces a run only at the same <code>--data.num_workers</code>: 0 workers replays one augmentation stream byte for byte, <code>N</code> workers replays a different one re-seeded per worker and per epoch (<a href="../../work_packages/wp-079/">WP-079</a>). Both are determined by <code>seed</code>; 32 workers does not reproduce 0.</p>
 <h2 id="ethical-considerations">🤝 Ethical considerations<a class="headerlink" href="#ethical-considerations" title="Permanent link">&para;</a></h2>
 <p>This model predicts the full skeletal pose of every detected person in an image — not a box, not a silhouette, but the location of each joint. That is a materially more identifying and more sensitive readout than either the detector's box or the segmenter's mask: gait, posture and body configuration are usable for re-identification and activity inference in ways neither of those outputs directly supports. Any deployment reading pose from people carries surveillance, tracking and biometric-inference implications well beyond what this project has assessed, and none is planned. The intended-use section above is a boundary, not a disclaimer: the model has no evaluation supporting use on real people outside this benchmark, and an OKS AP of 0.27 means roughly three in four joints are not usefully localized at COCO's own strict thresholds.</p>
 <p>Failure modes are unbounded in the sense that matters — no calibration study exists, so per-point scores should not be read as confidence, an occluded joint is trained to be guessed rather than flagged as unknown (A66), and the model gives no signal when it is operating outside its training distribution or on a body configuration COCO's <code>person</code> category under-represents.</p>
@@ -4628,10 +4888,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
       
         <script src="../../javascripts/pycon_copy.js"></script>
       

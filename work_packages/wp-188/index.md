@@ -1,6 +1,6 @@
 # 📦 WP-188 — `feat(docs): notebooks rendered from jupytext sources`
 
-> Engineering log · [Phase 17 — R1 pose-objective parity](https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/)
+> Engineering log · [Phase 18 — CUDA graph replay and pipeline throughput](https://borda.github.io/lucid-YOLO/engineering/phase-18-cuda-replay-throughput/)
 >
 > 🔗 Depends on [WP-114](https://borda.github.io/lucid-YOLO/work_packages/wp-114/) · Needed by [WP-189](https://borda.github.io/lucid-YOLO/work_packages/wp-189/), WP-190
 >

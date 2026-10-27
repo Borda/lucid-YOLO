@@ -1,0 +1,25 @@
+# WP-218 — rules plus pointers
+
+> Engineering log · [Phase 19 — Codebase audit remediation](https://borda.github.io/lucid-YOLO/engineering/phase-19-codebase-audit/)
+>
+> 🔗 Depends on [WP-217](https://borda.github.io/lucid-YOLO/work_packages/wp-217/) · Needed by none
+>
+> ⬅️ [WP-217](https://borda.github.io/lucid-YOLO/work_packages/wp-217/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/)
+
+
+<a id="wp-218"></a>
+
+## WP-218 — rules plus pointers
+
+**Finding.** Audit I1 found an agent contract loaded into every session through `CLAUDE.md` carrying long explanatory paragraphs, historical measurements and drifting tree counts alongside operative rules. DCO instructions were repeated across the contract, contributor guide and deliberately redundant `CLAUDE.md` reminder.
+
+**Change.** `AGENTS.md` becomes rules plus rationale pointers: 22,926 bytes before, 15,118 after, and the longest line falls from 3,343 characters to 592. Section headings 1–8, the ordered execution loop, the commit-format example and every obligation, prohibition, approval, threshold, stop condition and behaviour-bearing literal stay in the contract; what left it is explanation — the history behind a rule, measurements, incident counts and tree counts that drift. That text is archived in [Agent-contract rationale](https://borda.github.io/lucid-YOLO/engineering/agents-rationale/), one section per contract section and one heading per original bullet or paragraph, and each compressed bullet that lost its reasoning links to its heading. The page is in the MkDocs navigation. `AGENTS.md` sec. 5 owns the full DCO rule; the contributor guide points there and keeps its human-facing sign-off instructions. `CLAUDE.md` is untouched: it restates the commit rule on purpose.
+
+The size target was about 10 KB. It was not met: the first compression reached 11,920 bytes by dropping rules along with their reasons, and restoring every rule a preservation review found missing — hook contracts, dataset counts, worked examples, the definition of what [PRINCIPAL] marks — brought the contract to 15,118. A rule is kept over a byte.
+
+**Verification.**
+
+- **CPU.** `make gate` green on this commit's tree.
+- **Preservation.** A byte-exact backup of the original contract was taken before the change, and the result was compared against it twice: a sentence-level map of every original obligation to where it now lives, and an independent followability review asking where an agent reading only the new file would act differently. The review's 17 findings (rules present only in the rationale page, a broadened doctest exemption, an ambiguous skip condition, actors and examples dropped) were each restored in the contract, and a second review pass found none open. All rationale anchors resolve, and the commit-format example is byte-identical.
+- **Not changed here.** The contract names a `trailers` job in `lint.yml` as the enforcing owner of commit trailers; the review found no job of that name in the current workflow. The sentence is preserved as written, since correcting it is a CI question rather than a compression.
+

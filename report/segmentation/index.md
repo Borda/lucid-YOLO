@@ -106,6 +106,6 @@ lucid-yolo fit --config seg_smoke.yaml \
 python scripts/eval_det.py <checkpoint> --data-root <root>
 ```
 
-As above, these are the commands as run and are left unedited; the 0.3.0 spellings are `lucid-data download` and `lucid-eval` ([WP-096](https://borda.github.io/lucid-YOLO/work_packages/wp-096/)).
+As above, these are the commands as run and are left unedited; the 0.3.0 spellings are `lucid-data download` and `lucid-eval` ([WP-096](https://borda.github.io/lucid-YOLO/work_packages/wp-096/)). The config was renamed after this run too: `seg_smoke.yaml` is today `seg_nano_smoke.yaml` (`variant: n`, [WP-136](https://borda.github.io/lucid-YOLO/work_packages/wp-136/)), and the `--config seg_smoke.yaml` line above resolves only under the new name.
 
 Seed 0 throughout. The package version installed for run v9 is not recorded in any of its artifacts. Cross-platform bitwise reproduction is not claimed (A26); the metric report is archived under `.experiments/seg_smoke/`, and the run config, hyperparameters and epoch metrics under `lightning_logs/version_9/`.

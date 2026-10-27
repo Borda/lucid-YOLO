@@ -1,0 +1,24 @@
+# WP-214 — fewer host syncs, chunked mask upsample
+
+> Engineering log · [Phase 19 — Codebase audit remediation](https://borda.github.io/lucid-YOLO/engineering/phase-19-codebase-audit/)
+>
+> 🔗 Depends on [WP-213](https://borda.github.io/lucid-YOLO/work_packages/wp-213/) · Needed by [WP-215](https://borda.github.io/lucid-YOLO/work_packages/wp-215/)
+>
+> ⬅️ [WP-213](https://borda.github.io/lucid-YOLO/work_packages/wp-213/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-215](https://borda.github.io/lucid-YOLO/work_packages/wp-215/) ➡️
+
+
+<a id="wp-214"></a>
+
+## WP-214 — fewer host syncs, chunked mask upsample
+
+**Finding.** U8 found segmentation decode resized every retained mask to the full canvas together, creating full-resolution float temporaries for up to 300 detections. U9 found six count-tensor reads during batch restoration, followed by per-image writes to pad targets already transported as flat tensors.
+
+**Change.** Eager mask decode retains the original prototype assembly and sigmoid, then resizes, crops and thresholds chunks of at most 32 masks into the final boolean stack. Upsampling still precedes cropping, preserving border numerics. ONNX export retains the original unchunked single-resize operations. Collation retains host count tuples and flat destination indices; restoration uses the tuples without reading device count tensors. Private consumer lists retain packed storage for one scatter per padded field, falling back to ordinary padding after target replacement or reordering. Mask padding scatters one float view of the packed masks, preserving caller edits and rebuilding from current slices after replacement. Existing count tensor fields, ragged-list APIs and rotated/keypoint validation remain available. Loss-replay synchronization is unchanged.
+
+**Verification.**
+
+- **CPU.** `make gate` green on this commit's tree. `test_collate_batch_small_constant_segment_count` pins 14 transported tensors, one more than before: the flat padded-row indices, one tensor per batch whatever the instance count. Regressions: `test_chunked_masks_equal_full_canvas_decode`, `test_mask_upsample_bounds_instance_axis`, `test_transfer_hook_reads_no_tensor_counts`, `test_packed_padding_equals_ragged_padding` and `test_packed_step_loss_equals_ragged_step`. Random decode cases include zero, one, 33 and 300 masks; packed equality includes empty images, 17 keypoints, rotated boxes and masks. The synchronization and bounded-resize checks fail before the change and pass afterwards.
+- **Benchmark.** `scripts/bench_input_path.py` uses runtime entry points shared with the parent revision, times synchronized transfer/restoration/padding and 300-mask decode, and emits median milliseconds plus CUDA peak allocated MiB (`null` on CPU/MPS). A tiny CPU case exercises the command in `scripts/_tests/test_bench_input_path.py`.
+- **Accelerators.** `make gate-gpu` green on an A100 (py3.11, torch 2.9.1+cu129) at the stack's tip `72b5505`, the tree [WP-218](https://borda.github.io/lucid-YOLO/work_packages/wp-218/) left: 359 passed and 2 skipped (a `grad_dtype` case that needs a newer torch, and a replay test that needs two CUDA devices), every notebook in full, `demo_obb` on DOTA-v1.0 among them, and 55/55 accelerator goldens. `tests/ptl -m "gpu or data"` also passed on Colab's py3.13 / torch 2.11 (242 passed). The same selection on this package's own commit, `af3567f`, passed in that session too (242 passed). The packed-padding and chunked-decode equality tests ran on CUDA in both.
+- **A100 benchmark.** `scripts/bench_input_path.py`, three runs on the parent commit `197b846` and three on this one, medians of the three: transfer, restoration and padding 7.68 ms before and 7.06 ms after; 300-mask decode 3.87 ms before and 4.52 ms after; decode peak allocated memory 1,565 MiB before and 321 MiB after. The chunking cuts the peak to a fifth at about a sixth more decode time, which is the trade the package made: the temporary no longer grows with the detection count.
+

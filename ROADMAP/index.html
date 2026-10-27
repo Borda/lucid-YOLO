@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="The agent's work queue: 200 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording…">
+        <meta name="description" content="The agent's work queue: 218 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording…">
       
       
         <meta name="author" content="Jirka Borovec">
@@ -15,7 +15,7 @@
         <link rel="canonical" href="https://borda.github.io/lucid-YOLO/ROADMAP/">
       
       
-        <link rel="prev" href="../api/inference/">
+        <link rel="prev" href="../api/export/">
       
       
         <link rel="next" href="../RESEARCH_LOG/">
@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
   
@@ -33,10 +33,10 @@
   
 
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -70,7 +70,7 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="lucid-yolo">
   <meta property="og:title" content="Work-Package Roadmap">
-  <meta property="og:description" content="The agent&#39;s work queue: 200 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording…">
+  <meta property="og:description" content="The agent&#39;s work queue: 218 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording…">
   <meta property="og:url" content="https://borda.github.io/lucid-YOLO/ROADMAP/"><meta property="og:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -78,7 +78,7 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta name="twitter:title" content="Work-Package Roadmap">
-  <meta name="twitter:description" content="The agent&#39;s work queue: 200 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording…">
+  <meta name="twitter:description" content="The agent&#39;s work queue: 218 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording…">
   
     <link rel="alternate" type="text/markdown" href="index.md" title="Markdown copy of this page">
   
@@ -694,6 +694,34 @@
     
   
     Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../advanced/cuda-performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Opt-in CUDA performance flags
   
 
     
@@ -1864,6 +1892,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2193,6 +2249,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#phase-18-cuda-graph-replay-and-pipeline-throughput-wp-182200" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🎞️ Phase 18 — CUDA graph replay and pipeline throughput (WP-182…200)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-19-codebase-audit-remediation-wp-201218" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔎 Phase 19 — Codebase audit remediation (WP-201…218)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#critical-path-and-parallelism" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2349,6 +2427,34 @@
     
   
     Cross-cutting engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/agents-rationale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent-contract rationale
   
 
     
@@ -4205,6 +4311,182 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3_19" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3_19" id="__nav_5_3_19_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 18 — CUDA graph replay and pipeline throughput
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_3_19_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3_19">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 18 — CUDA graph replay and pipeline throughput
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-18-cuda-replay-throughput/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3_20" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3_20" id="__nav_5_3_20_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 19 — Codebase audit remediation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_3_20_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3_20">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 19 — Codebase audit remediation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-19-codebase-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -4473,6 +4755,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#phase-18-cuda-graph-replay-and-pipeline-throughput-wp-182200" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🎞️ Phase 18 — CUDA graph replay and pipeline throughput (WP-182…200)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-19-codebase-audit-remediation-wp-201218" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🔎 Phase 19 — Codebase audit remediation (WP-201…218)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#critical-path-and-parallelism" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4520,10 +4824,10 @@
 
 
 <h1 id="work-package-roadmap">🗺️ Work-Package Roadmap<a class="headerlink" href="#work-package-roadmap" title="Permanent link">&para;</a></h1>
-<p>The agent's work queue: 200 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording follow-up work that landed after its package had closed. Transcribed from the governing blueprint (sec. 15) with a live status column.</p>
+<p>The agent's work queue: 218 numbered work packages, one commit each, executed in dependency order per the AGENTS.md loop, plus lettered rows recording follow-up work that landed after its package had closed. Transcribed from the governing blueprint (sec. 15) with a live status column.</p>
 <p><strong>Scope says what a package does, not what executing it taught.</strong> Measurements, rejected approaches and negative results live in RESEARCH_LOG.md, linked per row as <code>· log</code>; choices the papers left open live in ASSUMPTIONS.md and are cited by id; release results live in REPRODUCTION_REPORT.md. A row that restates any of those is duplicating a record that has an owner.</p>
 <p><strong>Length is guidance, not a limit, and the guide is this table's own median</strong> — Scope about 285 characters, DoD about 80, subject about 50. Nothing enforces it and no test measures it: a row whose claims genuinely need more room takes it, and cutting substance to reach a number is the worse outcome. What the figure is for is the drift it makes visible. A cell running several times its column's median is usually not carrying more scope, it is carrying the reasoning behind the scope — which has an owner elsewhere, per the paragraph above. Compress the prose first, move what survives compression to the linked log, and leave the row stating what the package does.</p>
-<p>Legend: <strong>Dep</strong> = prerequisite WPs · <strong>[DATA]</strong> needs a real dataset (synthetic stand-in per A26 for offline development only) · <strong>[GPU]</strong> needs an accelerator (MPS first, D12c) · <strong>[PRINCIPAL]</strong> belongs to whoever drives the project rather than executes it (AGENTS.md sec. 1) — never started autonomously. DoD = the test id(s) that must pass; every WP additionally requires <code>make gate</code> green. Status icons: ⬜ todo · 🔄 in-progress · ✅ done · ⛔ blocked (see docs/ESCALATION.md) · ⏸ deferred, scope still wanted but the start is waiting on something outside this repository, named in the row · ⊘ closed without its DoD met, the row itself saying why. Only ✅, 🔄 and ⊘ appear below Phase 16: every WP written before Phase 17 has either landed or been closed, so ⛔ and ⏸ are defined for rows this queue has not yet needed rather than describing anything on it; Phase 17 is the first queue of ⬜ rows, each waiting on an accelerator or a principal. ⏸ is distinct from ⛔ on both sides: nothing here is stuck, and nothing outside is being escalated to. The status column is flipped to ✅ in the same commit that completes its WP.</p>
+<p>Legend: <strong>Dep</strong> = prerequisite WPs · <strong>[DATA]</strong> needs a real dataset (synthetic stand-in per A26 for offline development only) · <strong>[GPU]</strong> needs an accelerator (MPS first, D12c) · <strong>[PRINCIPAL]</strong> belongs to whoever drives the project rather than executes it (AGENTS.md sec. 1) — never started autonomously. DoD = the test id(s) that must pass; every WP additionally requires <code>make gate</code> green. Status icons: ⬜ todo · 🔄 in-progress · ✅ done · ⛔ blocked (see docs/ESCALATION.md) · ⏸ deferred, scope still wanted but the start is waiting on something outside this repository, named in the row · ⊘ closed without its DoD met, the row itself saying why. Only ✅, 🔄 and ⊘ appear below Phase 16: every WP written before Phase 17 has either landed or been closed, so ⛔ and ⏸ are defined for rows this queue has not yet needed rather than describing anything on it; Phase 17 holds the only ⬜ rows, each waiting on an accelerator or a principal. ⏸ is distinct from ⛔ on both sides: nothing here is stuck, and nothing outside is being escalated to. The status column is flipped to ✅ in the same commit that completes its WP.</p>
 <h2 id="phase-0-foundation-wp-001007">🧱 Phase 0 — Foundation (WP-001…007)<a class="headerlink" href="#phase-0-foundation-wp-001007" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -5684,7 +5988,7 @@
 <td>110</td>
 <td><code>refine(cli): drop the deprecated download alias</code></td>
 <td>The removal 0.3.0 put in writing in three places — <code>[project.scripts]</code>, AGENTS.md sec. 2, the 0.3.0 changelog — carried out on schedule: the console script, the argparse parser that served only it, and its <code>__main__</code> twin. <code>lucid-data download</code> is untouched. Every operator-facing string naming the alias names the surviving spelling now, the <code>--verify</code> repair hint included — asserted runnable rather than merely present · <a href="../work_packages/wp-110/#wp-110">log</a></td>
-<td><code>tests/cli/test_cli_surface.py::test_deprecated_download_alias_gone</code> and <code>tests/data/test_download.py::TestCliVerify::test_repair_hint_names_command_still_parses</code> (node id moved under <code>TestCliVerify</code> by <a href="../work_packages/wp-128/">WP-128</a>)</td>
+<td><code>tests/cli/test_cli_surface.py::test_deprecated_download_alias_gone</code> and <code>tests/data/test_download.py::TestCliVerify::test_repair_hint_names_command_that_parses</code> (node id moved under <code>TestCliVerify</code> by <a href="../work_packages/wp-128/">WP-128</a>)</td>
 <td>089, 096</td>
 <td>✅</td>
 </tr>
@@ -6495,6 +6799,22 @@
 <td>178</td>
 <td>⬜</td>
 </tr>
+</tbody>
+</table>
+<h2 id="phase-18-cuda-graph-replay-and-pipeline-throughput-wp-182200">🎞️ Phase 18 — CUDA graph replay and pipeline throughput (WP-182…200)<a class="headerlink" href="#phase-18-cuda-graph-replay-and-pipeline-throughput-wp-182200" title="Permanent link">&para;</a></h2>
+<p>The rows that landed after <a href="../work_packages/wp-178/">WP-178</a> and independently of the parity question, 2026-09-18 to 2026-10-21: channels-last, dense box terms and an opt-in compiled step first, then the notebook and plotting rails, then opt-in CUDA graph replay of the network, loss, optimizer and per-task prediction stages and the input-pipeline work beside it. The small fix, golden, test-tooling and site rows that landed in the same stretch stay in their landing order. These rows were appended under the Phase 17 heading as they landed and were split out on 2026-10-23; numbers, rows and statuses are unchanged.</p>
+<table>
+<thead>
+<tr>
+<th>WP</th>
+<th>Commit subject</th>
+<th>Scope</th>
+<th>DoD</th>
+<th>Dep</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
 <tr>
 <td>182</td>
 <td><code>perf(train): channels_last on CUDA</code></td>
@@ -6627,7 +6947,7 @@
 <td>193d</td>
 <td><code>perf(ptl): replay shared features in small-batch CUDA pose training</code> [DATA][GPU]</td>
 <td>Pose replays the existing backbone and neck while its head stays native, preserving absent point gradients. The default stays off; accumulated runs, a fully frozen backbone and neck, and heads with changed topology, hooks or forwards keep the native route · <a href="../work_packages/wp-193d/#wp-193d">log</a></td>
-<td><code>tests/ptl/test_pose_network_capture.py</code>, whose synthetic <code>layout="empty"</code> case of <code>test_pose_trainer_matches_native</code> evidences the absent point-stem gradients of a batch with no assigned positives — the public-COCO parity run does not; public-COCO byte parity and five isolated-L4 complete fits with 11.17% median time reduction at batch 4 (one exploratory batch-16 pair: 2.50%; peak allocated memory down, reserved up); torch 2.4/2.9 focused checks and full pre-commit; full <code>make gate</code>, accelerator goldens and final accuracy not run</td>
+<td><code>tests/ptl/capture/test_pose_network_capture.py</code>, whose synthetic <code>layout="empty"</code> case of <code>test_pose_trainer_matches_native</code> evidences the absent point-stem gradients of a batch with no assigned positives — the public-COCO parity run does not; public-COCO byte parity and five isolated-L4 complete fits with 11.17% median time reduction at batch 4 (one exploratory batch-16 pair: 2.50%; peak allocated memory down, reserved up); torch 2.4/2.9 focused checks and full pre-commit; full <code>make gate</code>, accelerator goldens and final accuracy not run</td>
 <td>193c</td>
 <td>🔄</td>
 </tr>
@@ -6635,7 +6955,7 @@
 <td>193e</td>
 <td><code>perf(ptl): replay independent segmentation predictions</code> [DATA][GPU]</td>
 <td>Opt-in BF16 CUDA prediction groups preserve native gradient absence and per-stem accumulation. One topology pass and an attribute certificate retain live storage and observer checks; default, evaluation and unsupported modes stay native · <a href="../work_packages/wp-193e/#wp-193e">log</a></td>
-<td><code>tests/ptl/test_segment_head_capture.py</code>; exact public-COCO states; five paired isolated-L4 complete fits; full pre-commit; full <code>make gate</code> not run</td>
+<td><code>tests/ptl/capture/test_segment_head_capture.py</code>; exact public-COCO states; five paired isolated-L4 complete fits; full pre-commit; full <code>make gate</code> not run</td>
 <td>193c</td>
 <td>🔄</td>
 </tr>
@@ -6651,7 +6971,7 @@
 <td>193g</td>
 <td><code>perf(ptl): replay shared segmentation features</code> [DATA][GPU]</td>
 <td>Opt-in backbone/neck replay preserves independent segmentation prediction gradients. Combines with head replay; accumulation and modified forwards stay native, with one fit-scoped signature · <a href="../work_packages/wp-193g/#wp-193g">log</a></td>
-<td><code>tests/ptl/test_segment_network_capture.py</code>; public-COCO byte parity; five paired isolated-L4 complete fits; focused tooling; full <code>make gate</code> and accelerator goldens not run (offline CI green at PR head 8ebf10e)</td>
+<td><code>tests/ptl/capture/test_segment_network_capture.py</code>; public-COCO byte parity; five paired isolated-L4 complete fits; focused tooling; full <code>make gate</code> and accelerator goldens not run (offline CI green at PR head 8ebf10e)</td>
 <td>193d, 193e</td>
 <td>🔄</td>
 </tr>
@@ -6715,7 +7035,7 @@
 <td>199</td>
 <td><code>perf(ptl): replay detection assignment and loss</code> [DATA][GPU]</td>
 <td>Opt-in loss forward/backward replay calls the existing assignment and scoring expressions with masked target capacity. One recording grows from observed counts; checks and live alpha stay current, and optimizer work is independent · <a href="../work_packages/wp-199/#wp-199">log</a></td>
-<td><code>tests/ptl/test_loss_capture.py</code>; focused CPU/CUDA, mutation checks and repeated complete public-COCO fits; full <code>make gate</code> and accelerator goldens not run</td>
+<td><code>tests/ptl/capture/test_loss_capture.py</code>; focused CPU/CUDA, mutation checks and repeated complete public-COCO fits; full <code>make gate</code> and accelerator goldens not run</td>
 <td>198</td>
 <td>🔄</td>
 </tr>
@@ -6731,9 +7051,169 @@
 <td>200</td>
 <td><code>perf(ptl): replay native CUDA oriented networks</code> [DATA][GPU]</td>
 <td>Opt-in network replay retains all six native oriented outputs, while classification, rotated objectives and state updates stay native. Accumulation and changed objectives retain the original route · <a href="../work_packages/wp-200/#wp-200">log</a></td>
-<td><code>tests/ptl/test_oriented_network_capture.py</code>; actual graph execution, empty-angle gradients and validation transitions; five paired public-DOTA complete fits above 8%; focused CPU/CUDA and full pre-commit; full <code>make gate</code>, accelerator goldens and long-run accuracy not run</td>
+<td><code>tests/ptl/capture/test_oriented_network_capture.py</code>; actual graph execution, empty-angle gradients and validation transitions; five paired public-DOTA complete fits above 8%; focused CPU/CUDA and full pre-commit; full <code>make gate</code>, accelerator goldens and long-run accuracy not run</td>
 <td>193d, 199</td>
 <td>🔄</td>
+</tr>
+</tbody>
+</table>
+<h2 id="phase-19-codebase-audit-remediation-wp-201218">🔎 Phase 19 — Codebase audit remediation (WP-201…218)<a class="headerlink" href="#phase-19-codebase-audit-remediation-wp-201218" title="Permanent link">&para;</a></h2>
+<p>Opened by the codebase audit of 2026-10-21. D30 records that the audit roadmap lands as one work package and one commit per batch, in place of one per lettered step, with D18 in force; the order is batch 1 first because it settles the contract text the later commit trailers depend on. Batches 2 and 3 are independent, batch 4 follows 3, and batch 5 follows 3 for the test scaffolding. Later batches of the audit roadmap are not yet numbered. <a href="../work_packages/wp-206/">WP-206</a> and <a href="../work_packages/wp-207/">WP-207</a> are not audit batches: <a href="../work_packages/wp-206/">WP-206</a> fixes the replay defect that the audit's CUDA verification run found, <a href="../work_packages/wp-207/">WP-207</a> acts on the principal's answer to the accumulation escalation that fix settled, and both sit here because that run opened them. <a href="../work_packages/wp-209/">WP-209</a> is not an audit batch either: the replay consolidation's first A100 accelerator run found three reds already on <code>main</code>, and the principal had them fixed before it.</p>
+<table>
+<thead>
+<tr>
+<th>WP</th>
+<th>Commit subject</th>
+<th>Scope</th>
+<th>DoD</th>
+<th>Dep</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>201</td>
+<td><code>docs: contract record and user-docs accuracy sweep</code> [PRINCIPAL]</td>
+<td>Batch 1 of the codebase audit. D30 clears O3 and puts D18 in force, D31 supersedes D3's s-scale clause; AGENTS sec. 1 and 2 and CONTRIBUTING follow. Model cards state current golden values, README gets one Install section, matplotlib is stated as runtime, banner keypoint clause matches D22 and its evaluation wording is corrected. No code changes · <a href="../work_packages/wp-201/#wp-201">log</a></td>
+<td><code>make docs</code> strict build; full pre-commit; AGENTS.md diff limited to two paragraphs; D31 and the banner approved by the principal 2026-10-21</td>
+<td>200</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>202</td>
+<td><code>fix(cli): correct CLI surface and image ingest</code></td>
+<td>Batch 2. <code>lucid-yolo</code> limited to fit and validate, keypoint help wording fixed, task-irrelevant <code>lucid-eval</code> arguments refused, <code>--ann_file</code>/<code>--images_dir</code> added to <code>lucid-eval</code>, <code>--data_root</code> alias on <code>build-tiles</code>. One shared decode-and-scale helper fixes 16-bit PNGs in both readers and <code>build-tiles</code> refuses them; <code>check</code> resolves splits through the layout resolver and gains <code>--keypoints</code> · <a href="../work_packages/wp-202/#wp-202">log</a></td>
+<td><code>tests/cli</code> and <code>tests/data</code> assert help text, refusals, a 16-bit PNG fixture and a <code>build-tiles</code> to <code>lucid-data check</code> round trip; data goldens unmoved</td>
+<td>201</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>203</td>
+<td><code>ci(tests): gate, CI and test infrastructure</code></td>
+<td>Batch 3. <code>make golden</code> fails instead of skipping, shared lint helpers replace duplicates, new pygrep and banned-api hooks, card-equals-golden hook. Duplicate seed fixtures go, shared scaffolds land, <code>pytest-xdist</code> runs the suite in parallel, CI workflows are consolidated, <code>jsonargparse</code> floor raised to 4.36. No shipped behaviour changes · <a href="../work_packages/wp-203/#wp-203">log</a></td>
+<td>Collected test count unchanged apart from intended merges; no assertion weakened; green three times under <code>-n auto</code> and once serially; coverage does not drop</td>
+<td>201</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>204</td>
+<td><code>refactor(api): inference, export and Python API</code></td>
+<td>Batch 4. Per-task pure decode functions and a shared <code>MAX_DETECTIONS</code>, <code>RotatedTopKDecoder</code> with padding and indices, one single-head model base, <code>export.graph_from_module</code> with an API page, <code>score_coco</code> returning a <code>CocoScore</code>, tensor-input predict variants and top-level re-exports, the <code>lucid-export</code> command and <code>export</code> extra, a checkpoint read once, resume tested through the CLI, TRAINING split into a recipe and a CUDA performance page. The <code>coco_eval.py</code> split moved to <a href="../work_packages/wp-205/">WP-205</a> · <a href="../work_packages/wp-204/#wp-204">log</a></td>
+<td>ONNX parity, predict and eval goldens unchanged; param and FLOP goldens unmoved or escalation trigger 4; CLI stdout pinned</td>
+<td>203</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>205</td>
+<td><code>refactor(ptl): task registry and module split</code></td>
+<td>Batch 5, CPU part. <code>lucid_yolo/tasks.py</code> (<code>Task</code>, <code>TaskSpec</code>) feeds the size and batch tables; <code>ptl/module.py</code>, <code>datamodule.py</code> and <code>eval/coco_eval.py</code> split into private modules by pure moves; padding, blend and keypoint-count helpers. Replay consolidation deferred · <a href="../work_packages/wp-205/#wp-205">log</a></td>
+<td>Re-exports, log keys and hparams identical; no CUDA behaviour changes; the CI coverage figure is not verified for this tree (see log)</td>
+<td>203</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>206</td>
+<td><code>fix(ptl): copy live gradients before CUDA replay</code> [GPU]</td>
+<td>Detection network replay copies a live <code>.grad</code> out of the static gradient buffers at forward time again, instead of from a pre-hook inside the replayed backward, which left accumulated gradients wrong on CUDA. Three CUDA capture tests whose losses or expectations contradicted their own contract are corrected. Segmentation head capture and the accumulation escalation are untouched · <a href="../work_packages/wp-206/#wp-206">log</a></td>
+<td>The 11 CUDA capture ids failing on <code>main</code> pass on an L4 under Python 3.11 / torch 2.9.1 and Python 3.13 / torch 2.11; accelerator selection otherwise green; <code>make gate</code>; no golden moved</td>
+<td>205</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>207</td>
+<td><code>perf(ptl): network replay under accumulation</code> [GPU]</td>
+<td>Pose, oriented and segmentation network replay no longer retire under gradient accumulation, the principal's answer to the 2026-10-20 escalation after <a href="../work_packages/wp-206/">WP-206</a> fixed the shared recorder. Segmentation head capture keeps its accumulation guard; the parity tests pin accumulation 2 · <a href="../work_packages/wp-207/#wp-207">log</a></td>
+<td>Pose, oriented and segmentation trainer parity at accumulation 2 bitwise equal to native on CUDA under Python 3.11 / torch 2.9.1 and Python 3.13 / torch 2.11; <code>tests/ptl</code> accelerator selection green; <code>make gate</code></td>
+<td>206</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>208</td>
+<td><code>perf(ptl): shared replay core, head accumulation</code> [GPU]</td>
+<td>Batch 5b. The network, segmentation-head and loss replay holders share one private module of recording, live-gradient, stream-drain and lifecycle primitives; every holder drains before releasing its graphs and its callback tolerates a missing holder and a failing drain. Segmentation head replay copies live gradients at forward time and accumulates. D32 records the red-main rule for CUDA tests and the per-flag lifetime rule · <a href="../work_packages/wp-208/#wp-208">log</a></td>
+<td><code>make gate-gpu</code> green on an A100 under Python 3.11 / torch 2.9.1, <code>tests/ptl</code> accelerator selection green under Python 3.13 / torch 2.11, the new head-accumulation parity test bitwise equal to native; <code>make gate</code></td>
+<td>207, 209</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>209</td>
+<td><code>fix(ptl): green A100 accelerator gate</code> [GPU]</td>
+<td>Keypoint validation no longer crashes on an image without people beside one with points (<code>_host_split</code> concatenates only tensors holding rows). The pose replay comparisons run cuDNN in true float32 and are bounded by the one-ulp noise floor measured on an A100; the keypoint accelerator golden is resealed at 0.582045 on the principal's answer to escalation trigger 4. The RLE density runs in float32 with autocast off during mixed-precision pose training. The backbone attention computes its logits and softmax in float32 with autocast off in forward and backward under mixed precision · <a href="../work_packages/wp-209/#wp-209">log</a></td>
+<td><code>make gate-gpu</code> green on an A100 under Python 3.11 / torch 2.9.1, <code>demo_obb</code> included; <code>tests/ptl</code> accelerator selection green under Python 3.13; <code>make gate</code></td>
+<td>207</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>210</td>
+<td><code>refine(tests): capture tests in one package</code> [GPU]</td>
+<td>Batch 5c. Nine CUDA replay suites move into one capture package. Shared CPU routing scaffolds and private-state accessors replace repeated setup and holder reads; loss-recorder observations reuse the inherited spy. Byte and gradient assertions stay unchanged; baseline CPU durations are recorded · <a href="../work_packages/wp-210/#wp-210">log</a></td>
+<td>moved CUDA capture tests green under <code>make gate-gpu</code> on an A100; collected count unchanged; <code>make gate</code></td>
+<td>208</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>211</td>
+<td><code>refactor(ptl): per-task strategies</code> [GPU]</td>
+<td>Batch 6a. Private task strategies own target extras, loss/log composition, replay routing and validation in the single Lightning module. Exhaustive Task-keyed CLI tables prevent a fifth task inheriting detection behavior; tensor arithmetic, checkpoint keys and public symbols stay unchanged · <a href="../work_packages/wp-211/#wp-211">log</a></td>
+<td>goldens bit-exact on CPU and under <code>make gate-gpu</code> on an A100; exhaustiveness tests; <code>make gate</code></td>
+<td>210</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>212</td>
+<td><code>refactor(losses): named loss inputs, recorded alpha</code> [GPU]</td>
+<td>Batch 6a. Named branch predictions and flat capture inputs replace positional tensor groups; one native fallback and ordered replay guards shorten capture routing. Recorded alpha follows the supplied override; tensor arithmetic, recorder input order, logs and checkpoint keys stay unchanged · <a href="../work_packages/wp-212/#wp-212">log</a></td>
+<td>goldens bit-exact; loss replay tests green under <code>make gate-gpu</code> on an A100; <code>make gate</code></td>
+<td>211</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>213</td>
+<td><code>feat(ptl): distributed obb and keypoint validation</code> [GPU]</td>
+<td>Batch 6a. Private torchmetrics metrics gather whole-image rotated and keypoint records, drop sampler-padding duplicates and retain the validation loader’s order. Existing rotated mAP and OKS AP scorers stay bit-exact on one device; dataset identities cross worker transport without public API changes · <a href="../work_packages/wp-213/#wp-213">log</a></td>
+<td>gloo two-process equality on CPU; single-device goldens bit-exact under <code>make gate-gpu</code> on an A100; <code>make gate</code></td>
+<td>212</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>214</td>
+<td><code>perf(ptl): fewer host syncs, chunked mask upsample</code> [DATA][GPU]</td>
+<td>Batch 6b. Host tuples retain collate counts through device transfer; flat packed fields scatter into padded targets without per-image writes. Segmentation decode chunks full-canvas resize and crop at 32 masks while retaining assembly and border numerics; ONNX keeps its single resize · <a href="../work_packages/wp-214/#wp-214">log</a></td>
+<td>byte-equality tests; A100 benchmark before/after in the combined run; goldens bit-exact; <code>make gate</code></td>
+<td>213</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>215</td>
+<td><code>refine(scripts): shared lint helpers</code></td>
+<td>Batch 6 (tooling). Share fence tracking while retaining each checker’s grammar; import repository roots from the common owners, keeping module attributes patchable. Route the remaining recursive lint walk through the shared helper; preserve every verdict’s wording · <a href="../work_packages/wp-215/#wp-215">log</a></td>
+<td><code>scripts/_tests</code> unchanged and green; every hook passes; <code>make gate</code></td>
+<td>214</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>216</td>
+<td><code>refine(tests): cross-task training stories</code></td>
+<td>Batch 6 (tests). Parametrize data-only empty-image, branch-gradient and state-key stories, preserving task options, target generation and every assertion. Keep distinct assignment-order oracles and OBB empty-image backward checks; no shipped code changes · <a href="../work_packages/wp-216/#wp-216">log</a></td>
+<td>merged cases keep every assertion; <code>make gate</code></td>
+<td>215</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>217</td>
+<td><code>fix(ptl): audit residuals</code></td>
+<td>Batch 6 (residuals). Share the private detection cap across model and decode layers, derive the FLOP-counter side from Task, normalize repeated subclass hyperparameter saves and remove the unused oriented host copy; the isolated pose collection failure does not reproduce · <a href="../work_packages/wp-217/#wp-217">log</a></td>
+<td>regression tests red before, green after; goldens 50/50; <code>make gate</code></td>
+<td>216</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>218</td>
+<td><code>docs(agents): rules plus pointers</code></td>
+<td>Batch 6c. Compress the agent contract into rules and rationale pointers, keep every obligation against a byte-exact backup, make AGENTS section 5 the single owner of the DCO rule and publish the explanatory history as a docs page · <a href="../work_packages/wp-218/#wp-218">log</a></td>
+<td>preservation map and followability review against the backup; <code>make gate</code></td>
+<td>217</td>
+<td>✅</td>
 </tr>
 </tbody>
 </table>
@@ -6803,10 +7283,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
       
         <script src="../javascripts/pycon_copy.js"></script>
       

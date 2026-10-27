@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Four tiers, one command. lucid-yolo fit --config .yaml resolves the name against the configs packaged inside the wheel, so a run needs no checkout …">
+        <meta name="description" content="Four tiers, one command. lucid-yolo fit --config .yaml resolves the name against the configs packaged inside the installed package, so a run needs no checkout…">
       
       
         <meta name="author" content="Jirka Borovec">
@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
   
@@ -33,10 +33,10 @@
   
 
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -70,7 +70,7 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="lucid-yolo">
   <meta property="og:title" content="Launching a training run">
-  <meta property="og:description" content="Four tiers, one command. lucid-yolo fit --config .yaml resolves the name against the configs packaged inside the wheel, so a run needs no checkout …">
+  <meta property="og:description" content="Four tiers, one command. lucid-yolo fit --config .yaml resolves the name against the configs packaged inside the installed package, so a run needs no checkout…">
   <meta property="og:url" content="https://borda.github.io/lucid-YOLO/TRAINING/"><meta property="og:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -78,7 +78,7 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta name="twitter:title" content="Launching a training run">
-  <meta name="twitter:description" content="Four tiers, one command. lucid-yolo fit --config .yaml resolves the name against the configs packaged inside the wheel, so a run needs no checkout …">
+  <meta name="twitter:description" content="Four tiers, one command. lucid-yolo fit --config .yaml resolves the name against the configs packaged inside the installed package, so a run needs no checkout…">
   
     <link rel="alternate" type="text/markdown" href="index.md" title="Markdown copy of this page">
   
@@ -731,21 +731,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#cuda-colour-augmentation" class="md-nav__link">
+  <a href="#opt-in-cuda-performance-flags" class="md-nav__link">
     <span class="md-ellipsis">
       
-        CUDA colour augmentation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#prepare-the-next-epoch-during-validation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Prepare the next epoch during validation
+        Opt-in CUDA performance flags
       
     </span>
   </a>
@@ -783,23 +772,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="🖌️ Instance segmentation — COCO 2017">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#independent-segmentation-predictions-on-cuda" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Independent segmentation predictions on CUDA
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -825,93 +797,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#oriented-and-keypoint-runs-are-single-device" class="md-nav__link">
+  <a href="#distributed-validation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        🖥️ Oriented and keypoint runs are single-device
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#decoded-training-image-cache" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        🗃️ Decoded training-image cache
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="🗃️ Decoded training-image cache">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#prepared-training-source-cache" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Prepared training-source cache
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#opt-in-cuda-network-replay" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Opt-in CUDA network replay
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#optional-cuda-detection-and-pose-loss-execution" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Optional CUDA detection and pose loss execution
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cuda-graph-replay-of-orthogonalization-is-opt-in" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        📼 CUDA graph replay of orthogonalization is opt-in
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cuda-update-preparation-replay-is-opt-in" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        📼 CUDA update preparation replay is opt-in
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#torchcompile-is-opt-in-cuda-detect" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ⚡ torch.compile is opt-in (CUDA, detect)
+        🖥️ Distributed validation
       
     </span>
   </a>
@@ -930,10 +819,43 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#resuming-an-interrupted-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⏯️ Resuming an interrupted run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-checkpoint-will-deserialize" class="md-nav__link">
     <span class="md-ellipsis">
       
         🔐 What --checkpoint will deserialize
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-a-checkpoint-from-python" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🐍 Using a checkpoint from Python
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exporting-to-onnx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📦 Exporting to ONNX
       
     </span>
   </a>
@@ -986,6 +908,34 @@
     
   
     Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../advanced/cuda-performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Opt-in CUDA performance flags
   
 
     
@@ -2159,6 +2109,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2369,6 +2347,34 @@
     
   
     Cross-cutting engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/agents-rationale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent-contract rationale
   
 
     
@@ -4222,6 +4228,182 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3_19" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3_19" id="__nav_5_3_19_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 18 — CUDA graph replay and pipeline throughput
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_3_19_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3_19">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 18 — CUDA graph replay and pipeline throughput
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-18-cuda-replay-throughput/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3_20" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3_20" id="__nav_5_3_20_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 19 — Codebase audit remediation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_3_20_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3_20">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 19 — Codebase audit remediation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-19-codebase-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -4292,21 +4474,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#cuda-colour-augmentation" class="md-nav__link">
+  <a href="#opt-in-cuda-performance-flags" class="md-nav__link">
     <span class="md-ellipsis">
       
-        CUDA colour augmentation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#prepare-the-next-epoch-during-validation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Prepare the next epoch during validation
+        Opt-in CUDA performance flags
       
     </span>
   </a>
@@ -4344,23 +4515,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="🖌️ Instance segmentation — COCO 2017">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#independent-segmentation-predictions-on-cuda" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Independent segmentation predictions on CUDA
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -4386,93 +4540,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#oriented-and-keypoint-runs-are-single-device" class="md-nav__link">
+  <a href="#distributed-validation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        🖥️ Oriented and keypoint runs are single-device
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#decoded-training-image-cache" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        🗃️ Decoded training-image cache
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="🗃️ Decoded training-image cache">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#prepared-training-source-cache" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Prepared training-source cache
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#opt-in-cuda-network-replay" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Opt-in CUDA network replay
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#optional-cuda-detection-and-pose-loss-execution" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Optional CUDA detection and pose loss execution
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cuda-graph-replay-of-orthogonalization-is-opt-in" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        📼 CUDA graph replay of orthogonalization is opt-in
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cuda-update-preparation-replay-is-opt-in" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        📼 CUDA update preparation replay is opt-in
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#torchcompile-is-opt-in-cuda-detect" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ⚡ torch.compile is opt-in (CUDA, detect)
+        🖥️ Distributed validation
       
     </span>
   </a>
@@ -4491,10 +4562,43 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#resuming-an-interrupted-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⏯️ Resuming an interrupted run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-checkpoint-will-deserialize" class="md-nav__link">
     <span class="md-ellipsis">
       
         🔐 What --checkpoint will deserialize
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-a-checkpoint-from-python" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🐍 Using a checkpoint from Python
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exporting-to-onnx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📦 Exporting to ONNX
       
     </span>
   </a>
@@ -4549,16 +4653,12 @@
 
 
 <h1 id="launching-a-training-run">🏋️ Launching a training run<a class="headerlink" href="#launching-a-training-run" title="Permanent link">&para;</a></h1>
-<p>Four tiers, one command. <code>lucid-yolo fit --config &lt;name&gt;.yaml</code> resolves the name against the configs packaged inside the wheel, so a run needs no checkout — <code>det_nano_smoke.yaml</code>, <code>seg_nano_smoke.yaml</code>, <code>obb_nano_smoke.yaml</code> and <code>pose_nano_smoke.yaml</code> are all installed with the package.</p>
+<p>Four tiers, one command. <code>lucid-yolo fit --config &lt;name&gt;.yaml</code> resolves the name against the configs packaged inside the installed package, so a run needs no checkout once lucid-yolo is installed (the <a href="https://github.com/Borda/lucid-YOLO#install">Install section of the README</a> has the one-line command) — <code>det_nano_smoke.yaml</code>, <code>seg_nano_smoke.yaml</code>, <code>obb_nano_smoke.yaml</code> and <code>pose_nano_smoke.yaml</code> are all installed with the package.</p>
 <p>What the configs carry is run-level configuration only: schedule, optimizer and loss gains, and placeholder data paths. Topology is named by <code>variant</code> and lives in the registry, never in a config file (ADR-001). Every value below that overrides a config is an override <em>of a placeholder or of a batch-size-dependent value</em>, not a correction.</p>
 <p><code>--data.data_root</code> is the only path any tier needs. The split directories and their annotation files are resolved from it by convention — COCO 2017's <code>train2017</code> spelling, the plain <code>train</code> the tiler writes, an <code>images/&lt;split&gt;</code> tree, or a per-split <code>_annotations.coco.json</code> export (<code>lucid_yolo.data.layout</code>). A layout none of those names still takes the four explicit overrides.</p>
 <p>Provisioning the datasets these recipes read: docs/DATASETS.md. What the accepted runs actually measured, with the exact commands as they were run at the time: docs/REPRODUCTION_REPORT.md.</p>
-<h2 id="cuda-colour-augmentation">CUDA colour augmentation<a class="headerlink" href="#cuda-colour-augmentation" title="Permanent link">&para;</a></h2>
-<p><code>--data.device_hsv true</code> moves training HSV and quantization to CUDA with <code>32-true</code>, <code>16-mixed</code> or <code>bf16-mixed</code> precision. The workers still sample the same gains and horizontal flips, and validation keeps its existing path. The default is <code>false</code>; other backends and precisions warn once and keep worker-side HSV. Any precision plugin whose input conversion casts the float32 images or float64 gains before the data hook (true-half and double, and the FSDP and DeepSpeed plugins under every accepted precision) keeps the original path as well, with the same one-time warning.</p>
-<p>On Linux NVIDIA GPUs with compute capability 8.0 or newer, the float32 consumer restore can fuse the existing colour operations and quantization into one channels-last write. This is on by default wherever Triton and a host C compiler are present — torch's CUDA wheel already selects a Triton, so an existing <code>device_hsv</code> run there takes the fused path without installing anything (<code>uv pip install -e ".[cuda-hsv]"</code> adds Triton where it is missing). <code>--data.fused_hsv false</code> keeps <code>device_hsv</code> on the native CUDA restore, to step around a toolchain or bisect a difference between the two. The first call compiles the kernel and needs a host C compiler. The extra also installs the existing Setuptools build dependency needed by older Triton SDKs. A Triton <code>ImportError</code>, a missing compiler, other devices, noncontiguous buffers and other consumer precisions retain the native restore. So does a first compile or launch that fails: it warns once with its cause, and the native restore runs for the rest of the process. Gain sampling, rounding and the uint8 boundary are unchanged. Direct <code>unpack_batch</code> calls keep their existing path.</p>
-<p>This can help a CPU-limited training run, including one with decoded images cached by <code>--data.cache_train_images true</code>. It transports float32 images until the colour transform finishes, so image IPC and host-to-device bytes are four times the default uint8 transport. The shared-memory worker cap budgets float32 images only when the module chooses the worker count (<code>--data.num_workers</code> unset) in one process; segmentation masks still need their own memory allowance. A named <code>--data.num_workers</code> is neither capped nor warned: batch 64 at 640 px with 8 workers and <code>prefetch_factor</code> 2 queues about 5.0 GB of <code>/dev/shm</code> in float32, against 1.26 GB in uint8. Each DDP rank budgets the free <code>/dev/shm</code> on its own, so ranks sharing one host can jointly overcommit it — a known limit. The cap cannot shrink a batch: with a small <code>/dev/shm</code>, enlarge it or use <code>--data.num_workers 0</code>. Measure the complete run on the intended host.</p>
-<h2 id="prepare-the-next-epoch-during-validation">Prepare the next epoch during validation<a class="headerlink" href="#prepare-the-next-epoch-during-validation" title="Permanent link">&para;</a></h2>
-<p><code>--data.epoch_prefetch true</code> with <code>--data.persistent_workers true</code> lets the existing workers prepare up to <code>num_workers x prefetch_factor</code> batches of the next training epoch during the last step and validation. It is opt-in because the training queue can remain resident alongside validation inputs: <code>num_workers x prefetch_factor</code> batches of host memory, about 1.26 GB of uint8 images for the batch 64, 640 px, 8 worker, <code>prefetch_factor</code> 2 example above, or about 5.0 GB of float32 with <code>--data.device_hsv true</code>. With pinned host memory, which is on by default when CUDA is available, queued batches can sit in page-locked RAM that the <code>/dev/shm</code> worker cap does not budget. Use it when dataset and augmentation configuration remain stable between epochs. Every packaged config breaks that: its <code>CloseMosaicCallback</code> switches mosaic off for the final epochs through <code>set_mosaic_prob</code>, which persistent workers never see, because each keeps the pipeline copy it started with — those epochs would still train on mosaics. The module warns once when such a change arrives under <code>epoch_prefetch</code>; keep <code>--data.persistent_workers false</code> for these configs. It applies to full, single-CUDA epochs with the module's own shuffle generator; batch limits, a step bound, overfit, loader reloads and distributed training keep the ordinary loader, as do non-persistent workers, and the run warns once naming the first unmet condition. CUDA is the boundary because the overlap was measured only on one CUDA GPU (an L4); other accelerators are unmeasured, not known to fail. The configured final epoch does not prepare another one. Measure the complete fit: the benefit is greatest when first-batch preparation is a meaningful fraction of the epoch.</p>
+<h2 id="opt-in-cuda-performance-flags">Opt-in CUDA performance flags<a class="headerlink" href="#opt-in-cuda-performance-flags" title="Permanent link">&para;</a></h2>
+<p>Opt-in performance flags — colour augmentation on the device, epoch prefetch, the image caches, CUDA graph replay, <code>torch.compile</code> — live on their own page: <a href="../advanced/cuda-performance/">Opt-in CUDA performance flags</a>. Most need a CUDA device and belong to a roadmap row still open. Two exceptions: the host-side image cache <code>--data.cache_train_images</code> is built in the data module and needs no accelerator, and its row (<a href="../work_packages/wp-192b/">WP-192b</a>) and the <code>--model.compile_step</code> row (WP-184) are done. None of them is needed for the recipes below, and each defaults to off or to the ordinary path.</p>
 <h2 id="always-point-default_root_dir-at-storage-that-outlives-the-runtime">💾 Always: point <code>default_root_dir</code> at storage that outlives the runtime<a class="headerlink" href="#always-point-default_root_dir-at-storage-that-outlives-the-runtime" title="Permanent link">&para;</a></h2>
 <p><code>--trainer.default_root_dir</code> is the <code>save_dir</code> of both default loggers (TensorBoard and CSV, pinned to a single <code>lightning_logs/version_N</code> directory) and the directory checkpoints land in. On a hosted runtime it is the whole of what survives a disconnect.</p>
 <p>This is not a precaution in the abstract. 0.2.0's Seg-smoke ran with <code>default_root_dir</code> under <code>/content/</code>, and its model card records the hardware line as unrecorded because the logs went with the runtime.</p>
@@ -4590,11 +4690,7 @@
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>lucid-eval<span class="w"> </span>--checkpoint<span class="w"> </span>&lt;checkpoint&gt;<span class="w"> </span>--data_root<span class="w"> </span>/content/coco2017<span class="w"> </span>--output<span class="w"> </span>seg_report.json
 </code></pre></div>
-<p><code>lucid-eval</code> reads the task off the checkpoint and scores masks when the checkpoint has them, so the same command serves both COCO tiers. <code>--masks false</code> scores boxes only from a segmentation checkpoint.</p>
-<h3 id="independent-segmentation-predictions-on-cuda">Independent segmentation predictions on CUDA<a class="headerlink" href="#independent-segmentation-predictions-on-cuda" title="Permanent link">&para;</a></h3>
-<p><code>--model.capture_segment_heads true --trainer.precision bf16-mixed</code> records the existing segmentation prediction routines, including their first-order backward work. The default is <code>false</code>. Box/class stems remain independent; coefficients, prototypes and semantic logits have separate backward nodes so an empty mask objective keeps absent gradients. With this option alone, common features, prototype fusion, assignment, losses, state updates and schedules stay native. Enable <code>capture_network</code> separately to replay the common features too.</p>
-<p>Byte-exact agreement with native training is verified only on NVIDIA L4 (sm_89) with torch 2.9.1+cu129; other GPUs and torch builds are unverified. The route requires PyTorch 2.9 or newer, one CUDA device, automatic optimisation and <code>accumulate_grad_batches=1</code>. Gradient accumulation stays native because replay was validated only at <code>accumulate_grad_batches=1</code>, not because of a known defect in the recorded backward. CPU, MPS, FP32, FP16 and older BF16 runtimes warn and use native calls; evaluation stays native too. Custom or changed prediction dispatch, hooks, frozen prediction parameters, aliased storage and retained feature gradients retire replay for the fit. Each prediction group records one input signature per fit (shape, stride, dtype, device, gradient flag and CUDA stream); a call with any other signature, a partial batch included, runs the native head without adding another graph, and the recorded graph pools stay reserved until the fit ends, so a run whose batch shapes keep changing pays that memory without replaying. Copying, checkpoints and fit teardown retain the original parameter names and no recording.</p>
-<p>A recording failure raises after restoring running buffers and RNG state; disable the flag to keep that run native. The flag retains CUDA graph pools, so check reserved memory and throughput on the actual batch size. A replayed step's mask coefficients, prototypes and semantic logits live in CUDA graph memory that the next replay overwrites in place; box and class predictions are copies. Anything that keeps those three tensors, or a gradient adopted from their backward, beyond the training step that produced them has to clone it. Measurements and rejected alternatives belong to <a href="../work_packages/wp-193e/#wp-193e">WP-193e</a>; a small-batch result does not establish a large-batch speed-up.</p>
+<p><code>lucid-eval</code> reads the task off the checkpoint and scores masks when the checkpoint has them, so the same command serves both COCO tiers. <code>--masks false</code> scores boxes only from a segmentation checkpoint. For the COCO tiers (detect, segment, keypoints) <code>--ann_file</code> and <code>--images_dir</code> override the annotation JSON and image directory independently; the defaults stay <code>annotations/instances_val2017.json</code> (<code>person_keypoints_val2017.json</code> for keypoints) and <code>val2017/</code> under <code>--data_root</code>. An option the checkpoint's task does not use (<code>--split</code>, <code>--variant</code> for a non-oriented checkpoint; <code>--masks</code> other than for segment; <code>--eval_backend</code>, <code>--ann_file</code>, <code>--images_dir</code> for an oriented one) is refused by name when passed explicitly.</p>
 <h2 id="keypoints-coco-2017-person_keypoints">🕺 Keypoints — COCO 2017 <code>person_keypoints</code><a class="headerlink" href="#keypoints-coco-2017-person_keypoints" title="Permanent link">&para;</a></h2>
 <p>The same COCO tree again, read through its other annotation file. <code>num_keypoints</code> is required and has no default — the point count is a property of the annotation schema, not something a model can pick.</p>
 <div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>lucid-yolo<span class="w"> </span>fit<span class="w"> </span>--config<span class="w"> </span>pose_nano_smoke.yaml<span class="w"> </span><span class="se">\</span>
@@ -4627,61 +4723,115 @@
 <li><strong>Batch 16 at <code>img_size: 1024</code></strong>, against 128 at 640 for COCO. The tile side is R18's own crop size, and 16 is the placeholder <code>obb_nano_smoke.yaml</code> ships — "tune to accelerator memory". No oriented tier run has measured a batch that fits, so it is a starting point rather than a figure: at 2.56x the pixels per image it is a third of the COCO batch's pixel budget, not a match for it. <code>--model.lr</code> stays at the config's 0.01 for the same reason — the 0.02 above is the batch-128 linear scaling, and it does not carry over to a batch nobody has settled yet.</li>
 </ul>
 <p><code>lucid-eval</code> picks the rotated protocol from the checkpoint's own task, and with it the 1024 px letterbox and batch 8; an explicit <code>--img_size</code> or <code>--batch_size</code> still wins.</p>
-<h2 id="oriented-and-keypoint-runs-are-single-device">🖥️ Oriented and keypoint runs are single-device<a class="headerlink" href="#oriented-and-keypoint-runs-are-single-device" title="Permanent link">&para;</a></h2>
-<p><code>lucid-yolo fit</code> refuses <code>task: obb</code> and <code>task: keypoints</code> on more than one process, and says so at setup rather than partway through the first validation. Their epoch metrics — <code>val/rotated_mAP</code> and <code>val/oks_mAP</code> — accumulate plain Python lists that nothing gathers, so each rank would score its own shard and log it as the split's number. Average precision ranks every detection of the split against every other by confidence, so per-rank values cannot be averaged back into the right one; a wrong number that looks plausible is worse than a refusal. Leave <code>trainer.devices</code> at <code>1</code> for these two tasks, or pick a bigger accelerator rather than more of them. Detection and segmentation are unaffected: their metrics are torchmetrics metrics and synchronise across ranks. Whatever the task, a CUDA run trains in <code>channels_last</code> memory format automatically — parameters and images both, no flag (D23) — while CPU and MPS keep the default layout.</p>
-<h2 id="decoded-training-image-cache">🗃️ Decoded training-image cache<a class="headerlink" href="#decoded-training-image-cache" title="Permanent link">&para;</a></h2>
-<p><code>--data.cache_train_images true</code> decodes each distinct training file name during datamodule setup and keeps the RGB <code>uint8</code> tensor in host RAM. Mosaic, affine, colour and flip augmentation still run on fresh float storage for every draw; only the repeated JPEG/PNG decode disappears. COCO and YOLO training readers support the flag, and validation is deliberately not cached.</p>
-<p>Budget the option from the uncompressed images, not their files: approximately <code>sum(3 * height * width)</code> bytes for 8-bit sources, before Python/tensor metadata — a 16-bit PNG decodes to <code>uint16</code> and costs two bytes per channel, so twice that — and once per device: a multi-GPU run spawns one process per rank, each building its own <code>DetectionDataModule</code> and therefore its own cache, so the single-process budget above multiplies by <code>trainer.devices</code>. The cache is keyed by file name (by path for the YOLO reader), so two records naming one file share an entry, while the same picture stored under two names is decoded and held twice. It defaults off.</p>
-<p>Whether DataLoader workers share the cache depends on the multiprocessing start method, not on the operating system, and the data module leaves the start method at the platform default. Under <code>fork</code> the workers read the parent's cache through copy-on-write pages, so it costs one copy of RAM however many workers there are. Under <code>spawn</code> and <code>forkserver</code> — the default on macOS and Windows, and on Linux from Python 3.14 — the cache is pickled to every worker, torch moves each cached tensor into shared memory to do it (one segment or file descriptor per image), and with <code>--data.persistent_workers false</code>, the default, the hand-over repeats every epoch. The values are identical either way; a non-fork start method does not promise the one-copy cost or the speedup, and a large split can meet file-descriptor or <code>/dev/shm</code> limits at a size nobody has measured. The pipeline never writes to the cache — every draw converts into fresh float storage. Leave it off when the split does not fit comfortably beside the loader queue, model, optimizer and operating-system cache.</p>
-<h3 id="prepared-training-source-cache">Prepared training-source cache<a class="headerlink" href="#prepared-training-source-cache" title="Permanent link">&para;</a></h3>
-<p><code>--data.cache_prepared_train_images true</code> also reuses float conversion and affine centring before random augmentation. It takes precedence over <code>cache_train_images</code>, keeps one float32 source per training record and snapshots YOLO labels with their images. Mosaic, geometry, colour, targets and RNG draws keep their existing results. The option defaults off.</p>
-<p>Budget about <code>12 * sum(height * width)</code> bytes for the retained RGB pixels, plus target and reader metadata, per training process. Extrapolated from the 1,024-image slice measured in <a href="../work_packages/wp-192c/">WP-192c</a> (3.30 MB per image), the full COCO train2017 split would need about 390 GB per process; this is an extrapolation, not a measured run. Every DDP rank is a separate process and holds its own copy, so ranks on one host multiply that figure. Each float32 pixel channel uses four times the bytes of an 8-bit channel. The prepared cache retains separate images for duplicate COCO records, whereas the decoded cache deduplicates file names. COCO reports an estimate before decoding; YOLO has no annotation sizes and reports the retained pixel bytes afterwards. Under <code>spawn</code> or <code>forkserver</code> (see above), workers receive cached tensors through shared memory, so budget the cache alongside the queued batches. Forked workers share its read-only pages. Fit-stage setup builds the cache once, repeated fit setup reuses it, and other stages release the datamodule's references. Measure the complete fit on the intended host.</p>
-<h2 id="opt-in-cuda-network-replay">Opt-in CUDA network replay<a class="headerlink" href="#opt-in-cuda-network-replay" title="Permanent link">&para;</a></h2>
-<p><code>--model.capture_network true</code> records the detection backbone, neck and dual head with PyTorch's <code>make_graphed_callables</code>, including their backward pass. Assignment, losses, optimizer, LR/alpha schedules and EMA keep the ordinary loop. It is separate from <code>compile_step</code> and cannot be combined with that flag. The default is <code>false</code>. The measured speed-up is limited to a small-batch workload (batch 4); batch-32 screens changed direction, so check throughput on your own batch size before enabling it.</p>
-<p>For <code>task: keypoints</code>, the same flag records backbone and neck plus eighteen independent box/class/point stems through the private prediction runner. Each point stem has its own backward node: a batch with no assigned positives keeps its point-parameter gradients absent. The current RLE/OKS or Laplace objectives stay native. Gradient accumulation, a fully frozen backbone and neck, changed head topology or dispatch, and head hooks/compilation keep pose native; a partial shared-feature freeze still replays. A fully frozen start or a later change to the shared-feature trainable set keeps the rest of the fit native after one warning. Changing a stem's trainable set or module mode retires that stem's recording, with a warning naming the stem; replacing a head module retires the parent before feature replay. The measured benefit is for nano/640/BF16, batch 4 on L4: five complete pairs save 12.97%, including setup, validation and checkpoints, against the existing shared-feature replay. Reserved memory rises from 1384 to 1730 MiB. Check time and memory on another batch or device. <a href="../work_packages/wp-193f/">WP-193f</a> records the measurements and unverified limits; <a href="../work_packages/wp-193d/">WP-193d</a> retains the earlier feature-only result.</p>
-<p>For <code>task: obb</code>, the flag records backbone, neck and the complete dual head, including both angle outputs. The native classification and oriented losses stay outside capture. Their empty-target expressions retain zero angle gradients. Overridden training consumers, classification losses or oriented helpers keep the complete native call; gradient accumulation also stays native. The oriented speed-up is likewise limited to a small-batch workload (Nano OBB at batch 4, BF16, one L4): a single batch-8 pair changed fit time by only 4.10%, and replay raised peak reserved memory from 3974 to 4300 MiB, so check throughput and memory on your own batch size. The measurements and remaining limits are in <a href="../work_packages/wp-200/">WP-200</a>.</p>
-<p>This path requires single-device CUDA automatic optimisation and <code>task: detect</code>, <code>task: keypoints</code>, <code>task: obb</code> or <code>task: segment</code>. BF16 replay requires a final PyTorch 2.9 or newer release; 2.9 pre-release and NGC <code>a0</code> builds are excluded by design. 2.9 is the first verified runtime: older BF16 runs warn and stay eager because the 2.4 comparison did not meet the exact eager oracle. FP32 and FP16 replay of detection, oriented detection and pose shared features are checked on 2.4 as well; pose stem replay has run on 2.9.1 only (<a href="../work_packages/wp-193f/">WP-193f</a>). CPU, MPS and other strategies warn and stay eager; other tasks or <code>compile_step</code> raise at construction. One image signature is recorded per fit. A partial batch uses eager execution without growing a graph cache. Changes to the recorded stages’ parameter/buffer storage, module modes, hooks or precision retire replay for the rest of that fit. The supplied network must keep its ordinary stage implementations and static Python configuration. Root forward overrides, stage instance-forward overrides and registered hooks use the eager path. Anomaly detection (<code>--trainer.detect_anomaly true</code>) also stays eager so backward NaN checks run normally. A failure while recording raises instead of falling back to eager (RNG state and buffers are restored first), so disable <code>--model.capture_network</code> if recording fails on your model. Higher-order differentiation is not supported.</p>
-<p>Recording warmup restores RNG and BatchNorm buffers before the first real batch. Accumulation or custom optimiser/zero-grad hooks preserve live gradients outside the graph-owned backward buffers before they can be overwritten. AMP uses an uncached autocast scope as the PyTorch API requires. Validation, prediction and public <code>forward</code> calls stay eager. Checkpoints retain the ordinary parameter names and the flag, with no graph state. Each fit records afresh and drops its recording on completion or an exception. CUDA graph pools can increase reserved memory even when peak allocated memory falls; measure both on the intended workload. The measured scope and remaining validation gaps are in <a href="../work_packages/wp-193c/">WP-193c</a>.</p>
-<p>For segmentation, the same <code>--model.capture_network true</code> option records only backbone and neck. Prediction groups, prototype fusion and both losses keep their existing arithmetic and gradient boundaries. It can combine with <code>--model.capture_segment_heads true</code>, which records the prediction groups separately. Gradient accumulation stays native, as do overridden or compiled segmentation forwards. The default remains <code>false</code>; a recording is transient and follows the same fit cleanup and input-signature rules above. See <a href="../work_packages/wp-193g/">WP-193g</a> for the measured workload and limits.</p>
-<h2 id="optional-cuda-detection-and-pose-loss-execution">Optional CUDA detection and pose loss execution<a class="headerlink" href="#optional-cuda-detection-and-pose-loss-execution" title="Permanent link">&para;</a></h2>
-<p><code>--model.capture_loss true</code> replays the existing detection assignment and loss forward/backward with fresh predictions, targets and the current alpha tensor. Default <code>false</code>: capture costs setup time and retains CUDA workspace, so short or compute-bound runs may not benefit. It accepts <code>task: detect</code> or <code>task: keypoints</code>, and requires single-device CUDA automatic optimisation and <code>compile_step: false</code>. It can combine with <code>capture_network</code>, <code>capture_orthogonalization</code> and <code>capture_updates</code>; <code>capture_loss</code> itself records no optimizer update, so the optimizer step is whatever those two optimizer options select (the existing eager path when both are off).</p>
-<p>For pose, the unrotated detection objective uses that recorder while point gathers and OKS stay native. During training, the built-in RLE densities can score both branches in one batch, retaining separate visible-point means and branch weights. That batching is gated on the option being active for the fit, not on the recorder: it continues after the recorder retires and on steps whose detection loss takes its native call, such as a customized criterion or BF16 on torch older than 2.9. This reduces dispatch but can change matrix-kernel selection and parameter-gradient summation rounding: pose execution retains the mathematical objective, but training is not byte-identical. Hooked, overridden or compiled densities, altered pose scoring and validation use their original calls. Branches with different input dtypes/devices or tensor subclasses keep separate density calls. Laplace-only pose keeps native point scoring. See <a href="../work_packages/wp-199b/">WP-199b</a> for the measured scope and unverified accuracy checks.</p>
-<p>One masked target workspace grows from observed instance counts and replaces the previous recording. Returned scalars and assignments own their storage. Current label bounds are checked before replay. Global module hooks, unsafe custom epsilon/exponent settings, entirely empty targets, partial batches, non-finite inputs, unsupported layouts or autograd contexts, another CUDA stream and older BF16 runtimes keep the native loss. FP32 and FP16 have focused CUDA coverage on torch 2.4.0 and 2.9.1; BF16 replay starts at the verified final 2.9 runtime. Changed criterion implementations, gains or precision retire the recording. A capture failure raises after clearing the partial owner. Higher-order differentiation and multiple backward passes through one recorded result are outside this automatic-training option.</p>
-<p>On the measured L4 nano/640/BF16 workload, five batch-4 complete-fit pairs saved 13.14%. A separate batch-16 exploratory pair was 7.767% slower. Treat this as a small-batch launch-overhead option and measure the complete fit before enabling it for another workload.</p>
-<p><a href="../work_packages/wp-199/">WP-199</a> records the measured workload, discarded screens and remaining validation gaps. Check complete-fit throughput and memory on your own batch size before enabling it.</p>
-<h2 id="cuda-graph-replay-of-orthogonalization-is-opt-in">📼 CUDA graph replay of orthogonalization is opt-in<a class="headerlink" href="#cuda-graph-replay-of-orthogonalization-is-opt-in" title="Permanent link">&para;</a></h2>
-<p><code>--model.capture_orthogonalization true</code> records MuSGD's existing Newton--Schulz matrix calls and replays them with each new gradient. The default is <code>false</code>: private graph pools retain extra device workspace, and setup may outweigh the gain on short or compute-bound runs. Momentum, parameter updates and the learning-rate schedule remain eager. CPU and MPS keep the original functions. <a href="../work_packages/wp-197b/">WP-197b</a> records the measured workload and compatibility envelope.</p>
-<h2 id="cuda-update-preparation-replay-is-opt-in">📼 CUDA update preparation replay is opt-in<a class="headerlink" href="#cuda-update-preparation-replay-is-opt-in" title="Permanent link">&para;</a></h2>
-<p><code>--model.capture_updates true</code> additionally records MuSGD's update preparation, including momentum, for eligible dense float32 CUDA groups. Learning-rate changes and parameter writes remain outside capture. This option can be used with or without <code>capture_orthogonalization</code>; the two recordings do not nest. CPU, MPS and unsupported CUDA layouts or execution contexts retain the native step. A failure while recording raises instead of falling back to the native step (gradients and momentum are restored first), so disable <code>--model.capture_updates</code> if recording fails on your model. Loading optimizer state discards old recordings. The default is <code>false</code> because capture adds setup and retains workspace. <a href="../work_packages/wp-197c/">WP-197c</a> reports five complete public-data fits, numerical checks and measured memory cost; other workloads need their own measurement.</p>
-<h2 id="torchcompile-is-opt-in-cuda-detect">⚡ torch.compile is opt-in (CUDA, detect)<a class="headerlink" href="#torchcompile-is-opt-in-cuda-detect" title="Permanent link">&para;</a></h2>
-<p><code>--model.compile_step true</code> (or <code>compile_step: true</code> under <code>model:</code>; <code>det_nano_smoke.yaml</code> carries it at <code>false</code>) compiles the detection objective with Inductor. What is compiled is one region, <code>DetectionLitModule._detect_objective</code>: the forward, both branch decodes, the task-aligned assignment and the dual loss, traced as a single graph with no breaks — <code>tests/ptl/test_compile.py</code> pins that on CPU for a batch with ground truths and for one with none. Compiling the model half alone was measured first and was not worth a flag: x1.09–1.16 on the step, because the assignment and the loss are where the small kernels and the launch overhead live. With <a href="../work_packages/wp-183/">WP-183</a>'s dense box terms (no data-dependent gather) and the label check skipped under tracing, the whole region compiles: on an RTX PRO 6000, variant <code>n</code>, COCO, batch 16, deterministic, the eager training step is 74.7 ms and the compiled one 60.9 ms, x1.23. A bf16 run was recorded at x1.46 on the same bench and is <strong>not</strong> enabled by this flag — precision is a separate decision the fidelity gate has not been asked about.</p>
-<p>What it costs: 110–140 s of compilation per process before the first step, and a handful of recompiles over a run: the training graph, the first <code>no_grad</code> evaluation step, and — because Dynamo specialises sizes 0 and 1 whatever is marked — one each for the first batch with no ground truths (<code>tal.py</code>'s own branch), the first with exactly one padded instance, and the first with one image, if the loader ever produces it. Measured on CPU with the <code>eager</code> backend over five batch shapes: four graphs. Batch size and padded instance count are marked dynamic on the images and the ground truths before every compiled call, so the last, smaller batch of an epoch and a batch with more instances than the one before share one graph; without the marks Dynamo would specialise until <code>cache_size_limit</code> (8) and then drop to eager without saying so, and with them the assigner's <code>F.one_hot(best_gt, num_gt)</code> — a concrete class count — had to become an <code>arange</code> comparison, since the enforcing marks refuse a pinned dim rather than silently recompiling. <code>TORCH_LOGS=recompiles</code> shows the count.</p>
-<p>Where it refuses, it says so once at <code>setup</code> and trains eager. Off CUDA: the MPS Inductor backend crashes in <code>convolution_backward</code>, and CPU has nothing to gain. Under <code>task: segment</code>, <code>obb</code> or <code>keypoints</code>: their extra terms read tensors on the host inside <code>_task_extra_loss</code>, outside the region, so compiling the detection part alone would buy a fraction of the x1.23 for the same compile cost; they stay eager until their terms are made traceable. The compile wraps the bound method, not the module, so parameter names, the state dict, the EMA shadow, checkpoints and export are exactly what they are without the flag — a compiled <em>module</em> would prefix every key with <code>_orig_mod.</code>.</p>
-<p>The default is off on cost, not on doubt. A78 — whether the compiled objective trains as eager does — was validated on an A100 (paired 4-epoch run: 1 recompile, step 180.6 → 144.2 ms, loss parity <code>3.6e-5</code> with TF32 off), but compilation added 210 s of wall to a 4-epoch run of 313 steps, a break-even near 19 epochs at that size and under one epoch on COCO train; turn it on per recipe when the run is long enough. When comparing the two arms, compare mAP, or set <code>torch.set_float32_matmul_precision("highest")</code> first: under TF32 the per-batch <code>train/loss</code> differs by up to <code>1e-1</code>, because the task-aligned assignment is discrete and TF32 rounding moves its top-k set. D24 carries the numbers.</p>
+<h2 id="distributed-validation">🖥️ Distributed validation<a class="headerlink" href="#distributed-validation" title="Permanent link">&para;</a></h2>
+<p>All four tasks accept DDP validation. Detection and segmentation use torchmetrics; oriented detection and keypoints gather whole-image records with private torchmetrics metrics before calling the existing rotated mAP and OKS AP scorers. The validation loader carries dataset-position IDs so repeated sampler-padding images are scored once, keeping the first occurrence and the loader's original dataset order. Custom validation loaders for oriented detection or keypoints must retain the datamodule's private indexed targets; a distributed batch without identity is refused rather than silently double-counted. Public sample and batch signatures are unchanged (<a href="../work_packages/wp-213/">WP-213</a>).</p>
+<p>The multi-device proof is scoped to a CPU gloo two-process test; no two-GPU run was made, and a real multi-GPU check remains outstanding. Training recipes remain measured on one device. Whatever the task, CUDA training uses <code>channels_last</code> memory format automatically for parameters and images (D23); CPU and MPS retain the default layout.</p>
 <h2 id="what-deterministic-true-and-seed-actually-pin">🎲 What <code>deterministic: true</code> and <code>seed</code> actually pin<a class="headerlink" href="#what-deterministic-true-and-seed-actually-pin" title="Permanent link">&para;</a></h2>
 <p>Every tier config sets <code>deterministic: true</code> and seed 0. Two boundaries sit inside that, and neither fails loudly.</p>
 <p><strong>On MPS it is not strict.</strong> <code>default_determinism</code> (<code>lucid_yolo/cli/train.py</code>) resolves the trainer's <code>deterministic</code> flag to <code>"warn_only"</code> whenever MPS is the auto-picked accelerator, because MPS ships no deterministic implementation for some backward kernels this model reaches — <code>index_put_with_accumulate</code>, hit by the assignment and loss backward — and strict <code>True</code> aborts mid-step there. Every op with a deterministic kernel stays deterministic; the rest downgrade to a warning. CPU and CUDA keep strict <code>True</code>. So an Apple-silicon run under D12c is reproducible only up to those kernels, and says so in the log rather than by failing.</p>
 <p><strong>The worker count is part of the seed.</strong> A seeded run is byte-identical only against another run at the <em>same</em> <code>--data.num_workers</code>. At <code>0</code> the pipeline draws every augmentation parameter from one generator in the parent process, in index order. With workers each is re-seeded per worker and per epoch from the loader's own generator (<a href="../work_packages/wp-079/">WP-079</a>), which is what keeps per-epoch diversity alive. Both streams are fully determined by <code>seed</code> and they are <strong>different streams</strong>: the recipes above run at 32 workers, and rerunning one at 0 workers, or at 16, reproduces the schedule and not the sample-by-sample augmentation. Reproducing a published run means matching its worker count as well as its seed, which is why every command above states one.</p>
+<h2 id="resuming-an-interrupted-run">⏯️ Resuming an interrupted run<a class="headerlink" href="#resuming-an-interrupted-run" title="Permanent link">&para;</a></h2>
+<p>Add <code>--ckpt_path</code> to the command that started the run and point it at a checkpoint the run wrote. With the default loggers that is <code>&lt;default_root_dir&gt;/lightning_logs/version_N/checkpoints/</code> (<code>N</code> numbers the run; the first run is <code>version_0</code>). With <code>logger: false</code> there is no version directory and Lightning writes to <code>&lt;default_root_dir&gt;/checkpoints/</code>:</p>
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>lucid-yolo<span class="w"> </span>fit<span class="w"> </span>--config<span class="w"> </span>det_nano_smoke.yaml<span class="w"> </span>--data.data_root<span class="w"> </span>/data/coco<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>--trainer.default_root_dir<span class="w"> </span>/content/drive/MyDrive/lucid_runs<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>--ckpt_path<span class="w"> </span>/content/drive/MyDrive/lucid_runs/lightning_logs/version_0/checkpoints/&lt;file&gt;.ckpt
+</code></pre></div>
+<p>The resumed run continues the step and epoch counters, the EMA shadow and its update count, the MuSGD momentum, and the progressive-loss weight. That weight is a function of the current and final epoch and holds no state of its own, so restoring the epoch counter is what restores it. Keep <code>--trainer.max_epochs</code> equal to the original run's: the weight and the learning-rate schedule are both functions of it. Augmentation random-number state is not checkpointed, so a resumed run is not bit-identical to an uninterrupted one. The command-line path is covered by <code>tests/cli/test_resume_cli.py</code>, which asserts each of the four on a CPU smoke run; <code>tests/ptl/test_resume.py</code> covers trajectory equality on a fixed stream without augmentation.</p>
 <h2 id="what-checkpoint-will-deserialize">🔐 What <code>--checkpoint</code> will deserialize<a class="headerlink" href="#what-checkpoint-will-deserialize" title="Permanent link">&para;</a></h2>
-<p>Every command above reads its checkpoint through one loader, and that loader reads the file twice in a fixed order. The first read is restricted — <code>torch.load(..., weights_only=True)</code> — and refuses anything the file names outside torch's allowlist while the pickle stream is still being parsed, so a checkpoint carrying an arbitrary reducer is rejected before that reducer runs. Only a file that survives that read is handed to Lightning.</p>
-<p>The order is what makes this a policy rather than a hope. <code>weights_only</code> reached Lightning's <code>load_from_checkpoint</code> in 2.6.0, and this project's floor is <code>pytorch-lightning&gt;=2.4</code>; below 2.6 the argument is absorbed as a hyper-parameter override and changes nothing about how the file is read. So the restriction cannot be stated at that call on every supported install — but it can be stated at the first read, on all of them.</p>
-<p>Two consequences before pointing <code>--checkpoint</code> at a file someone else produced. A checkpoint whose <code>hyper_parameters</code> or callback state carries a non-tensor object is refused rather than loaded, which is the same refusal a hostile file gets: the reader cannot tell the two apart, and does not guess. And a file swapped between the two reads is checked in its first form and loaded in its second — the gate is a check on the file, not a lock on it.</p>
+<p><code>lucid-eval</code>, <code>lucid-predict</code>, <code>lucid-export</code> and <code>lucid_yolo.load_eval_module</code> read their checkpoint through one loader, and that loader reads the file once, restricted. <code>fit --ckpt_path</code> (resuming) does not go through it: it is Lightning's own load, outside the guarantee below. The read is <code>torch.load(..., weights_only=True)</code>, which refuses anything the file names outside torch's allowlist while the pickle stream is still being parsed, so a checkpoint carrying an arbitrary reducer is rejected before that reducer runs. The module is then built from that same payload: its saved <code>hyper_parameters</code>, filtered to the arguments <code>DetectionLitModule</code> takes, construct it, and Lightning's public <code>on_load_checkpoint</code> hook and a <code>load_state_dict</code> follow. Lightning's own loader, which would read the file a second time without the restriction, is never called.</p>
+<p>Earlier releases read the file twice, restricted first as a gate and then through Lightning, because the restriction only reached Lightning's loader in 2.6.0 and this project's floor is <code>pytorch-lightning&gt;=2.4</code>. The single read states the restriction on every supported install, and closes the gap in which a file swapped between the two reads was checked in its first form and loaded in its second. What it skips is Lightning's migration of legacy checkpoints, which only rewrites loop and callback state from Lightning 1.x layouts, none of which this project reads.</p>
+<p>Two consequences before pointing <code>--checkpoint</code> at a file someone else produced. A checkpoint whose <code>hyper_parameters</code> or callback state carries a non-tensor object is refused rather than loaded, which is the same refusal a hostile file gets: the reader cannot tell the two apart, and does not guess. And a checkpoint with no <code>hyper_parameters</code> or <code>state_dict</code> mapping is refused with a <code>ValueError</code> naming the missing key and the file.</p>
+<h2 id="using-a-checkpoint-from-python">🐍 Using a checkpoint from Python<a class="headerlink" href="#using-a-checkpoint-from-python" title="Permanent link">&para;</a></h2>
+<p>The loader, the four predict functions and the COCO scorer are importable from the top-level package without loading torch until one is called (<a href="../api/inference/">Inference API</a>):</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchvision.io</span><span class="w"> </span><span class="kn">import</span> <span class="n">decode_image</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="kn">import</span><span class="w"> </span><span class="nn">lucid_yolo</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">module</span><span class="p">,</span> <span class="n">info</span> <span class="o">=</span> <span class="n">lucid_yolo</span><span class="o">.</span><span class="n">load_eval_module</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">"runs/det.ckpt"</span><span class="p">),</span> <span class="n">use_ema</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># EMA weights, eval mode</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">device</span> <span class="o">=</span> <span class="n">lucid_yolo</span><span class="o">.</span><span class="n">pick_device</span><span class="p">(</span><span class="s2">"auto"</span><span class="p">)</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">image</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="s2">"street.jpg"</span><span class="p">)</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="n">boxes</span> <span class="o">=</span> <span class="n">lucid_yolo</span><span class="o">.</span><span class="n">predict_image</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">image</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>  <span class="c1"># (N, 6): x1 y1 x2 y2 score class</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="n">same</span> <span class="o">=</span> <span class="n">lucid_yolo</span><span class="o">.</span><span class="n">predict_image</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">decode_image</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">image</span><span class="p">)),</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>  <span class="c1"># CHW uint8 tensor in</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="n">score</span> <span class="o">=</span> <span class="n">lucid_yolo</span><span class="o">.</span><span class="n">score_coco</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="s2">"~/data/coco2017"</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(),</span> <span class="n">limit</span><span class="o">=</span><span class="mi">500</span><span class="p">)</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="nb">print</span><span class="p">(</span><span class="n">score</span><span class="o">.</span><span class="n">report</span><span class="p">[</span><span class="s2">"e2e"</span><span class="p">][</span><span class="s2">"map"</span><span class="p">],</span> <span class="n">score</span><span class="o">.</span><span class="n">report</span><span class="p">[</span><span class="s2">"nms"</span><span class="p">][</span><span class="s2">"map"</span><span class="p">],</span> <span class="n">score</span><span class="o">.</span><span class="n">images</span><span class="p">,</span> <span class="n">score</span><span class="o">.</span><span class="n">seconds</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li><strong>Image input</strong> is a file path or a decoded <code>(3, H, W)</code> RGB tensor holding <code>uint8</code> or <code>uint16</code> codes, or floats in <code>[0, 1]</code>. One image per call: a batch is not accepted. An <code>(H, W, 3)</code> array, a float image outside <code>[0, 1]</code> and signed, bool or complex codes are refused with a message saying what to change.</li>
+<li><strong><code>predict_segmentation</code>, <code>predict_oriented</code> and <code>predict_keypoints</code></strong> take the same two forms. A checkpoint of another task is refused by the function whose task it is not.</li>
+<li><strong><code>score_coco</code></strong> picks the protocol from <code>module.task</code> (<code>detect</code>, <code>segment</code> or <code>keypoints</code>), prints nothing and writes nothing; it returns a <code>CocoScore</code> with the report, the image count and the scoring time. It refuses <code>obb</code> checkpoints: those are scored by <code>lucid-eval</code> or <code>lucid_yolo.eval.rotated_eval</code>. The dataset layout it expects is the one in <a href="../DATASETS/">Provisioning the datasets</a>.</li>
+<li><strong>The scoring engine differs from the command's.</strong> <code>score_coco</code> accepts only <code>eval_backend="faster_coco_eval"</code> (the default) or <code>"hotcoco"</code>; any other value, <code>"auto"</code> included, is refused. <code>lucid-eval</code> defaults to <code>auto</code>, which uses <code>hotcoco</code> when it is usable and falls back to <code>faster_coco_eval</code> otherwise. To match the command, pass <code>eval_backend="hotcoco"</code> explicitly; <code>lucid-eval</code> reports a <code>RuntimeError</code> for an explicit <code>hotcoco</code> that is not usable, and installing the <code>hotcoco</code> package is a precondition.</li>
+</ul>
+<h2 id="exporting-to-onnx">📦 Exporting to ONNX<a class="headerlink" href="#exporting-to-onnx" title="Permanent link">&para;</a></h2>
+<p><code>lucid-export</code> writes one checkpoint as one ONNX file. The task is read from the checkpoint, as <code>lucid-eval</code> and <code>lucid-predict</code> read it, and the graph is the suppression-free one-to-one path that task deploys on: a top-k node and no <code>NonMaxSuppression</code> node. Writing the file needs the <code>onnx</code> package, which torch's exporter imports to finalise it, so install the extra first:</p>
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"lucid-yolo[export]"</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>lucid-export<span class="w"> </span>--checkpoint<span class="w"> </span>runs/det.ckpt<span class="w"> </span>--output<span class="w"> </span>det.onnx
+</code></pre></div>
+<p>Without the extra the command stops before reading the checkpoint, with <code>lucid-export needs the onnx package to write the file: pip install "lucid-yolo[export]"</code>. A run on a nano detection checkpoint at <code>--img_size 128</code> printed:</p>
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>export: runs/det.ckpt -&gt; det.onnx (task=detect, ema=True, epoch=0, opset=17)
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>input: image (1, 3, 128, 128) float32, static shape
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>output: (1, 300, 6) detections [x1, y1, x2, y2, score, class]
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--checkpoint</code>, <code>--output</code></td>
+<td>Required. The parent directory of <code>--output</code> is created if absent.</td>
+</tr>
+<tr>
+<td><code>--img_size N</code></td>
+<td>Square input side. Defaults per task: 640 for detection, segmentation and keypoints, 1024 for oriented.</td>
+</tr>
+<tr>
+<td><code>--canvas "[H, W]"</code></td>
+<td>Non-square input, height first, written as one JSON list: <code>--canvas 640 480</code> does not parse. Exclusive with <code>--img_size</code>.</td>
+</tr>
+<tr>
+<td><code>--ema true\|false</code></td>
+<td>Export the EMA shadow (default) or the raw weights. A checkpoint without an EMA callback entry needs <code>--ema false</code>.</td>
+</tr>
+<tr>
+<td><code>--opset N</code></td>
+<td>ONNX opset, 17 by default, the only one the export gate certifies.</td>
+</tr>
+<tr>
+<td><code>--config</code></td>
+<td>Every command takes one.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>What the file answers with.</strong> Every graph returns 300 rows per image, best first; rows no anchor produced have score 0. Detection returns <code>(1, 300, 6)</code> as <code>[x1, y1, x2, y2, score, class]</code>. Segmentation adds <code>(1, 300, H, W)</code> boolean masks on the letterboxed canvas. Oriented returns <code>(1, 300, 7)</code> as <code>[cx, cy, w, h, theta, score, class]</code>. Keypoints adds <code>(1, 300, K, 2)</code> points on the letterboxed canvas; the per-point sigma is not exported. Coordinates are on the letterboxed canvas: the caller letterboxes the image, and maps results back through the inverse letterbox itself.</p>
+<p><strong>Limits.</strong></p>
+<ul>
+<li>The input shape is static, batch included. A second canvas or batch size is a second export; there is no dynamic batch.</li>
+<li>Opset 17 through torch's legacy TorchScript exporter (<code>dynamo=False</code>), which torch marks deprecated. Only the suppression-free path is exported: no NMS graph, no other format, no precision or quantization.</li>
+<li>A segmentation export refuses canvases that yield fewer than 300 anchors, which is 96 px a side and below. The oriented and detection graphs pad to 300 rows there, and the keypoint graph pads with origin points.</li>
+<li>The oriented graph on such a small canvas now returns 300 rows where it returned one row per anchor before; every row an anchor produced is unchanged, and canvases of 128 px and above are unchanged. <code>lucid-predict</code> output is unchanged on every canvas, since its confidence filter drops the padding rows.</li>
+</ul>
+<p>From Python, <code>lucid_yolo.export.graph_from_module(module, (640, 640))</code> rebuilds the graph from a loaded checkpoint under a strict key check and <code>export_graph(graph, "m.onnx")</code> writes it (<a href="../api/export/">Export API</a>). It accepts any module built at raw multipliers, not only registry variants.</p>
 <h2 id="a-yolo-format-root-instead-of-cocos">📁 A YOLO-format root instead of COCO's<a class="headerlink" href="#a-yolo-format-root-instead-of-cocos" title="Permanent link">&para;</a></h2>
 <p>Every tier above works unchanged against a YOLO-format root — no dedicated config, just three overrides on <code>det_nano_smoke.yaml</code>:</p>
-<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>lucid-data<span class="w"> </span>check<span class="w"> </span>--data_root<span class="w"> </span>/path/to/yolo_dataset<span class="w">   </span><span class="c1"># validates the tree, prints the class count</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>lucid-yolo<span class="w"> </span>fit<span class="w"> </span>--config<span class="w"> </span>det_nano_smoke.yaml<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>--data.data_root<span class="w"> </span>/path/to/yolo_dataset<span class="w"> </span>--data.layout<span class="w"> </span>yolo<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span>--model.num_classes<span class="w"> </span>&lt;len<span class="o">(</span>names<span class="o">)</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>the<span class="w"> </span>root<span class="err">'</span>s<span class="w"> </span>own<span class="w"> </span>data.yaml&gt;
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>lucid-data<span class="w"> </span>check<span class="w"> </span>--data_root<span class="w"> </span>/path/to/yolo_dataset<span class="w">   </span><span class="c1"># validates the tree, prints the class count</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>lucid-yolo<span class="w"> </span>fit<span class="w"> </span>--config<span class="w"> </span>det_nano_smoke.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span>--data.data_root<span class="w"> </span>/path/to/yolo_dataset<span class="w"> </span>--data.layout<span class="w"> </span>yolo<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span>--model.num_classes<span class="w"> </span>&lt;len<span class="o">(</span>names<span class="o">)</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>the<span class="w"> </span>root<span class="err">'</span>s<span class="w"> </span>own<span class="w"> </span>data.yaml&gt;
 </code></pre></div>
 <p><code>--data.layout yolo</code> is stated rather than left to be probed: <code>detect_layout</code> resolves a bare YOLO root on its own, but stating it also covers a root that happens to satisfy both conventions (COCO and YOLO — the probe refuses to break that tie, A63) and skips the probe entirely, so a missing path is named by the reader that actually needed it, not the probe. <code>--model.num_classes</code> must equal <code>len(names)</code> in the root's own <code>data.yaml</code> — a label row's class index is 0-based into that list and is never remapped (<a href="../work_packages/wp-099/">WP-099</a>), so a mismatched count trains against the wrong label space silently. <code>lucid-data check --data_root ...</code> prints both numbers so they can be compared before a launch, not after one.</p>
 <p><strong>Not available on this layout: <code>--model.task segment</code>.</strong> A YOLO label row carries five or nine normalized numbers and never a polygon ring, so there is nothing to rasterize a mask from — <code>DetectionDataModule</code> refuses <code>mask_targets=True</code> on a YOLO root rather than training a segmentation head against empty masks (<a href="../work_packages/wp-099b/">WP-099b</a>). Full format/layout mechanics: docs/DATASETS.md.</p>
 <h2 id="before-any-of-them-the-wiring-gate">🔌 Before any of them: the wiring gate<a class="headerlink" href="#before-any-of-them-the-wiring-gate" title="Permanent link">&para;</a></h2>
 <p>Each tier has a minutes-long overfit gate that must pass before a launch that costs hours. It is development tooling and ships in <code>scripts/</code>, not in the wheel, so it runs from a checkout:</p>
-<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>python<span class="w"> </span>scripts/overfit_micro.py<span class="w"> </span>--task<span class="w"> </span>detect<span class="w">     </span><span class="c1"># one-to-one train recall &gt;= 0.95</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>python<span class="w"> </span>scripts/overfit_micro.py<span class="w"> </span>--task<span class="w"> </span>segment<span class="w">    </span><span class="c1"># train mask IoU &gt;= 0.7</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>python<span class="w"> </span>scripts/overfit_micro.py<span class="w"> </span>--task<span class="w"> </span>obb<span class="w">        </span><span class="c1"># train rotated mAP50 &gt;= 0.9</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>python<span class="w"> </span>scripts/overfit_micro.py<span class="w"> </span>--task<span class="w"> </span>keypoints<span class="w">  </span><span class="c1"># train OKS AP &gt;= 0.30</span>
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>python<span class="w"> </span>scripts/overfit_micro.py<span class="w"> </span>--task<span class="w"> </span>detect<span class="w">     </span><span class="c1"># one-to-one train recall &gt;= 0.95</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>python<span class="w"> </span>scripts/overfit_micro.py<span class="w"> </span>--task<span class="w"> </span>segment<span class="w">    </span><span class="c1"># train mask IoU &gt;= 0.7</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>python<span class="w"> </span>scripts/overfit_micro.py<span class="w"> </span>--task<span class="w"> </span>obb<span class="w">        </span><span class="c1"># train rotated mAP50 &gt;= 0.9</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>python<span class="w"> </span>scripts/overfit_micro.py<span class="w"> </span>--task<span class="w"> </span>keypoints<span class="w">  </span><span class="c1"># train OKS AP &gt;= 0.30</span>
 </code></pre></div>
 <p>A tier that cannot overfit a handful of images will not converge on the full set, and finding that out after the first epoch of a fifty-epoch run costs the run. The four commands, and the shapes regression beside them, run as they are in the <a href="../notebooks/development_gates/">development gates notebook</a>.</p>
 <p>The keypoint floor looks low beside the other three and is not measuring less. Its slice is the only one not drawn from the geometric shapes — <code>task: keypoints</code> needs a keypoint-bearing family, so it draws a 7-point synthetic symbol schema, and OKS at that schema's uniform sigma is a cliff on objects a few dozen pixels across: feeding the ground truth back as the prediction scores exactly 1.0, and displacing every point by 3 px scores 0.269. The floor was set from that measured slope rather than guessed.</p>
@@ -4747,10 +4897,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
       
         <script src="../javascripts/pycon_copy.js"></script>
       

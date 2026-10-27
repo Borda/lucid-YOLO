@@ -70,7 +70,7 @@ DOTA's composition limits apply directly. It is satellite and aerial imagery of 
 | Hardware | one RTX PRO 6000, operator-reported — the run's own artifacts record no device, as with the earlier tiers |
 | EMA | decay 0.9999, tau 2000 |
 
-The wiring gate that precedes any DOTA launch is `scripts/overfit_micro.py --task obb`: 100 images, 592 instances, 4 classes, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train rotated mAP50 **0.9390** against a 0.9 floor (`goldens/gpu/overfit_micro_obb.json`).
+The wiring gate that precedes any DOTA launch is `scripts/overfit_micro.py --task obb`: 100 images, 592 instances, 4 classes, 100 epochs at 320 px, decoded through the deployed one-to-one path. It measures train rotated mAP50 **0.9088 ± 0.0088** against a 0.9 floor (`goldens/gpu/overfit_micro_obb.json`, resealed by WP-186: the band is as narrow as the score's headroom above the floor, so the next environmental move on this task is reported rather than absorbed).
 
 ## 📈 Training curves
 
@@ -95,7 +95,7 @@ EMA is worth `+0.0047` mAP50-95 and `+0.0102` mAP50 here — small, positive, an
 
 **Every number here is per tile.** Detections from overlapping tiles are not merged back onto whole images, because on an NMS-free path two tiles that both detect one object have nothing to suppress the duplicate, so the merge needs a policy decided rather than inherited ([WP-064](https://borda.github.io/lucid-YOLO/work_packages/wp-064/)). A per-tile score never pays the duplicate-detection cost whole-image evaluation charges, so **these figures are not comparable to published DOTA results**, which are whole-image. That is a property of the measurement, not a caveat about its precision.
 
-The same checkpoint scores 0.2914 / 0.5242 on Apple MPS and 0.2914 / 0.5243 on CUDA — agreement to four decimals across two accelerators and two operators, which is stronger evidence about the evaluator than about the model. **This is the only two-device measurement anywhere in the project, and it is an evaluation.** Training has run on one device every time; nothing here says a training run ports across accelerators. For this task that is enforced rather than merely untried: `lucid-yolo fit` **refuses `task: obb` on more than one process** at setup, because `val/rotated_mAP` accumulates plain Python lists nothing gathers across ranks and a per-rank average precision cannot be averaged back into the split's.
+The same checkpoint scores 0.2914 / 0.5242 on Apple MPS and 0.2914 / 0.5243 on CUDA — agreement to four decimals across two accelerators and two operators, which is stronger evidence about the evaluator than about the model. **This is the only two-device measurement anywhere in the project, and it is an evaluation.** Training has run on one device every time; nothing here says a training run ports across accelerators. Oriented validation now accepts DDP and gathers complete image records, deduplicated by dataset identity before scoring ([WP-213](https://borda.github.io/lucid-YOLO/work_packages/wp-213/)). Its multi-device check is a CPU gloo two-process test; no two-GPU run was made, and a real multi-GPU check remains outstanding.
 
 ## ⚠️ Limitations
 

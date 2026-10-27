@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
   
@@ -33,10 +33,10 @@
   
 
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -705,6 +705,34 @@
     
   
     Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../advanced/cuda-performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Opt-in CUDA performance flags
   
 
     
@@ -2004,6 +2032,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2214,6 +2270,34 @@
     
   
     Cross-cutting engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/agents-rationale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent-contract rationale
   
 
     
@@ -4067,6 +4151,182 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3_19" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3_19" id="__nav_5_3_19_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 18 — CUDA graph replay and pipeline throughput
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_3_19_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3_19">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 18 — CUDA graph replay and pipeline throughput
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-18-cuda-replay-throughput/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3_20" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3_20" id="__nav_5_3_20_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 19 — Codebase audit remediation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_3_20_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3_20">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 19 — Codebase audit remediation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engineering/phase-19-codebase-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -4390,6 +4650,21 @@
 <td>MuSGD orthogonalization gets opt-in, optimizer-owned CUDA graph replay (2026-10-16)</td>
 <td><strong><code>capture_orthogonalization: true</code> records and replays the existing pure scalar and batched Newton–Schulz calls; the default stays <code>false</code>.</strong> Input values are copied in and results cloned out. With <code>capture_orthogonalization</code> alone, momentum, parameter writes, learning rates and EMA remain outside the graphs, and neither function changes its arithmetic. The optimizer counts its matrix parameters at the first capture-enabled step() and bounds recordings by that count, which a later state reload does not resize; new signatures beyond that limit execute eagerly. Function, device, dtype, shape, strides, steps, epsilon, matmul precision, BLAS backend, determinism and the caller's CUDA stream identify a recording. Each device has one warmup stream, and each recording has an independent pool, so skipped gradients or changing bucket order need no shared-pool replay order. State reload clears recordings; graph buffers are never checkpointed. CPU/MPS and the guarded execution contexts retain the original calls. Setup and retained device workspace make this an explicit option; the measured complete-fit benefit, allocator costs and compatibility limits live in <a href="../work_packages/wp-197b/">WP-197b</a>, their single source under D28. The basis is this repository's source, our own CUDA profiles and the neutral PyTorch runtime API (R42), with no new method assumption. <strong>Amended 2026-10-18 (<a href="../work_packages/wp-197c/">WP-197c</a>)</strong>: the optional <code>capture_updates</code> extension records this repository's surrounding update preparation and momentum, restores warmup mutations, and leaves current-LR parameter writes outside capture. Independent storage and exact execution signatures gate reuse; layout copies preserve values while enabling foreach writes. <a href="../work_packages/wp-197c/">WP-197c</a> records its complete-fit evidence and extra memory.</td>
 </tr>
+<tr>
+<td>D30</td>
+<td>O3 is cleared and D18 is in force; the codebase-audit roadmap lands as one WP per batch (2026-10-21)</td>
+<td><strong>Principal decision:</strong> the review that O3 named — employer nexus and counsel review of the README/NOTICE naming — is done, so O3 is cleared. <code>gh repo view</code> reports <code>Borda/lucid-YOLO</code> as <code>PUBLIC</code>, and <a href="../work_packages/wp-125/">WP-125</a> is accepted (✅ in the roadmap). That makes all three of D18's preconditions true — O3 cleared, the repository public, <a href="../work_packages/wp-125/">WP-125</a> accepted — and <strong>D18 is in force</strong>: the relaxation in its clause (a) applies from this row, and clauses (b) to (d) stand as written. O3's own entry under Open items is not rewritten beyond its status cell, which now points here; a record edited to match what later happened stops being evidence of what was decided. The gate does not relax under D18, and neither does anything else this row does not name. <strong>Audit roadmap.</strong> The codebase-audit roadmap (<code>.plans/active/todo_codebase-audit.md</code> sec. 8) lands as one work package and one commit per batch, <a href="../work_packages/wp-201/">WP-201</a> to <a href="../work_packages/wp-205/">WP-205</a>, rather than one work package per lettered step. This is a grouping decision about how that roadmap is tracked, not a use of D18's relaxation.</td>
+</tr>
+<tr>
+<td>D31</td>
+<td>D3's s-scale headline clause is superseded; the n-scale smoke is the accepted tier, and D3 is not edited (2026-10-21)</td>
+<td><strong>Principal decision:</strong> D3 reads "headline runs at s-scale", and no tier ran at s-scale: every accepted tier ran at n-scale, and the n-scale smoke is the accepted tier. D3 is transcribed from the governing blueprint and is a record of a decision taken on 2026-07-10, so it is left exactly as written, for the reason D21 gives for D1. This row supersedes the s-scale clause and nothing else: "family-generic code" and "iterate/debug at n-scale" in D3 stand.</td>
+</tr>
+<tr>
+<td>D32</td>
+<td>A known failing CUDA test is a red <code>main</code>, and the replay flags are kept or retired per flag (2026-10-23)</td>
+<td><strong>Principal decision:</strong> a known failing CUDA test is a red <code>main</code> until it is fixed, and a [GPU] work package does not close without a green <code>make gate-gpu</code> run (decision 3 of the 2026-10-20 entry in <code>docs/ESCALATION.md</code>). <strong>P5, the lifetime of the opt-in CUDA replay flags:</strong> keep or retire per flag. A flag is kept while its <code>make gate-gpu</code> parity is green and its documented speed-up holds. A flag is retired when it is red past one phase, or when its gain on its documented workload is under 3%. No flag becomes default-on in 0.x without a principal call. <strong>Context:</strong> <a href="../work_packages/wp-206/">WP-206</a> found CUDA capture tests that had never passed on <code>main</code>; the offline gate cannot see them. As of <code>6109747</code> the last accelerator sweep, <code>colab_10</code> on an L4, was green apart from the parts it did not run: the four overfit tests, the full notebook runs and the GPU goldens. The next [GPU] work package, <a href="../work_packages/wp-208/">WP-208</a>, is the first closed under this rule. The per-flag record is the "Lifetime of the replay flags" section of <a href="../advanced/cuda-performance/">CUDA performance</a>.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="adr-001-architecture-in-code-yaml-for-experiments-only-d9">🏗️ ADR-001 — Architecture in code; YAML for experiments only (D9)<a class="headerlink" href="#adr-001-architecture-in-code-yaml-for-experiments-only-d9" title="Permanent link">&para;</a></h2>
@@ -4450,7 +4725,7 @@
 <td>O3</td>
 <td>Employer nexus + counsel review of README/NOTICE naming</td>
 <td>before the repository or any tag is public (before v0.1.0)</td>
-<td>blocked-on-principal</td>
+<td>cleared 2026-10-21 (D30)</td>
 </tr>
 <tr>
 <td>O4</td>
@@ -4522,10 +4797,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
       
         <script src="../javascripts/pycon_copy.js"></script>
       

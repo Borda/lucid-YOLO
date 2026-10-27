@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Turning a trained model's raw outputs into detections: one-call prediction for a single image per task, and the decoders behind it, NMS-free top-k beside the…">
+        <meta name="description" content="Turning a trained model's raw outputs into detections: loading a checkpoint, one-call prediction for a single image per task, scoring on COCO, and the…">
       
       
         <meta name="author" content="Jirka Borovec">
@@ -18,14 +18,14 @@
         <link rel="prev" href="../training/">
       
       
-        <link rel="next" href="../../ROADMAP/">
+        <link rel="next" href="../export/">
       
       
         
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
   
@@ -33,10 +33,10 @@
   
 
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -70,7 +70,7 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="lucid-yolo">
   <meta property="og:title" content="Inference">
-  <meta property="og:description" content="Turning a trained model&#39;s raw outputs into detections: one-call prediction for a single image per task, and the decoders behind it, NMS-free top-k beside the…">
+  <meta property="og:description" content="Turning a trained model&#39;s raw outputs into detections: loading a checkpoint, one-call prediction for a single image per task, scoring on COCO, and the…">
   <meta property="og:url" content="https://borda.github.io/lucid-YOLO/api/inference/"><meta property="og:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -78,7 +78,7 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://borda.github.io/lucid-YOLO/assets/social_card.png">
   <meta name="twitter:title" content="Inference">
-  <meta name="twitter:description" content="Turning a trained model&#39;s raw outputs into detections: one-call prediction for a single image per task, and the decoders behind it, NMS-free top-k beside the…">
+  <meta name="twitter:description" content="Turning a trained model&#39;s raw outputs into detections: loading a checkpoint, one-call prediction for a single image per task, scoring on COCO, and the…">
   
     <link rel="alternate" type="text/markdown" href="index.md" title="Markdown copy of this page">
   
@@ -694,6 +694,34 @@
     
   
     Provisioning the datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/cuda-performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Opt-in CUDA performance flags
   
 
     
@@ -1908,6 +1936,45 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#loading-a-checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading a checkpoint
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Loading a checkpoint">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.eval.checkpoint.load_eval_module" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        load_eval_module
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.eval.checkpoint.pick_device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pick_device
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#prediction" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1969,6 +2036,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#scoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scoring
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scoring">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.eval.coco_score.score_coco" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        score_coco
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.eval.coco_score.CocoScore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CocoScore
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#decoders" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2005,6 +2111,45 @@
         
           <li class="md-nav__item">
   <a href="#lucid_yolo.decode.TopKDecoder.decode_with_indices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        decode_with_indices
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.RotatedTopKDecoder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RotatedTopKDecoder
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RotatedTopKDecoder">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.RotatedTopKDecoder.forward" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        forward
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices" class="md-nav__link">
     <span class="md-ellipsis">
       
         decode_with_indices
@@ -2091,10 +2236,110 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#decode-helpers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decode helpers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decode helpers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.decode_with_coefficients" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        decode_with_coefficients
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.decode_with_keypoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        decode_with_keypoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.gather_by_anchor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gather_by_anchor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.gather_keypoint_sets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gather_keypoint_sets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.points_to_letterboxed_original" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        points_to_letterboxed_original
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2310,6 +2555,34 @@
     
   
     Cross-cutting engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/agents-rationale/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent-contract rationale
   
 
     
@@ -4163,6 +4436,182 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3_19" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3_19" id="__nav_5_3_19_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 18 — CUDA graph replay and pipeline throughput
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_3_19_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3_19">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 18 — CUDA graph replay and pipeline throughput
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-18-cuda-replay-throughput/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3_20" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3_20" id="__nav_5_3_20_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phase 19 — Codebase audit remediation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_3_20_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3_20">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Phase 19 — Codebase audit remediation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../engineering/phase-19-codebase-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -4233,6 +4682,45 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#loading-a-checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading a checkpoint
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Loading a checkpoint">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.eval.checkpoint.load_eval_module" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        load_eval_module
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.eval.checkpoint.pick_device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pick_device
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#prediction" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4294,6 +4782,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#scoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scoring
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scoring">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.eval.coco_score.score_coco" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        score_coco
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.eval.coco_score.CocoScore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CocoScore
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#decoders" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4330,6 +4857,45 @@
         
           <li class="md-nav__item">
   <a href="#lucid_yolo.decode.TopKDecoder.decode_with_indices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        decode_with_indices
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.RotatedTopKDecoder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RotatedTopKDecoder
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RotatedTopKDecoder">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.RotatedTopKDecoder.forward" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        forward
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices" class="md-nav__link">
     <span class="md-ellipsis">
       
         decode_with_indices
@@ -4416,6 +4982,78 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#decode-helpers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decode helpers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decode helpers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.decode_with_coefficients" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        decode_with_coefficients
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.decode_with_keypoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        decode_with_keypoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.gather_by_anchor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gather_by_anchor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.gather_keypoint_sets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gather_keypoint_sets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lucid_yolo.decode.points_to_letterboxed_original" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        points_to_letterboxed_original
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4442,8 +5080,261 @@
 
 
 <h1 id="inference">🔎 Inference<a class="headerlink" href="#inference" title="Permanent link">&para;</a></h1>
-<p>Turning a trained model's raw outputs into detections: one-call prediction for a single image per task, and the decoders behind it, NMS-free top-k beside the NMS baseline. Generated from the docstrings in <code>src/lucid_yolo/predict/</code> and <code>src/lucid_yolo/decode/</code>.</p>
-<h2 id="prediction">Prediction<a class="headerlink" href="#prediction" title="Permanent link">&para;</a></h2>
+<p>Turning a trained model's raw outputs into detections: loading a checkpoint, one-call prediction for a single image per task, scoring on COCO, and the decoders behind them, NMS-free top-k beside the NMS baseline. Generated from the docstrings in <code>src/lucid_yolo/predict.py</code>, <code>src/lucid_yolo/eval/</code> and <code>src/lucid_yolo/decode/</code>. The names in the first three sections are also importable from the top-level package, lazily (<code>lucid_yolo.load_eval_module</code>, <code>lucid_yolo.predict_image</code>, <code>lucid_yolo.score_coco</code>), so <code>import lucid_yolo</code> loads neither torch nor Lightning until one of them is used. <a href="../../TRAINING/#using-a-checkpoint-from-python">Using a checkpoint from Python</a> shows them together.</p>
+<h2 id="loading-a-checkpoint">Loading a checkpoint<a class="headerlink" href="#loading-a-checkpoint" title="Permanent link">&para;</a></h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="lucid_yolo.eval.checkpoint.load_eval_module" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <span class="doc doc-object-name doc-function-name">load_eval_module</span>
+
+
+<a href="#lucid_yolo.eval.checkpoint.load_eval_module" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">load_eval_module</span><span class="p">(</span><span class="n">checkpoint</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">use_ema</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">DetectionLitModule</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Load an eval-mode module from a Lightning checkpoint, optionally with EMA weights.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>checkpoint</code>
+            </td>
+            <td>
+                  <code><span title="pathlib.Path">Path</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Path to the Lightning <code>.ckpt</code> file.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>use_ema</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <code>True</code>, overlay the :class:<code>EMACallback</code> shadow stored in the
+checkpoint onto the module's parameters and buffers.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="            DetectionLitModule (lucid_yolo.ptl.module.DetectionLitModule)" href="../training/#lucid_yolo.ptl.DetectionLitModule">DetectionLitModule</a>, <span title="dict">dict</span>[<span title="str">str</span>, <span title="object">object</span>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The eval-mode module and a small provenance dict (checkpoint, epoch, step, EMA).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="pickle.UnpicklingError">UnpicklingError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the checkpoint names anything restricted loading refuses.
+Raised by the one read, before any reducer the file carries is called -- see
+the module docstring.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the checkpoint carries no <code>hyper_parameters</code> or <code>state_dict</code>
+mapping, no <code>epoch</code> or <code>global_step</code>, or -- under
+<code>use_ema</code> -- no <code>num_updates</code> beside the shadow; and if <code>use_ema</code> is
+requested and the checkpoint carries no EMA shadow, names the EMA callback in
+more than one <code>callbacks</code> entry, or carries a shadow that does not cover
+every floating-point parameter and buffer.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.eval.checkpoint.load_eval_module--__codelineno-0-1" name="lucid_yolo.eval.checkpoint.load_eval_module--__codelineno-0-1" href="#lucid_yolo.eval.checkpoint.load_eval_module--__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="lucid_yolo.eval.checkpoint.load_eval_module--__codelineno-0-2" name="lucid_yolo.eval.checkpoint.load_eval_module--__codelineno-0-2" href="#lucid_yolo.eval.checkpoint.load_eval_module--__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">load_eval_module</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">"/nonexistent.ckpt"</span><span class="p">),</span> <span class="n">use_ema</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>  <span class="c1"># doctest: +IGNORE_EXCEPTION_DETAIL</span>
+<a id="lucid_yolo.eval.checkpoint.load_eval_module--__codelineno-0-3" name="lucid_yolo.eval.checkpoint.load_eval_module--__codelineno-0-3" href="#lucid_yolo.eval.checkpoint.load_eval_module--__codelineno-0-3"></a><span class="gt">Traceback (most recent call last):</span>
+<a id="lucid_yolo.eval.checkpoint.load_eval_module--__codelineno-0-4" name="lucid_yolo.eval.checkpoint.load_eval_module--__codelineno-0-4" href="#lucid_yolo.eval.checkpoint.load_eval_module--__codelineno-0-4"></a><span class="gr">FileNotFoundError</span>: <span class="n">...</span>
+</code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="lucid_yolo.eval.checkpoint.pick_device" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <span class="doc doc-object-name doc-function-name">pick_device</span>
+
+
+<a href="#lucid_yolo.eval.checkpoint.pick_device" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">pick_device</span><span class="p">(</span><span class="n">requested</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Resolve <code>auto</code> to the fastest available backend, else check <code>requested</code> exists here.</p>
+<p>A named backend is held to the same availability question <code>auto</code> asks, rather than
+passed through (WP-171). <code>--device cuda</code> on a machine with no CUDA used to be
+accepted and then fail several minutes later, inside the first <code>.to(device)</code> — after
+the checkpoint was loaded and, for a long run, after the annotations were parsed —
+with a message about a tensor rather than about the flag. The refusal names the
+request and what this machine does have, because the useful next command is the one
+the caller cannot guess from a stack trace.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>requested</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>"auto"</code> or any string :class:<code>torch.device</code> accepts.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.device">device</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The chosen device.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If <code>requested</code> names a backend this machine cannot run on.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.eval.checkpoint.pick_device--__codelineno-0-1" name="lucid_yolo.eval.checkpoint.pick_device--__codelineno-0-1" href="#lucid_yolo.eval.checkpoint.pick_device--__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">pick_device</span><span class="p">(</span><span class="s2">"cpu"</span><span class="p">)</span>
+<a id="lucid_yolo.eval.checkpoint.pick_device--__codelineno-0-2" name="lucid_yolo.eval.checkpoint.pick_device--__codelineno-0-2" href="#lucid_yolo.eval.checkpoint.pick_device--__codelineno-0-2"></a><span class="go">device(type='cpu')</span>
+<a id="lucid_yolo.eval.checkpoint.pick_device--__codelineno-0-3" name="lucid_yolo.eval.checkpoint.pick_device--__codelineno-0-3" href="#lucid_yolo.eval.checkpoint.pick_device--__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">pick_device</span><span class="p">(</span><span class="s2">"auto"</span><span class="p">)</span><span class="o">.</span><span class="n">type</span> <span class="ow">in</span> <span class="n">available_devices</span><span class="p">()</span>
+<a id="lucid_yolo.eval.checkpoint.pick_device--__codelineno-0-4" name="lucid_yolo.eval.checkpoint.pick_device--__codelineno-0-4" href="#lucid_yolo.eval.checkpoint.pick_device--__codelineno-0-4"></a><span class="go">True</span>
+</code></pre></div>
+
+
+    </div>
+
+</div><h2 id="prediction">Prediction<a class="headerlink" href="#prediction" title="Permanent link">&para;</a></h2>
+<p>Each function takes the image as a file path or as a decoded <code>(3, H, W)</code> RGB tensor, one image per call.</p>
 
 
 <div class="doc doc-object doc-function">
@@ -4454,12 +5345,12 @@
 
 
 <a href="#lucid_yolo.predict.predict_image" class="headerlink" title="Permanent link">&para;</a></h3>
-<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">predict_image</span><span class="p">(</span><span class="n">module</span><span class="p">:</span> <span class="n">DetectionLitModule</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">img_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">640</span><span class="p">,</span> <span class="n">decoder</span><span class="p">:</span> <span class="n">DecodePath</span> <span class="o">=</span> <span class="s1">'e2e'</span><span class="p">,</span> <span class="n">conf_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">DEFAULT_CONF_THRESHOLD</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="n">device</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">predict_image</span><span class="p">(</span><span class="n">module</span><span class="p">:</span> <span class="n">DetectionLitModule</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">img_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">COCO_IMG_SIZE</span><span class="p">,</span> <span class="n">decoder</span><span class="p">:</span> <span class="n">DecodePath</span> <span class="o">=</span> <span class="s1">'e2e'</span><span class="p">,</span> <span class="n">conf_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">DEFAULT_CONF_THRESHOLD</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="n">device</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span>
 </code></pre></div>
 
     <div class="doc doc-contents first">
 
-        <p>Detect objects in one image file and return them in original-image coordinates.</p>
+        <p>Detect objects in one image and return them in original-image coordinates.</p>
 <p>The image is letterboxed into an <code>img_size</code> square canvas, run through the module
 once, decoded by the selected path, and mapped back onto the original pixel grid by
 the exact analytic inverse of the letterbox that produced the canvas (A10). Rows
@@ -4501,11 +5392,13 @@ both decoders emit to keep their output shape fixed.</p>
                 <code>image</code>
             </td>
             <td>
-                  <code><span title="pathlib.Path">Path</span></code>
+                  <code><span title="pathlib.Path">Path</span> | <span title="torch.Tensor">Tensor</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the image file to read.</p>
+                <p>Path to the image file to read, or an already-decoded <code>(3, H, W)</code> RGB
+tensor: <code>uint8</code>/<code>uint16</code> codes, or floating point in <code>[0, 1]</code>
+(:func:<code>~lucid_yolo.eval.annotations.letterbox_image_tensor</code>).</p>
               </div>
             </td>
             <td>
@@ -4525,7 +5418,7 @@ both decoders emit to keep their output shape fixed.</p>
               </div>
             </td>
             <td>
-                  <code>640</code>
+                  <code><span title="lucid_yolo.decode.common.COCO_IMG_SIZE">COCO_IMG_SIZE</span></code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -4648,6 +5541,27 @@ path over the dense branch.</p>
               </div>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If a tensor <code>image</code> is not <code>(3, H, W)</code>, or is floating point
+outside <code>[0, 1]</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="TypeError">TypeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If a tensor <code>image</code> holds signed integer or boolean values.</p>
+              </div>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -4670,12 +5584,12 @@ path over the dense branch.</p>
 
 
 <a href="#lucid_yolo.predict.predict_segmentation" class="headerlink" title="Permanent link">&para;</a></h3>
-<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">predict_segmentation</span><span class="p">(</span><span class="n">module</span><span class="p">:</span> <span class="n">DetectionLitModule</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">img_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">640</span><span class="p">,</span> <span class="n">decoder</span><span class="p">:</span> <span class="n">DecodePath</span> <span class="o">=</span> <span class="s1">'e2e'</span><span class="p">,</span> <span class="n">conf_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">DEFAULT_CONF_THRESHOLD</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="n">device</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SegmentedPrediction</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">predict_segmentation</span><span class="p">(</span><span class="n">module</span><span class="p">:</span> <span class="n">DetectionLitModule</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">img_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">COCO_IMG_SIZE</span><span class="p">,</span> <span class="n">decoder</span><span class="p">:</span> <span class="n">DecodePath</span> <span class="o">=</span> <span class="s1">'e2e'</span><span class="p">,</span> <span class="n">conf_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">DEFAULT_CONF_THRESHOLD</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="n">device</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SegmentedPrediction</span>
 </code></pre></div>
 
     <div class="doc doc-contents first">
 
-        <p>Segment objects in one image file and return boxes and masks in original coordinates.</p>
+        <p>Segment objects in one image and return boxes and masks in original coordinates.</p>
 <p>:func:<code>predict_image</code> plus Eq. 7, in the order
 :class:<code>~lucid_yolo.eval.coco_eval.DualPathEvaluator</code> established and for its reason:
 the model runs once, the selected path decodes boxes <strong>and</strong> reports the anchor each
@@ -4726,11 +5640,13 @@ instead of a handful, which is measured in hundreds of megabytes of transient fl
                 <code>image</code>
             </td>
             <td>
-                  <code><span title="pathlib.Path">Path</span></code>
+                  <code><span title="pathlib.Path">Path</span> | <span title="torch.Tensor">Tensor</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the image file to read.</p>
+                <p>Path to the image file to read, or an already-decoded <code>(3, H, W)</code> RGB
+tensor: <code>uint8</code>/<code>uint16</code> codes, or floating point in <code>[0, 1]</code>
+(:func:<code>~lucid_yolo.eval.annotations.letterbox_image_tensor</code>).</p>
               </div>
             </td>
             <td>
@@ -4750,7 +5666,7 @@ instead of a handful, which is measured in hundreds of megabytes of transient fl
               </div>
             </td>
             <td>
-                  <code>640</code>
+                  <code><span title="lucid_yolo.decode.common.COCO_IMG_SIZE">COCO_IMG_SIZE</span></code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -4865,6 +5781,27 @@ module claiming that task has no mask coefficients to decode; or if
               </div>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If a tensor <code>image</code> is not <code>(3, H, W)</code>, or is floating point
+outside <code>[0, 1]</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="TypeError">TypeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If a tensor <code>image</code> holds signed integer or boolean values.</p>
+              </div>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -4887,17 +5824,17 @@ module claiming that task has no mask coefficients to decode; or if
 
 
 <a href="#lucid_yolo.predict.predict_oriented" class="headerlink" title="Permanent link">&para;</a></h3>
-<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">predict_oriented</span><span class="p">(</span><span class="n">module</span><span class="p">:</span> <span class="n">DetectionLitModule</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">img_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">DEFAULT_ORIENTED_IMG_SIZE</span><span class="p">,</span> <span class="n">decoder</span><span class="p">:</span> <span class="n">DecodePath</span> <span class="o">=</span> <span class="n">ORIENTED_DECODE_PATH</span><span class="p">,</span> <span class="n">conf_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">DEFAULT_CONF_THRESHOLD</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="n">device</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">predict_oriented</span><span class="p">(</span><span class="n">module</span><span class="p">:</span> <span class="n">DetectionLitModule</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">img_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">DEFAULT_ORIENTED_IMG_SIZE</span><span class="p">,</span> <span class="n">decoder</span><span class="p">:</span> <span class="n">DecodePath</span> <span class="o">=</span> <span class="n">ORIENTED_DECODE_PATH</span><span class="p">,</span> <span class="n">conf_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">DEFAULT_CONF_THRESHOLD</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="n">device</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span>
 </code></pre></div>
 
     <div class="doc doc-contents first">
 
-        <p>Detect oriented objects in one image file and return them in original coordinates.</p>
+        <p>Detect oriented objects in one image and return them in original coordinates.</p>
 <p>:func:<code>predict_image</code>'s shape with R1 Eq. 13 in it, and the same pieces the per-tile
 oriented evaluator (:mod:<code>lucid_yolo.eval.rotated_eval</code>) is built from rather than a
 second reading of them: :func:<code>~lucid_yolo.models.heads.obb.decode_rboxes</code> turns the
 one-to-one branch's ltrb distances and raw angles into canonical rotated boxes,
-:func:<code>~lucid_yolo.models.heads.obb.o2o_rotated_topk</code> ranks them, and
+:class:<code>~lucid_yolo.decode.topk_e2e.RotatedTopKDecoder</code> ranks them, and
 :func:<code>~lucid_yolo.decode.common.rboxes_to_letterboxed_original</code> lands them on the
 original pixel grid. Nothing here computes a pad, a ratio or a corner.</p>
 <p><strong>The column convention is A45</strong>, the one the oriented evaluator and
@@ -4956,11 +5893,13 @@ canonical form is invariant under it and is <strong>not</strong> recomputed here
                 <code>image</code>
             </td>
             <td>
-                  <code><span title="pathlib.Path">Path</span></code>
+                  <code><span title="pathlib.Path">Path</span> | <span title="torch.Tensor">Tensor</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the image file to read.</p>
+                <p>Path to the image file to read, or an already-decoded <code>(3, H, W)</code> RGB
+tensor: <code>uint8</code>/<code>uint16</code> codes, or floating point in <code>[0, 1]</code>
+(:func:<code>~lucid_yolo.eval.annotations.letterbox_image_tensor</code>).</p>
               </div>
             </td>
             <td>
@@ -5129,6 +6068,27 @@ domain, per :func:<code>_check_predict_arguments</code>.</p>
               </div>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If a tensor <code>image</code> is not <code>(3, H, W)</code>, or is floating point
+outside <code>[0, 1]</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="TypeError">TypeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If a tensor <code>image</code> holds signed integer or boolean values.</p>
+              </div>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -5151,22 +6111,23 @@ domain, per :func:<code>_check_predict_arguments</code>.</p>
 
 
 <a href="#lucid_yolo.predict.predict_keypoints" class="headerlink" title="Permanent link">&para;</a></h3>
-<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">predict_keypoints</span><span class="p">(</span><span class="n">module</span><span class="p">:</span> <span class="n">DetectionLitModule</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">img_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">640</span><span class="p">,</span> <span class="n">decoder</span><span class="p">:</span> <span class="n">DecodePath</span> <span class="o">=</span> <span class="s1">'e2e'</span><span class="p">,</span> <span class="n">conf_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">DEFAULT_CONF_THRESHOLD</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="n">device</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KeypointPrediction</span>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">predict_keypoints</span><span class="p">(</span><span class="n">module</span><span class="p">:</span> <span class="n">DetectionLitModule</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">img_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">COCO_IMG_SIZE</span><span class="p">,</span> <span class="n">decoder</span><span class="p">:</span> <span class="n">DecodePath</span> <span class="o">=</span> <span class="s1">'e2e'</span><span class="p">,</span> <span class="n">conf_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">DEFAULT_CONF_THRESHOLD</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="n">device</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KeypointPrediction</span>
 </code></pre></div>
 
     <div class="doc doc-contents first">
 
-        <p>Locate objects and their points in one image file, in original-image coordinates.</p>
+        <p>Locate objects and their points in one image, in original-image coordinates.</p>
 <p>:func:<code>predict_image</code> plus the point branch, composed the way
 :func:<code>predict_segmentation</code> composes the mask branch and for the same reason: the
 point stem is dense over anchors, so the selected path must report the <em>anchor</em>
 each surviving row came from and the points are gathered by that index. The
-decode-then-gather order is :class:<code>~lucid_yolo.export.KeypointExportGraph</code>'s and
-the training module's own <code>val/oks_mAP</code>'s, so all three read one composition.</p>
-<p>Points are mapped back with :meth:<code>~lucid_yolo.data.letterbox.Letterbox.inverse_map</code>
--- the same exact analytic inverse the boxes take (A10), applied to the point axis
-flattened into a plain point list, so a point and the box around it cannot land on
-two different grids.</p>
+decode-then-gather composition is
+:func:<code>~lucid_yolo.decode.per_task.decode_with_keypoints</code>, the one
+:class:<code>~lucid_yolo.export.KeypointExportGraph</code> and the evaluator decode through too.</p>
+<p>Points are mapped back with
+:func:<code>~lucid_yolo.decode.common.points_to_letterboxed_original</code> -- the same exact
+analytic inverse the boxes take (A10), applied to the point axis flattened into a
+plain point list, so a point and the box around it cannot land on two different grids.</p>
 <p><code>K</code> is read from the decoded tensor, never assumed. The head's point count is a
 constructor argument (A64) and COCO's 17 is one instantiation of it; a function that
 assumed 17 would silently mis-shape every other schema.</p>
@@ -5206,11 +6167,13 @@ assumed 17 would silently mis-shape every other schema.</p>
                 <code>image</code>
             </td>
             <td>
-                  <code><span title="pathlib.Path">Path</span></code>
+                  <code><span title="pathlib.Path">Path</span> | <span title="torch.Tensor">Tensor</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the image file to read.</p>
+                <p>Path to the image file to read, or an already-decoded <code>(3, H, W)</code> RGB
+tensor: <code>uint8</code>/<code>uint16</code> codes, or floating point in <code>[0, 1]</code>
+(:func:<code>~lucid_yolo.eval.annotations.letterbox_image_tensor</code>).</p>
               </div>
             </td>
             <td>
@@ -5230,7 +6193,7 @@ assumed 17 would silently mis-shape every other schema.</p>
               </div>
             </td>
             <td>
-                  <code>640</code>
+                  <code><span title="lucid_yolo.decode.common.COCO_IMG_SIZE">COCO_IMG_SIZE</span></code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -5345,6 +6308,27 @@ a module claiming that task emits no points on the selected branch; or if
               </div>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If a tensor <code>image</code> is not <code>(3, H, W)</code>, or is floating point
+outside <code>[0, 1]</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="TypeError">TypeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If a tensor <code>image</code> holds signed integer or boolean values.</p>
+              </div>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -5354,6 +6338,387 @@ a module claiming that task emits no points on the selected branch; or if
 <a id="lucid_yolo.predict.predict_keypoints--__codelineno-0-2" name="lucid_yolo.predict.predict_keypoints--__codelineno-0-2" href="#lucid_yolo.predict.predict_keypoints--__codelineno-0-2"></a><span class="go">True</span>
 </code></pre></div>
 
+
+    </div>
+
+</div><h2 id="scoring">Scoring<a class="headerlink" href="#scoring" title="Permanent link">&para;</a></h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="lucid_yolo.eval.coco_score.score_coco" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <span class="doc doc-object-name doc-function-name">score_coco</span>
+
+
+<a href="#lucid_yolo.eval.coco_score.score_coco" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">score_coco</span><span class="p">(</span><span class="n">module</span><span class="p">:</span> <span class="n">DetectionLitModule</span><span class="p">,</span> <span class="n">data_root</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">ann_file</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">images_dir</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">img_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">COCO_IMG_SIZE</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">_DEFAULT_BATCH_SIZE</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">'auto'</span><span class="p">,</span> <span class="n">limit</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">masks</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">eval_backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">'faster_coco_eval'</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CocoScore</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Score a checkpoint on COCO val2017 through both decode paths and return the numbers.</p>
+<p>The protocol is the one <code>lucid-eval</code> runs, chosen by the module's own <code>task</code>:
+box mAP for <code>detect</code>, box plus <code>segm_</code> mask mAP for <code>segment</code> (box only with
+<code>masks=False</code>), box plus <code>oks_</code> keypoint mAP against
+<code>person_keypoints_val2017.json</code> for <code>keypoints</code>. Nothing is printed and no file
+is written.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>module</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="            DetectionLitModule (lucid_yolo.ptl.module.DetectionLitModule)" href="../training/#lucid_yolo.ptl.DetectionLitModule">DetectionLitModule</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>An eval-mode module, as
+:func:<code>~lucid_yolo.eval.checkpoint.load_eval_module</code> returns it. Moved to
+<code>device</code> in place.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>data_root</code>
+            </td>
+            <td>
+                  <code><span title="pathlib.Path">Path</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>COCO root holding <code>val2017/</code> and <code>annotations/</code>. Optional when
+both <code>ann_file</code> and <code>images_dir</code> are given.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>ann_file</code>
+            </td>
+            <td>
+                  <code><span title="pathlib.Path">Path</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Annotation JSON. Defaults to <code>annotations/instances_val2017.json</code>
+under <code>data_root</code>, or <code>annotations/person_keypoints_val2017.json</code> for a
+keypoint checkpoint.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>images_dir</code>
+            </td>
+            <td>
+                  <code><span title="pathlib.Path">Path</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Image directory. Defaults to <code>val2017</code> under <code>data_root</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>img_size</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Letterbox side, a positive multiple of every head stride. Defaults to
+<code>640</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code><span title="lucid_yolo.decode.common.COCO_IMG_SIZE">COCO_IMG_SIZE</span></code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>batch_size</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Images per forward pass. Defaults to <code>32</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code><span title="lucid_yolo.eval.coco_score._DEFAULT_BATCH_SIZE">_DEFAULT_BATCH_SIZE</span></code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>device</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>"auto"</code>, <code>"cpu"</code>, <code>"mps"</code> or <code>"cuda"</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;auto&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>limit</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Score only the first N images; <code>0</code> scores all.</p>
+              </div>
+            </td>
+            <td>
+                  <code>0</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>masks</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>For a segmentation checkpoint, whether to score masks too.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>eval_backend</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Box/mask scoring engine, <code>"faster_coco_eval"</code> or <code>"hotcoco"</code>.
+The <code>oks_</code> statistics always come from faster_coco_eval.</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;faster_coco_eval&#39;</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="            CocoScore
+
+
+  
+      dataclass
+   (lucid_yolo.eval.coco_score.CocoScore)" href="#lucid_yolo.eval.coco_score.CocoScore">CocoScore</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The two paths' statistics, the scored image count and the scoring time.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the module's task is not <code>detect</code>, <code>segment</code> or
+<code>keypoints</code>; if a keypoint checkpoint's <code>K</code> is not COCO's 17; if
+<code>limit</code>, <code>batch_size</code>, <code>img_size</code> or <code>eval_backend</code> is outside its
+domain; if <code>data_root</code> is missing while an override is; or if <code>device</code>
+names a backend this machine does not have.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.eval.coco_score.score_coco--__codelineno-0-1" name="lucid_yolo.eval.coco_score.score_coco--__codelineno-0-1" href="#lucid_yolo.eval.coco_score.score_coco--__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="lucid_yolo.eval.coco_score.score_coco--__codelineno-0-2" name="lucid_yolo.eval.coco_score.score_coco--__codelineno-0-2" href="#lucid_yolo.eval.coco_score.score_coco--__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">lucid_yolo.eval.checkpoint</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_eval_module</span>
+<a id="lucid_yolo.eval.coco_score.score_coco--__codelineno-0-3" name="lucid_yolo.eval.coco_score.score_coco--__codelineno-0-3" href="#lucid_yolo.eval.coco_score.score_coco--__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">module</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">load_eval_module</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">"det.ckpt"</span><span class="p">),</span> <span class="n">use_ema</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># needs a checkpoint  # doctest: +SKIP</span>
+<a id="lucid_yolo.eval.coco_score.score_coco--__codelineno-0-4" name="lucid_yolo.eval.coco_score.score_coco--__codelineno-0-4" href="#lucid_yolo.eval.coco_score.score_coco--__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">score</span> <span class="o">=</span> <span class="n">score_coco</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="s2">"~/data/coco2017"</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">())</span>  <span class="c1"># needs COCO  # doctest: +SKIP</span>
+<a id="lucid_yolo.eval.coco_score.score_coco--__codelineno-0-5" name="lucid_yolo.eval.coco_score.score_coco--__codelineno-0-5" href="#lucid_yolo.eval.coco_score.score_coco--__codelineno-0-5"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">score</span><span class="o">.</span><span class="n">report</span><span class="p">[</span><span class="s2">"e2e"</span><span class="p">][</span><span class="s2">"map"</span><span class="p">]</span>  <span class="c1"># doctest: +SKIP</span>
+<a id="lucid_yolo.eval.coco_score.score_coco--__codelineno-0-6" name="lucid_yolo.eval.coco_score.score_coco--__codelineno-0-6" href="#lucid_yolo.eval.coco_score.score_coco--__codelineno-0-6"></a><span class="go">0.3912</span>
+</code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="lucid_yolo.eval.coco_score.CocoScore" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">CocoScore</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#lucid_yolo.eval.coco_score.CocoScore" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>The dual-path COCO report of one checkpoint, as numbers rather than printed text.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="lucid_yolo.eval.coco_score.CocoScore.report">report</span></code></td>
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="dict">dict</span>[<span title="str">str</span>, <span title="float">float</span>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>{"e2e": stats, "nms": stats}</code>. Each <code>stats</code> holds the twelve COCO
+box statistics under their bare names (<code>map</code> is mAP50-95, then <code>map_50</code>,
+<code>map_75</code> and the size and recall breakdowns), plus the twelve <code>segm_</code>
+mask statistics for a segmentation checkpoint scored with masks, or the ten
+<code>oks_</code> keypoint statistics for a keypoint checkpoint.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="lucid_yolo.eval.coco_score.CocoScore.images">images</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>How many images were scored, after any <code>limit</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="lucid_yolo.eval.coco_score.CocoScore.seconds">seconds</span></code></td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Wall time of the scoring pass, excluding the annotation load.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.eval.coco_score.CocoScore--__codelineno-0-1" name="lucid_yolo.eval.coco_score.CocoScore--__codelineno-0-1" href="#lucid_yolo.eval.coco_score.CocoScore--__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">score</span> <span class="o">=</span> <span class="n">CocoScore</span><span class="p">(</span><span class="n">report</span><span class="o">=</span><span class="p">{</span><span class="s2">"e2e"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"map"</span><span class="p">:</span> <span class="mf">0.31</span><span class="p">},</span> <span class="s2">"nms"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"map"</span><span class="p">:</span> <span class="mf">0.32</span><span class="p">}},</span> <span class="n">images</span><span class="o">=</span><span class="mi">5000</span><span class="p">,</span> <span class="n">seconds</span><span class="o">=</span><span class="mf">90.0</span><span class="p">)</span>
+<a id="lucid_yolo.eval.coco_score.CocoScore--__codelineno-0-2" name="lucid_yolo.eval.coco_score.CocoScore--__codelineno-0-2" href="#lucid_yolo.eval.coco_score.CocoScore--__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="nb">round</span><span class="p">(</span><span class="n">score</span><span class="o">.</span><span class="n">report</span><span class="p">[</span><span class="s2">"nms"</span><span class="p">][</span><span class="s2">"map"</span><span class="p">]</span> <span class="o">-</span> <span class="n">score</span><span class="o">.</span><span class="n">report</span><span class="p">[</span><span class="s2">"e2e"</span><span class="p">][</span><span class="s2">"map"</span><span class="p">],</span> <span class="mi">2</span><span class="p">)</span>
+<a id="lucid_yolo.eval.coco_score.CocoScore--__codelineno-0-3" name="lucid_yolo.eval.coco_score.CocoScore--__codelineno-0-3" href="#lucid_yolo.eval.coco_score.CocoScore--__codelineno-0-3"></a><span class="go">0.01</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
 
     </div>
 
@@ -5411,7 +6776,7 @@ Defaults to 300 (R1 sec. 3.2.1, R3 sec. 4).</p>
               </div>
             </td>
             <td>
-                  <code><span title="lucid_yolo.decode.topk_e2e._DEFAULT_TOPK">_DEFAULT_TOPK</span></code>
+                  <code><span title="lucid_yolo.decode.common.MAX_DETECTIONS">MAX_DETECTIONS</span></code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -5817,6 +7182,469 @@ aligned with <code>cls_logits</code> on the anchor axis.</p>
 
 
 
+<h3 id="lucid_yolo.decode.RotatedTopKDecoder" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">RotatedTopKDecoder</span>
+
+
+<a href="#lucid_yolo.decode.RotatedTopKDecoder" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="torch.nn.Module">Module</span></code></p>
+
+
+
+        <p>Score-based top-k end-to-end decoder for the one-to-one branch's oriented outputs (A45).</p>
+<p>The oriented twin of :class:<code>TopKDecoder</code>, and deliberately the same contract: the
+one-to-one branch's raw ltrb distances and raw angles (R1 Eq. 13) become canonical
+rotated boxes through :func:<code>~lucid_yolo.models.heads.obb.decode_rboxes</code> (A23), the
+anchors are ranked purely by classification confidence through
+:func:<code>~lucid_yolo.models.heads.obb.o2o_rotated_topk_with_indices</code> — no overlap is
+computed and no box is dropped for overlapping another — and the result is padded
+to exactly <code>k</code> rows, the anchor indices beside it padded with
+:data:<code>~lucid_yolo.decode.common.PAD_ANCHOR_INDEX</code>.</p>
+<p>The padding is what this class adds over calling the ranking directly, which returns
+<code>min(k, A)</code> rows: on a canvas with fewer than <code>k</code> anchors (a side of 96 px or
+less at the three head strides) the row count would otherwise depend on the canvas,
+unlike every other decoder's. On a canvas with at least <code>k</code> anchors the <code>k</code> rows
+are the ranking's own, bit for bit. Rows beyond the available anchors carry
+<code>score == 0</code>, so a caller filtering on score drops them.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>k</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Maximum detections kept per image; also the fixed output length. Defaults to
+:data:<code>~lucid_yolo.decode.common.MAX_DETECTIONS</code> (A9).</p>
+              </div>
+            </td>
+            <td>
+                  <code><span title="lucid_yolo.decode.common.MAX_DETECTIONS">MAX_DETECTIONS</span></code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-1" name="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-1" href="#lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-2" name="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-2" href="#lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">lucid_yolo.assign.grid</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_anchor_points</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-3" name="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-3" href="#lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">points</span><span class="p">,</span> <span class="n">strides</span> <span class="o">=</span> <span class="n">make_anchor_points</span><span class="p">([(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)],</span> <span class="p">[</span><span class="mi">8</span><span class="p">])</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-4" name="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-4" href="#lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">cls_logits</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([[[</span><span class="o">-</span><span class="mf">5.0</span><span class="p">],</span> <span class="p">[</span><span class="mf">5.0</span><span class="p">]]])</span>  <span class="c1"># anchor 1 is the confident one</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-5" name="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-5" href="#lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-5"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">raw_ltrb</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-6" name="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-6" href="#lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">raw_angles</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-7" name="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-7" href="#lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-7"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">detections</span> <span class="o">=</span> <span class="n">RotatedTopKDecoder</span><span class="p">(</span><span class="n">k</span><span class="o">=</span><span class="mi">3</span><span class="p">)(</span><span class="n">cls_logits</span><span class="p">,</span> <span class="n">raw_ltrb</span><span class="p">,</span> <span class="n">raw_angles</span><span class="p">,</span> <span class="n">points</span><span class="p">,</span> <span class="n">strides</span><span class="p">)</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-8" name="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-8" href="#lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-8"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">detections</span><span class="o">.</span><span class="n">shape</span>  <span class="c1"># fixed (B, k, 7) even though only 2 anchors exist</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-9" name="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-9" href="#lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-9"></a><span class="go">torch.Size([1, 3, 7])</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-10" name="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-10" href="#lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-10"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">detections</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span>  <span class="c1"># the padding row: score zero, no box</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-11" name="lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-11" href="#lucid_yolo.decode.RotatedTopKDecoder--__codelineno-0-11"></a><span class="go">tensor([0., 0., 0., 0., 0., 0., 0.])</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="lucid_yolo.decode.RotatedTopKDecoder.forward" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">forward</span>
+
+
+<a href="#lucid_yolo.decode.RotatedTopKDecoder.forward" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">forward</span><span class="p">(</span><span class="n">cls_logits</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">raw_ltrb</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">raw_angles</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">anchor_points</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">strides</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Decode raw one-to-one outputs into fixed-size top-k oriented detections.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>cls_logits</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Raw one-to-one class logits of shape <code>(B, A, C)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>raw_ltrb</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Raw one-to-one ltrb distances of shape <code>(B, A, 4)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>raw_angles</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Raw one-to-one angles in radians, shape <code>(B, A, 1)</code> or
+<code>(B, A)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>anchor_points</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Anchor-centre <code>(x, y)</code> coordinates of shape <code>(A, 2)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>strides</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Per-anchor level stride of shape <code>(A,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Detections of shape <code>(B, k, 7)</code> whose last axis is the A45 tuple</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>[cx, cy, w, h, theta, score, class]</code>, sorted by descending score with</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>score-zero padding rows filling any shortfall below <code>k</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-1" name="lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-1" href="#lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-2" name="lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-2" href="#lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">lucid_yolo.assign.grid</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_anchor_points</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-3" name="lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-3" href="#lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">points</span><span class="p">,</span> <span class="n">strides</span> <span class="o">=</span> <span class="n">make_anchor_points</span><span class="p">([(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)],</span> <span class="p">[</span><span class="mi">8</span><span class="p">])</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-4" name="lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-4" href="#lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">cls_logits</span><span class="p">,</span> <span class="n">raw_ltrb</span><span class="p">,</span> <span class="n">raw_angles</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-5" name="lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-5" href="#lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-5"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">RotatedTopKDecoder</span><span class="p">(</span><span class="n">k</span><span class="o">=</span><span class="mi">5</span><span class="p">)(</span><span class="n">cls_logits</span><span class="p">,</span> <span class="n">raw_ltrb</span><span class="p">,</span> <span class="n">raw_angles</span><span class="p">,</span> <span class="n">points</span><span class="p">,</span> <span class="n">strides</span><span class="p">)</span><span class="o">.</span><span class="n">shape</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-6" name="lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-6" href="#lucid_yolo.decode.RotatedTopKDecoder.forward--__codelineno-0-6"></a><span class="go">torch.Size([1, 5, 7])</span>
+</code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">decode_with_indices</span>
+
+
+<a href="#lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">decode_with_indices</span><span class="p">(</span><span class="n">cls_logits</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">raw_ltrb</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">raw_angles</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">anchor_points</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">strides</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Decode as :meth:<code>forward</code> does, and report the source anchor of each row.</p>
+<p>The whole decode lives here and :meth:<code>forward</code> is its detections-only view, as
+in :class:<code>TopKDecoder</code>, so the two cannot report different selections. The
+indices are what any per-anchor value outside the A45 tuple is gathered by.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>cls_logits</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Raw one-to-one class logits of shape <code>(B, A, C)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>raw_ltrb</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Raw one-to-one ltrb distances of shape <code>(B, A, 4)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>raw_angles</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Raw one-to-one angles in radians, shape <code>(B, A, 1)</code> or
+<code>(B, A)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>anchor_points</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Anchor-centre <code>(x, y)</code> coordinates of shape <code>(A, 2)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>strides</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Per-anchor level stride of shape <code>(A,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A pair <code>(detections, anchor_indices)</code>: the <code>(B, k, 7)</code> A45 batch</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>meth:<code>forward</code> returns, and the <code>(B, k)</code> long tensor naming the anchor each</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <span title="torch.Tensor">Tensor</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>row came from, with :data:<code>~lucid_yolo.decode.common.PAD_ANCHOR_INDEX</code> on the</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <span title="torch.Tensor">Tensor</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>padding rows.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-1" name="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-1" href="#lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-2" name="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-2" href="#lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">lucid_yolo.assign.grid</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_anchor_points</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-3" name="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-3" href="#lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">points</span><span class="p">,</span> <span class="n">strides</span> <span class="o">=</span> <span class="n">make_anchor_points</span><span class="p">([(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)],</span> <span class="p">[</span><span class="mi">8</span><span class="p">])</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-4" name="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-4" href="#lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">cls_logits</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([[[</span><span class="o">-</span><span class="mf">5.0</span><span class="p">],</span> <span class="p">[</span><span class="mf">5.0</span><span class="p">]]])</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-5" name="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-5" href="#lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-5"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">raw_ltrb</span><span class="p">,</span> <span class="n">raw_angles</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-6" name="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-6" href="#lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">decoder</span> <span class="o">=</span> <span class="n">RotatedTopKDecoder</span><span class="p">(</span><span class="n">k</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-7" name="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-7" href="#lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-7"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">_</span><span class="p">,</span> <span class="n">anchors</span> <span class="o">=</span> <span class="n">decoder</span><span class="o">.</span><span class="n">decode_with_indices</span><span class="p">(</span><span class="n">cls_logits</span><span class="p">,</span> <span class="n">raw_ltrb</span><span class="p">,</span> <span class="n">raw_angles</span><span class="p">,</span> <span class="n">points</span><span class="p">,</span> <span class="n">strides</span><span class="p">)</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-8" name="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-8" href="#lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-8"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">anchors</span>  <span class="c1"># anchor 1 ranks first; the third row is padding</span>
+<a id="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-9" name="lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-9" href="#lucid_yolo.decode.RotatedTopKDecoder.decode_with_indices--__codelineno-0-9"></a><span class="go">tensor([[ 1,  0, -1]])</span>
+</code></pre></div>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="lucid_yolo.decode.NMSDecoder" class="doc doc-heading">
 <code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">NMSDecoder</span>
 
@@ -5866,7 +7694,7 @@ evaluation convention).</p>
               </div>
             </td>
             <td>
-                  <code><span title="lucid_yolo.decode.nms_path._DEFAULT_CONF_THRESHOLD">_DEFAULT_CONF_THRESHOLD</span></code>
+                  <code><span title="lucid_yolo.decode.common.EVAL_CONF_THRESHOLD">EVAL_CONF_THRESHOLD</span></code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -5884,7 +7712,7 @@ class exceeds this. Defaults to <code>0.7</code>.</p>
               </div>
             </td>
             <td>
-                  <code><span title="lucid_yolo.decode.nms_path._DEFAULT_IOU_THRESHOLD">_DEFAULT_IOU_THRESHOLD</span></code>
+                  <code><span title="lucid_yolo.decode.common.DEFAULT_IOU_THRESHOLD">DEFAULT_IOU_THRESHOLD</span></code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -5901,7 +7729,7 @@ Defaults to <code>300</code> (R1 sec. 3.2.1).</p>
               </div>
             </td>
             <td>
-                  <code><span title="lucid_yolo.decode.nms_path._DEFAULT_MAX_DET">_DEFAULT_MAX_DET</span></code>
+                  <code><span title="lucid_yolo.decode.common.MAX_DETECTIONS">MAX_DETECTIONS</span></code>
             </td>
           </tr>
       </tbody>
@@ -6360,7 +8188,7 @@ convention).</p>
               </div>
             </td>
             <td>
-                  <code><span title="lucid_yolo.decode.rotated_nms._DEFAULT_CONF_THRESHOLD">_DEFAULT_CONF_THRESHOLD</span></code>
+                  <code><span title="lucid_yolo.decode.common.EVAL_CONF_THRESHOLD">EVAL_CONF_THRESHOLD</span></code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -6395,7 +8223,7 @@ to <code>300</code> (R1 sec. 3.2.1, A9, A47).</p>
               </div>
             </td>
             <td>
-                  <code><span title="lucid_yolo.decode.rotated_nms._DEFAULT_MAX_DET">_DEFAULT_MAX_DET</span></code>
+                  <code><span title="lucid_yolo.decode.common.MAX_DETECTIONS">MAX_DETECTIONS</span></code>
             </td>
           </tr>
       </tbody>
@@ -6639,6 +8467,815 @@ input pixels, as returned by
 
     </div>
 
+</div><h2 id="decode-helpers">Decode helpers<a class="headerlink" href="#decode-helpers" title="Permanent link">&para;</a></h2>
+<p>The per-task decode compositions that prediction, evaluation and export share, and the constants and gathers beneath them.</p>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="lucid_yolo.decode.decode_with_coefficients" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <span class="doc doc-object-name doc-function-name">decode_with_coefficients</span>
+
+
+<a href="#lucid_yolo.decode.decode_with_coefficients" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">decode_with_coefficients</span><span class="p">(</span><span class="n">decoder</span><span class="p">:</span> <span class="n">IndexingDecoder</span><span class="p">,</span> <span class="n">cls_logits</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">raw_ltrb</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">coefficients</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">anchor_points</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">strides</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Decode one branch's boxes and gather each row's mask coefficients by its own anchor.</p>
+<p>The segmentation half of Eq. 7 before the prototypes: <code>decoder</code> ranks the branch
+and reports each row's source anchor, and
+:func:<code>~lucid_yolo.decode.common.gather_by_anchor</code> takes that anchor's coefficient
+vector. All four inputs must come from the <strong>same</strong> branch — the decoder's ranking
+of one branch paired with the other branch's coefficients is a plausible mask of a
+different object at a correct box.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>decoder</code>
+            </td>
+            <td>
+                  <code><span title="lucid_yolo.decode.common.IndexingDecoder">IndexingDecoder</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The path's decoder, e.g.
+:class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</code> or
+:class:<code>~lucid_yolo.decode.nms_path.NMSDecoder</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>cls_logits</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Raw class logits of shape <code>(B, A, C)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>raw_ltrb</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Raw ltrb distances of shape <code>(B, A, 4)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>coefficients</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The same branch's mask coefficients, shape <code>(B, A, M)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>anchor_points</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Anchor-centre <code>(x, y)</code> coordinates of shape <code>(A, 2)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>strides</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Per-anchor level stride of shape <code>(A,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A row-aligned triple: the decoder's <code>(B, N, 6)</code> detections, its <code>(B, N)</code></p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>anchor indices, and the <code>(B, N, M)</code> gathered coefficients, all-zero on</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>padding rows.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-1" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-1" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-2" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-2" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">lucid_yolo.assign.grid</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_anchor_points</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-3" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-3" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">lucid_yolo.decode.topk_e2e</span><span class="w"> </span><span class="kn">import</span> <span class="n">TopKDecoder</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-4" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-4" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">points</span><span class="p">,</span> <span class="n">strides</span> <span class="o">=</span> <span class="n">make_anchor_points</span><span class="p">([(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)],</span> <span class="p">[</span><span class="mi">8</span><span class="p">])</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-5" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-5" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-5"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">cls_logits</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([[[</span><span class="o">-</span><span class="mf">5.0</span><span class="p">],</span> <span class="p">[</span><span class="mf">5.0</span><span class="p">]]])</span>  <span class="c1"># anchor 1 is the confident one</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-6" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-6" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">coefficients</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([[[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">],</span> <span class="p">[</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">]]])</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-7" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-7" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-7"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">_</span><span class="p">,</span> <span class="n">anchors</span><span class="p">,</span> <span class="n">gathered</span> <span class="o">=</span> <span class="n">decode_with_coefficients</span><span class="p">(</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-8" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-8" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-8"></a><span class="gp">... </span>    <span class="n">TopKDecoder</span><span class="p">(</span><span class="n">k</span><span class="o">=</span><span class="mi">3</span><span class="p">),</span> <span class="n">cls_logits</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="n">coefficients</span><span class="p">,</span> <span class="n">points</span><span class="p">,</span> <span class="n">strides</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-9" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-9" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-9"></a><span class="gp">... </span><span class="p">)</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-10" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-10" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-10"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">anchors</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-11" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-11" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-11"></a><span class="go">tensor([[ 1,  0, -1]])</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-12" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-12" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-12"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">gathered</span>  <span class="c1"># anchor 1's vector first, the padding row zeroed</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-13" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-13" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-13"></a><span class="go">tensor([[[2., 2.],</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-14" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-14" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-14"></a><span class="go">         [1., 1.],</span>
+<a id="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-15" name="lucid_yolo.decode.decode_with_coefficients--__codelineno-0-15" href="#lucid_yolo.decode.decode_with_coefficients--__codelineno-0-15"></a><span class="go">         [0., 0.]]])</span>
+</code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="lucid_yolo.decode.decode_with_keypoints" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <span class="doc doc-object-name doc-function-name">decode_with_keypoints</span>
+
+
+<a href="#lucid_yolo.decode.decode_with_keypoints" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">decode_with_keypoints</span><span class="p">(</span><span class="n">decoder</span><span class="p">:</span> <span class="n">IndexingDecoder</span><span class="p">,</span> <span class="n">cls_logits</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">raw_ltrb</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">raw_points</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">anchor_points</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">strides</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Decode one branch's boxes and take each row's decoded point set by its own anchor.</p>
+<p>:func:<code>decode_with_coefficients</code> for the point stem: <code>decoder</code> ranks the branch
+and :func:<code>gather_keypoint_sets</code> decodes that branch's dense offsets and takes each
+kept row's set. All inputs must come from the same branch, for the reason
+:func:<code>decode_with_coefficients</code> states.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>decoder</code>
+            </td>
+            <td>
+                  <code><span title="lucid_yolo.decode.common.IndexingDecoder">IndexingDecoder</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The path's decoder, e.g.
+:class:<code>~lucid_yolo.decode.topk_e2e.TopKDecoder</code> or
+:class:<code>~lucid_yolo.decode.nms_path.NMSDecoder</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>cls_logits</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Raw class logits of shape <code>(B, A, C)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>raw_ltrb</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Raw ltrb distances of shape <code>(B, A, 4)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>raw_points</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The same branch's raw point offsets, shape <code>(B, A, K, 2)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>anchor_points</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Anchor-centre <code>(x, y)</code> coordinates of shape <code>(A, 2)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>strides</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Per-anchor level stride of shape <code>(A,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A row-aligned triple: the decoder's <code>(B, N, 6)</code> detections, its <code>(B, N)</code></p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>anchor indices, and the <code>(B, N, K, 2)</code> point sets in canvas pixels, zero on</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>padding rows.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-1" name="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-1" href="#lucid_yolo.decode.decode_with_keypoints--__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<a id="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-2" name="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-2" href="#lucid_yolo.decode.decode_with_keypoints--__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">lucid_yolo.assign.grid</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_anchor_points</span>
+<a id="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-3" name="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-3" href="#lucid_yolo.decode.decode_with_keypoints--__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">lucid_yolo.decode.topk_e2e</span><span class="w"> </span><span class="kn">import</span> <span class="n">TopKDecoder</span>
+<a id="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-4" name="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-4" href="#lucid_yolo.decode.decode_with_keypoints--__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">points</span><span class="p">,</span> <span class="n">strides</span> <span class="o">=</span> <span class="n">make_anchor_points</span><span class="p">([(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)],</span> <span class="p">[</span><span class="mi">8</span><span class="p">])</span>
+<a id="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-5" name="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-5" href="#lucid_yolo.decode.decode_with_keypoints--__codelineno-0-5"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">cls_logits</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([[[</span><span class="o">-</span><span class="mf">5.0</span><span class="p">],</span> <span class="p">[</span><span class="mf">5.0</span><span class="p">]]])</span>
+<a id="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-6" name="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-6" href="#lucid_yolo.decode.decode_with_keypoints--__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">sets</span> <span class="o">=</span> <span class="n">decode_with_keypoints</span><span class="p">(</span>
+<a id="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-7" name="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-7" href="#lucid_yolo.decode.decode_with_keypoints--__codelineno-0-7"></a><span class="gp">... </span>    <span class="n">TopKDecoder</span><span class="p">(</span><span class="n">k</span><span class="o">=</span><span class="mi">3</span><span class="p">),</span> <span class="n">cls_logits</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">points</span><span class="p">,</span> <span class="n">strides</span>
+<a id="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-8" name="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-8" href="#lucid_yolo.decode.decode_with_keypoints--__codelineno-0-8"></a><span class="gp">... </span><span class="p">)</span>
+<a id="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-9" name="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-9" href="#lucid_yolo.decode.decode_with_keypoints--__codelineno-0-9"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">sets</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="p">:,</span> <span class="mi">0</span><span class="p">]</span>  <span class="c1"># anchor 1's centre, anchor 0's, then the padding row's origin</span>
+<a id="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-10" name="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-10" href="#lucid_yolo.decode.decode_with_keypoints--__codelineno-0-10"></a><span class="go">tensor([[12.,  4.],</span>
+<a id="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-11" name="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-11" href="#lucid_yolo.decode.decode_with_keypoints--__codelineno-0-11"></a><span class="go">        [ 4.,  4.],</span>
+<a id="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-12" name="lucid_yolo.decode.decode_with_keypoints--__codelineno-0-12" href="#lucid_yolo.decode.decode_with_keypoints--__codelineno-0-12"></a><span class="go">        [ 0.,  0.]])</span>
+</code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="lucid_yolo.decode.gather_by_anchor" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <span class="doc doc-object-name doc-function-name">gather_by_anchor</span>
+
+
+<a href="#lucid_yolo.decode.gather_by_anchor" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">gather_by_anchor</span><span class="p">(</span><span class="n">per_anchor</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">anchor_index</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Select each detection's per-anchor values by the anchor its own box came from.</p>
+<p>The one gather every decode consumer pairs a detection with its anchor's values
+through — the mask coefficients of Eq. 7 and the decoded point sets alike — so the
+padding rule below exists once. <code>anchor_index</code> comes from the decoder that
+produced the detections, so row <code>n</code> of the result belongs to the anchor row <code>n</code>'s
+box came from: a row taken from a differently ranked selection would be a plausible
+mask or pose of the wrong object beside a correct box.</p>
+<p>Rows carrying :data:<code>PAD_ANCHOR_INDEX</code> are clamped to a valid gather position and
+then zeroed, so a padding row never reads the last anchor's values. For coefficients
+that is an all-zero vector — a mask logit of exactly 0, a probability of 0.5, and so
+an empty mask under the strictly-greater A37 threshold; for points it is the origin.
+Those rows carry score 0 as well. On a batch with no padding row the clamp and the
+product by one leave every gathered value bit-for-bit what a bare gather returns.</p>
+<p>The values must already be in their final per-anchor form: points are decoded by
+:func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code> over the whole anchor grid
+<strong>before</strong> this runs, because that decode needs every anchor's centre and stride and
+offers no per-detection indexing.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>per_anchor</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Dense per-anchor values of shape <code>(B, A, *trailing)</code> — mask
+coefficients <code>(B, A, M)</code>, decoded point sets <code>(B, A, K, 2)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>anchor_index</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Source anchor per detection, shape <code>(B, N)</code>, as a decoder's
+<code>decode_with_indices</code> reports it.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The selected values, shape <code>(B, N, *trailing)</code>, padding rows all zero.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-1" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-1" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-2" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-2" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">points</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mf">12.0</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># three anchors, two points each</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-3" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-3" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">gathered</span> <span class="o">=</span> <span class="n">gather_by_anchor</span><span class="p">(</span><span class="n">points</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([[</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">]]))</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-4" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-4" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">gathered</span><span class="o">.</span><span class="n">shape</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-5" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-5" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-5"></a><span class="go">torch.Size([1, 2, 2, 2])</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-6" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-6" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">gathered</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-7" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-7" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-7"></a><span class="go">tensor([[ 8.,  9.],</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-8" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-8" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-8"></a><span class="go">        [10., 11.]])</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-9" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-9" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-9"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">gathered</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span>  <span class="c1"># a padding row reads the origin, not the last anchor</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-10" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-10" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-10"></a><span class="go">tensor([[0., 0.],</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-11" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-11" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-11"></a><span class="go">        [0., 0.]])</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-12" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-12" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-12"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">gather_by_anchor</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([[</span><span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">]]))</span>  <span class="c1"># coefficients</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-13" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-13" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-13"></a><span class="go">tensor([[[1., 1., 1., 1.],</span>
+<a id="lucid_yolo.decode.gather_by_anchor--__codelineno-0-14" name="lucid_yolo.decode.gather_by_anchor--__codelineno-0-14" href="#lucid_yolo.decode.gather_by_anchor--__codelineno-0-14"></a><span class="go">         [0., 0., 0., 0.]]])</span>
+</code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="lucid_yolo.decode.gather_keypoint_sets" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <span class="doc doc-object-name doc-function-name">gather_keypoint_sets</span>
+
+
+<a href="#lucid_yolo.decode.gather_keypoint_sets" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">gather_keypoint_sets</span><span class="p">(</span><span class="n">raw_points</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">anchor_index</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">anchor_points</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">strides</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Decode one branch's dense point offsets and take each detection's point set.</p>
+<p>Decode first, gather second, and the order is forced:
+:func:<code>~lucid_yolo.models.heads.keypoint.decode_keypoints</code> composes the raw offsets
+with the whole anchor grid and has no per-detection indexing, so gathering first
+would mean reconstructing each kept row's anchor and stride by hand. The gather is
+:func:<code>~lucid_yolo.decode.common.gather_by_anchor</code>, so a padding row yields the
+origin rather than the last anchor's pose.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>raw_points</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Raw point offsets of shape <code>(B, A, K, 2)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>anchor_index</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Source anchor per detection, shape <code>(B, N)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>anchor_points</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Anchor-centre <code>(x, y)</code> coordinates of shape <code>(A, 2)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>strides</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Per-anchor level stride of shape <code>(A,)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Point coordinates in canvas pixels, shape <code>(B, N, K, 2)</code>, padding rows zero.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-1" name="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-1" href="#lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<a id="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-2" name="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-2" href="#lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">lucid_yolo.assign.grid</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_anchor_points</span>
+<a id="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-3" name="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-3" href="#lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">points</span><span class="p">,</span> <span class="n">strides</span> <span class="o">=</span> <span class="n">make_anchor_points</span><span class="p">([(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)],</span> <span class="p">[</span><span class="mi">8</span><span class="p">])</span>
+<a id="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-4" name="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-4" href="#lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">raw_points</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># one point per anchor, no offset</span>
+<a id="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-5" name="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-5" href="#lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-5"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">gather_keypoint_sets</span><span class="p">(</span><span class="n">raw_points</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([[</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">]]),</span> <span class="n">points</span><span class="p">,</span> <span class="n">strides</span><span class="p">)</span>
+<a id="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-6" name="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-6" href="#lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-6"></a><span class="go">tensor([[[[12.,  4.]],</span>
+<a id="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-7" name="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-7" href="#lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-7"></a><span class="go">&lt;BLANKLINE&gt;</span>
+<a id="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-8" name="lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-8" href="#lucid_yolo.decode.gather_keypoint_sets--__codelineno-0-8"></a><span class="go">         [[ 0.,  0.]]]])</span>
+</code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="lucid_yolo.decode.points_to_letterboxed_original" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <span class="doc doc-object-name doc-function-name">points_to_letterboxed_original</span>
+
+
+<a href="#lucid_yolo.decode.points_to_letterboxed_original" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">points_to_letterboxed_original</span><span class="p">(</span><span class="n">points</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">orig_size</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">letterboxed_size</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">allow_upscale</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Un-letterbox bare <code>(x, y)</code> points of one image back to original coordinates (A10).</p>
+<p>The point-set twin of :func:<code>to_letterboxed_original</code>: the same exact inverse the
+box corners take, applied to points with no score or class column beside them. Any
+leading shape is kept — <code>(N, K, 2)</code> point sets, a flat <code>(P, 2)</code> list — because
+every point is folded into one flat list for a single
+:meth:<code>~lucid_yolo.data.letterbox.Letterbox.inverse_map</code> call and the shape restored
+after, so no row can take a different inverse from its neighbour. A batch whose
+images have different original sizes calls this once per image.</p>
+<p>An empty input skips the inverse and comes back unchanged, so the trailing point
+axis survives an image with nothing in it.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>points</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Letterboxed-canvas points of shape <code>(..., 2)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>orig_size</code>
+            </td>
+            <td>
+                  <code><span title="tuple">tuple</span>[<span title="int">int</span>, <span title="int">int</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Original image <code>(height, width)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>letterboxed_size</code>
+            </td>
+            <td>
+                  <code><span title="tuple">tuple</span>[<span title="int">int</span>, <span title="int">int</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Letterboxed canvas <code>(height, width)</code> the points live in.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>allow_upscale</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The letterbox <code>allow_upscale</code> setting used at resize time;
+must match so the inverse recovers the exact geometry. Defaults to <code>True</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Points of the input's shape in original-image coordinates.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><a id="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-1" name="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-1" href="#lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<a id="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-2" name="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-2" href="#lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="c1"># A 2x4 image letterboxed into a 4x4 canvas gains 1px top/bottom pads.</span>
+<a id="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-3" name="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-3" href="#lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">sets</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([[[</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">],</span> <span class="p">[</span><span class="mf">4.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">]]])</span>  <span class="c1"># one instance, two points</span>
+<a id="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-4" name="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-4" href="#lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">points_to_letterboxed_original</span><span class="p">(</span><span class="n">sets</span><span class="p">,</span> <span class="n">orig_size</span><span class="o">=</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="n">letterboxed_size</span><span class="o">=</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
+<a id="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-5" name="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-5" href="#lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-5"></a><span class="go">tensor([[[0., 0.],</span>
+<a id="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-6" name="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-6" href="#lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-6"></a><span class="go">         [4., 2.]]])</span>
+<a id="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-7" name="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-7" href="#lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-7"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">points_to_letterboxed_original</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">17</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span> <span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span><span class="o">.</span><span class="n">shape</span>
+<a id="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-8" name="lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-8" href="#lucid_yolo.decode.points_to_letterboxed_original--__codelineno-0-8"></a><span class="go">torch.Size([0, 17, 2])</span>
+</code></pre></div>
+
+
+    </div>
+
 </div>
 
 
@@ -6702,10 +9339,10 @@ input pixels, as returned by
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "toc.follow", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
       
         <script src="../../javascripts/pycon_copy.js"></script>
       

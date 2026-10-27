@@ -1,6 +1,6 @@
 # 📦 WP-189 — `refine(viz): plotting and overlay helpers move into the package`
 
-> Engineering log · [Phase 17 — R1 pose-objective parity](https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/)
+> Engineering log · [Phase 18 — CUDA graph replay and pipeline throughput](https://borda.github.io/lucid-YOLO/engineering/phase-18-cuda-replay-throughput/)
 >
 > 🔗 Depends on [WP-188](https://borda.github.io/lucid-YOLO/work_packages/wp-188/) · Needed by WP-191
 >

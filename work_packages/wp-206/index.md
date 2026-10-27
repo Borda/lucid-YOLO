@@ -1,0 +1,56 @@
+# WP-206 — live gradients copied before a replay, and the CUDA capture tests made truthful
+
+> Engineering log · [Phase 19 — Codebase audit remediation](https://borda.github.io/lucid-YOLO/engineering/phase-19-codebase-audit/)
+>
+> 🔗 Depends on [WP-205](https://borda.github.io/lucid-YOLO/work_packages/wp-205/) · Needed by [WP-207](https://borda.github.io/lucid-YOLO/work_packages/wp-207/)
+>
+> ⬅️ [WP-205](https://borda.github.io/lucid-YOLO/work_packages/wp-205/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-207](https://borda.github.io/lucid-YOLO/work_packages/wp-207/) ➡️
+
+
+<a id="wp-206"></a>
+
+## WP-206 — the detection network replay corrupted accumulated gradients on CUDA, and three of the CUDA tests could not pass as written
+
+**Symptom.** The CUDA run that verified the codebase audit ([WP-201](https://borda.github.io/lucid-YOLO/work_packages/wp-201/) to [WP-205](https://borda.github.io/lucid-YOLO/work_packages/wp-205/)) failed 11 tests in the three capture files, all marked `requires_cuda` and so skipped by the offline gate:
+
+- `tests/ptl/test_network_capture.py`: `test_cuda_replay_matches_eager_updates_and_buffers[2-None]`, `[2-dtype1]` and `[2-dtype2]`; `test_trainer_activates_once_per_fit_and_cleans_up[2-bf16-mixed]`; `test_fp16_scaler_recovers_after_overflow[2]`; `test_load_state_dict_assign_retires_recording_and_matches_eager_gradients`; `test_partial_batch_inside_accumulation_window_matches_eager[partial-between-full]` and `[partial-last]`.
+- `tests/ptl/test_network_capture_guards.py`: `TestReplayBackwardHold::test_two_forwards_before_backward_match_eager`.
+- `tests/ptl/test_loss_capture.py`: `test_nonfinite_inputs_preserve_native_outputs[3-9-nan-False]` and `[3-9-nan-True]`.
+
+The same 11 ids failed on an NVIDIA L4 and on an A100-SXM4-40GB, under torch 2.9.1+cu129 on Python 3.11 (the runtime the replay packages recorded their proofs on) and under torch 2.11.0+cu130 on Python 3.13, on the audit's tree and on the tree before it. Each id fails when run alone, and two repeat runs of the three files gave the same 11. Every one runs only with the network or loss capture on, and both are off by default.
+
+**Not a regression of the audit.** The same nine network-capture ids fail on every commit from `102b8d9`, which landed the detection network replay, up to the audit's base; the two loss-capture ids fail from `28549ba`, the commit that added that file. As a file run on CUDA, these tests had never passed on `main`.
+
+**Where it broke.** The replay pull request's own commits, run one at a time on the L4 (Python 3.11, torch 2.9.1), put the break inside it. Its second, third and fourth commits pass all 23 selected tests; `a8259f5` (`fix(ptl): harden network capture replay guards`) fails five of them, and the last commit, which adds three tests, fails eight. `a8259f5` moved the copy that takes a live `.grad` out of the static gradient buffers. That copy used to run at forward time, and `a8259f5` moved it into a pre-hook on the replayed backward node. A replayed backward writes those buffers, and `AccumulateGrad` may adopt one as a parameter's `.grad`. So a gradient still alive at the next replay aliases the storage that replay overwrites, and the copy has to happen before then. Made from the pre-hook, the copy left the accumulated gradients wrong on CUDA from the first replay that met a live gradient; made at forward time it does not.
+
+**The mechanism inside the autograd engine is not established.** One hypothesis was that the pre-hook's copy raced the replayed backward on another stream. A diagnostic arm that kept the pre-hook and added `torch.cuda.synchronize()` after the copy still failed all 11, so stream ordering does not explain it. What is shown is empirical: the copy in the pre-hook is wrong, and the copy at forward time is right. Nothing here says why the engine treats the two differently.
+
+**Fix.** `_NetworkCapture._run` calls `_copy_out_live_gradients()` (the old `_before_replayed_backward`, same body) right before it replays, and `_await_backward` registers only the post-hook that releases the hold. The hold is what makes the forward-time copy sufficient: while a replay's backward is pending, every later forward runs eager, so no other replay can write the buffers between the copy and that backward. The pre-hook ran inside the backward, after Lightning's `zero_grad(set_to_none=True)`, so it met a live gradient only when one had been kept past it. So the defect reached only a detection run with `accumulate_grad_batches` above 1, or a run that kept gradients alive into the next step by an in-place `zero_grad` or a callback. Keypoint, oriented and segmentation network replay retire under accumulation (`_ACCUMULATION_EAGER_LABELS`).
+
+**Three tests corrected, each against the contract its own docstring or the source states.**
+
+- `test_nonfinite_inputs_preserve_native_outputs[3-9-nan-*]` put a NaN in `alpha` and expected loss capture to fall back to the native route. The source states the opposite (`loss_capture.py`: "strides and alpha are not padded, so their non-finite values match on both routes"), and so does `test_host_unpadded_nonfinite_inputs_replay_with_native_bits`. The case is removed, and the host test gains an `alpha` case, so a non-finite `alpha` is still covered under the contract the code implements. `loss_capture.py` is unchanged.
+- `test_load_state_dict_assign_retires_recording_and_matches_eager_gradients` asserts that every parameter has a gradient after the swap, while its loss read `o2m_cls` alone. That leaves the other stems at `None` on the eager reference too, so the line failed by construction. The loss after the swap now reads all four outputs, and the assertion is unchanged.
+- `test_two_forwards_before_backward_match_eager` read two of the four outputs. A replayed backward writes a gradient for every parameter it recorded, zeros for a branch the loss left unread, while eager leaves that branch at `None`. The comparison failed on `None` against zeros. The loss now reads all four outputs, and the comparison is bitwise (`assert_close` with `rtol=0, atol=0`, which also checks the `None` pattern). Separately, `test_live_gradient_leaves_storage_before_backward` becomes `..._before_replay` and calls the copy the way `_run` now does.
+
+**A replay semantic this records but does not change.** Under network replay, a parameter that the loss does not reach gets a zero gradient where eager gives `None`. That is not neutral in general, because an optimizer skips a `None` gradient but applies weight decay and momentum to a zero one. Training never meets it: the detection objective in `DetectionLitModule` reads all four head outputs (`o2m_cls`, `o2m_box`, `o2o_cls`, `o2o_box`).
+
+**What the earlier gate claims covered.** `102b8d9` names `test_cuda_replay_matches_eager_updates_and_buffers`, `test_trainer_activates_once_per_fit_and_cleans_up` and `test_fp16_scaler_recovers_after_overflow` in its `Gate:` trailer, and each has an accumulation-2 case among the 11. The pull request's middle commits passed them, and `a8259f5` broke them before the merge. [WP-193c](https://borda.github.io/lucid-YOLO/work_packages/wp-193c/) cites "focused CUDA trajectory, buffer, precision, fallback and lifecycle regressions", and those regressions were not green on the merged tree.
+
+**Verification.**
+
+- **CPU.** The three capture files give 159 passed and 103 skipped (the CUDA ids), and `make gate` runs before the commit.
+- **CUDA, `colab_07`.** This was an L4, uploaded trees.
+    - HEAD failed 11 of 105.
+    - HEAD with the synchronize failed 11 of 105.
+    - The candidate failed 2 of 103 on both Python 3.11 / torch 2.9.1 and Python 3.13 / torch 2.11, the two tests with the partial loss.
+    - The candidate's whole accelerator selection (`-m "gpu or data"` over `tests` and `scripts`, minus the four overfit runs and the full notebook run) gave 344 passed, 2 skipped and the same 2 failed in 12 min 40 s.
+- **CUDA, `colab_08`.** This ran with the corrected tests, on the source and tests of this commit. The three capture files passed 103 of 103 on an L4 under both Python 3.11 / torch 2.9.1+cu129 and Python 3.13 / torch 2.11.0+cu130, with no failures.
+
+**Goldens.** No frozen golden is touched. The overfit goldens are unaffected because `scripts/overfit_micro.py` builds its module with `capture_network` at its default, off, and the default trainer does not accumulate.
+
+**Limits and deferred.**
+
+- **Segmentation head capture keeps its pre-hook.** `segment_head_capture.py` copies live gradients from a backward pre-hook in the same way. It is not changed here, because it retires whenever `accumulate_grad_batches` is not 1. A live gradient then reaches it only through an in-place `zero_grad` or a callback, and no test exercises that path, so there is no CUDA evidence either way. Moving it belongs with the replay consolidation.
+- **The 2026-10-20 [escalation](https://borda.github.io/lucid-YOLO/ESCALATION/) stays open.** It asks whether detection replay must stay native under accumulation, and why the CUDA accumulation checks fail on the unmodified baseline. This package removes the failure the entry describes for detection. Whether keypoint, oriented and segmentation network replay may now accumulate is the principal's decision, and `_ACCUMULATION_EAGER_LABELS` is unchanged.
+- **Accuracy and throughput** under accumulation with replay are not re-measured. This package restores gradient equality with eager and claims nothing beyond it.

@@ -1,6 +1,6 @@
 # 📦 WP-192 — `perf(eval): complete oriented scoring uses the worker policy`
 
-> Engineering log · [Phase 17 — R1 pose-objective parity](https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/)
+> Engineering log · [Phase 18 — CUDA graph replay and pipeline throughput](https://borda.github.io/lucid-YOLO/engineering/phase-18-cuda-replay-throughput/)
 >
 > 🔗 Depends on WP-191 · Needed by [WP-192b](https://borda.github.io/lucid-YOLO/work_packages/wp-192b/), [WP-193](https://borda.github.io/lucid-YOLO/work_packages/wp-193/)
 >

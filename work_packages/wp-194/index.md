@@ -1,6 +1,6 @@
 # 📦 WP-194 — `refine(tests): static checks to hooks, plain test names`
 
-> Engineering log · [Phase 17 — R1 pose-objective parity](https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/)
+> Engineering log · [Phase 18 — CUDA graph replay and pipeline throughput](https://borda.github.io/lucid-YOLO/engineering/phase-18-cuda-replay-throughput/)
 >
 > 🔗 Depends on [WP-193](https://borda.github.io/lucid-YOLO/work_packages/wp-193/) · Needed by [WP-195](https://borda.github.io/lucid-YOLO/work_packages/wp-195/)
 >

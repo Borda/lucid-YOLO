@@ -1,0 +1,26 @@
+# WP-217 — audit residuals
+
+> Engineering log · [Phase 19 — Codebase audit remediation](https://borda.github.io/lucid-YOLO/engineering/phase-19-codebase-audit/)
+>
+> 🔗 Depends on [WP-216](https://borda.github.io/lucid-YOLO/work_packages/wp-216/) · Needed by [WP-218](https://borda.github.io/lucid-YOLO/work_packages/wp-218/)
+>
+> ⬅️ [WP-216](https://borda.github.io/lucid-YOLO/work_packages/wp-216/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-218](https://borda.github.io/lucid-YOLO/work_packages/wp-218/) ➡️
+
+
+<a id="wp-217"></a>
+
+## WP-217 — audit residuals
+
+**Finding.** C-CONST left model ranking caps and the FLOP-counter image side as literals because models cannot import the decode layer. [WP-205](https://borda.github.io/lucid-YOLO/work_packages/wp-205/) normalized checkpoint tasks only during base construction: a subclass saving hyperparameters again could restore a `Task` member, which restricted checkpoint loading refuses. Oriented validation also converted axis-aligned predictions to the host before passing them to a strategy that discards them.
+
+**Change.** The private detection cap lives in `tasks.py`, the existing stdlib-only leaf importable from both layers; `decode.common.MAX_DETECTIONS` retains its public name and object identity. Model ranking defaults share that cap, and the FLOP-counter side derives from the detection task spec. Every `save_hyperparameters` call normalizes recorded `Task` members and the logger snapshot, preserving Lightning's original caller frame and explicit arguments. The host conversion of the axis-aligned detections moves into `_update_val_map`, so the strategy that keeps that metric pays for it and the oriented strategy, which keeps none, no longer does; the rotated decoder and metric path stay unchanged. No public names, documented assumptions or goldens change.
+
+**Verification.**
+
+- **CPU.** `make gate` green on this commit's tree. `TestSubclassCheckpointTask.test_saved_task_is_plain_str`, `test_initial_snapshot_task_is_plain_str` and `test_checkpoint_loads_through_load_eval_module` cover named and keyword-forwarding subclasses, including subclasses that save again. `test_detection_cap_matches_model_ranking_defaults` pins identity across all four ranking entry points, and `test_flop_measurement_side_matches_coco_img_size` pins the task-derived side.
+- **Red before.** Both re-saving subclass cases failed `assert type(module.hparams["task"]) is str` and the logger-snapshot assertion with `<enum 'Task'>`; both command-loader round trips failed with `_pickle.UnpicklingError: Weights only load failed`. The ranking-cap identity assertion failed while its numeric value remained 300.
+- **Cause check.** The original forwarding subclasses pass while both re-saving variants fail before checkpoint serialization. This rejects a loader-only fault and shows why constructor-only normalization is insufficient. The same assertions and restricted round trips pass after normalization moves to every save.
+- **Goldens.** `scripts/check_goldens.py` passes all 50 live and frozen files without moving any golden.
+- **Oriented logs.** One seeded real validation batch and epoch end retain exact equality of the returned loss and every `val/*` scalar before and after removing the conversion. `_OrientedStrategy.update_box_validation` discards axis-aligned predictions; `update_extra_validation` calls `_update_val_rotated`, which ranks and scores rotated boxes independently.
+- **Not reproduced: single-file collection.** The reported `KeyError: 'keypoints'` in `test_sigma_choice_matches_coco_schema_only_at_seventeen_points` does not reproduce on the [WP-216](https://borda.github.io/lucid-YOLO/work_packages/wp-216/) tree: the exact `pytest --doctest-modules src/lucid_yolo/ptl/module.py tests/ptl/test_keypoint_training.py` collection passes (60 tests) serially, under `-n auto`, under `-n 2 -m "not gpu and not data"` and with `-p no:randomly`, on pytest 9.1.1 and doctestplus 1.7.1. The keypoint accumulator the test feeds was replaced by [WP-213](https://borda.github.io/lucid-YOLO/work_packages/wp-213/)'s `_KeypointAP` after the report was written, and no traceback survives to say whether that is what removed it, so no patch and no regression test is added. A recurrence reopens it with its traceback.
+
