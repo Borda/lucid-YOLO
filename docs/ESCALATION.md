@@ -24,6 +24,14 @@ Escalation is success, not failure: this log plus the assumption register is the
 
 ## 📌 Entries
 
+## 2026-10-26 — WP-208…214 one A100 session over the GPU-hour budget
+
+- **Symptom**: closing the six [GPU] packages of the audit stack ([WP-208](work_packages/wp-208.md), [WP-210](work_packages/wp-210.md), [WP-211](work_packages/wp-211.md), [WP-212](work_packages/wp-212.md), [WP-213](work_packages/wp-213.md), [WP-214](work_packages/wp-214.md)) under D32 needed a green `make gate-gpu` and each package's accelerator tests on its own commit. Run as one session, that is about seven GPU-hours, over trigger 5's four.
+- **Hypotheses tried**: none; this is a budget question, not a failure.
+- **Sources consulted**: none.
+- **Decision requested**: one A100 session of about seven hours, or the tip's gate and the per-commit arms split across two.
+- **Resolution** (principal, 2026-10-26): one session. It ran green: `make gate-gpu` at the tip `72b5505`, `tests/ptl` on py3.13, and each package's own commit.
+
 ## 2026-09-03 — WP-154b the composition centre moves a frozen golden
 
 - **Symptom**: [WP-154b](work_packages/wp-154b.md) changes `AffineParams.matrix`'s composition centre from `(W/2, H/2)` to `((W-1)/2, (H-1)/2)`, the convention `fuse-augmentations` composes about. `goldens/frozen/0.6/aug_invariants.json` — a pure-code frozen golden written by the v0.6.0 release commit `22739e1` — pins five metrics the change moves past their tolerance: `affine_image_mean` 0.5565 → 0.5542 (tol 0.002), `affine_bbox_coord_sum` 121.3428 → 121.9856 (tol 0.05), `affine_polygon_area` 276.7792 → 277.6373 (tol 0.5), `fused_image_mean` 0.5529 → 0.5506 (tol 0.002), `fused_bbox_coord_sum` 91.0071 → 91.4892 (tol 0.05). Every hook, every one of 2543 unit tests and the other 35 goldens are green; the three residual pytest failures (`scripts/_tests/test_check_goldens.py::test_real_goldens_pass`, `::test_main_exit_code_zero_on_real_goldens`, the `check_all` doctest) all assert "every real golden passes" and resolve with this one file. This is trigger 4: the row cannot be both gate-green and frozen-golden-clean.

@@ -12,7 +12,7 @@ This page archives the explanation, history and examples accompanying the rules 
 
 ### Review tasks
 
-> **Review tasks**: use [.github/skills/code-review/SKILL.md](../../.github/skills/code-review/SKILL.md) as the single owner of the review process. Review is read-only: the execution loop below governs implementation, not review. Retain the source, provenance, golden and principal boundaries here; report violations or escalation needs rather than editing files, starting a WP or committing during review.
+> **Review tasks**: use `.github/skills/code-review/SKILL.md` as the single owner of the review process. Review is read-only: the execution loop below governs implementation, not review. Retain the source, provenance, golden and principal boundaries here; report violations or escalation needs rather than editing files, starting a WP or committing during review.
 
 ## 1. The loop
 
