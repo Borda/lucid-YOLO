@@ -54,7 +54,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: "📦 Install uv"
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - name: "🧰 Create venv and install the dev dependency group"
         run: |
           uv venv --python ${{ matrix.python-version }} .venv
@@ -89,7 +89,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: "📦 Install uv"
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - name: "🧰 Create venv and install the dev dependency group"
         run: |
           uv venv --python 3.11 .venv
@@ -109,7 +109,7 @@ jobs:
         with:
           persist-credentials: false
       - name: "📦 Install uv"
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - name: "🏗️ Build sdist and wheel"
         run: uv build --out-dir dist
       - name: "🧪 Wheel smoke"
@@ -131,7 +131,7 @@ jobs:
         with:
           persist-credentials: false
       - name: "📦 Install uv"
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - name: "🔎 actionlint"
         run: uvx --from actionlint-py==1.7.12.25 actionlint
       - name: "🛡️ zizmor"
