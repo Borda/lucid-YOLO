@@ -19,7 +19,13 @@ from lucid_yolo.data import (
     Targets,
     apply_affine_to_points,
     boxes_from_polygons,
+    polygons_to_rboxes,
 )
+
+#: A rectangle whose long edge runs at 45 degrees: its envelope and its rotated fit differ.
+_TILTED_QUAD = torch.tensor([[0.0, 10.0], [20.0, 30.0], [30.0, 20.0], [10.0, 0.0]])
+#: An axis-aligned rectangle, ``4 x 2`` at the origin.
+_FLAT_QUAD = torch.tensor([[0.0, 0.0], [4.0, 0.0], [4.0, 2.0], [0.0, 2.0]])
 
 
 def _boxes(n: int) -> torch.Tensor:
@@ -237,6 +243,49 @@ class TestKeypoints:
         assert targets.keypoint_vis.shape == (0, 0)
 
 
+class TestSharedKeypointCount:
+    """The one ``K`` read both batch-level joins share: ``Targets.concat`` and the packed transport."""
+
+    def test_skips_items_without_point_sets(self) -> None:
+        """An empty or box-only item's point axis of ``0`` never outvotes the batch's ``K``."""
+        posed = Targets(
+            boxes=_boxes(2),
+            labels=_labels(2),
+            keypoints=torch.zeros((2, 4, 2)),
+            keypoint_vis=torch.zeros((2, 4), dtype=torch.int64),
+        )
+        box_only = Targets(boxes=_boxes(1), labels=_labels(1))
+        assert Targets._shared_keypoint_count([Targets.empty(), posed, box_only]) == 4
+
+    @pytest.mark.parametrize(
+        "items",
+        [
+            pytest.param([], id="no-items"),
+            pytest.param([Targets.empty(), Targets(boxes=_boxes(1), labels=_labels(1))], id="no-point-sets"),
+        ],
+    )
+    def test_zero_without_point_sets(self, items: list[Targets]) -> None:
+        """A batch that annotates no points at all has ``K = 0``, the item-free batch included."""
+        assert Targets._shared_keypoint_count(items) == 0
+
+    def test_refuses_differing_counts_naming_both(self) -> None:
+        """Two point-carrying items with different ``K`` are refused, the first item's count first."""
+        two_points = Targets(
+            boxes=_boxes(1),
+            labels=_labels(1),
+            keypoints=torch.zeros((1, 2, 2)),
+            keypoint_vis=torch.zeros((1, 2), dtype=torch.int64),
+        )
+        three_points = Targets(
+            boxes=_boxes(1),
+            labels=_labels(1),
+            keypoints=torch.zeros((1, 3, 2)),
+            keypoint_vis=torch.zeros((1, 3), dtype=torch.int64),
+        )
+        with pytest.raises(ValueError, match="differing keypoint counts: 2 and 3"):
+            Targets._shared_keypoint_count([two_points, Targets.empty(), three_points])
+
+
 class TestClone:
     """Deep-copy independence."""
 
@@ -350,6 +399,64 @@ class TestEmpty:
         merged = Targets.concat([Targets.empty(), populated, Targets.empty()])
         assert merged.boxes.shape[0] == 2
         assert torch.equal(merged.boxes, _boxes(2))
+
+
+class TestFromQuads:
+    """One quadrilateral per instance becomes its envelope box and its rotated fit."""
+
+    def test_box_is_envelope_and_rbox_is_fit_of_same_quad(self) -> None:
+        """A tilted rectangle yields its axis-aligned envelope and its 45-degree long-edge box.
+
+        Both modalities come from the one ring, which is the instance-axis invariant every
+        oriented reader relies on; a tilted quad is the case where the two visibly differ.
+        """
+        targets = Targets.from_quads([_TILTED_QUAD], torch.tensor([3]))
+
+        assert targets.boxes.tolist() == [[0.0, 0.0, 30.0, 30.0]]
+        assert targets.rboxes[0].tolist() == pytest.approx([15.0, 15.0, 28.284271, 14.142136, math.pi / 4], abs=1e-5)
+        assert targets.labels.tolist() == [3]
+        assert targets.difficult.tolist() == [False]
+
+    def test_matches_separate_envelope_and_fit_bit_for_bit(self) -> None:
+        """The result equals the two calls the three oriented readers used to make by hand.
+
+        The constructor replaced three copies of ``boxes_from_polygons`` plus
+        ``polygons_to_rboxes`` in the COCO, YOLO and DOTA readers; any difference here would
+        move every oriented target those readers produce.
+        """
+        quads = [_TILTED_QUAD, _FLAT_QUAD]
+
+        targets = Targets.from_quads(quads, _labels(2))
+
+        assert torch.equal(targets.boxes, boxes_from_polygons(quads))
+        assert torch.equal(targets.rboxes, polygons_to_rboxes(torch.stack(quads, dim=0)))
+
+    def test_optional_channels_carried_on_shared_axis(self) -> None:
+        """Difficult flags and keypoints given alongside the quads arrive unchanged.
+
+        The COCO reader passes R18's ``difficult`` flag and, in keypoint mode, the point
+        channels; dropping either here would silently lose the evaluation's ignore rule or
+        the pose supervision.
+        """
+        difficult = torch.tensor([True, False])
+        keypoints = torch.ones((2, 3, 2), dtype=torch.float32)
+        keypoint_vis = torch.full((2, 3), 2, dtype=torch.int64)
+
+        targets = Targets.from_quads(
+            [_TILTED_QUAD, _FLAT_QUAD], _labels(2), difficult=difficult, keypoints=keypoints, keypoint_vis=keypoint_vis
+        )
+
+        assert torch.equal(targets.difficult, difficult)
+        assert torch.equal(targets.keypoints, keypoints)
+        assert torch.equal(targets.keypoint_vis, keypoint_vis)
+
+    def test_no_quads_yields_empty_targets(self) -> None:
+        """An image with no instance is a valid empty set, not a failed stack of nothing."""
+        targets = Targets.from_quads([], _labels(0))
+
+        assert targets.boxes.shape == (0, 4)
+        assert targets.rboxes.shape == (0, 5)
+        assert targets.labels.shape == (0,)
 
 
 class TestApplyAffineToPoints:

@@ -202,7 +202,7 @@ def test_planted_rotated_box_lands_canonical_in_original_coordinates(
     assert float(detections[0, 5]) > 0.9
 
 
-def test_wild_raw_angle_still_lands_inside_canonical_range(image_file: Path) -> None:
+def test_wild_raw_angle_lands_inside_canonical_range(image_file: Path) -> None:
     """An angle of 500 radians is normalized rather than returned, and the box is untouched.
 
     The range assertion is the whole point and the expected value is deliberately not

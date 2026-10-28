@@ -140,7 +140,7 @@ class TestFlooredExtentKeepsAGradient:
         assert pred.grad is not None
         assert float(pred.grad[0, 0, 2].abs()) > 0.0
 
-    def test_doubly_collapsed_prediction_still_moves(self) -> None:
+    def test_doubly_collapsed_prediction_moves(self) -> None:
         """Both extents floored at once — the untrained-head state A50 names — stays trainable."""
         target = torch.tensor([[[4.0, 4.0, 8.0, 6.0, 0.2]]])
         pred = torch.tensor([4.0, 4.0, 0.0, 0.0, 0.2]).expand(1, 2, 5).clone().requires_grad_(True)

@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from markers import requires_cuda
 from torch import Tensor
 
 import lucid_yolo.data.rotated_aug as aug
@@ -123,8 +124,7 @@ def test_gradient_fallback_keeps_scalar_derivatives() -> None:
     _bits_equal(actual_gradient, expected_gradient)
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA compatibility check")
+@requires_cuda
 def test_cuda_boxes_keep_scalar_clipping() -> None:
     """Accelerator tensors retain the pre-existing scalar route and output bits."""
     boxes = torch.tensor([[0.0, 0.0, 8.0, 4.0, 0.2], [64.0, 64.0, 8.0, 4.0, 0.3]], device="cuda")

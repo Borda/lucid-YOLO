@@ -55,6 +55,7 @@ EXPECTED_SCRIPTS = {
     "lucid-data": "lucid_yolo.cli.data:main",
     "lucid-eval": "lucid_yolo.cli.eval:main",
     "lucid-predict": "lucid_yolo.cli.predict:main",
+    "lucid-export": "lucid_yolo.cli.export:main",
 }
 
 
@@ -113,6 +114,30 @@ def test_every_declared_console_script_resolves() -> None:
     for target in declared.values():
         module_name, _, attribute = target.partition(":")
         assert callable(getattr(importlib.import_module(module_name), attribute))
+
+
+def test_train_help_lists_supported_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
+    """Help offers training and validation, which have implemented Lightning hooks."""
+    with pytest.raises(SystemExit) as exit_info:
+        train_cli.main(["--help"])
+
+    assert exit_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "{fit,validate}" in help_text
+    assert "test" not in help_text
+    assert "predict" not in help_text
+
+
+@pytest.mark.parametrize("subcommand", ["test", "predict"])
+def test_train_refuses_unsupported_subcommand(subcommand: str, capsys: pytest.CaptureFixture[str]) -> None:
+    """Unsupported trainer operations fail at parsing rather than executing hooks."""
+    with pytest.raises(SystemExit) as exit_info:
+        train_cli.main([subcommand])
+
+    assert exit_info.value.code == 2
+    error = capsys.readouterr().err
+    assert "invalid choice" in error
+    assert subcommand in error
 
 
 def test_train_command_exits_zero_after_subcommand_ran(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -326,6 +351,20 @@ def test_eval_refuses_argument_outside_domain(tmp_path: Path, argument: str, fla
         eval_cli.main(["--checkpoint", str(tmp_path / "absent.ckpt"), "--data_root", str(tmp_path), argument])
 
 
+@pytest.mark.parametrize("img_size", [None, 640])
+def test_predict_refuses_unknown_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, img_size: int | None) -> None:
+    """Unknown checkpoint tasks are named before prediction, even with an explicit size."""
+    monkeypatch.setattr(
+        predict_cli, "load_eval_module", lambda *_args, **_kwargs: (SimpleNamespace(task="panoptic"), {})
+    )
+
+    with pytest.raises(ValueError, match="task") as refusal:
+        predict_cli.predict(tmp_path / "unknown.ckpt", tmp_path / "absent.jpg", img_size=img_size)
+
+    assert "panoptic" in str(refusal.value)
+    assert str(refusal.value) == f"task must be one of {tuple(eval_cli.DEFAULT_IMG_SIZE)}; got 'panoptic'"
+
+
 def test_eval_refuses_task_it_has_no_protocol_for(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A checkpoint task this command implements nothing for is named, not scored as detection.
 
@@ -441,7 +480,7 @@ class TestDataCommandConfigFlag:
 
         assert exit_code == 1, "the root does not exist, so the check fails -- but it ran"
 
-    def test_invocation_without_config_still_runs(self, tmp_path: Path) -> None:
+    def test_invocation_without_config_runs(self, tmp_path: Path) -> None:
         """Omitting ``--config`` is unaffected by the key the flag adds to the namespace.
 
         The ``None``-valued key is present whether or not the flag was typed, so this is

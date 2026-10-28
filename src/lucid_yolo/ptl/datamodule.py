@@ -77,7 +77,7 @@ Batch contract:
     * **Transport form** (what :func:`collate_detection` returns): the equal-sized
       (letterboxed) images stacked and quantized into a single
       ``(B, C, img_size, img_size)`` **uint8** tensor — each post-augmentation float
-      pixel in ``[0, 1]`` rounded to a ``1/255`` step (:data:`_PIXEL_QUANT_MAX`) —
+      pixel in ``[0, 1]`` rounded to a ``1/255`` step (:data:`~lucid_yolo.data._quantization._PIXEL_QUANT_MAX`) —
       paired with a :class:`PackedTargets`, the batch's ragged per-image
       :class:`~lucid_yolo.data.targets.Targets` flattened into a fixed set of
       dense tensors. A worker ships each distinct tensor as its own shared-memory
@@ -109,8 +109,6 @@ from __future__ import annotations
 
 import os
 import warnings
-from collections.abc import Sequence
-from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import cast
@@ -119,26 +117,39 @@ from weakref import ref
 import torch
 from pytorch_lightning import LightningDataModule, Trainer
 from pytorch_lightning.accelerators import CUDAAccelerator
-from pytorch_lightning.plugins.precision import Precision
 from pytorch_lightning.strategies import SingleDeviceStrategy
 from pytorch_lightning.utilities import rank_zero_warn
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset, get_worker_info
-from tqdm.auto import tqdm
+from torch.utils.data import DataLoader
 
 from lucid_yolo.assign.grid import require_grid_side
-from lucid_yolo.data._quantization import _PIXEL_QUANT_MAX
-from lucid_yolo.data.affine import _DEFAULT_PAD_VALUE, RandomAffine
-from lucid_yolo.data.augment import HorizontalFlip, HSVJitter, HSVParams, _jitter_hsv_batch
+from lucid_yolo.data._quantization import _dequantize_images
+from lucid_yolo.data._quantization import _quantize_images as _quantize_images  # noqa: PLC0414 - re-export
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.layout import DatasetLayout, detect_layout, resolve_split
 from lucid_yolo.data.letterbox import Letterbox
-from lucid_yolo.data.mixup import CopyPaste, Mixup
-from lucid_yolo.data.mosaic import MosaicAssembly
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.data.yolo import YoloDetectionDataset
 from lucid_yolo.ptl._epoch_loader import _EpochPrefetchLoader
-from lucid_yolo.ptl.seg_targets import instance_mask_targets
+from lucid_yolo.ptl._pipeline import _DetectionSource, _init_worker, _PreparedTrainingSource
+from lucid_yolo.ptl._pipeline import _host_sample as _host_sample  # noqa: PLC0414 - re-export
+from lucid_yolo.ptl._pipeline import _TrainPipeline as _TrainPipeline  # noqa: PLC0414 - re-export
+from lucid_yolo.ptl._transport import _PROTO_STRIDE as _PROTO_STRIDE  # noqa: PLC0414 - re-export
+from lucid_yolo.ptl._transport import (
+    PackedTargets,
+    _collate_training,
+    _PackedTargetList,
+    _restore_images,
+    _transport_survives,
+    collate_detection,
+    pack_targets,
+    unpack_batch,
+    unpack_masks,
+    unpack_targets,
+)
+from lucid_yolo.ptl._transport import _DeferredHSVSample as _DeferredHSVSample  # noqa: PLC0414 - re-export
+from lucid_yolo.ptl._transport import _TrainingSample as _TrainingSample  # noqa: PLC0414 - re-export
+from lucid_yolo.ptl._validation import _ValidationDataset
 
 __all__ = [
     "DetectionDataModule",
@@ -150,41 +161,12 @@ __all__ = [
     "unpack_targets",
 ]
 
-#: Column count of a polygon point ``(x, y)`` — the width of a packed ring row.
-_POINT_DIM = 2
-
-#: Either layout's reader. Both yield ``(image, Targets)`` samples and size the same way, which
-#: is what lets the augmentation pipeline, the collate and every consumer stay layout-blind.
-_DetectionSource = CocoDetectionDataset | YoloDetectionDataset
-
-#: Three RGB channels, each retained as an IEEE float32 rather than an 8-bit code.
-_RGB_FLOAT_PIXEL_BYTES = 3 * torch.finfo(torch.float32).bits // 8
-
-#: Image dtype a deferred-HSV batch must still carry when its colour transform runs:
-#: the worker path jitters float32 pixels, so any narrower dtype rounds them first.
-_DEFERRED_IMAGE_DTYPE = torch.float32
-#: Gain dtype a deferred-HSV batch must still carry: ``1 + gain`` is formed in double,
-#: as the worker path's Python addition does, before it takes the image dtype.
-_DEFERRED_GAIN_DTYPE = torch.float64
-
-#: Input-pixel stride of the prototype grid the mask targets are rasterised onto.
-#: :class:`~lucid_yolo.models.heads.proto.ProtoNet` upsamples the fused P3 feature
-#: (stride 8) by two (A15), so the grid is a fixed quarter of the input canvas. The
-#: collate needs the grid without the model, and
-#: :meth:`~lucid_yolo.ptl.module.DetectionLitModule._segment_terms` asserts the
-#: transported masks match the prototypes it actually got, so a topology that broke
-#: this fails loudly rather than supervising at the wrong resolution.
-_PROTO_STRIDE = 4
-
-#: Default mosaic probability: every training sample (blueprint sec. 5.9: ``mosaic
-#: p=1.0``). The ``close_mosaic`` late-epoch disable flips the per-pipeline
-#: :attr:`_TrainPipeline.mosaic_p` seam to ``0`` via
-#: :meth:`DetectionDataModule.set_mosaic_prob` (driven by ``CloseMosaicCallback``, WP-036).
-_MOSAIC_PROB = 1.0
-#: Standard YOLO-lineage affine translate fraction ([R1] Table S3; scale is size-aware).
-_AFFINE_TRANSLATE = 0.1
-#: Standard YOLO-lineage horizontal-flip probability ([R1] Table S3: ``fliplr=0.5``).
-_FLIP_PROB = 0.5
+# The batch transport and the worker pipeline moved out to `_transport` and `_pipeline`;
+# tests, `scripts/golden_producers.py` and `scripts/dump_debug_grid.py` still import their
+# names from this module. Each import above written `from m import X as X`, with PLC0414
+# suppressed as a re-export, is one of those names this module would not otherwise bind, or
+# one a mypy-checked script imports: the redundant alias is the explicit re-export both
+# mypy's strict mode and ruff's unused-import check read.
 
 #: Default per-worker prefetched batches (the DataLoader default). The whole
 #: queue — ``num_workers x prefetch_factor`` batches — lives in POSIX shared
@@ -286,848 +268,6 @@ def _val_worker_target(img_size: int) -> int:
     """
     scale = (img_size / _VAL_REFERENCE_SIDE) ** 2
     return max(1, round(_VAL_MAX_WORKERS * scale))
-
-
-def _init_worker(worker_id: int) -> None:
-    """DataLoader ``worker_init_fn``: cap torch threads and re-seed the worker's RNG.
-
-    **Thread cap.** Without it every worker process inherits torch's default
-    intra-op thread pool (one thread per core), so ``num_workers`` workers
-    oversubscribe the CPU by that factor and the tensor ops inside the
-    augmentation pipeline (affine warps, HSV jitter, blends) thrash instead of
-    running in parallel. One thread per worker makes worker throughput scale
-    with ``num_workers``.
-
-    **Re-seed (WP-079).** :class:`_TrainPipeline` seeds its single generator once,
-    at construction, in the *parent* process. Every worker therefore inherits a
-    copy of the **same** generator state, and the parent's copy never advances
-    (the parent never calls ``__getitem__`` when workers are used). Two failures
-    follow, and both were live in the Det-smoke tier runs:
-
-    1. every worker replays one identical augmentation-parameter stream, cutting
-       the per-epoch parameter diversity to ``1 / num_workers``;
-    2. with ``persistent_workers=False`` (the WP-076 default) workers are rebuilt
-       from that same parent state every epoch, so the whole run replays a single
-       epoch's worth of augmentation parameters.
-
-    Seeding from :attr:`torch.utils.data.WorkerInfo.seed` fixes both: torch
-    derives it as ``base_seed + worker_id``, and draws ``base_seed`` from the
-    loader's own generator at every iterator creation — unique per worker, fresh
-    per epoch, and still fully determined by the datamodule's ``seed``.
-
-    Datasets with no ``_generator`` attribute (the val pipeline is letterbox-only,
-    hence deterministic) are left untouched.
-
-    Args:
-        worker_id: The worker index (unused; the seed comes from the worker info).
-    """
-    del worker_id
-    torch.set_num_threads(1)
-    info = get_worker_info()
-    if info is None:
-        return
-    generator = getattr(info.dataset, "_generator", None)
-    if isinstance(generator, torch.Generator):
-        generator.manual_seed(info.seed)
-
-
-@dataclass
-class PackedTargets:
-    """Batch of per-image :class:`~lucid_yolo.data.targets.Targets` flattened for IPC.
-
-    A DataLoader worker ships every distinct tensor as its own shared-memory
-    segment, so the natural ``list[Targets]`` batch — a per-image list whose every
-    image also carries a *list* of per-instance polygon rings — explodes into
-    hundreds of tiny segments and exhausts the consumer's mmap budget
-    (``vm.max_map_count``) at realistic worker counts. This container collapses the
-    whole ragged batch into a **fixed set of dense tensors**, plus optional mask
-    stacks and deferred HSV gains: the modality
-    rows are concatenated along their instance/ring/point axes and paired with the
-    per-image (and per-ring) counts needed to split them back apart. The tensor
-    count is constant regardless of how many instances the batch holds, so the
-    transport costs a handful of segments instead of hundreds.
-
-    This is a *transport* form only: :func:`unpack_targets` reconstructs the exact
-    ``list[Targets]`` consumers expect (see :meth:`DetectionDataModule.on_after_batch_transfer`).
-    The dataclass is deliberately **not frozen** — PyTorch Lightning moves batches
-    across devices with ``apply_to_collection``, which rejects frozen dataclasses.
-
-    Attributes:
-        boxes_cat: ``(sum_N, 4)`` float32 ``xyxy`` boxes of every image, concatenated.
-        labels_cat: ``(sum_N,)`` int64 class ids aligned with ``boxes_cat``.
-        difficult_cat: ``(sum_N,)`` bool R18 difficult flags aligned with
-            ``boxes_cat`` (WP-088). Transported rather than defaulted on arrival
-            because A48 makes the oriented evaluation depend on the flag: a
-            difficult ground truth that reaches the metric as an ordinary one turns
-            every detection of it into a false positive.
-        boxes_per_image: ``(B,)`` int64 instance count per image; splits
-            ``boxes_cat``/``labels_cat``/``difficult_cat`` back into ``B`` images.
-        rboxes_cat: ``(sum_M, 5)`` float32 long-edge rotated boxes, concatenated.
-        rboxes_per_image: ``(B,)`` int64 rotated-box count per image; splits
-            ``rboxes_cat``.
-        keypoints_cat: ``(sum_N, K, 2)`` float32 point coordinates, concatenated
-            (WP-132). Transported rather than left behind because the alternative is
-            the worst kind of dead flag: ``keypoint_targets=True`` would parse the
-            points in the reader and drop them at this boundary, and the run would
-            train on nothing while every shape downstream still looked right.
-        keypoint_vis_cat: ``(sum_N, K)`` int64 COCO visibilities aligned with
-            ``keypoints_cat``. Shipped rather than defaulted for the reason A48 gives
-            for ``difficult_cat``: A66 makes ``v == 0`` mean "no annotation exists",
-            so a visibility that arrives defaulted supervises the model towards
-            coordinates nobody ever placed.
-        keypoints_per_image: ``(B,)`` int64 point-set count per image; splits
-            ``keypoints_cat``/``keypoint_vis_cat``. A separate count from
-            ``boxes_per_image`` even though WP-120 pairs the two axes 1:1 when
-            keypoints are present at all, because a detection batch has ``N`` boxes
-            and *no* point sets — one count cannot say both.
-        polygon_points_cat: ``(sum_P, 2)`` float32 polygon points of every ring of
-            every image, concatenated.
-        points_per_ring: ``(R,)`` int64 point count per ring; splits
-            ``polygon_points_cat`` into ``R`` rings.
-        rings_per_image: ``(B,)`` int64 ring count per image (``0`` when an image
-            carries no polygons, else its instance count); groups the ``R`` rings
-            back into per-image lists.
-        masks_cat: ``(sum_N, Hp, Wp)`` bool instance masks of every image,
-            concatenated, or ``None`` on a detection loader. Present only when the
-            collate rasterises (``mask_targets=True``), which moves that CPU work
-            out of the training process and into the workers; the split is
-            ``boxes_per_image``, since a segmentation annotation carries one ring
-            per box. Shipped as ``bool`` rather than the ``float32``
-            :func:`~lucid_yolo.ptl.seg_targets.instance_mask_targets` returns: the
-            values are ``{0, 1}``, so the cast back is exact and the transport is a
-            quarter of the size.
-        hsv_gains: Optional ``(B, 3)`` float64 colour gains in sample order. When
-            present, the accompanying images remain float32 until the consumer
-            applies these gains and the usual uint8 quantization. ``None`` retains
-            the default transport and is always used by validation.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> t = Targets(boxes=torch.tensor([[0.0, 0.0, 4.0, 4.0]]), labels=torch.tensor([3]))
-        >>> packed = pack_targets([t, Targets.empty()])
-        >>> packed.boxes_per_image.tolist()
-        [1, 0]
-
-        ```
-    """
-
-    boxes_cat: Tensor
-    labels_cat: Tensor
-    difficult_cat: Tensor
-    boxes_per_image: Tensor
-    rboxes_cat: Tensor
-    rboxes_per_image: Tensor
-    keypoints_cat: Tensor
-    keypoint_vis_cat: Tensor
-    keypoints_per_image: Tensor
-    polygon_points_cat: Tensor
-    points_per_ring: Tensor
-    rings_per_image: Tensor
-    masks_cat: Tensor | None = None
-    hsv_gains: Tensor | None = None
-
-
-def _concat_keypoints(targets: list[Targets]) -> tuple[Tensor, Tensor]:
-    """Concatenate a batch's point sets and visibilities along the instance axis.
-
-    Split out of :func:`pack_targets` for one reason the other modalities do not
-    have: an instance-free image carries the canonical ``(0, 0, 2)`` empty, whose
-    point axis is ``0`` rather than the batch's ``K``, and ``torch.cat`` compares
-    every axis but the one it joins. The empties are therefore reshaped to the
-    batch's own ``K`` first — free at zero elements, and it keeps a mixed batch of
-    annotated and empty images packing at all. Two images that genuinely disagree
-    on ``K`` still raise from ``torch.cat``, which is right: no single head predicts
-    both.
-
-    Args:
-        targets: The per-image target list being packed.
-
-    Returns:
-        The ``(keypoints_cat, keypoint_vis_cat)`` pair of shapes ``(sum_N, K, 2)``
-        float32 and ``(sum_N, K)`` int64, with ``K = 0`` for a batch that annotates
-        no points at all.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> posed = Targets(
-        ...     boxes=torch.zeros((1, 4)),
-        ...     labels=torch.tensor([0]),
-        ...     keypoints=torch.zeros((1, 3, 2)),
-        ...     keypoint_vis=torch.ones((1, 3), dtype=torch.int64),
-        ... )
-        >>> coords, visibility = _concat_keypoints([posed, Targets.empty()])
-        >>> coords.shape, visibility.shape
-        (torch.Size([1, 3, 2]), torch.Size([1, 3]))
-
-        ```
-    """
-    num_points = max((int(target.keypoints.shape[1]) for target in targets if target.keypoints.shape[0]), default=0)
-    coords = [
-        target.keypoints if target.keypoints.shape[0] else target.keypoints.new_zeros((0, num_points, _POINT_DIM))
-        for target in targets
-    ]
-    visibility = [
-        target.keypoint_vis if target.keypoints.shape[0] else target.keypoint_vis.new_zeros((0, num_points))
-        for target in targets
-    ]
-    return torch.cat(coords, dim=0), torch.cat(visibility, dim=0)
-
-
-def pack_targets(targets: list[Targets]) -> PackedTargets:
-    """Flatten a ragged ``list[Targets]`` into a :class:`PackedTargets` transport.
-
-    Every modality is concatenated along its own axis and paired with the counts
-    that split it back per image (and per ring). The inverse is
-    :func:`unpack_targets`; ``unpack_targets(pack_targets(x))`` reproduces ``x``
-    tensor-for-tensor (same dtypes, shapes and values).
-
-    Args:
-        targets: The non-empty length-``B`` per-image target list to pack. All
-            tensors must share one device.
-
-    Returns:
-        A :class:`PackedTargets` holding the batch as eleven dense tensors on the
-        inputs' device.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> a = Targets(boxes=torch.zeros((2, 4)), labels=torch.tensor([1, 2]))
-        >>> packed = pack_targets([a, Targets.empty()])
-        >>> packed.boxes_cat.shape, packed.boxes_per_image.tolist()
-        (torch.Size([2, 4]), [2, 0])
-
-        ```
-    """
-    boxes_cat = torch.cat([target.boxes for target in targets], dim=0)
-    labels_cat = torch.cat([target.labels for target in targets], dim=0)
-    rboxes_cat = torch.cat([target.rboxes for target in targets], dim=0)
-    rings = [ring for target in targets for ring in target.polygons]
-    polygon_points_cat = torch.cat(rings, dim=0) if rings else boxes_cat.new_zeros((0, _POINT_DIM))
-    keypoints_cat, keypoint_vis_cat = _concat_keypoints(targets)
-
-    def counts(values: list[int]) -> Tensor:
-        return torch.tensor(values, dtype=torch.int64, device=boxes_cat.device)
-
-    return PackedTargets(
-        boxes_cat=boxes_cat,
-        labels_cat=labels_cat,
-        difficult_cat=torch.cat([target.difficult for target in targets], dim=0),
-        boxes_per_image=counts([int(target.boxes.shape[0]) for target in targets]),
-        rboxes_cat=rboxes_cat,
-        rboxes_per_image=counts([int(target.rboxes.shape[0]) for target in targets]),
-        keypoints_cat=keypoints_cat,
-        keypoint_vis_cat=keypoint_vis_cat,
-        keypoints_per_image=counts([int(target.keypoints.shape[0]) for target in targets]),
-        polygon_points_cat=polygon_points_cat,
-        points_per_ring=counts([int(ring.shape[0]) for ring in rings]),
-        rings_per_image=counts([len(target.polygons) for target in targets]),
-    )
-
-
-def unpack_targets(packed: PackedTargets) -> list[Targets]:
-    """Reconstruct the ``list[Targets]`` a :class:`PackedTargets` transports.
-
-    The exact inverse of :func:`pack_targets`: each modality is split back along
-    its axis by the packed counts and the per-ring polygons are regrouped into the
-    per-image lists. The reconstructed tensors live on the packed tensors' device
-    (so calling this in :meth:`DetectionDataModule.on_after_batch_transfer` yields
-    on-device targets), and equal the originals tensor-for-tensor.
-
-    Args:
-        packed: The transport container to expand.
-
-    Returns:
-        The length-``B`` per-image target list, identical to the one
-        :func:`pack_targets` consumed.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> a = Targets(boxes=torch.zeros((2, 4)), labels=torch.tensor([1, 2]))
-        >>> restored = unpack_targets(pack_targets([a, Targets.empty()]))
-        >>> [len(t.labels) for t in restored]
-        [2, 0]
-
-        ```
-    """
-    boxes_per_image = [int(count) for count in packed.boxes_per_image.tolist()]
-    rboxes_per_image = [int(count) for count in packed.rboxes_per_image.tolist()]
-    keypoints_per_image = [int(count) for count in packed.keypoints_per_image.tolist()]
-    rings_per_image = [int(count) for count in packed.rings_per_image.tolist()]
-    points_per_ring = [int(count) for count in packed.points_per_ring.tolist()]
-
-    boxes = torch.split(packed.boxes_cat, boxes_per_image)
-    labels = torch.split(packed.labels_cat, boxes_per_image)
-    difficult = torch.split(packed.difficult_cat, boxes_per_image)
-    rboxes = torch.split(packed.rboxes_cat, rboxes_per_image)
-    keypoints = torch.split(packed.keypoints_cat, keypoints_per_image)
-    keypoint_vis = torch.split(packed.keypoint_vis_cat, keypoints_per_image)
-    rings = list(torch.split(packed.polygon_points_cat, points_per_ring)) if points_per_ring else []
-
-    targets: list[Targets] = []
-    ring_cursor = 0
-    for index, ring_count in enumerate(rings_per_image):
-        image_rings = rings[ring_cursor : ring_cursor + ring_count]
-        ring_cursor += ring_count
-        # An image with no point sets is restored to the canonical (0, 0, 2) empty
-        # rather than to the (0, K, 2) slice the split hands back, so the roundtrip
-        # this function promises is tensor-for-tensor on a mixed batch too.
-        empty_points = keypoints_per_image[index] == 0
-        targets.append(
-            Targets(
-                boxes=boxes[index],
-                labels=labels[index],
-                polygons=list(image_rings),
-                rboxes=rboxes[index],
-                difficult=difficult[index],
-                keypoints=packed.keypoints_cat.new_zeros((0, 0, _POINT_DIM)) if empty_points else keypoints[index],
-                keypoint_vis=packed.keypoint_vis_cat.new_zeros((0, 0)) if empty_points else keypoint_vis[index],
-            )
-        )
-    return targets
-
-
-def unpack_masks(packed: PackedTargets) -> list[Tensor] | None:
-    """Split a packed mask stack back into one ``(N_i, Hp, Wp)`` tensor per image.
-
-    The mask counterpart of :func:`unpack_targets`, kept separate because the masks
-    are an optional modality: a detection loader ships none and this returns
-    ``None``, which is the signal the consumer falls back to rasterising itself.
-    ``torch.split`` returns views, so the per-image tensors cost no copy and stay on
-    whatever device the transport was moved to.
-
-    Args:
-        packed: The transport container, whose ``masks_cat`` may be ``None``.
-
-    Returns:
-        One float mask stack per image in image order, or ``None`` when the batch
-        carries no masks. The bool transport is restored to float32 ``{0.0, 1.0}``,
-        the dtype :func:`~lucid_yolo.ptl.seg_targets.instance_mask_targets` produces.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> unpack_masks(pack_targets([Targets.empty()])) is None
-        True
-
-        ```
-    """
-    if packed.masks_cat is None:
-        return None
-    counts = [int(count) for count in packed.boxes_per_image.tolist()]
-    return [chunk.to(torch.float32) for chunk in torch.split(packed.masks_cat, counts)]
-
-
-@dataclass(frozen=True)
-class _DeferredHSVSample:
-    """Keep a sample's stated colour gains beside its flipped image and targets.
-
-    Only the worker-side pipeline and collate consume this record; the packed
-    batch transports one gain tensor rather than one Python object per sample.
-
-    Attributes:
-        image: Floating-point image after the geometric transforms and flip.
-        targets: Geometry transformed with that image.
-        params: The HSV draw made before the flip draw, as in the host pipeline.
-    """
-
-    image: Tensor
-    targets: Targets
-    params: HSVParams
-
-
-_TrainingSample = tuple[Tensor, Targets] | _DeferredHSVSample
-
-
-def _host_sample(sample: _TrainingSample) -> tuple[Tensor, Targets]:
-    """Complete a deferred sample for host-side diagnostics without quantizing it.
-
-    The debug grid and augmentation golden read unquantized dataset samples rather
-    than collated batches. Resolving their colour here retains that convention when
-    the pipeline defers HSV; ordinary samples pass through unchanged.
-
-    Args:
-        sample: One ordinary or deferred training sample.
-
-    Returns:
-        The fully augmented image and its original targets.
-
-    Examples:
-        ```pycon
-        >>> sample = (torch.zeros(3, 2, 2), Targets.empty())
-        >>> _host_sample(sample) is sample
-        True
-
-        ```
-    """
-    if isinstance(sample, _DeferredHSVSample):
-        return HSVJitter().apply(sample.image, sample.targets, sample.params)
-    return sample
-
-
-def collate_detection(
-    batch: Sequence[tuple[Tensor, Targets]], *, mask_targets: bool = False
-) -> tuple[Tensor, PackedTargets]:
-    """Collate ``(image, Targets)`` samples into ``(images, PackedTargets)``.
-
-    All images are letterboxed to a common ``img_size`` upstream, so they stack
-    into one dense tensor. The ragged per-image
-    :class:`~lucid_yolo.data.targets.Targets` are flattened into a
-    :class:`PackedTargets` (:func:`pack_targets`) so the whole batch crosses the
-    DataLoader worker boundary as a handful of shared-memory segments rather than
-    hundreds of tiny ones. The datamodule restores the ``list[Targets]`` consumer
-    contract on the destination device in
-    :meth:`DetectionDataModule.on_after_batch_transfer`; a direct caller converts
-    with :func:`unpack_targets`.
-
-    Under ``mask_targets`` the segmentation mask targets are rasterised **here**,
-    which is what puts that work in the loader workers: the DataLoader hands a whole
-    batch to one worker and runs its ``collate_fn`` in that same process, so the
-    batches of a run are rasterised concurrently across workers and ahead of the step
-    that needs them. Rasterising in the training process instead cost a measured
-    1005 ms per step at batch 32 on COCO, serial with the GPU, which is most of why
-    the accelerator idled. The grid is the input canvas at :data:`_PROTO_STRIDE`
-    (A15) rather than a size read off the model, so the collate needs no model;
-    :meth:`~lucid_yolo.ptl.module.DetectionLitModule._segment_terms` checks the
-    transported grid against the prototypes it actually got.
-
-    Args:
-        batch: The per-sample ``(image, Targets)`` pairs from the dataset.
-        mask_targets: Rasterise each image's instance masks onto the prototype grid
-            and ship them in ``packed.masks_cat``. Requires one polygon ring per box
-            (:func:`~lucid_yolo.ptl.seg_targets.instance_mask_targets` raises
-            otherwise), so it is set only by a segmentation loader.
-
-    Returns:
-        A ``(images, packed)`` pair: ``images`` is the batch quantized to a
-        ``(B, C, H, W)`` **uint8** tensor (float ``[0, 1]`` pixels rounded to
-        ``1/255`` steps — :data:`_PIXEL_QUANT_MAX` — for a 4x-smaller IPC hop) and
-        ``packed`` is the batch's targets as a :class:`PackedTargets`. The transfer
-        hook (or :func:`unpack_batch`) restores float32 ``[0, 1]`` images on the
-        destination device.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> batch = [(torch.zeros(3, 4, 4), Targets.empty()) for _ in range(2)]
-        >>> images, packed = collate_detection(batch)
-        >>> images.dtype, images.shape, packed.boxes_per_image.tolist()
-        (torch.uint8, torch.Size([2, 3, 4, 4]), [0, 0])
-
-        ```
-    """
-    return _collate_training(batch, mask_targets=mask_targets)
-
-
-def _collate_training(batch: Sequence[_TrainingSample], *, mask_targets: bool = False) -> tuple[Tensor, PackedTargets]:
-    """Collate the training pipeline's samples, ordinary or colour-deferred, into the transport.
-
-    The body behind :func:`collate_detection`, widened to the pipeline's private
-    sample union: the training loader routes through it because, under
-    ``device_hsv``, :class:`_TrainPipeline` can yield :class:`_DeferredHSVSample`
-    records, which the public signature does not name. Ordinary ``(image, Targets)``
-    pairs take the public path unchanged. A batch of deferred records keeps its
-    float32 images unquantized and attaches their stated gains as
-    ``packed.hsv_gains``, one float64 row per image; colour conversion and the uint8
-    quantization then run where the batch is restored (:func:`unpack_batch` or the
-    transfer hook). A batch mixing both kinds is refused, so a gain row is never
-    paired with an already-jittered image.
-
-    Args:
-        batch: Ordinary ``(image, Targets)`` pairs or deferred colour samples, all of
-            one kind.
-        mask_targets: As in :func:`collate_detection`.
-
-    Returns:
-        The ``(images, packed)`` transport pair: uint8 images for ordinary samples,
-        float32 images with ``packed.hsv_gains`` set for deferred ones.
-
-    Raises:
-        ValueError: If the batch mixes deferred and ordinary samples.
-
-    Examples:
-        ```pycon
-        >>> sample = _DeferredHSVSample(torch.zeros(3, 4, 4), Targets.empty(), HSVParams(0.0, 0.0, 0.0))
-        >>> images, packed = _collate_training([sample])
-        >>> images.dtype, packed.hsv_gains.shape
-        (torch.float32, torch.Size([1, 3]))
-
-        ```
-    """
-    deferred = bool(batch) and isinstance(batch[0], _DeferredHSVSample)
-    if any(isinstance(sample, _DeferredHSVSample) != deferred for sample in batch):
-        raise ValueError("cannot collate deferred and already-jittered HSV samples together")
-    images = torch.stack(
-        [sample.image if isinstance(sample, _DeferredHSVSample) else sample[0] for sample in batch], dim=0
-    )
-    image_size = (int(images.shape[-2]), int(images.shape[-1]))
-    if not deferred:
-        images = _quantize_images(images)
-    targets = [sample.targets if isinstance(sample, _DeferredHSVSample) else sample[1] for sample in batch]
-    packed = pack_targets(targets)
-    if deferred:
-        packed.hsv_gains = torch.tensor(
-            [sample.params.as_tuple() for sample in batch if isinstance(sample, _DeferredHSVSample)],
-            dtype=torch.float64,
-        )
-    if mask_targets:
-        grid = (image_size[0] // _PROTO_STRIDE, image_size[1] // _PROTO_STRIDE)
-        rasterised = [instance_mask_targets(target, image_size, grid).to(torch.bool) for target in targets]
-        packed.masks_cat = torch.cat(rasterised) if rasterised else torch.zeros((0, *grid), dtype=torch.bool)
-    return images, packed
-
-
-def _quantize_images(images: Tensor) -> Tensor:
-    """Round augmented float pixels to the existing uint8 transport codes."""
-    return images.mul(_PIXEL_QUANT_MAX).round().clamp_(0, _PIXEL_QUANT_MAX).to(torch.uint8)
-
-
-def _restore_images(
-    images: Tensor, packed: PackedTargets, dtype: torch.dtype, *, channels_last: bool = False
-) -> Tensor:
-    """Finish a deferred colour transform before restoring the consumer's image dtype.
-
-    Only the transfer hook requests ``channels_last`` and loads the optional CUDA
-    compiler there, and only while ``fused_hsv`` allows the fused restore; the hook
-    makes the native result channels-last itself otherwise. Direct unpacking keeps the
-    native expression and its layout.
-
-    Raises:
-        TypeError: If a deferred batch no longer carries float32 images and float64
-            gains. Something cast it between the collate and this restore, and running
-            the colour transform on the cast values would change the training pixels.
-    """
-    if packed.hsv_gains is not None:
-        if images.dtype != _DEFERRED_IMAGE_DTYPE or packed.hsv_gains.dtype != _DEFERRED_GAIN_DTYPE:
-            raise TypeError(
-                f"deferred HSV batch arrived with {images.dtype} images and {packed.hsv_gains.dtype} gains, "
-                f"expected {_DEFERRED_IMAGE_DTYPE} and {_DEFERRED_GAIN_DTYPE}: the batch was cast before its "
-                "colour transform ran. Restore it before casting, or leave device_hsv off for this precision setup."
-            )
-        if channels_last and dtype == torch.float32 and images.is_cuda:
-            from lucid_yolo.data._hsv_cuda import _restore_hsv_cuda  # noqa: PLC0415
-
-            restored = _restore_hsv_cuda(images, packed.hsv_gains)
-            if restored is not None:
-                return restored
-        images = _quantize_images(_jitter_hsv_batch(images, packed.hsv_gains))
-    return _dequantize_images(images, dtype)
-
-
-def _transport_survives(plugin: Precision) -> bool:
-    """Report whether a precision plugin's input conversion keeps the deferred-HSV dtypes.
-
-    Lightning passes every batch through ``precision_plugin.convert_input`` before the
-    transfer hooks, so a plugin that casts floating tensors rounds the float32 images
-    or the float64 gains before :func:`_restore_images` sees them. The plugin's own
-    conversion is probed with one tensor of each dtype rather than matched by name, so
-    a plugin this module does not know about is judged by what it does.
-
-    Args:
-        plugin: The attached trainer's precision plugin.
-
-    Returns:
-        ``True`` when both probe tensors come back at their original dtypes.
-
-    Examples:
-        ```pycon
-        >>> from pytorch_lightning.plugins.precision import DoublePrecision
-        >>> _transport_survives(Precision()), _transport_survives(DoublePrecision())
-        (True, False)
-
-        ```
-    """
-    probe = (torch.zeros(1, dtype=_DEFERRED_IMAGE_DTYPE), torch.zeros(1, dtype=_DEFERRED_GAIN_DTYPE))
-    images, gains = cast("tuple[Tensor, Tensor]", plugin.convert_input(probe))
-    return images.dtype == _DEFERRED_IMAGE_DTYPE and gains.dtype == _DEFERRED_GAIN_DTYPE
-
-
-def _dequantize_images(images: Tensor, dtype: torch.dtype = torch.float32) -> Tensor:
-    """Restore uint8 transport images to floating-point ``[0, 1]``; pass floats through.
-
-    The inverse of the :func:`collate_detection` quantization: uint8 codes cast to
-    ``dtype`` and divide by :data:`_PIXEL_QUANT_MAX`. The ``0``…``255`` codes and the
-    divisor are exactly representable in float16/bfloat16, so a half-precision
-    ``dtype`` keeps the same ``1/510`` quantization bound. An already-float tensor (a
-    direct, non-quantized feed) is returned untouched — its own dtype preserved — so
-    the restore is safe to run over either form.
-
-    Args:
-        images: A ``(B, C, H, W)`` uint8 transport batch or an already-float batch.
-        dtype: Floating-point dtype for the restored images (default
-            ``torch.float32``); used only on the uint8 dequantization path.
-
-    Returns:
-        The images in ``[0, 1]`` at ``dtype`` (dequantized when the input was uint8,
-        otherwise the input unchanged).
-    """
-    if images.dtype == torch.uint8:
-        return images.to(dtype).div(_PIXEL_QUANT_MAX)
-    return images
-
-
-def unpack_batch(
-    batch: tuple[Tensor, PackedTargets], dtype: torch.dtype = torch.float32
-) -> tuple[Tensor, list[Targets]]:
-    """Restore the consumer batch from a collated transport, finishing any deferred colour first.
-
-    Reverses the collate end to end. A :func:`collate_detection` batch carries uint8
-    images, which are dequantized to ``dtype`` in ``[0, 1]`` (``code / 255``). A
-    training batch collated with deferred colour (``device_hsv``) instead carries
-    float32 images and ``packed.hsv_gains``: the batched HSV jitter and the same
-    uint8 quantization run first, on the images' device, and the dequantization
-    follows, so both forms come back on one ``1/255`` code grid. The
-    :class:`PackedTargets` is expanded back to the ragged ``list[Targets]``
-    (:func:`unpack_targets`). This is
-    the single public restore a direct (non-Lightning) consumer uses when it drives
-    the loader itself; :meth:`DetectionDataModule.on_after_batch_transfer` runs the
-    equivalent on-device restore inside a Lightning run, matching the attached
-    module's precision. Restoring only the targets — leaving the images in their
-    transport dtype — stays available via :func:`unpack_targets`.
-
-    Args:
-        batch: The ``(images, PackedTargets)`` transport pair: uint8 images from
-            :func:`collate_detection`, or float32 images with ``packed.hsv_gains`` from
-            the training loader under ``device_hsv``. ``packed`` must be on the images'
-            device, since the gains are applied to the images where they stand and are
-            never moved.
-        dtype: Floating-point dtype for the restored images (default
-            ``torch.float32``); pass ``torch.float16``/``torch.bfloat16`` to match a
-            half-precision consumer.
-
-    Returns:
-        The ``(images, list[Targets])`` consumer pair: ``images`` is ``(B, C, H, W)``
-        ``dtype`` in ``[0, 1]`` and the targets are the ragged length-``B`` per-image list.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> batch = [(torch.zeros(3, 4, 4), Targets.empty()) for _ in range(2)]
-        >>> images, targets = unpack_batch(collate_detection(batch))
-        >>> images.dtype, len(targets)
-        (torch.float32, 2)
-
-        ```
-    """
-    images, packed = batch
-    return _restore_images(images, packed, dtype), unpack_targets(packed)
-
-
-class _PreparedTrainingSource(Dataset[tuple[Tensor, Targets]]):
-    """Retain the immutable, fill-centred float image before random geometry.
-
-    Converting a source and subtracting the affine fill are independent of every
-    random draw. Mosaic can assemble those pixels on a zero-filled canvas; the
-    affine then receives exactly the tensor its ordinary fill subtraction creates.
-    The fill is restored after the same resample, before any colour or blending.
-    This costs four bytes per source pixel channel instead of the byte cache's one.
-    ``base`` must be a raw reader without ``transforms``: its pixels are retained as
-    the source canvas the training geometry starts from. The memory reports come
-    from rank zero only, so a multi-process run states them once.
-
-    Raises:
-        ValueError: If ``base`` carries ``transforms``; their output would be retained
-            and then transformed again by the training geometry.
-    """
-
-    def __init__(self, base: _DetectionSource) -> None:
-        if base._transforms is not None:
-            raise ValueError(
-                "prepared image cache needs a raw reader without transforms; "
-                "the training geometry would apply them a second time"
-            )
-        self.base = base
-        self.keypoint_flip_pairs = base.keypoint_flip_pairs
-        estimate = ""
-        if isinstance(base, CocoDetectionDataset):
-            expected = _RGB_FLOAT_PIXEL_BYTES * sum(record.height * record.width for record in base._images)
-            estimate = f"about {expected / 1e9:.1f} GB ({expected:,} bytes) from the annotation sizes; "
-        rank_zero_warn(
-            f"prepared image cache: {estimate}retaining float32 source images costs four times "
-            "an 8-bit decoded image cache in host RAM per training process"
-        )
-        self._items: list[tuple[Tensor, Targets]] = []
-        for index in tqdm(range(len(base)), desc="Preparing images", unit="img"):
-            image, targets = base[index]
-            # Subtract out of place: the reader's tensor is never written, so nothing
-            # here depends on whether a reader hands out fresh or shared storage. The
-            # cost is one transient image per record, released on the next iteration.
-            self._items.append((image - _DEFAULT_PAD_VALUE, targets))
-        retained = sum(image.nbytes for image, _ in self._items)
-        rank_zero_warn(
-            f"prepared image cache: holding {retained:,} bytes of float32 pixels "
-            f"for {len(self._items)} training records"
-        )
-
-    def __len__(self) -> int:
-        """Return the number of retained training records."""
-        return len(self._items)
-
-    def __getitem__(self, index: int) -> tuple[Tensor, Targets]:
-        """Return one retained image and its original targets; the image is shared storage, never write it."""
-        return self._items[index]
-
-
-class _TrainPipeline(Dataset[_TrainingSample]):
-    """Train-time wrapper composing mosaic/mixup/copy-paste over a base dataset.
-
-    For each index the pipeline draws whatever extra source indices it needs from
-    one seeded :class:`torch.Generator`, so a fixed seed and a deterministic access
-    order reproduce an epoch byte-for-byte. Every produced sample is letterboxed to
-    ``img_size`` so the collate can stack the batch.
-
-    Attributes:
-        mosaic_p: Probability that a sample is built from a four-image mosaic rather
-            than its single base image (default :data:`_MOSAIC_PROB`). A mutable seam:
-            the ``close_mosaic`` schedule sets it to ``0`` for the final epochs via
-            :meth:`DetectionDataModule.set_mosaic_prob`. Consulted per draw, so a
-            change takes effect on the next sample assembled.
-
-    Args:
-        base: The raw (untransformed) reader — either layout's.
-        img_size: Target square side for the letterboxed output.
-        policy: The size-aware strengths from
-            :func:`~lucid_yolo.data.coco.build_scale_policy` (``scale``, ``mixup``,
-            ``copy_paste``).
-        seed: Seed for the single :class:`torch.Generator` driving every draw.
-        oriented: Whether the base dataset yields rotated targets. It suppresses
-            copy-paste, which cannot act on a modality that carries no polygons
-            (WP-056); every other stage is unchanged, and in particular the draw
-            sequence is not — the copy-paste probability is *consulted* as always,
-            it simply never fires.
-        polygon_free: The same suppression for the same reason, reached the other way:
-            a base whose *format* carries no rings rather than whose modality does not.
-            The YOLO reading is one (WP-099: ``polygons`` is always empty there), and
-            unlike the oriented case copy-paste would not raise on it — it would find no
-            paste candidates and quietly do nothing, having already decoded a whole extra
-            source sample to discover that. Suppressing it says so and stops paying for it.
-        defer_hsv: Sample the same colour gains but apply them after transfer. The
-            pointwise colour transform commutes with the following horizontal flip.
-    """
-
-    def __init__(
-        self,
-        base: _DetectionSource | _PreparedTrainingSource,
-        img_size: int,
-        policy: dict[str, float],
-        seed: int,
-        oriented: bool = False,
-        polygon_free: bool = False,
-        defer_hsv: bool = False,
-    ) -> None:
-        self._base = base
-        self._defer_hsv = defer_hsv
-        self._img_size = int(img_size)
-        self.mosaic_p = float(_MOSAIC_PROB)
-        self._mixup_prob = policy["mixup"]
-        # Copy-paste is structurally unavailable on the oriented path, not merely
-        # unhelpful: it transfers *rasterised polygon masks*, and WP-056 keeps rotated
-        # targets without polygons on purpose, so a rotated instance has nothing to
-        # paste. `CopyPaste` says exactly that by raising, which means the composition —
-        # not the transform — is what has to know. Mosaic and mixup are unaffected: both
-        # carry `rboxes` through (WP-058). `polygon_free` is the same absence arrived at from
-        # the format instead of the modality (WP-099b); there the transform stays silent
-        # rather than raising, so the composition is the *only* thing that can know.
-        self._copy_paste_prob = 0.0 if (oriented or polygon_free) else policy["copy_paste"]
-        self._generator = torch.Generator().manual_seed(seed)
-        # A prepared source has already subtracted the affine's fill from every pixel, so
-        # the mosaic leaves uncovered canvas at zero and the affine restores the fill after
-        # its resample; otherwise both fill with the same grey as usual.
-        centred = isinstance(base, _PreparedTrainingSource)
-        self._mosaic = MosaicAssembly(
-            self._img_size, generator=self._generator, pad_value=0.0 if centred else _DEFAULT_PAD_VALUE
-        )
-        self._affine = RandomAffine(
-            scale=policy["scale"],
-            translate=_AFFINE_TRANSLATE,
-            generator=self._generator,
-            letterbox=self._img_size,
-            centered_input=centred,
-        )
-        self._mixup = Mixup(p=1.0, generator=self._generator)
-        self._copy_paste = CopyPaste(p=1.0, generator=self._generator)
-        self._hsv = HSVJitter(generator=self._generator)
-        # The pairing comes from `base`'s own annotation schema, never from a constant
-        # here — A64's requirement, and the one this line previously broke by omission.
-        # `HorizontalFlip` is K-generic by design and cannot know which index mirrors
-        # which; supplying nothing does not mean "no swap needed", it means every sided
-        # point in a mirrored sample supervises the model toward its opposite number's
-        # location. That trains, converges to a left/right-confused head, and reports
-        # nothing, which is why the value is read from the dataset rather than defaulted.
-        # `None` still reaches the flip intact for a schema with no left/right symmetry,
-        # where mirroring coordinates alone is the correct answer.
-        self._flip = HorizontalFlip(
-            p=_FLIP_PROB,
-            generator=self._generator,
-            keypoint_flip_pairs=base.keypoint_flip_pairs,
-        )
-
-    def __len__(self) -> int:
-        """Return the number of base images."""
-        return len(self._base)
-
-    def __getitem__(self, index: int) -> _TrainingSample:
-        """Assemble a sample, keeping deferred colour gains beside it when requested."""
-        image, targets = self._geometric(index)
-        image, targets = self._maybe_mixup(image, targets)
-        image, targets = self._maybe_copy_paste(image, targets)
-        if self._defer_hsv:
-            params = self._hsv.sample()
-            self._hsv.last_gains = params.as_tuple()
-            image, targets = self._flip(image, targets)
-            return _DeferredHSVSample(image, targets, params)
-        image, targets = self._hsv(image, targets)
-        return self._flip(image, targets)
-
-    def _geometric(self, index: int) -> tuple[Tensor, Targets]:
-        """Build the geometric base: optional mosaic, then the affine onto the letterbox canvas.
-
-        The random affine and the letterbox down to ``img_size`` compose into a single
-        image resample (:class:`~lucid_yolo.data.affine.RandomAffine` with
-        ``letterbox=``), so the geometric path costs one bilinear pass instead of two.
-        """
-        if self._draw() < self.mosaic_p:
-            items = [self._base[i] for i in self._mosaic_indices(index)]
-            image, targets = self._mosaic(items)
-        else:
-            image, targets = self._base[index]
-        return self._affine(image, targets)
-
-    def _maybe_mixup(self, image: Tensor, targets: Targets) -> tuple[Tensor, Targets]:
-        """With probability ``mixup`` blend a second full geometric sample in."""
-        if self._draw() >= self._mixup_prob:
-            return image, targets
-        other = self._geometric(self._random_index())
-        return self._mixup([(image, targets), other])
-
-    def _maybe_copy_paste(self, image: Tensor, targets: Targets) -> tuple[Tensor, Targets]:
-        """With probability ``copy_paste`` paste polygon instances from another sample."""
-        if self._draw() >= self._copy_paste_prob:
-            return image, targets
-        source = self._geometric(self._random_index())
-        return self._copy_paste([(image, targets), source])
-
-    def _mosaic_indices(self, index: int) -> list[int]:
-        """Return ``index`` plus three further sampled indices for a mosaic."""
-        return [index, self._random_index(), self._random_index(), self._random_index()]
-
-    def _random_index(self) -> int:
-        """Draw a uniform base-dataset index from the seeded generator."""
-        return int(torch.randint(0, len(self._base), (1,), generator=self._generator).item())
-
-    def _draw(self) -> float:
-        """Draw one uniform in ``[0, 1)`` from the seeded generator."""
-        return float(torch.rand((), generator=self._generator).item())
 
 
 def _check_shared_label_space(train_map: dict[int, int], val_map: dict[int, int]) -> None:
@@ -1486,15 +626,17 @@ class DetectionDataModule(LightningDataModule):
             return
         if self._mask_targets:
             raise ValueError(
-                "mask_targets=True is unavailable on a YOLO root: the format carries no "
-                "per-instance polygon rings, so there is nothing to rasterise masks from. "
-                "Train segmentation from a COCO-format root, or drop mask_targets"
+                "mask_targets=True is unavailable on a YOLO root: this reader parses only the "
+                "detection and oriented label rows, not the polygon-row variant some YOLO exports "
+                "carry, so it has no per-instance rings to rasterise masks from. Train segmentation "
+                "from a COCO-format root, or drop mask_targets"
             )
         if self._keypoint_targets:
             raise ValueError(
-                "keypoint_targets=True is unavailable on a YOLO root: the format's label rows "
-                "carry a class and a box and no point fields at all, so there is nothing to "
-                "read keypoints from. Train pose from a COCO-format root, or drop keypoint_targets"
+                "keypoint_targets=True is unavailable on a YOLO root: this reader parses only the "
+                "detection and oriented label rows, not the pose-row variant with point fields some "
+                "YOLO exports carry, so it has no keypoints to read. Train pose from a COCO-format "
+                "root, or drop keypoint_targets"
             )
 
     @property
@@ -1850,7 +992,11 @@ class DetectionDataModule(LightningDataModule):
         if images.is_cuda:
             images = images.contiguous(memory_format=torch.channels_last)
         if isinstance(targets, PackedTargets):
-            return images, unpack_targets(targets), unpack_masks(targets)
+            restored = unpack_targets(targets)
+            if targets._padding_indices is not None:
+                views = _PackedTargetList(restored, targets)
+                return images, views, views._masks
+            return images, restored, unpack_masks(targets)
         return images, targets, None
 
     def _consumer_dtype(self) -> torch.dtype:
@@ -2014,7 +1160,7 @@ class DetectionDataModule(LightningDataModule):
             "worker_init_fn": _init_worker if workers else None,
         }
         loader = DataLoader(
-            self._val,
+            _ValidationDataset(self._val) if self._rotated_targets or self._keypoint_targets else self._val,
             shuffle=False,
             **kwargs,  # type: ignore[arg-type]
         )

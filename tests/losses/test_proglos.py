@@ -23,10 +23,11 @@ import torch
 from pytorch_lightning import Callback, Trainer
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
+from training import collate_unpacked
 
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.losses import ProgressiveLossSchedule, progressive_alpha
-from lucid_yolo.ptl import DetectionLitModule, collate_detection, unpack_batch
+from lucid_yolo.ptl import DetectionLitModule
 
 if TYPE_CHECKING:
     from pytorch_lightning import LightningModule
@@ -35,12 +36,6 @@ if TYPE_CHECKING:
 _NUM_CLASSES = 4
 #: Square input side; divisible by every stride for an integer anchor grid.
 _IMG_SIZE = 160
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed torch before each test so model init and synthetic batches are reproducible."""
-    torch.manual_seed(0)
 
 
 @pytest.mark.parametrize(
@@ -104,29 +99,11 @@ class _SingleSampleDataset(Dataset[tuple[Tensor, Targets]]):
         return torch.randn(3, _IMG_SIZE, _IMG_SIZE), Targets(boxes=boxes, labels=labels)
 
 
-def _collate_unpacked(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list[Targets]]:
-    """Collate, then restore the ``list[Targets]`` the module consumes.
-
-    No datamodule is attached here, so the transfer hook that restores the transport
-    form never fires; this wrapper runs the same collate -> restore round-trip the
-    datamodule performs in production (dequantizing the uint8 images and unpacking the
-    targets) so the module receives its float images and ragged target list.
-
-    Examples:
-        >>> boxes = torch.tensor([[8.0, 8.0, 24.0, 24.0]])
-        >>> sample = (torch.randn(3, 32, 32), Targets(boxes=boxes, labels=torch.tensor([1])))
-        >>> images, targets = _collate_unpacked([sample])
-        >>> images.shape, len(targets)
-        (torch.Size([1, 3, 32, 32]), 1)
-    """
-    return unpack_batch(collate_detection(batch))
-
-
 def test_module_alpha_steps_through_schedule() -> None:
     """A three-epoch run drives module.alpha through the exact ramp values epoch by epoch."""
     module = DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=_NUM_CLASSES)
     loader: DataLoader[tuple[Tensor, Targets]] = DataLoader(
-        _SingleSampleDataset(), batch_size=1, collate_fn=_collate_unpacked
+        _SingleSampleDataset(), batch_size=1, collate_fn=collate_unpacked
     )
     recorder = _AlphaRecorder()
     trainer = Trainer(
@@ -175,6 +152,6 @@ class TestRampDomain:
         with pytest.raises(ValueError, match="total_epochs must be >= 1"):
             ProgressiveLossSchedule().alpha_at(0, total_epochs)
 
-    def test_single_epoch_run_still_works(self) -> None:
+    def test_single_epoch_run_works(self) -> None:
         """``E == 1`` is the case the ``max(E - 1, 1)`` guard exists for and must survive."""
         assert progressive_alpha(0, 1) == pytest.approx(0.8)

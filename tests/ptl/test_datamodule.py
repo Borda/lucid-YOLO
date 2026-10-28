@@ -26,8 +26,7 @@ import torch
 from torch import Tensor
 from torchvision.io import write_png
 
-from lucid_yolo.data import coco as coco_data
-from lucid_yolo.data import yolo as yolo_data
+from lucid_yolo.data import _image as image_data
 from lucid_yolo.data.coco import CocoDetectionDataset, build_scale_policy
 from lucid_yolo.data.layout import DATA_YAML_NAME, DatasetLayout
 from lucid_yolo.data.letterbox import Letterbox
@@ -220,14 +219,13 @@ def _datamodule(data_root: Path, **kwargs: object) -> DetectionDataModule:
 def decode_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Record every image decode either reader performs, by the path it was asked to read."""
     calls: list[str] = []
-    incumbent = coco_data.read_image
+    incumbent = image_data.read_image
 
     def counted_read_image(path: str, mode: object) -> Tensor:
         calls.append(path)
         return incumbent(path, mode)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(coco_data, "read_image", counted_read_image)
-    monkeypatch.setattr(yolo_data, "read_image", counted_read_image)
+    monkeypatch.setattr(image_data, "read_image", counted_read_image)
     return calls
 
 
@@ -432,9 +430,7 @@ class TestLayoutDispatch:
         ("layout", "write_root"),
         [("coco", _write_coco_root), ("yolo", _write_yolo_root)],
     )
-    def test_repeat_fit_setup_still_rebuilds_train_pipeline(
-        self, tmp_path: Path, layout: str, write_root: object
-    ) -> None:
+    def test_repeat_fit_setup_rebuilds_train_pipeline(self, tmp_path: Path, layout: str, write_root: object) -> None:
         """Reusing the cached reader keeps ``setup``'s reset: the mosaic probability returns to its start.
 
         The close-mosaic schedule lowers the probability on the live pipeline; a repeat
@@ -670,14 +666,17 @@ class TestYoloCapabilities:
             _datamodule(tmp_path, layout="yolo", val_ann_file=tmp_path / "instances_val.json")
 
     def test_copy_paste_suppressed_on_yolo_root(self, tmp_path: Path) -> None:
-        """The format carries no rings, so copy-paste would decode a source sample and paste nothing."""
+        """The reader parses only detection and oriented rows, so there are no rings for copy-paste to paste.
+
+        Left on, copy-paste would decode a whole source sample per draw and find no paste candidates.
+        """
         datamodule = _datamodule(_write_yolo_root(tmp_path), variant=_COPY_PASTE_VARIANT)
         datamodule.setup("fit")
 
         assert build_scale_policy(_COPY_PASTE_VARIANT)["copy_paste"] > 0.0
         assert datamodule._train._copy_paste_prob == 0.0
 
-    def test_copy_paste_still_runs_on_coco_root(self, tmp_path: Path) -> None:
+    def test_copy_paste_runs_on_coco_root(self, tmp_path: Path) -> None:
         """The suppression is the YOLO path's alone — the COCO pipeline's draw sequence is untouched."""
         datamodule = _datamodule(_write_coco_root(tmp_path), variant=_COPY_PASTE_VARIANT)
         datamodule.setup("fit")
@@ -832,7 +831,10 @@ def _assert_batches_identical(left: tuple[Tensor, PackedTargets], right: tuple[T
         if got is None or want is None:
             assert got is want, f"{field.name} is present in one run and absent in the other"
             continue
-        assert torch.equal(got, want), f"{field.name} differs between runs"
+        if isinstance(got, Tensor):
+            assert torch.equal(got, want), f"{field.name} differs between runs"
+        else:
+            assert got == want, f"{field.name} differs between runs"
 
 
 class TestTrainingDeterminism:
@@ -1229,8 +1231,10 @@ class TestPreparedTrainingCache:
             _assert_batches_identical(left_batch, right_batch)
             for field in dataclasses.fields(left_batch[1]):
                 a, b = getattr(left_batch[1], field.name), getattr(right_batch[1], field.name)
-                if a is not None and b is not None:
+                if isinstance(a, Tensor):
                     assert a.shape == b.shape
                     assert torch.equal(
                         a.contiguous().reshape(-1).view(torch.uint8), b.contiguous().reshape(-1).view(torch.uint8)
                     )
+                else:
+                    assert a == b

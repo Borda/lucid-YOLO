@@ -319,6 +319,11 @@ def tile_source_image(
         A ``(tiles, empty)`` pair: one ``(image record, annotation records)`` entry per
         tile written, in window order, and how many windows carried no annotation.
 
+    Raises:
+        ValueError: If the source decodes to more than 8 bits per channel (a 16-bit
+            PNG): tiles are written as 8-bit JPEG or PNG, and narrowing the depth is a
+            conversion the operator chooses, not one this build makes silently.
+
     Examples:
         ```pycon
         >>> tile_source_image(  # doctest: +IGNORE_EXCEPTION_DETAIL
@@ -336,6 +341,11 @@ def tile_source_image(
     """
     targets = load_dota_targets(labels_dir / f"{path.stem}.txt", keep_difficult=True)
     image = read_image(str(path), ImageReadMode.RGB)
+    if image.dtype != torch.uint8:
+        raise ValueError(
+            f"{path}: decodes to {image.dtype}, but build-tiles writes 8-bit tiles; "
+            "convert the source to 8 bits per channel before tiling it"
+        )
     tiles: list[_TileResult] = []
     empty = 0
     for window, tile, tiled in tile_image_targets(

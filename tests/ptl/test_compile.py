@@ -32,6 +32,7 @@ from pytorch_lightning.accelerators import CUDAAccelerator
 from torch import Tensor
 
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.losses import BranchPrediction
 from lucid_yolo.models.heads.detect import decode_ltrb
 from lucid_yolo.ptl import DetectionLitModule, pad_targets
 
@@ -177,10 +178,8 @@ class TestDetectObjectiveTracesAsOneGraph:
 
         _head, out = module._detect_objective(images, anchor_points, strides, gt_boxes, gt_labels, gt_mask, alpha_t)
         expected = module.loss(
-            head_out.o2m_cls,
-            o2m_boxes,
-            head_out.o2o_cls,
-            o2o_boxes,
+            BranchPrediction(head_out.o2m_cls, o2m_boxes),
+            BranchPrediction(head_out.o2o_cls, o2o_boxes),
             anchor_points,
             gt_boxes,
             gt_labels,

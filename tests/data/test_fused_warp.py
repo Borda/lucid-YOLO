@@ -16,10 +16,9 @@ seeded generator.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 import pytest
 import torch
+from tensors import seeded_generator
 
 from lucid_yolo.data import (
     Letterbox,
@@ -28,23 +27,6 @@ from lucid_yolo.data import (
     boxes_from_polygons,
 )
 from lucid_yolo.data.transforms import GeometricTransform
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed every RNG source before each test so generated geometry is deterministic."""
-    torch.manual_seed(0)
-    yield
-
-
-def _generator(seed: int = 1234) -> torch.Generator:
-    """Return a CPU generator seeded to ``seed`` for reproducible sampling.
-
-    Examples:
-        >>> _generator(7).initial_seed()
-        7
-    """
-    return torch.Generator().manual_seed(seed)
 
 
 def _polygon_targets(canvas: int) -> Targets:
@@ -87,7 +69,7 @@ class TestOutputContract:
     )
     def test_image_shape_dtype_range(self, in_h: int, in_w: int) -> None:
         """Any source size letterboxes to a square float32 image within the fill range."""
-        fused = RandomAffine(degrees=10.0, translate=0.1, scale=0.2, generator=_generator(), letterbox=128)
+        fused = RandomAffine(degrees=10.0, translate=0.1, scale=0.2, generator=seeded_generator(), letterbox=128)
 
         out_image, _ = fused(torch.rand(3, in_h, in_w), Targets.empty())
 
@@ -138,10 +120,10 @@ class TestTwoStepEquivalence:
         targets = _polygon_targets(min(in_h, in_w))
         kwargs = {"degrees": 12.0, "translate": 0.1, "scale": 0.3, "shear": 4.0}
 
-        two_affine = RandomAffine(**kwargs, generator=_generator(7))
+        two_affine = RandomAffine(**kwargs, generator=seeded_generator(7))
         warped_image, warped_targets = two_affine(image.clone(), targets.clone())
         _, two_targets = Letterbox(128)(warped_image, warped_targets)
-        fused = RandomAffine(**kwargs, generator=_generator(7), letterbox=128)
+        fused = RandomAffine(**kwargs, generator=seeded_generator(7), letterbox=128)
         _, fused_targets = fused(image.clone(), targets.clone())
 
         assert torch.equal(fused_targets.boxes, two_targets.boxes)

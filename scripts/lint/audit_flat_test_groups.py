@@ -34,7 +34,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
+from scripts.lint._common import REPO_ROOT, print_failure, sorted_rglob
+
 DEFAULT_TESTS_DIR = REPO_ROOT / "tests"
 DEFAULT_SCRIPTS_TESTS_DIR = REPO_ROOT / "scripts" / "_tests"
 
@@ -211,7 +213,7 @@ def find_all_flat_groups(tests_dir: Path, prefix_tokens: int = DEFAULT_PREFIX_TO
         []
     """
     findings = []
-    for path in sorted(tests_dir.rglob("test_*.py")):
+    for path in sorted_rglob(tests_dir, "test_*.py"):
         for prefix, members in sorted(find_flat_groups(path, prefix_tokens).items()):
             relative = path.relative_to(tests_dir.parent)
             findings.append(f"{relative}::{prefix} ({len(members)} tests)")
@@ -247,10 +249,7 @@ def main(argv: list[str] | None = None) -> int:
 
     findings = [item for tests_dir in tests_dirs for item in find_all_flat_groups(tests_dir, args.prefix_tokens)]
     if findings:
-        print(f"flat-test-group audit FAILED: {len(findings)} group(s) still outside a class")
-        for item in findings:
-            print(f"  - {item}")
-        return 1
+        return print_failure("flat-test-group audit", findings, "group(s) still outside a class")
     print("flat-test-group audit clean: every confirmed mechanical group is classed")
     return 0
 

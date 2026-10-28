@@ -19,12 +19,13 @@ jobs:
   # Everything the local pre-commit hook runs, over the whole tree: ruff check and
   # format, strict mypy, the hygiene hooks and the copyleft audit.
   #
-  # Also the only place the twelve `repo: local` hooks run in CI. They sit under
+  # Also the only place every `repo: local` hook runs in CI. They sit under
   # `ci: skip:` in `.pre-commit-config.yaml` because pre-commit.ci has no `.venv`
   # for their `language: system` entries, so each failed there before checking
   # anything. The `pre-commit` CLI ignores that key, so the run below is the full set.
   precommit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       UV_TORCH_BACKEND: "cpu"
       # `commit-trailers-history` validates `origin/main..HEAD`: on a pull request
@@ -35,13 +36,14 @@ jobs:
     steps:
       - name: "📥 Check out the repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: "🐍 Set up Python"
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-          cache: pip
       - name: "📦 Install uv"
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       # `typing` as well as `dev`: the mypy hook is `language: system` with entry
       # `.venv/bin/python -m mypy`, so mypy must be in this venv. Without the group
       # it fails with `No module named mypy`, as it did after the 0.8.0 release
@@ -60,3 +62,7 @@ jobs:
   # installed. Admission layer three, the provenance trailers, is pr-message.yml:
   # this workflow's `trailers` job validated a pull request's own commits, and a
   # squash-only repository never lands those.
+
+  # The workflow audits (actionlint, zizmor) are the `workflows` job in ci-tests.yml:
+  # branch protection requires `testing-guardian`, and only jobs that guardian
+  # `needs` can turn it red.

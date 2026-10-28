@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from markers import requires_cuda
 from pytorch_lightning import Trainer
 from pytorch_lightning.accelerators import CUDAAccelerator
 from torch import Tensor
@@ -395,8 +396,7 @@ def test_near_tie_pixels_keep_division_codes(
     assert (actual * 255).round().to(torch.uint8).flatten().tolist() == codes
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA regression")
+@requires_cuda
 @pytest.mark.parametrize("batch_size", [1, 3])
 def test_cuda_batch_matches_cpu_transform(batch_size: int) -> None:
     """CUDA runs the CPU division convention before rounding to transport codes."""
@@ -408,8 +408,7 @@ def test_cuda_batch_matches_cpu_transform(batch_size: int) -> None:
     assert torch.equal((expected * 255).round().to(torch.uint8), (actual * 255).round().to(torch.uint8))
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA regression")
+@requires_cuda
 def test_cuda_hue_division_preserves_captured_coco_pixel() -> None:
     """The real-data pixel that exposed reciprocal rounding keeps its three codes."""
     image = (

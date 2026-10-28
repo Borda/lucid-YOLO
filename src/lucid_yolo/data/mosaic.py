@@ -69,6 +69,7 @@ import torch
 from fuse_augmentations import instance_keep_mask  # type: ignore[import-untyped]
 from torch import Tensor
 
+from lucid_yolo.data._common import _DEFAULT_PAD_VALUE
 from lucid_yolo.data.rotated_aug import (
     check_rotated_pairing,
     clip_rboxes_to_canvas,
@@ -80,8 +81,6 @@ from lucid_yolo.data.transforms import boxes_from_polygons
 
 __all__ = ["MosaicAssembly", "MosaicParams"]
 
-#: Default pad colour: mid-grey ``114/255`` per the YOLO-lineage convention (matches letterbox/affine).
-_DEFAULT_PAD_VALUE = 114.0 / 255.0
 #: Mosaic combines exactly this many images.
 _MOSAIC_IMAGE_COUNT = 4
 

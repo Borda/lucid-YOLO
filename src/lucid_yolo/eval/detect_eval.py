@@ -26,6 +26,11 @@ when that image is reached, and the evaluator folds each batch into the metric
 immediately (masks are RLE-encoded into the metric state on update). Neither the
 targets nor the predictions are ever dense for the whole split at once.
 
+The scoring stages themselves live in :mod:`lucid_yolo.eval.coco_score`, shared with the
+keypoint runner and with :func:`~lucid_yolo.eval.coco_score.score_coco`, which returns the
+same report to a Python caller instead of printing it; this module is the command's
+wrapper around them: the banner, the progress bar, the per-path lines and the JSON file.
+
 This is the path :func:`lucid_yolo.eval.cli.main` takes for a ``detect`` or ``segment``
 checkpoint (WP-096); the oriented one is :mod:`lucid_yolo.eval.rotated_eval`. Which of
 the two runs is decided by the checkpoint, in the same spirit as the mask decision above.
@@ -42,70 +47,24 @@ Provenance: R1 Table 7, R1 sec. 4.4 (dual-path protocol), R1 Table S9
 
 from __future__ import annotations
 
-import json
-import math
-import time
 from typing import TYPE_CHECKING
 
-from torch import Tensor, nn
 from tqdm.auto import tqdm
 
-from lucid_yolo.data.letterbox import Letterbox
-from lucid_yolo.decode.nms_path import NMSDecoder
-from lucid_yolo.decode.topk_e2e import TopKDecoder
-from lucid_yolo.eval.annotations import letterboxed_batches, load_eval_annotations
-from lucid_yolo.eval.checkpoint import pick_device
-from lucid_yolo.eval.coco_eval import DualPathEvaluator
-from lucid_yolo.models.build import SegmentOutput
-from lucid_yolo.ptl.module import DetectionLitModule
+from lucid_yolo.eval.coco_score import (
+    _coco_paths,
+    _prepare_coco_run,
+    _print_timing,
+    _score_run,
+    _write_report,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from lucid_yolo.ptl.module import DetectionLitModule
 
-class _SegmentationForward(nn.Module):
-    """Present a segmentation checkpoint under the forward contract the evaluator expects.
-
-    :meth:`DetectionLitModule.forward` returns the detection head's output alone
-    — deliberately, since that is what the E2E decode, the epoch metric and the
-    export path all ask for. The evaluator decides to score masks structurally,
-    by whether the forward returns a
-    :class:`~lucid_yolo.models.build.SegmentOutput`, so handing it the module
-    unwrapped would silently produce a *detection* report from a segmentation
-    checkpoint: no prototypes, no predicted masks, twelve keys, no error, and the
-    cost of the ground-truth masks paid for nothing.
-
-    The wrapped module is registered as a child, so ``.to()`` and ``.eval()``
-    reach it, and the forward delegates to the module's own
-    :meth:`~lucid_yolo.ptl.module.DetectionLitModule.forward_segmentation` rather
-    than recomposing the backbone, neck and mask branches here — that composition
-    exists once, on purpose.
-
-    Args:
-        module: A checkpoint-loaded module whose ``task`` is ``"segment"``.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> from lucid_yolo.ptl.module import DetectionLitModule
-        >>> module = DetectionLitModule(
-        ...     depth=0.34, width=0.25, max_channels=1024, num_classes=4, task="segment"
-        ... ).eval()
-        >>> with torch.no_grad():
-        ...     out = _SegmentationForward(module)(torch.zeros(1, 3, 160, 160))
-        >>> out.prototypes.shape[1]
-        32
-
-        ```
-    """
-
-    def __init__(self, module: DetectionLitModule) -> None:
-        super().__init__()
-        self.module = module
-
-    def forward(self, images: Tensor) -> SegmentOutput:
-        """Run the detection and mask branches over ``images``."""
-        return self.module.forward_segmentation(images)
+__all__ = ["run"]
 
 
 def run(
@@ -120,6 +79,8 @@ def run(
     limit: int,
     output: Path | None,
     eval_backend: str = "faster_coco_eval",
+    ann_file: Path | None = None,
+    images_dir: Path | None = None,
 ) -> int:
     """Run the dual-path COCO evaluation for an already-loaded checkpoint.
 
@@ -136,6 +97,8 @@ def run(
         eval_backend: The already-resolved bbox/segm scoring engine (WP-138),
             ``"faster_coco_eval"`` or ``"hotcoco"`` — resolved once by
             :func:`lucid_yolo.cli.eval.evaluate`, not re-probed here.
+        ann_file: Annotation JSON override; defaults to annotations/instances_val2017.json under data_root.
+        images_dir: Image directory override; defaults to val2017 under data_root.
 
     Returns:
         ``0``; a failure here raises rather than returning a code.
@@ -147,41 +110,37 @@ def run(
 
         ```
     """
-    ann_file = data_root / "annotations" / "instances_val2017.json"
-    images_dir = data_root / "val2017"
+    ann_file, images_dir = _coco_paths("detect", data_root, ann_file, images_dir)
     # Whether the ground truth needs masks at all is the checkpoint's property, not the
     # caller's: --masks false can decline them, but nothing opts a detector *into* them.
     segmentation = module.task == "segment" and masks
     info["masks"] = segmentation
     info["eval_backend"] = eval_backend
-    images, targets, label_to_category = load_eval_annotations(ann_file, with_masks=segmentation)
-    if limit:
-        images = images[:limit]
-    device = pick_device(device_name)
-    letterbox = Letterbox(img_size)
-    model: nn.Module = _SegmentationForward(module) if segmentation else module
-    evaluator = DualPathEvaluator(
-        model, TopKDecoder(), NMSDecoder(), label_to_category, letterbox, backend=eval_backend
+    coco_run = _prepare_coco_run(
+        module,
+        ann_file=ann_file,
+        images_dir=images_dir,
+        img_size=img_size,
+        batch_size=batch_size,
+        device_name=device_name,
+        limit=limit,
+        eval_backend=eval_backend,
+        masks=segmentation,
+        keypoints=False,
     )
 
     print(
-        f"eval: {len(images)} images, device={device.type}, ema={info.get('ema')}, "
+        f"eval: {len(coco_run.images)} images, device={coco_run.device.type}, ema={info.get('ema')}, "
         f"img_size={img_size}, masks={segmentation}"
     )
-    start = time.perf_counter()
     # The bar wraps the batch generator rather than living inside DualPathEvaluator: the
     # evaluator is library code that tests drive in-process, and a progress bar is a
     # property of being run from a command line, which is here.
-    batches = tqdm(
-        letterboxed_batches(images, images_dir, letterbox, batch_size),
-        total=math.ceil(len(images) / batch_size),
-        desc="eval",
-        unit="batch",
-    )
-    report = evaluator.evaluate(batches, targets, device)
-    elapsed = time.perf_counter() - start
-    print(f"done in {elapsed:.1f}s ({len(images) / elapsed:.1f} img/s)")
+    batches = tqdm(coco_run.batches(), total=coco_run.num_batches, desc="eval", unit="batch")
+    score = _score_run(coco_run, batches)
+    _print_timing(score)
 
+    report = score.report
     for path in ("e2e", "nms"):
         stats = report[path]
         print(f"[{path}] mAP50-95={stats['map']:.4f} mAP50={stats['map_50']:.4f} mAP75={stats['map_75']:.4f}")
@@ -194,10 +153,5 @@ def run(
     print(f"E2E deficit vs NMS: {delta * 100:.2f} AP")
 
     if output:
-        payload = {"info": info, "images": len(images), "seconds": round(elapsed, 1), "report": report}
-        # Created rather than required: the scoring pass is the expensive part and this
-        # file is its only durable form (see the note in `rotated_eval.run`).
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(payload, indent=2) + "\n")
-        print(f"report -> {output}")
+        _write_report(output, info, score)
     return 0

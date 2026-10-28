@@ -49,6 +49,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root for path-based entry points
+from scripts.lint._common import REPO_ROOT
+
 #: Conventional-commit subject: allowed type, optional lowercase scope, ": " then text.
 #: ``refine`` is this project's own addition to the conventional set, for a change
 #: that improves something already correct — a rename, a clearer boundary, a
@@ -116,14 +119,6 @@ BOT_AUTHOR_RE = re.compile(r"\[bot\]@users\.noreply\.github\.com$")
 #: source, and the subsection inside it whose rows do not.
 _ALLOWLIST_HEADING = "source allowlist"
 _PLACEHOLDER_HEADING = "placeholders"
-
-#: The repository this checker belongs to, resolved from the file rather than from the
-#: process. Every path and every ``git`` call below is anchored here. Read from the
-#: working directory instead, the checker answers about wherever it happens to be
-#: standing: from a subdirectory it dies on the provenance table it cannot find, and
-#: from another checkout it would validate that checkout's history and report clean.
-#: ``release_guard.py`` already anchors this way; these two lint entry points did not.
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: Default location of the provenance allowlist.
 DEFAULT_PROVENANCE = REPO_ROOT / "docs" / "PROVENANCE.md"

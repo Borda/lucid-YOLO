@@ -9,13 +9,11 @@ does. No assignment, loss or optimizer expression is recorded or rewritten.
 
 from __future__ import annotations
 
-import contextlib
 import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
 import torch
-from pytorch_lightning import Callback
 from pytorch_lightning.accelerators import CUDAAccelerator
 from pytorch_lightning.strategies import SingleDeviceStrategy
 from torch import Tensor, nn
@@ -26,14 +24,20 @@ from lucid_yolo.models.heads.proto import ProtoFusion, ProtoNet
 from lucid_yolo.models.heads.semantic import SemanticAux
 from lucid_yolo.optim.musgd import _memory_overlaps
 from lucid_yolo.optim.update_replay import _RecordedSpans
-from lucid_yolo.ptl.network_capture import (
-    _BF16_REPLAY_SUPPORTED,
-    _precision_signature,
+from lucid_yolo.ptl import _graph_replay
+from lucid_yolo.ptl._graph_replay import (
+    BF16_REPLAY_SUPPORTED,
+    ReplayLifecycle,
+    copy_out_live_gradients,
+    global_hook_breach,
+    module_hook_breach,
+    release_graphs,
+    replay_autocast,
+    tensor_signature,
 )
+from lucid_yolo.ptl._graph_replay import precision_signature as _precision_signature
 
 if TYPE_CHECKING:
-    from pytorch_lightning import LightningModule, Trainer
-
     from lucid_yolo.ptl.module import DetectionLitModule
 
 _Tensors = tuple[Tensor, ...]
@@ -67,40 +71,17 @@ _FORWARD_HELPERS: dict[type[nn.Module], dict[str, object]] = {
     nn.BatchNorm2d: {"_check_input_dim": nn.BatchNorm2d._check_input_dim},
 }
 
-
-def _tensor_signature(tensors: tuple[Tensor, ...]) -> tuple[object, ...]:
-    """Describe the mutable tensor identities, storage and gradient contract without reading values."""
-    return tuple(
-        (
-            id(tensor),
-            tensor.data_ptr(),
-            tuple(tensor.shape),
-            tensor.stride(),
-            tensor.dtype,
-            tensor.device,
-            tensor.requires_grad,
-        )
-        for tensor in tensors
-    )
+#: First verified BF16 replay runtime, bound here so a patch of this module reaches the feature gate.
+_BF16_REPLAY_SUPPORTED = BF16_REPLAY_SUPPORTED
+#: The storage and gradient-contract fingerprint, under the name this module's certificate has always used.
+_tensor_signature = tensor_signature
 
 
 def _observer_breach(modules: tuple[nn.Module, ...]) -> str | None:
     """Keep module hooks observable on the native path, even after recording."""
-    runtime = nn.modules.module
-    if any(
-        getattr(runtime, name, {})
-        for name in (
-            "_global_forward_hooks",
-            "_global_forward_pre_hooks",
-            "_global_backward_hooks",
-            "_global_backward_pre_hooks",
-        )
-    ):
+    if global_hook_breach():
         return "a global module hook is registered"
-    if any(
-        layer._forward_hooks or layer._forward_pre_hooks or layer._backward_hooks or layer._backward_pre_hooks
-        for layer in modules
-    ):
+    if any(module_hook_breach(layer) for layer in modules):
         return "a prediction stage carries a forward or backward hook"
     return None
 
@@ -220,40 +201,32 @@ class _RecordedGroup:
         self.signature = _input_signature(inputs)
         self.pending_backward = False
         self.stream = torch.cuda.current_stream(inputs[0].device)
-        snapshots = [(buffer, buffer.detach().clone()) for buffer in self.adapter.buffers()]
-        with torch.random.fork_rng(devices=[inputs[0].device.index]):
-            try:
-                samples = tuple(
-                    torch.empty_strided(x.shape, x.stride(), dtype=x.dtype, device=x.device)
-                    .copy_(x.detach())
-                    .requires_grad_(x.requires_grad)
-                    for x in inputs
-                )
-                self.adapter = cast("_PredictionGroup", torch.cuda.make_graphed_callables(self.adapter, samples))
-            finally:
-                torch.cuda.synchronize(inputs[0].device)
-                with torch.no_grad():
-                    for buffer, snapshot in snapshots:
-                        buffer.copy_(snapshot)
+        samples = tuple(
+            torch.empty_strided(x.shape, x.stride(), dtype=x.dtype, device=x.device)
+            .copy_(x.detach())
+            .requires_grad_(x.requires_grad)
+            for x in inputs
+        )
+        # Looked up through the module: the one seam a CPU test replaces for both holders.
+        self.adapter = cast("_PredictionGroup", _graph_replay.record_graphed(self.adapter, samples, inputs[0].device))
 
     def run(self, inputs: _Tensors) -> _Tensors:
-        """Replay once, or preserve the static activations a previous backward still needs."""
+        """Replay once, or preserve the static activations a previous backward still needs.
+
+        Live gradients leave the group's static gradient buffers at forward time, before the
+        replay (:func:`~lucid_yolo.ptl._graph_replay.copy_out_live_gradients`). The hold keeps
+        any other replay of this group from running before this one's backward, so nothing can
+        alias those buffers again before that backward writes them; the post-hook releases it.
+        """
         if self.pending_backward or _input_signature(inputs) != self.signature or self.spans.reached_by(list(inputs)):
             return self.adapter.eager(inputs)
+        copy_out_live_gradients(self.parameters)
         outputs = self.adapter(*inputs)
         node = outputs[0].grad_fn
         if node is not None:
             self.pending_backward = True
-            node.register_prehook(self._before_backward)
             node.register_hook(self._after_backward)
         return cast("_Tensors", outputs)
-
-    def _before_backward(self, grad_outputs: object) -> None:
-        """Protect live gradients from the private buffers the recorded backward overwrites."""
-        del grad_outputs
-        for parameter in self.parameters:
-            if parameter.grad is not None:
-                parameter.grad = parameter.grad.clone()
 
     def _after_backward(self, grad_inputs: object, grad_outputs: object) -> None:
         """Release this group's activations after its recorded backward finishes."""
@@ -384,8 +357,7 @@ class _SegmentHeadCapture:
         self.tensors: tuple[Tensor, ...] = ()
         self.state: tuple[object, ...] | None = None
         self.disabled = False
-        for stream in {entry.stream for entry in entries.values()}:
-            stream.synchronize()
+        release_graphs(entry.stream for entry in entries.values())
 
     def __getstate__(self) -> dict[str, bool]:
         """Serialize the request and no CUDA recording or live module reference."""
@@ -404,12 +376,10 @@ class _SegmentHeadCapture:
             and isinstance(trainer.accelerator, CUDAAccelerator)
             and isinstance(trainer.strategy, SingleDeviceStrategy)
             and module.automatic_optimization
-            and trainer.accumulate_grad_batches == 1
         )
         if self.requested and not self.active and stage == "fit":
             warnings.warn(
-                "capture_segment_heads=True is ignored outside single-device CUDA automatic optimization "
-                "with accumulate_grad_batches=1",
+                "capture_segment_heads=True is ignored outside single-device CUDA automatic optimization",
                 UserWarning,
                 stacklevel=3,
             )
@@ -438,25 +408,18 @@ class _SegmentHeadCapture:
         # A capture in progress, or an empty batch with nothing to record: this call stays native, replay stays on.
         if torch.cuda.is_current_stream_capturing() or any(x.numel() == 0 for x in features):
             return None
-        if trainer.accumulate_grad_batches != 1:
-            self.retire("gradient accumulation changed after setup")
-            return None
         try:
             precision = _precision_signature()
         except RuntimeError as error:
             self.retire(f"the CUDA precision policy cannot be read ({error})")
             return None
-        reason = _head_breach(module.head, len(features))
-        reason = reason or _feature_breach(features, precision)
+        reason = _head_breach(module.head, len(features)) or _feature_breach(features, precision)
         stages = (module.head, module.proto_fusion, module.protonet, module.semantic)
         if self.owner is not None and tuple(self.owner.children()) != stages:
             reason = "a prediction stage was replaced after recording"
         owner = self.owner if self.owner is not None else nn.ModuleList(stages)
         members = _members(owner)
-        reason = reason or _parameter_breach(members[1], members[2], features[0].device)
-        reason = reason or _stage_breach(owner, members[0])
-        if reason is None and self.owner is None:
-            reason = _storage_breach(owner, features[0].device)
+        reason = self._runner_breach(reason, owner, members, features[0].device)
         state = (_tensor_signature(members[1] + members[2]), precision) if reason is None else None
         if reason is None and self.attributes is not None and not self.attributes.matches(members[0]):
             reason = "prediction attributes or registration names changed after recording"
@@ -471,11 +434,30 @@ class _SegmentHeadCapture:
             self.tensors = members[1] + members[2]
         return self
 
+    def _runner_breach(
+        self,
+        reason: str | None,
+        owner: nn.Module,
+        members: tuple[tuple[nn.Module, ...], tuple[Tensor, ...], tuple[Tensor, ...]],
+        device: torch.device,
+    ) -> str | None:
+        """Keep lazy guard order and the stage-replacement warning's precedence."""
+        checks: tuple[Callable[[], str | None], ...] = (
+            lambda: reason,
+            lambda: _parameter_breach(members[1], members[2], device),
+            lambda: _stage_breach(owner, members[0]),
+            lambda: _storage_breach(owner, device) if self.owner is None else None,
+        )
+        return next((breach for check in checks if (breach := check()) is not None), None)
+
+    def start_batch(self) -> None:
+        """Release holds whose previous training step skipped its backward, so the new batch may replay."""
+        for entry in self.entries.values():
+            entry.pending_backward = False
+
     def _run(self, key: tuple[int, str], stages: tuple[nn.Module, ...], eager: _Call, inputs: _Tensors) -> _Tensors:
         """Record one group once; preserve native arithmetic on unsupported image signatures."""
-        with torch.autocast(
-            "cuda", enabled=torch.is_autocast_enabled(), dtype=torch.get_autocast_dtype("cuda"), cache_enabled=False
-        ):
+        with replay_autocast():
             if any(
                 (x.requires_grad and x.is_leaf)
                 or x.retains_grad
@@ -514,48 +496,7 @@ class _SegmentHeadCapture:
         return self._run((id(stage), "mask"), (stage,), lambda inputs: (stage(inputs[0]),), (feature,))[0]
 
 
-class _SegmentHeadCaptureLifecycle(Callback):
+class _SegmentHeadCaptureLifecycle(ReplayLifecycle):
     """Keep transient prediction recordings inside one fit, including skipped and failed steps."""
 
-    @staticmethod
-    def _holder(module: LightningModule) -> _SegmentHeadCapture | None:
-        holder = getattr(module, "_segment_head_capture", None)
-        return holder if isinstance(holder, _SegmentHeadCapture) else None
-
-    @classmethod
-    def _clear(cls, module: LightningModule) -> None:
-        holder = cls._holder(module)
-        if holder is not None:
-            holder.clear()
-
-    def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Begin the fit without a graph from an earlier model or trainer."""
-        self._clear(pl_module)
-
-    def on_train_batch_start(self, trainer: Trainer, pl_module: LightningModule, batch: object, batch_idx: int) -> None:
-        """A new batch releases holds whose previous training step skipped backward."""
-        holder = self._holder(pl_module)
-        for entry in holder.entries.values() if holder is not None else ():
-            entry.pending_backward = False
-
-    def on_fit_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Drain and release recordings at normal fit completion; a failing drain is raised."""
-        self._clear(pl_module)
-
-    def on_exception(self, trainer: Trainer, pl_module: LightningModule, exception: BaseException) -> None:
-        """Release recordings when the trainer fails, without replacing its exception or skipping teardown.
-
-        A failed CUDA step usually leaves the device in an error state that the drain raises again.
-        Raising it here would hide the trainer's own exception and skip the trainer's teardown, so a
-        drain failure becomes a warning; the holder is already empty by then.
-        """
-        try:
-            self._clear(pl_module)
-        except RuntimeError as error:
-            # Warning filters must not replace the trainer's original exception.
-            with contextlib.suppress(UserWarning):
-                warnings.warn(
-                    f"capture_segment_heads=True could not drain its recordings after the fit failed ({error})",
-                    UserWarning,
-                    stacklevel=2,
-                )
+    attribute, holder_type, flag = "_segment_head_capture", _SegmentHeadCapture, "capture_segment_heads"

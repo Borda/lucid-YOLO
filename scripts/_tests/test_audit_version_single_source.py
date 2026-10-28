@@ -17,32 +17,14 @@ claims to guard.
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
-from types import ModuleType
+
+from script_loader import load_script
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AUDIT_PATH = REPO_ROOT / "scripts" / "lint" / "audit_version_single_source.py"
 
 
-def _load_audit() -> ModuleType:
-    """Load ``scripts/lint/audit_version_single_source.py`` as an importable module.
-
-    Examples:
-        >>> module = _load_audit()
-        >>> module.__name__
-        'audit_version_single_source'
-        >>> callable(module.find_violations)
-        True
-    """
-    spec = importlib.util.spec_from_file_location("audit_version_single_source", AUDIT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-audit = _load_audit()
+audit = load_script("audit_version_single_source")
 
 
 def test_pyproject_declares_no_static_version_flags_version_key(tmp_path: Path) -> None:

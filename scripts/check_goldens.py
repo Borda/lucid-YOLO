@@ -57,7 +57,6 @@ Examples:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib
 import json
 import math
@@ -67,8 +66,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-#: Repository root (``scripts/`` is one level below it).
-REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root, so `scripts` resolves when run by path
+from scripts._common import REPO_ROOT, digest
 
 #: Default directory holding the top-level goldens and the ``frozen/`` tree.
 DEFAULT_GOLDENS_DIR = REPO_ROOT / "goldens"
@@ -311,22 +310,6 @@ def _compare_values(
     return comparisons
 
 
-def _digest(path: Path) -> str:
-    """Return the SHA-256 hex digest of a golden file's bytes.
-
-    The short-circuit key in :func:`check_all`: byte-equality is what makes reusing
-    one file's producer run for another sound, since identical bytes carry an
-    identical producer spec.
-
-    Args:
-        path: The golden file to hash.
-
-    Returns:
-        The 64-character lowercase hex digest.
-    """
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def check_golden(path: Path, *, cache: dict[str, dict[str, float]] | None = None) -> GoldenResult:
     """Load, run, and compare a single golden file.
 
@@ -362,7 +345,7 @@ def check_golden(path: Path, *, cache: dict[str, dict[str, float]] | None = None
                 "golden can never satisfy 'current code still satisfies every frozen value' once "
                 "its producer's external dependency moves, so it must never be committed there"
             )
-        key = _digest(path)
+        key = digest(path)  # byte-equal files carry an identical producer spec, so one run serves both
         if cache is not None and key in cache:
             actual, reused = cache[key], True
         else:

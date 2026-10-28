@@ -38,7 +38,9 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
+from scripts.lint._common import REPO_ROOT, FenceTracker, print_failure, sorted_rglob
+
 DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 
 #: Directory, under ``docs/``, holding one page per work package.
@@ -145,11 +147,10 @@ def mentions(text: str) -> Iterator[tuple[int, int, str]]:
         >>> [wp_id for _, _, wp_id in mentions(text)]
         ['125']
     """
-    offset, fenced = 0, False
+    offset = 0
+    fences = FenceTracker(_FENCE)
     for line in text.splitlines(keepends=True):
-        if _FENCE.match(line):
-            fenced = not fenced
-        elif not fenced and not _SKIP_LINE.match(line):
+        if not fences.update(line) and fences.language is None and not _SKIP_LINE.match(line):
             masked = _SKIP_SPAN.sub(lambda span: " " * len(span.group()), line)
             for match in _MENTION.finditer(masked):
                 yield offset + match.start(), offset + match.end(), match.group(1)
@@ -298,7 +299,7 @@ def find_stale(docs_dir: Path, fix: bool = False) -> list[str]:
     pages = {path.stem.removeprefix("wp-") for path in (docs_dir / _WP_DIR).glob("wp-*.md")}
     logs = _log_pages(docs_dir)
     stale = []
-    for page in sorted(docs_dir.rglob("*.md")):
+    for page in sorted_rglob(docs_dir, "*.md"):
         want = expected(page, docs_dir, deps, pages, logs)
         if want != page.read_text(encoding="utf-8"):
             stale.append(page.relative_to(docs_dir).as_posix())
@@ -323,10 +324,7 @@ def main(argv: list[str] | None = None) -> int:
 
     stale = find_stale(args.docs_dir, fix=args.fix)
     if stale and not args.fix:
-        print(f"wp-links audit FAILED: {len(stale)} page(s) out of date; run with --fix")
-        for item in stale:
-            print(f"  - {item}")
-        return 1
+        return print_failure("wp-links audit", stale, "page(s) out of date; run with --fix")
     print(f"wp-links audit {'fixed ' + str(len(stale)) + ' page(s)' if stale else 'clean'}")
     return 0
 

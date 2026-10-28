@@ -65,12 +65,6 @@ _THETA_LOW = -math.pi / 4
 _THETA_HIGH = 3 * math.pi / 4
 
 
-@pytest.fixture(autouse=True)
-def _seed_rng() -> None:
-    """Seed torch RNG so weight init and random inputs are deterministic."""
-    torch.manual_seed(0)
-
-
 def _feature_sizes(input_size: int) -> list[tuple[int, int]]:
     """Return the per-level ``(H, W)`` cell counts for a square input.
 

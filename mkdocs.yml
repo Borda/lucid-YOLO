@@ -200,6 +200,7 @@ nav:
       - Run it:
           - Launching a training run: TRAINING.md
           - Provisioning the datasets: DATASETS.md
+          - Opt-in CUDA performance flags: advanced/cuda-performance.md
       - Clean-room:
           - Provenance: PROVENANCE.md
           - Assumptions: ASSUMPTIONS.md
@@ -239,12 +240,14 @@ nav:
       - Data: api/data.md
       - Training: api/training.md
       - Inference: api/inference.md
+      - Export: api/export.md
   - Project:
       - Roadmap: ROADMAP.md
       - Logs:
           - Research log: RESEARCH_LOG.md
           - Engineering log: ENGINEERING_LOG.md
           - Cross-cutting engineering: engineering/cross-cutting.md
+          - Agent-contract rationale: engineering/agents-rationale.md
           - Escalation log: ESCALATION.md
       # Phase first, as the roadmap numbers them; each phase lists the log pages it has.
       - Phases:
@@ -290,4 +293,8 @@ nav:
               - Engineering: engineering/phase-16-training-throughput.md
           - Phase 17 — R1 pose-objective parity:
               - Engineering: engineering/phase-17-pose-objective-parity.md
+          - Phase 18 — CUDA graph replay and pipeline throughput:
+              - Engineering: engineering/phase-18-cuda-replay-throughput.md
+          - Phase 19 — Codebase audit remediation:
+              - Engineering: engineering/phase-19-codebase-audit.md
       - Contributor guide: CONTRIBUTING.md

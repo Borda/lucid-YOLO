@@ -27,7 +27,8 @@ seam that hook writes to. A compiled training step (WP-184) cannot read that
 float inside its traced region without Dynamo guarding on the value and
 recompiling at every epoch of the schedule, so :meth:`DualBranchLoss.__call__`
 also takes the weight as a keyword ``alpha`` tensor built outside the region
-(WP-187); the attribute stays the schedule's record and the logged value.
+(WP-187); the attribute stays the schedule's record, while the output records
+the weight actually used.
 
 Oriented ground truths (WP-088) ride through on the optional ``gt_rboxes`` argument
 of :meth:`DualBranchLoss.__call__`, which is forwarded unchanged to both assigners.
@@ -49,6 +50,7 @@ gradient.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from torch import Tensor
 
@@ -57,7 +59,28 @@ from lucid_yolo.assign.stal import SmallTargetAssigner
 from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.losses.detection_loss import DetectionBranchLoss, DetectionLossOutput
 
-__all__ = ["DualBranchLoss", "DualLossOutput"]
+__all__ = ["BranchPrediction", "DualBranchLoss", "DualLossOutput"]
+
+
+class BranchPrediction(NamedTuple):
+    """Pair one detection branch's raw class logits and decoded boxes.
+
+    Attributes:
+        logits: Raw class logits with shape ``(B, A, C)``.
+        boxes: Decoded ``xyxy`` boxes with shape ``(B, A, 4)``.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> prediction = BranchPrediction(torch.zeros(1, 4, 2), torch.zeros(1, 4, 4))
+        >>> prediction.logits.shape, prediction.boxes.shape
+        (torch.Size([1, 4, 2]), torch.Size([1, 4, 4]))
+
+        ```
+    """
+
+    logits: Tensor
+    boxes: Tensor
 
 
 @dataclass(frozen=True)
@@ -84,10 +107,8 @@ class DualLossOutput:
         o2m: One-to-many branch loss output (dense ``topk = 10`` assignment).
         o2o: One-to-one branch loss output (unique ``topk = 7 -> 1`` assignment).
         alpha: Branch weight applied to the o2m total (o2o gets ``1 - alpha``) —
-            always the :attr:`DualBranchLoss.alpha` attribute, a host float for
-            logging. When the call blended with a tensor ``alpha`` instead (the
-            compiled step's form) the two carry the same schedule value; the
-            tensor is never read back to the host here.
+            the :attr:`DualBranchLoss.alpha` float when no override is supplied,
+            otherwise the override tensor itself, without a read back to the host.
         o2m_assign: The dense assignment the o2m branch was scored against.
         o2o_assign: The unique assignment the o2o branch was scored against.
     """
@@ -95,7 +116,7 @@ class DualLossOutput:
     total: Tensor
     o2m: DetectionLossOutput
     o2o: DetectionLossOutput
-    alpha: float
+    alpha: float | Tensor
     o2m_assign: AssignResult
     o2o_assign: AssignResult
 
@@ -141,7 +162,10 @@ class DualBranchLoss:
         >>> empty_boxes = torch.zeros(1, 0, 4)
         >>> empty_labels = torch.zeros(1, 0, dtype=torch.long)
         >>> empty_mask = torch.zeros(1, 0, dtype=torch.bool)
-        >>> out = loss(logits, boxes, logits, boxes, points, empty_boxes, empty_labels, empty_mask)
+        >>> out = loss(
+        ...     BranchPrediction(logits, boxes), BranchPrediction(logits, boxes),
+        ...     points, empty_boxes, empty_labels, empty_mask
+        ... )
         >>> bool(torch.isfinite(out.total))  # no ground truth: finite, cls-only
         True
 
@@ -171,10 +195,8 @@ class DualBranchLoss:
 
     def __call__(
         self,
-        o2m_logits: Tensor,
-        o2m_boxes: Tensor,
-        o2o_logits: Tensor,
-        o2o_boxes: Tensor,
+        o2m: BranchPrediction,
+        o2o: BranchPrediction,
         anchor_points: Tensor,
         gt_boxes: Tensor,
         gt_labels: Tensor,
@@ -187,10 +209,8 @@ class DualBranchLoss:
         """Score both branches against their own assignments and combine them.
 
         Args:
-            o2m_logits: ``(B, A, C)`` raw class logits of the one-to-many branch.
-            o2m_boxes: ``(B, A, 4)`` predicted ``xyxy`` boxes of the o2m branch.
-            o2o_logits: ``(B, A, C)`` raw class logits of the one-to-one branch.
-            o2o_boxes: ``(B, A, 4)`` predicted ``xyxy`` boxes of the o2o branch.
+            o2m: Raw logits and decoded boxes of the one-to-many branch.
+            o2o: Raw logits and decoded boxes of the one-to-one branch.
             anchor_points: ``(A, 2)`` anchor-centre ``(x, y)`` pixels shared by
                 both branches (see :func:`lucid_yolo.assign.make_anchor_points`).
             gt_boxes: ``(B, N, 4)`` padded ground-truth boxes in ``xyxy`` pixels.
@@ -236,7 +256,10 @@ class DualBranchLoss:
             >>> logits = torch.zeros(1, 4, 1, requires_grad=True)
             >>> boxes = torch.zeros(1, 4, 4, requires_grad=True)
             >>> gt = torch.tensor([[[0.0, 0.0, 8.0, 8.0]]])
-            >>> out = loss(logits, boxes, logits, boxes, points, gt, torch.tensor([[0]]), torch.tensor([[True]]))
+            >>> out = loss(
+            ...     BranchPrediction(logits, boxes), BranchPrediction(logits, boxes),
+            ...     points, gt, torch.tensor([[0]]), torch.tensor([[True]])
+            ... )
             >>> out.total.backward()
             >>> bool(torch.isfinite(logits.grad).all())
             True
@@ -244,27 +267,25 @@ class DualBranchLoss:
             ```
         """
         o2m_assign = self.o2m_assigner(
-            o2m_logits.sigmoid(), o2m_boxes, anchor_points, gt_boxes, gt_labels, gt_mask, gt_rboxes
+            o2m.logits.sigmoid(), o2m.boxes, anchor_points, gt_boxes, gt_labels, gt_mask, gt_rboxes
         )
         o2o_assign = self.o2o_assigner(
-            o2o_logits.sigmoid(), o2o_boxes, anchor_points, gt_boxes, gt_labels, gt_mask, gt_rboxes
+            o2o.logits.sigmoid(), o2o.boxes, anchor_points, gt_boxes, gt_labels, gt_mask, gt_rboxes
         )
-        return self._score(o2m_logits, o2m_boxes, o2o_logits, o2o_boxes, o2m_assign, o2o_assign, strides, alpha)
+        return self._score(o2m, o2o, o2m_assign, o2o_assign, strides, alpha)
 
     def _score(
         self,
-        o2m_logits: Tensor,
-        o2m_boxes: Tensor,
-        o2o_logits: Tensor,
-        o2o_boxes: Tensor,
+        o2m: BranchPrediction,
+        o2o: BranchPrediction,
         o2m_assign: AssignResult,
         o2o_assign: AssignResult,
         strides: Tensor | None,
         alpha: Tensor | None,
     ) -> DualLossOutput:
         """Score the two existing assignments and apply the unchanged branch blend."""
-        o2m_out = self._o2m_loss(o2m_logits, o2m_boxes, o2m_assign, strides)
-        o2o_out = self._o2o_loss(o2o_logits, o2o_boxes, o2o_assign, strides)
+        o2m_out = self._o2m_loss(o2m.logits, o2m.boxes, o2m_assign, strides)
+        o2o_out = self._o2o_loss(o2o.logits, o2o.boxes, o2o_assign, strides)
         if alpha is None:
             total = self.alpha * o2m_out.total + (1.0 - self.alpha) * o2o_out.total
         else:
@@ -277,7 +298,7 @@ class DualBranchLoss:
             total=total,
             o2m=o2m_out,
             o2o=o2o_out,
-            alpha=self.alpha,
+            alpha=self.alpha if alpha is None else alpha,
             o2m_assign=o2m_assign,
             o2o_assign=o2o_assign,
         )

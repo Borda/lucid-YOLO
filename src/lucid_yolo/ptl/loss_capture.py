@@ -13,11 +13,9 @@ from __future__ import annotations
 import gc
 import math
 import warnings
-from typing import TYPE_CHECKING, cast
+from typing import NamedTuple, cast
 
 import torch
-from packaging.version import Version
-from pytorch_lightning import Callback
 from torch import Tensor, nn
 
 from lucid_yolo.assign import _cuda, stal, tal
@@ -26,13 +24,33 @@ from lucid_yolo.assign.stal import SmallTargetAssigner
 from lucid_yolo.assign.tal import AssignResult, _check_labels
 from lucid_yolo.losses import detection_loss
 from lucid_yolo.losses.detection_loss import DetectionBranchLoss, DetectionLossOutput
-from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
-from lucid_yolo.ptl.network_capture import _precision_signature
+from lucid_yolo.losses.dual_loss import BranchPrediction, DualBranchLoss, DualLossOutput
+from lucid_yolo.ptl._graph_replay import (
+    BF16_REPLAY_SUPPORTED,
+    ReplayLifecycle,
+    drain_device,
+    global_hook_breach,
+    replay_autocast,
+)
+from lucid_yolo.ptl._graph_replay import precision_signature as _precision_signature
 
-if TYPE_CHECKING:
-    from pytorch_lightning import LightningModule, Trainer
+#: First verified BF16 replay runtime, bound here so a patch of this module reaches the contract gate.
+_BF16_SUPPORTED = BF16_REPLAY_SUPPORTED
 
-_BF16_SUPPORTED = Version(torch.__version__) >= Version("2.9")
+
+class _LossInputs(NamedTuple):
+    """Name the recorder's flat inputs in their existing positional order."""
+
+    o2m_logits: Tensor
+    o2m_boxes: Tensor
+    o2o_logits: Tensor
+    o2o_boxes: Tensor
+    anchor_points: Tensor
+    gt_boxes: Tensor
+    gt_labels: Tensor
+    gt_mask: Tensor
+    strides: Tensor
+    alpha: Tensor
 
 
 def _functions(source: DualBranchLoss) -> tuple[object, ...]:
@@ -186,7 +204,7 @@ class _LossObjective(nn.Module):
         source = self.source
         ma = source.o2m_assigner._assign(ml.sigmoid(), mb, points, boxes, labels, mask, check_labels=False)
         oa = source.o2o_assigner._assign(ol.sigmoid(), ob, points, boxes, labels, mask, check_labels=False)
-        out = source._score(ml, mb, ol, ob, ma, oa, strides, alpha)
+        out = source._score(BranchPrediction(ml, mb), BranchPrediction(ol, ob), ma, oa, strides, alpha)
         self.assignments = ma, oa
         return (
             out.total,
@@ -218,15 +236,7 @@ def _eligible(inputs: tuple[Tensor, ...]) -> bool:
         or torch.is_inference_mode_enabled()
         or torch.compiler.is_compiling()
         or torch.is_anomaly_enabled()
-        or any(
-            getattr(nn.modules.module, name, {})
-            for name in (
-                "_global_forward_hooks",
-                "_global_forward_pre_hooks",
-                "_global_backward_hooks",
-                "_global_backward_pre_hooks",
-            )
-        )
+        or global_hook_breach()
         or any(type(value) is not Tensor for value in inputs)
     ):
         return False
@@ -269,11 +279,15 @@ class _LossCapture:
         self.clear()
 
     def clear(self) -> None:
-        """Release graph ownership and restart the next fit's eligibility decision."""
-        previous = getattr(self, "_objective", None)
-        if previous is not None:
-            vars(previous).pop("forward", None)
+        """Reset the holder, then drain the recorded device before the recording is released.
+
+        The reset comes first, so a failing drain still leaves an empty holder; the recording stays
+        alive in a local reference until the drain has finished. Without a recording nothing is
+        drained, so a CPU run and :meth:`__setstate__` never touch the CUDA runtime.
+        """
+        previous, device = getattr(self, "_objective", None), getattr(self, "_device", None)
         self._objective: _LossObjective | None = None
+        self._device: torch.device | None = None
         self._workspace: tuple[Tensor, Tensor, Tensor] | None = None
         self._signature: tuple[object, ...] | None = None
         self._source: tuple[object, ...] | None = None
@@ -281,6 +295,12 @@ class _LossCapture:
         self._capacity = 0
         self._pending_backward = False
         self._disabled = False
+        if previous is None:
+            return
+        try:
+            drain_device(device)
+        finally:
+            vars(previous).pop("forward", None)
 
     def __getstate__(self) -> dict[str, object]:
         """Keep CUDA resources out of pickle and deepcopy."""
@@ -292,32 +312,41 @@ class _LossCapture:
         self.clear()
 
     def retire(self, reason: str) -> None:
-        """Clear a stale recording and report its first cause once per fit."""
+        """Clear a stale recording and report its first cause once per fit.
+
+        A holder already retired stays as it is: it is eager for the rest of the fit, so a
+        later cause changes nothing a user could act on, and :meth:`clear` would re-enable it.
+        """
+        if self._disabled:
+            return
         self.clear()
         self._disabled = True
         warnings.warn(f"capture_loss=True stays eager: {reason}", UserWarning, stacklevel=3)
 
-    def run(
-        self,
-        source: DualBranchLoss,
-        ml: Tensor,
-        mb: Tensor,
-        ol: Tensor,
-        ob: Tensor,
-        points: Tensor,
-        boxes: Tensor,
-        labels: Tensor,
-        mask: Tensor,
-        strides: Tensor,
-        alpha: Tensor,
-    ) -> DualLossOutput:
+    def run(self, source: DualBranchLoss, inputs: _LossInputs) -> DualLossOutput:
         """Replay an eligible detection loss, otherwise call its existing public route."""
-        inputs = ml, mb, ol, ob, points, boxes, labels, mask, strides, alpha
+        result = self._run(source, inputs)
+        if result is not None:
+            return result
+        return source(
+            BranchPrediction(inputs.o2m_logits, inputs.o2m_boxes),
+            BranchPrediction(inputs.o2o_logits, inputs.o2o_boxes),
+            inputs.anchor_points,
+            inputs.gt_boxes,
+            inputs.gt_labels,
+            inputs.gt_mask,
+            strides=inputs.strides,
+            alpha=inputs.alpha,
+        )
+
+    def _run(self, source: DualBranchLoss, inputs: _LossInputs) -> DualLossOutput | None:
+        """Check replay eligibility and prepare the masked workspace before execution."""
+        ml, mb, ol, ob, _, boxes, labels, mask, strides, alpha = inputs
         if self._disabled or self._pending_backward or not _eligible(inputs):
-            return source(*inputs[:4], points, boxes, labels, mask, strides=strides, alpha=alpha)
+            return None
         contract = self._contract(source, ml)
         if contract is None:
-            return source(*inputs[:4], points, boxes, labels, mask, strides=strides, alpha=alpha)
+            return None
         state, precision = contract
         signature = (
             tuple(
@@ -330,7 +359,7 @@ class _LossCapture:
             torch.cuda.current_stream(ml.device).cuda_stream,
         )
         if self._signature is not None and signature != self._signature:
-            return source(*inputs[:4], points, boxes, labels, mask, strides=strides, alpha=alpha)
+            return None
         if __debug__:
             _check_labels(labels, mask, ml.shape[-1])
             if ol.shape[-1] != ml.shape[-1]:
@@ -343,7 +372,7 @@ class _LossCapture:
         if boxes.shape[1] == 0 or not bool(
             torch.stack(tuple(value.isfinite().all() for value in (ml, mb, ol, ob, boxes))).all()
         ):
-            return source(*inputs[:4], points, boxes, labels, mask, strides=strides, alpha=alpha)
+            return None
         capacity = max(self._capacity, 1 << (max(1, boxes.shape[1]) - 1).bit_length())
         if capacity != self._capacity:
             self.clear()
@@ -357,10 +386,12 @@ class _LossCapture:
             workspace.zero_()
             workspace[:, : value.shape[1]].copy_(value)
         arguments = (*inputs[:5], *self._workspace, strides, alpha)
-        with torch.autocast(
-            "cuda", enabled=torch.is_autocast_enabled(), dtype=torch.get_autocast_dtype("cuda"), cache_enabled=False
-        ):
+        with replay_autocast():
             result = self._replay(source, arguments, capacity, signature, state, precision)
+        return self._recorded_output(result, alpha)
+
+    def _recorded_output(self, result: tuple[Tensor, ...], alpha: Tensor) -> DualLossOutput:
+        """Own replayed outputs and assignments until their backward releases the hold."""
         assert self._objective is not None and self._objective.assignments is not None
         ma, oa = (_copy_assignment(value) for value in self._objective.assignments)
         node = result[0].grad_fn
@@ -369,7 +400,7 @@ class _LossCapture:
         self._pending_backward = True
         node.register_hook(self._backward_done)
         return DualLossOutput(
-            result[0], DetectionLossOutput(*result[1:5]), DetectionLossOutput(*result[5:]), source.alpha, ma, oa
+            result[0], DetectionLossOutput(*result[1:5]), DetectionLossOutput(*result[5:]), alpha, ma, oa
         )
 
     def _contract(self, source: DualBranchLoss, logits: Tensor) -> tuple[tuple[object, ...], tuple[object, ...]] | None:
@@ -423,7 +454,7 @@ class _LossCapture:
         finally:
             if collection_enabled:
                 gc.enable()
-        self._objective = objective
+        self._objective, self._device = objective, arguments[0].device
         self._capacity, self._signature = capacity, signature
         self._source, self._precision = state, precision
         return result
@@ -438,29 +469,7 @@ class _LossCapture:
         self._pending_backward = False
 
 
-class _LossCaptureLifecycle(Callback):
+class _LossCaptureLifecycle(ReplayLifecycle):
     """Bound the loss pool to one automatic fit, including skipped batches and failure."""
 
-    @staticmethod
-    def _holder(module: LightningModule) -> _LossCapture:
-        return cast("_LossCapture", module._loss_capture)
-
-    def on_train_batch_start(self, trainer: Trainer, pl_module: LightningModule, batch: object, batch_idx: int) -> None:
-        """Allow a new batch after a skipped backward."""
-        del trainer, batch, batch_idx
-        self._holder(pl_module).start_batch()
-
-    def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Start with no recording from an earlier fit."""
-        del trainer
-        self._holder(pl_module).clear()
-
-    def on_fit_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Release the graph pool after training."""
-        del trainer
-        self._holder(pl_module).clear()
-
-    def on_exception(self, trainer: Trainer, pl_module: LightningModule, exception: BaseException) -> None:
-        """Release the graph pool when training aborts."""
-        del trainer, exception
-        self._holder(pl_module).clear()
+    attribute, holder_type, flag = "_loss_capture", _LossCapture, "capture_loss"

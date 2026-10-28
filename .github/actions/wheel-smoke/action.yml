@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Wheel smoke
+description: >-
+  Install the built wheel into a clean venv outside the checkout and run what a user
+  of the wheel alone would run. Every other CI install is editable, so a missing
+  package-data file or an undeclared import ships green without this.
+
+inputs:
+  dist-dir:
+    description: Directory holding the built sdist and wheel, relative to the workspace.
+    required: false
+    default: dist
+
+runs:
+  using: composite
+  steps:
+    # Metadata first: a README PyPI would refuse fails here, not at upload.
+    - name: "🔎 twine check the distributions"
+      shell: bash
+      env:
+        DIST_DIR: ${{ inputs.dist-dir }}
+      run: uvx twine check "${DIST_DIR}"/*
+    # The venv and the working directory both sit under RUNNER_TEMP, so `lucid_yolo`
+    # can only resolve to the installed wheel and never to `src/` in the checkout.
+    # `UV_TORCH_BACKEND=cpu` keeps the install off CUDA wheels.
+    - name: "📦 Install the wheel into a clean venv outside the checkout"
+      shell: bash
+      env:
+        DIST_DIR: ${{ inputs.dist-dir }}
+        UV_TORCH_BACKEND: cpu
+      run: |
+        wheel="$(ls "${GITHUB_WORKSPACE}/${DIST_DIR}"/*.whl)"
+        uv venv --python 3.11 "${RUNNER_TEMP}/wheel-smoke-venv"
+        uv pip install --python "${RUNNER_TEMP}/wheel-smoke-venv/bin/python" "${wheel}"
+    - name: "🖥️ Run the five console scripts"
+      shell: bash
+      working-directory: ${{ runner.temp }}
+      run: |
+        for cmd in lucid-yolo lucid-data lucid-eval lucid-predict lucid-export; do
+          "wheel-smoke-venv/bin/${cmd}" --help > /dev/null
+        done
+    - name: "🧾 Load a packaged config through the installed package"
+      shell: bash
+      working-directory: ${{ runner.temp }}
+      run: |
+        wheel-smoke-venv/bin/python - <<'PY'
+        import importlib.resources as resources
+        import pathlib
+
+        import lucid_yolo
+        import yaml
+
+        assert "site-packages" in pathlib.Path(lucid_yolo.__file__).parts, lucid_yolo.__file__
+        config = resources.files("lucid_yolo") / "configs" / "det_nano_smoke.yaml"
+        loaded = yaml.safe_load(config.read_text(encoding="utf-8"))
+        assert isinstance(loaded, dict) and loaded, "packaged config did not load"
+        print(f"lucid_yolo {lucid_yolo.__version__}: {config.name} loaded, {len(loaded)} keys")
+        PY

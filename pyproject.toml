@@ -32,7 +32,7 @@ dependencies = [
   # Declared directly, not leaned on transitively: LightningCLI brings it, but all three
   # console scripts parse with it now (WP-096), and `[signatures]` is what reads the
   # docstrings the help text is built from.
-  "jsonargparse[signatures]>=4.28",
+  "jsonargparse[signatures]>=4.36",
   "torchvision>=0.19",
   # Capped, unlike the other torch-family pins, because `ptl/coco_backend.py` overrides
   # `CocoBackend._get_coco_format` and assigns to `MeanAveragePrecision._coco_backend` --
@@ -93,6 +93,15 @@ cuda-assignment = [
   "triton>=3.0,<4; sys_platform == 'linux' and platform_machine == 'x86_64'",
   "setuptools>=68; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
+# `lucid-export` and `lucid_yolo.export.export_graph` write the file through
+# `torch.onnx.export(..., dynamo=False)`, torch's TorchScript exporter, which imports
+# `onnx` to finalise the model proto even though nothing in this package imports it:
+# measured under torch 2.14.1 with `onnx` hidden from the import system, the export
+# fails with `OnnxExporterError: Module onnx is not installed!`. So a plain install
+# cannot export, and this extra is what makes the shipped command usable. `onnx` is
+# Apache-2.0 and already in the audited dev environment; `onnxruntime` is not needed to
+# write a file and stays dev-only, where the parity gate runs the exported graph.
+export = ["onnx>=1.17"]
 cuda-hsv = [
   "triton>=3.0,<4; sys_platform == 'linux' and platform_machine == 'x86_64'",
   # Triton 3.0 imports its build helper at runtime; use this project's build floor.
@@ -108,16 +117,22 @@ dev = [
   "pytest>=8.0",
   "pytest-cov>=5.0",
   "pytest-doctestplus>=1.3",
+  # `make test` runs the offline suite with `-n auto` (`PYTEST_XARGS` in the Makefile):
+  # serial pytest was the CI critical path. The synthetic fixture cache is generated
+  # with an atomic rename so concurrent workers never see a half-written set
+  # (`tests/fixtures/synthetic.py`). MIT, as is `execnet`, its only new transitive.
+  "pytest-xdist>=3.5",
   "shapely>=2.0",
   "pre-commit>=3.7",
   "build>=1.2",
   # `fuse-augmentations` was declared here until WP-159 promoted it to a runtime
   # dependency, and `matplotlib` until WP-189 did the same; the reasoning for each
   # moved with it to `[project].dependencies`.
-  # WP-066's export gate only. The export itself is `torch.onnx.export`, already a
-  # runtime dep, so nothing a consumer installs changes: `onnx` reads the emitted
-  # graph back to assert what is in it, and `onnxruntime` executes it to assert the
-  # exported model still answers what the checkpoint answers. Both Apache-2.0/MIT.
+  # WP-066's export gate. `onnx` reads the emitted graph back to assert what is in
+  # it, and `onnxruntime` executes it to assert the exported model still answers what
+  # the checkpoint answers. Both Apache-2.0/MIT. `onnx` is also the one package the
+  # export itself needs at runtime, which is why the `export` extra above declares it
+  # too; `onnxruntime` is a test-only dependency.
   "onnx>=1.17",
   "onnxruntime>=1.19",
   # The notebook smoke test (`tests/notebooks/test_notebooks_run.py`) executes each
@@ -208,6 +223,7 @@ lucid-yolo = "lucid_yolo.cli.train:main"
 lucid-data = "lucid_yolo.cli.data:main"
 lucid-eval = "lucid_yolo.cli.eval:main"
 lucid-predict = "lucid_yolo.cli.predict:main"
+lucid-export = "lucid_yolo.cli.export:main"
 
 [project.urls]
 # The canonical slug, not the one this checkout's remote still uses. GitHub redirects a
@@ -264,6 +280,11 @@ max-returns = 6
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "matplotlib".msg = "only lucid_yolo._viz may import matplotlib"
 "lucid_yolo._viz".msg = "the shipped package never imports the private figure package"
+# `tqdm.auto` resolves to the terminal bar or the notebook widget from where it runs; the
+# plain class always draws the terminal bar, a wall of one line per update in a notebook.
+# The per-file ignores below exempt scripts, tests, notebooks and `lucid_yolo._viz` from
+# this table as a whole, so the `tqdm-auto-only` pre-commit hook is what covers them.
+"tqdm.tqdm".msg = "import tqdm from tqdm.auto, which draws a widget where a notebook runs"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["PLR0913", "TID251"]

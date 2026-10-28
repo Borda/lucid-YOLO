@@ -1,0 +1,230 @@
+# Agent-contract rationale
+
+This page archives the explanation, history and examples accompanying the rules in `AGENTS.md` before [WP-218](../work_packages/wp-218.md). Quoted excerpts preserve that record, including dated counts and historical states; they are not additional instructions. `AGENTS.md` remains the active contract and its §5 owns the full DCO rule. Follow current commands and rules there; the excerpts explain their rationale.
+
+### Contract context
+
+> First file an agent (or engineer) executing the roadmap reads. Mirrors blueprint execution contract (sec. 14), amended by D12 (docs/DECISIONS.md) for single-operator local git flow.
+
+### Prime directive
+
+> **Prime directive**: no file, config, weight, or code fragment from `github.com/ultralytics/*` (or any mirror, package-registry copy, code-rendering page) is ever opened, downloaded, imported, or consulted. Includes docs.ultralytics.com — that site is generated from the same AGPL repository. No recovery from violating this.
+
+### Review tasks
+
+> **Review tasks**: use `.github/skills/code-review/SKILL.md` as the single owner of the review process. Review is read-only: the execution loop below governs implementation, not review. Retain the source, provenance, golden and principal boundaries here; report violations or escalation needs rather than editing files, starting a WP or committing during review.
+
+## 1. The loop
+
+### Required reading
+
+> 1. Read this file, `docs/DECISIONS.md`, `docs/ASSUMPTIONS.md`, `docs/ROADMAP.md`.
+
+### WP selection
+
+> 2. Select **lowest-numbered WP whose dependencies are all `done`**, not marked **[PRINCIPAL]**.
+
+### WP scope
+
+> 3. Implement **only that WP's scope**. Scope creep is a defect: unrelated fixes become their own WP.
+
+### Gate acceptance
+
+> 4. Run `make gate`. Must be green, every previously frozen golden included.
+
+### Local commit boundary
+
+> 5. Commit once (sec. 5 format) on `main` (D12a — one WP = one commit; each independently revertable, leaving `main` releasable).
+
+### Roadmap scope
+
+> 6. Flip WP row to `done` in `docs/ROADMAP.md`, same commit. Keep the Scope cell near the table's median (~285 chars) — guidance, not a limit, and the reasoning behind the scope belongs in the linked work-package file (`docs/work_packages/wp-XXX.md`, included by the log's phase page), per the log's header.
+
+### Session stop
+
+> 7. **Stop and report.** No chaining into the next WP without principal authorization for the session.
+
+### Tested tree
+
+> **Staged set must equal gate-tested set.** Step 4 certifies a tree, not an intention: any edit between gate run and `git commit` invalidates the green — including a docs edit, which is the form this actually takes. Docs-only *commit* is exempt; a docs edit riding inside a code commit is not, nor is a step-6 roadmap flip made after step 4 ran. Re-run the gate, or at minimum the meta tests, before staging. Failure surfaces one commit later as a red `main` with no obvious owner: `fcf3040` shipped that way, and the next agent spent a full run reporting a blocker it was forbidden to fix.
+
+### Principal
+
+> **[PRINCIPAL]** marks work that belongs to whoever *drives* the project rather than whoever *executes* it — the calls that come from intent, ownership or risk appetite, and so cannot be answered by reading the code. It is a role, not a species: an agent acting with delegated authority is still executing, and a principal who writes the patch themselves is still deciding.
+
+### Publication authority
+
+> Pushes batched at phase boundaries, each requiring explicit principal confirmation (D12a). Release tags always [PRINCIPAL].
+
+### D18
+
+> **This loop has an end condition (D18).** Once the reproduction report carries all four accepted tiers and the repository is public, a change that alters no shipped behaviour, adds or removes no public symbol, moves no golden and changes no documented assumption lands as an ordinary gated commit rather than a tracked WP. Everything else still opens one, the gate never relaxes, and adding a new **task** to the model family restarts the full procedure — its own phase, numbered WPs, smoke tier, principal gate and 0.MINOR — because a new task is a new reproduction claim. [WP-141](../work_packages/wp-141.md) landed the contributor guide and the three admission layers that make the relaxation usable by someone other than the agent, and D30 (2026-10-21) records the rest: O3 is cleared, the repository is public and [WP-125](../work_packages/wp-125.md) is accepted, so D18's preconditions all hold and **the relaxation is in force** — a change meeting the four conditions above lands as an ordinary gated commit, and everything else, the audit roadmap's batches included, still opens a WP.
+
+## 2. Environment
+
+### Runtime
+
+> - Python 3.11; PyTorch >= 2.4. CPU wheels sufficient for WP-001…WP-044 except integration runs; [GPU] WPs attempt Apple MPS first (D12c).
+
+### Setup
+
+> - `make setup` — venv, editable install with dev extras, pre-commit hooks.
+
+### Gate
+
+> - `make gate` — pre-commit (all linters, D12d) + offline pytest (`make test` runs it under pytest-xdist, `-n auto`; `PYTEST_XARGS=` runs it serially, which is how a failure is read) + golden suite + frozen-golden regression. **The single command deciding whether a commit may land.**
+
+### Golden freezing
+
+> - `make freeze-goldens MINOR=0.N` — release WPs only.
+
+### Offline gates
+
+> - All unit gates run **offline**: no network, dataset, or GPU. Only **[DATA]** and **[GPU]** WPs need more.
+
+### Markers
+
+> - **The `gpu` and `data` markers are not the accelerator boundary, and reading them as one overstates what the offline gate covers.** `tests/fixtures/markers.py` defines `requires_cuda` (the `gpu` mark plus a skip where CUDA is absent) and `requires_accelerator` (the `gpu` mark plus a skip where neither CUDA nor MPS is present), and 91 sites in 18 files under `tests/` and `scripts/_tests/` use them (counted 2026-10-22; the capture families, optimizer replay, MuSGD, the rotated clip batch and the RLE pair among them); a literal `pytest.mark.gpu` remains in three files, `test_fused_device_hsv.py`, the notebooks run and the four `test_overfit_micro.py` tests. The last two files hold every `data` mark (11 collected tests), and every `data` test is also `gpu`, so `-m "not gpu and not data"` deselects 361 of 5020 collected tests (doctests included) and runs the other 4659. The tests that would need a machine are kept out of the offline run, which is the whole of what the markers do. What an offline green run has therefore not exercised is the marked tests, and no marker says which accelerator branches an unmarked test reaches: an unmarked test runs on CPU because it was written to, not because anything checks that it can. `make gate-gpu` runs the marked tests on a machine with an accelerator, and it is not the merge bar for every commit, but a [GPU] work package does not close without a green `make gate-gpu` run, and a marked test known to fail there leaves `main` red until fixed (D32).
+
+### Wheels
+
+> - **Pre-release wheels for a tier run** carry a PEP 440 `.devN` suffix on the version they lead to, counting from zero (`0.3.0.dev0`); it sorts below that release, so a plain `pip install lucid-yolo` never resolves to one. Bump `N` for every wheel leaving this machine, rebuilds of the same tree included, and verify the installed version before launching anything long — a 15-hour run once trained on a stale wheel because the intended version was never published and pip silently took the newest existing. The bump rides with the commit whose tree the wheel is built from — never a commit of its own, which names no change and leaves the version describing a tree it was not written against. Dev wheels are built and uploaded by hand (`uv build`), never tagged: `release_guard.py` accepts `v0.MINOR.PATCH` only, and a tag claims a release.
+
+### Tqdm
+
+> - **Progress bars: `from tqdm.auto import tqdm`, always.** `tqdm.auto` resolves to terminal bar or notebook widget from where it runs; the plain import always draws the terminal bar, a wall of one line per update in a notebook — and notebooks are where this project's long builds and tier runs launch. Ruff's `TID251` ban covers `src/` and the `tqdm-auto-only` pygrep hook covers `tests/`, `scripts/` and `notebooks/`, so a plain `tqdm` import is refused there; it is presentation, and a hook that greps is as far as the gate goes.
+
+### Doctests
+
+> - **Every `src/` docstring `Examples:` doctest sits in a ```` ```pycon ```` fence, closed after exactly one blank line** — gated by the `doctest-fences` hook (`scripts/lint/audit_doctest_fences.py`), over `src/` only: `scripts/` and `tests/` are development tooling, not fenced, and a module there keeps the form it already uses. The fence changes nothing a gate runs: `make gate`'s `--doctest-modules` reads the `>>>` prompts either way. On the site it is what a reader sees: the API tab (`docs/api/`, rendered by `mkdocstrings` from these docstrings) highlights each block with the `pycon` lexer, and `docs/javascripts/pycon_copy.js` makes its copy button yield the code alone, prompts and output lines dropped. What it settles is one form across the tree, so the next edit copies a convention instead of whichever neighbour sits closest; left as a convention, the two forms drifted into 14 modules mixing both, and `src/` was fenced in one pass rather than module by module. The blank line is not decoration: doctest reads expected output up to the first blank line, so without it the closing fence is taken as output. A `>>>` in an ordinary string literal or comment is not a doctest and is not checked; a `::` literal block of shell commands (`$ python ...`) carries no prompt and stays as it is.
+
+### Names
+
+> - **Test names state the behaviour, with no filler words.** A test function name is its assertion written as an identifier — `test_casting_plugin_keeps_worker_hsv`, never `test_casting_plugin_still_keeps_the_worker_hsv`. Drop articles (`the`, `a`, `an`) and padding adverbs (`still`, `just`, `actually`, `properly`, `correctly`): they lengthen every `-v` line and failure header and change no meaning. Words that change the claim stay (`only`, `never`, `not`, `once`), and the scenario and its reason go in the test's docstring, not the name. Parametrize the same way: plain `bool`, `int` and `str` cases stay bare (`[False, True]`) and pytest derives the id; a case is wrapped in `pytest.param(..., id=...)` only when its default id would be unreadable — a function, a container, another opaque object — or it carries `marks=`. The five padding adverbs are gated by the `test-name-filler-adverbs` hook over `tests/` and `scripts/_tests/`; the rest is convention, not a gate.
+
+### Commands
+
+> - **Five commands ship; `scripts/` does not.** `lucid-yolo` (train/validate), `lucid-data` (`download` · `check` · `build-tiles`), `lucid-eval` (acceptance scoring, on the protocol the checkpoint's own task names), `lucid-predict` (detections for one image, on the task the checkpoint names) and `lucid-export` (one checkpoint to one ONNX file; its `onnx` dependency is the `export` extra) live in `lucid_yolo/cli/`; the first four cover a whole tier run from a wheel alone ([WP-096](../work_packages/wp-096.md), [WP-089](../work_packages/wp-089.md)) and the fifth writes the trained checkpoint for deployment ([WP-204](../work_packages/wp-204.md)). `scripts/` keeps development tooling — goldens, overfit gates, figures, release guard, licence audit — which a remote run needs none of. All five parse with jsonargparse: flags underscored (`--data_root`) as `--data.batch_size` already was, every command takes `--config`. `lucid-download`, the deprecated alias, is removed in 0.4.0 as 0.3.0 said it would be: `lucid-data download` is the only spelling.
+
+### Checkers
+
+> - **`scripts/lint/` holds every repo-content checker**, each a `main(argv)` CLI plus a `.pre-commit-config.yaml` local hook. Most of them arrived by migration — licence audit, commit trailers, doctest coverage, flat test groups, docs presence, docs site, figure captions, license headers, version single-source all used to run inline as a `tests/meta/` pytest test ([WP-129](../work_packages/wp-129.md)) — and the directory has since grown checkers that were never tests at all: the frozen-manifest digest assertion ([WP-168](../work_packages/wp-168.md)) was written as a hook from the start, and the DCO sign-off check ([WP-142](../work_packages/wp-142.md)) was a CI job here until the DCO GitHub App replaced it. Read the directory rather than this sentence for the current set; the count is a property of the tree, and a list written here drifts the moment a checker lands. Every hook carries a distinct emoji in its `name:` and is individually callable — `pre-commit run <hook-id>` (e.g. `pre-commit run license-audit`) — without running the rest of the suite, which is also how a WP-scoped fix is verified before `make gate`. `release-guard` (`scripts/release_guard.py`) runs on every commit and `pre-commit run --all-files` (`stages: [pre-commit, manual]`) as well as standalone (`pre-commit run --hook-stage manual release-guard`) — off a release tag it costs one `git describe` call, so always-run beats an exemption to remember. The hook passes `--metadata-only`, which is not a convenience: the guard's default gate command is `make gate`, `make gate` runs pre-commit, and pre-commit runs this hook, so on the one checkout where the guard has something to check — an exact release tag — the unsplit hook asked for another gate. Metadata-only runs the five file-reading checks and refuses on any of them with the same wording as a full run; what it drops is the gate, and it says so in its own verdict rather than printing the shipping line. The certifying run is `release.yml`'s, on a pushed tag, without the flag. `golden-check` (`scripts/check_goldens.py`) carried the same stages until [WP-162](../work_packages/wp-162.md) measured what "cheap" meant for it — 34.6 s on every commit — and moved it to `stages: [manual]`: `make gate` runs that harness through its own `golden` target, so the commit-stage copy repeated the gate instead of adding to it, and `ci-tests.yml` runs it as a job of its own (`goldens`), which is where CI's full sweep over every golden lives now (43 files when [WP-162](../work_packages/wp-162.md) measured it, 50 today — the number is a property of the release, so it is not restated here). `commit-trailers` (`stages: [commit-msg]`) validates the message actually being written and cannot run under `--all-files` at all, since no commit is in progress then; `commit-trailers-history` is its `--all-files`-reachable sibling, re-validating every local commit ahead of the current branch's configured upstream via the same script's `--unpushed` mode — `@{upstream}..HEAD`, or `HEAD --not --remotes` on a branch with no resolvable upstream (never pushed, or a fork PR checked out by `gh pr checkout`) — which on a pushed branch, the normal state of a clean tree, is zero commits, so a green run there usually means nothing was examined rather than that everything passed. What it does catch is unpushed local work and an amended message before it leaves the machine; `lint.yml`'s `trailers` job is the enforcing owner, and it fetches full history to be one.
+
+### Script tests
+
+> - **`scripts/_tests/` holds every test whose subject is a `scripts/` module** — the lint checkers above, plus `release_guard.py`, `check_goldens.py`, `absolutize_readme.py`, `draw_predictions.py`, `shapes_regression.py`, `overfit_micro.py`: each a functional-core test of the script's own functions on synthetic fixtures, not a live-tree scan (the hook or the `make` target the DoD table cites is what runs against the live tree). Named `test_<script>.py`, mirroring the script it covers. `scripts/README.md` is the map: what each script does and where its test lives.
+
+## 3. Dataset contract
+
+### Dataset validation
+
+> Datasets never committed, never auto-downloaded by test code. `src/lucid_yolo/configs/data/*.yaml` carries the root path; `lucid-data check` (also `make check-data`) validates layout and counts before any [DATA] WP runs against real data. **Where each dataset comes from and what has to be on disk: `docs/DATASETS.md`.**
+
+### COCO
+
+> - **COCO 2017** (R12): `train2017/`, `val2017/`, `annotations/instances_*.json`; 118,287 train / 5,000 val images. The keypoint tier reads `annotations/person_keypoints_*.json` from the same archive instead, and the layout resolver cannot name it — both config files have to override `train_ann_file` and `val_ann_file` explicitly (`docs/DATASETS.md`).
+
+### DOTA
+
+> - **DOTA-v1.0** (R18): original images + labelTxt; 2,806 images / 188,282 instances / 15 classes across all three splits, of which train and val are the annotated two thirds — testing ground truth is withheld by the authors, so it is neither downloaded nor needed. Provisioning is manual (interactive Drive folders, not archive URLs); terms are academic use only. 1024 px tiling is a build artifact, never committed — build with `lucid-data build-tiles --root <root> --out <tiles>`, which writes the layout `obb_nano_smoke.yaml` names. The tier trains on tiles, never the original tree: DOTA images run to several thousand pixels a side in PNG, which has no random-access region decode, so cropping per sample would decode a whole image to yield one 1024 px window ([WP-094](../work_packages/wp-094.md)).
+
+### Real-data acceptance
+
+> - Offline development against [DATA] WPs may use the synthetic stand-in generator (A26/D12b); **tier acceptance runs require real data** — missing real data blocks the tier, it is not worked around.
+
+## 4. Escalation protocol (the anti-guessing rule)
+
+### Escalation record
+
+> Stop and write a `docs/ESCALATION.md` entry — symptom, WP, hypotheses tried, sources consulted, decision requested — on any of:
+
+### Gate failure trigger
+
+> 1. Gate fails after **two** documented assumption iterations.
+
+### Denylisted-source trigger
+
+> 2. Answering a question would require a denylisted source.
+
+### Specification-conflict trigger
+
+> 3. WP spec conflicts with the technical specification or the papers.
+
+### Frozen-golden trigger
+
+> 4. A change would require altering a frozen golden.
+
+### GPU-budget trigger
+
+> 5. A run would exceed 4 GPU-hours and is not already [PRINCIPAL].
+
+## 5. Commit format (provenance-carrying)
+
+### Commit example
+
+> Conventional Commits subject plus mandatory trailers:
+>
+> ```text
+> feat(models): add dual detection head with reg_max=1
+>
+> Implements the one-to-one (topk=7 -> topk2=1, 300 outputs) and
+> one-to-many (topk=10, dense) branches sharing neck features, with
+> direct 4-scalar ltrb regression and no DFL module.
+>
+> WP: 022
+> Provenance: R1 3.2.1, R1 3.2.2, R1 Fig. S2, R6
+> Assumptions: A9
+> Gate: tests/models/test_head.py::test_dual_head_shapes
+>
+> Signed-off-by: Jane Doe <jane@example.com>
+> ```
+
+### Trailers
+
+> - `WP:` exactly one WP id, or `none` for work that belongs to no package — remediation of an audit finding, for one. `Provenance:` at least one source id from docs/PROVENANCE.md (papers and primary literature only). `Assumptions:` A-ids touched, or `none`. `Gate:` test id(s) proving the DoD.
+
+### Denials
+
+> - **`Provenance: none` is a value, not an empty field**, and it may carry its reason: `none (implementation efficiency; R1 silent on target rasterisation)`. An id written inside that explanation is a **reference** — resolved against the register like any other, and never counted as satisfying "name a source", because the line is a denial. A trailer that neither cites nor denies is refused. Both halves are checked: a well-formed id naming no register row fails, and so does an id whose row sits under Placeholders rather than the source allowlist — R15 and R19 are legal-evidence citations, admissible in a document and never as an implementation source.
+
+### Types
+
+> - Types: `feat` `fix` `test` `ci` `docs` `chore` `perf` `refactor` `refine` `exp` `release`. `refine` is this project's own, for a change improving something already correct — a rename, a clearer boundary, a sharpened comment: `refactor` claims behaviour-preserving restructuring, `docs` claims prose, and a rename crossing code, configs and prose is neither.
+
+### DCO
+
+> - **Every commit carries a DCO `Signed-off-by:` trailer** — merge commits, cherry-picks and agent-made commits included. Create it with `git commit -s`, `git merge --signoff` or `git cherry-pick -s`; a merge staged with `--no-commit` is finished with `git commit -s`. The DCO GitHub App checks every PR commit, and a missing sign-off on a pushed commit can only be cleared by rewriting the branch, so sign at creation time; never reword already-pushed commits to add it, since the next merge of the remote branch brings the unsigned originals back as duplicates.
+
+### References
+
+> - No commit message references the Ultralytics repository; papers cited by arXiv id. No issue references (`#42`) or mentions (`@name`) in subject or body — GitHub auto-links them to whatever repository the commit ends up in; co-author trailer emails and the `Signed-off-by:` address are the two exceptions. A markdown heading is not a reference.
+
+## 6. Naming hygiene
+
+### Identifiers
+
+> Internal identifiers use descriptive names derived from the papers' terminology (`DualAssignHead`, `SmallTargetAssigner`, `ProgressiveLossSchedule`, `MuSGD`, `PrototypeMaskHead`, `LongEdgeOBBHead`) — never any implementation's symbol names (we have not seen them, and it stays that way). Assignment, loss, optimizer and rotated-geometry modules are written by hand from the equations: AI assistants may regurgitate AGPL training data, and these are the highest-risk surface.
+
+## 7. Standing prohibitions
+
+### Prohibited actions
+
+> Never: consult or install `ultralytics` or any mirror; create a model-topology config format (ADR-001); copy code from any external detection repository (check LICENSE and provenance before consulting *any* external detection repo, third-party YOLO-seg/YOLO-OBB forks included); plan, promise, or tag a 1.0 (ADR-002); modify a frozen golden; start a [PRINCIPAL] WP; commit datasets or downloaded weights; leave `main` red (D32: a known failing `make gate-gpu` test counts); download, fine-tune, distill from, or compare against released Ultralytics checkpoints.
+
+### Manifest
+
+> **"Modify a frozen golden" is checked, not merely written here** ([WP-168](../work_packages/wp-168.md)). `goldens/frozen/MANIFEST.sha256` pins every frozen file by digest and the `frozen-manifest` pre-commit hook asserts it; the golden harness could not, because it compares each frozen file against that same file's own stored values, so an edit moving the values and the tolerances together was green by construction. Once escalation trigger 4 has been answered and the move is approved, `python scripts/freeze_goldens.py --reseal` is what records it — the only sanctioned writer, and never a hand-edited digest.
+
+### Exceptions
+
+> **The prohibition has been overridden, twice, on the record** — both on `goldens/frozen/0.6/aug_invariants.json`, both dated 2026-09-03, both in `docs/ESCALATION.md`: [WP-154b](../work_packages/wp-154b.md) (the affine composition centre) and [WP-155](../work_packages/wp-155.md) (the letterbox resample). Written here because a rule stated as absolute while exceptions to it exist elsewhere teaches the next reader to distrust the rule rather than to find the exceptions. Neither is a standing waiver, and the second entry says so in its own resolution: the two are dated exceptions, and the next frozen-golden case is a fresh principal decision rather than one this precedent settles. The prohibition is what stands; the route through it is escalation trigger 4, and nothing else.
+
+## 8. Delegated work packages
+
+### Delegation notifications
+
+> A completion notification is not a completion. The harness reports a delegated task `completed` whether the agent finished or stopped mid-sentence on a partial edit, and the notification carries a `result` field that looks like a report — so an unfinished run reads as a finished one that summarized badly. Happened four times in Phase 8, twice found only by inspecting the worktree.
+
+### Completion
+
+> Before treating a delegated WP as done, check the worktree's `git status` against what the spec asked for; a missing test file or untouched entry-point module is the tell. Resume with a message naming what is still missing rather than respawning — the agent picks up from its own transcript with full context. The spawn prompt's "report when done or when stuck" clause helps and does not prevent this.

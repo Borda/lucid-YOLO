@@ -40,6 +40,11 @@ _PREDICT_DIR = Path(__file__).resolve().parents[2] / "tests" / "predict"
 if str(_PREDICT_DIR) not in sys.path:
     sys.path.insert(0, str(_PREDICT_DIR))
 
+# ``script_loader`` (the one ``load_script`` every suite shares) sits beside this file.
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 

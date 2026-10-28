@@ -312,7 +312,7 @@ def test_stdlib_and_relative_imports_need_no_declaration(tmp_path: Path) -> None
     assert guard.check_dependency_tiers(manifest, root, {}).passed
 
 
-def test_conditional_import_still_import(tmp_path: Path) -> None:
+def test_conditional_import_counts_as_import(tmp_path: Path) -> None:
     """An import inside a function or a branch is one the installed package can run.
 
     Walking the module preamble alone would miss it, and a lazily imported
@@ -403,7 +403,7 @@ def test_certifying_run_invokes_gate_exactly_once(tmp_path: Path) -> None:
     assert receipt.read_text(encoding="utf-8").splitlines() == ["ran"]
 
 
-def test_metadata_only_still_refuses_changelog_not_name_tag(tmp_path: Path) -> None:
+def test_metadata_only_refuses_changelog_not_name_tag(tmp_path: Path) -> None:
     """The reduced mode is not a reduced standard: malformed metadata is refused as before.
 
     An escape hatch would be a mode that accepts what the full run refuses. This one
@@ -575,7 +575,7 @@ def test_consumer_extra_requires_guarded_import(tmp_path: Path, source: str, pas
     assert guard.check_dependency_tiers(manifest, root, {}).passed is passes
 
 
-def test_guarded_group_only_dependency_still_refused(tmp_path: Path) -> None:
+def test_guarded_group_only_dependency_refused(tmp_path: Path) -> None:
     """A development group never substitutes for an installable consumer extra."""
     manifest = _write_manifest(tmp_path, "", '"helper"')
     root = _write_package(tmp_path, "try:\n    import helper\nexcept ImportError:\n    pass\n")

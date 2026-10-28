@@ -5,37 +5,54 @@ Both inference decoders emit the **same** fixed-size A9 detection tuple so a
 single evaluator can consume either interchangeably: the suppression-free
 score-based top-k path over the one-to-one branch (WP-041) and the
 confidence-threshold path over the dense one-to-many branch (WP-042). This module
-holds the pieces they share — the A9 tuple column layout, the fixed-length
-zero-padding step, and the eval-time inverse-letterbox hook.
+holds the pieces they share — the A9 tuple column layout, the detection cap and the
+default thresholds, the fixed-length zero-padding step, the one gather that pairs a
+detection with its anchor's per-anchor values, and the eval-time inverse-letterbox
+hooks for boxes, rotated boxes and bare points.
+
+The cap and the defaults are defined here once and imported by every decoder,
+evaluator and entry point that needs them, rather than spelled as a literal in each:
+a second ``300`` is free to drift from the first on the day one of them changes, and
+nothing in either copy's tests would notice.
 
 The A9 detection tuple is ``[x1, y1, x2, y2, score, class]`` with ``score`` in
 ``[0, 1]`` and ``class`` the integral class index stored as a float. Rows beyond
 the available detections carry ``score == 0`` and are ignored by an evaluation
 loop that filters on score.
 
-This module deliberately names no path-specific operator, so the WP-041 meta-test
-that reads the one-to-one decoder's source can keep pinning its suppression-free
-property structurally.
+This module deliberately calls no path-specific operator. The structural pin on the
+one-to-one decoder's suppression-free property (the ``content-pins`` hook) reads only
+:mod:`lucid_yolo.decode.topk_e2e`'s own source, which imports from here.
 
-Provenance: R1 sec. 3.2.1, R3 sec. 4. Assumptions: A9, A10.
+Provenance: R1 sec. 3.2.1, R1 sec. 4.4, R3 sec. 4. Assumptions: A9, A10, A47.
 """
 
 from __future__ import annotations
+
+from typing import Protocol
 
 import torch
 from torch import Tensor
 
 from lucid_yolo.data.letterbox import Letterbox
+from lucid_yolo.tasks import _MAX_DETECTIONS
 
 __all__ = [
     "BOX_CORNERS",
+    "COCO_IMG_SIZE",
+    "DEFAULT_IOU_THRESHOLD",
     "DET_WIDTH",
+    "EVAL_CONF_THRESHOLD",
     "LABEL_COLUMN",
+    "MAX_DETECTIONS",
     "PAD_ANCHOR_INDEX",
     "RBOX_COLUMNS",
     "SCORE_COLUMN",
+    "IndexingDecoder",
+    "gather_by_anchor",
     "pad_anchor_indices",
     "pad_detections",
+    "points_to_letterboxed_original",
     "rboxes_to_letterboxed_original",
     "to_letterboxed_original",
 ]
@@ -61,6 +78,50 @@ LABEL_COLUMN = 5
 #: Negative so it can never be mistaken for a real row and cannot silently index
 #: the last anchor the way ``-1`` would if it were used as a gather index directly.
 PAD_ANCHOR_INDEX = -1
+
+#: Detections kept per image by every decode path, and scored per image by every
+#: evaluation protocol that reads them (R1 sec. 3.2.1, R3 sec. 4, A9, A47). 300, not
+#: COCO's 100: it is the width the one-to-one branch's top-k emits, and a lower scoring
+#: cap would measure a truncation rather than the model.
+MAX_DETECTIONS = _MAX_DETECTIONS
+
+#: Evaluation-time confidence threshold of the suppression paths — permissive, so the
+#: mAP integration sees the low-confidence tail. Not a single-image default:
+#: :data:`lucid_yolo.predict.DEFAULT_CONF_THRESHOLD` answers a different question.
+EVAL_CONF_THRESHOLD = 0.001
+
+#: Class-wise overlap above which the dense path's suppression drops the lower-scoring
+#: of two same-class boxes. The rotated path carries it over unchanged (A61).
+DEFAULT_IOU_THRESHOLD = 0.7
+
+#: Letterbox side of the COCO tiers — detection, segmentation and keypoints — and so the
+#: default canvas of their single-image entry points (R1 sec. 4.4). The oriented tier
+#: trains at 1024 px instead (R18 sec. 4) and states its own side.
+COCO_IMG_SIZE = 640
+
+
+class IndexingDecoder(Protocol):
+    """A decoder that reports, beside each detection row, the anchor that row came from.
+
+    :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` and
+    :class:`~lucid_yolo.decode.nms_path.NMSDecoder` both satisfy it. A per-anchor value
+    outside the A9 tuple — a mask coefficient vector, a point set — can be paired with
+    a detection only through this index, by :func:`gather_by_anchor`.
+
+    Examples:
+        ```pycon
+        >>> from lucid_yolo.decode.topk_e2e import TopKDecoder
+        >>> decoder: IndexingDecoder = TopKDecoder()
+        >>> callable(decoder.decode_with_indices)
+        True
+
+        ```
+    """
+
+    def decode_with_indices(
+        self, cls_logits: Tensor, raw_ltrb: Tensor, anchor_points: Tensor, strides: Tensor
+    ) -> tuple[Tensor, Tensor]:
+        """Decode one branch and return ``(detections, anchor_indices)``, row-aligned."""
 
 
 def pad_detections(detections: Tensor, max_det: int) -> Tensor:
@@ -162,6 +223,63 @@ def pad_anchor_indices(indices: Tensor, max_det: int) -> Tensor:
     return torch.cat((indices, padding), dim=-1)
 
 
+def gather_by_anchor(per_anchor: Tensor, anchor_index: Tensor) -> Tensor:
+    """Select each detection's per-anchor values by the anchor its own box came from.
+
+    The one gather every decode consumer pairs a detection with its anchor's values
+    through — the mask coefficients of Eq. 7 and the decoded point sets alike — so the
+    padding rule below exists once. ``anchor_index`` comes from the decoder that
+    produced the detections, so row ``n`` of the result belongs to the anchor row ``n``'s
+    box came from: a row taken from a differently ranked selection would be a plausible
+    mask or pose of the wrong object beside a correct box.
+
+    Rows carrying :data:`PAD_ANCHOR_INDEX` are clamped to a valid gather position and
+    then zeroed, so a padding row never reads the last anchor's values. For coefficients
+    that is an all-zero vector — a mask logit of exactly 0, a probability of 0.5, and so
+    an empty mask under the strictly-greater A37 threshold; for points it is the origin.
+    Those rows carry score 0 as well. On a batch with no padding row the clamp and the
+    product by one leave every gathered value bit-for-bit what a bare gather returns.
+
+    The values must already be in their final per-anchor form: points are decoded by
+    :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` over the whole anchor grid
+    **before** this runs, because that decode needs every anchor's centre and stride and
+    offers no per-detection indexing.
+
+    Args:
+        per_anchor: Dense per-anchor values of shape ``(B, A, *trailing)`` — mask
+            coefficients ``(B, A, M)``, decoded point sets ``(B, A, K, 2)``.
+        anchor_index: Source anchor per detection, shape ``(B, N)``, as a decoder's
+            ``decode_with_indices`` reports it.
+
+    Returns:
+        The selected values, shape ``(B, N, *trailing)``, padding rows all zero.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> points = torch.arange(12.0).reshape(1, 3, 2, 2)  # three anchors, two points each
+        >>> gathered = gather_by_anchor(points, torch.tensor([[2, -1]]))
+        >>> gathered.shape
+        torch.Size([1, 2, 2, 2])
+        >>> gathered[0, 0]
+        tensor([[ 8.,  9.],
+                [10., 11.]])
+        >>> gathered[0, 1]  # a padding row reads the origin, not the last anchor
+        tensor([[0., 0.],
+                [0., 0.]])
+        >>> gather_by_anchor(torch.ones(1, 3, 4), torch.tensor([[0, -1]]))  # coefficients
+        tensor([[[1., 1., 1., 1.],
+                 [0., 0., 0., 0.]]])
+
+        ```
+    """
+    real = anchor_index >= 0
+    spread = (..., *([None] * (per_anchor.ndim - 2)))
+    index = anchor_index.clamp(min=0)[spread].expand(-1, -1, *per_anchor.shape[2:])
+    gathered = per_anchor.gather(1, index)
+    return gathered * real[spread].to(gathered.dtype)
+
+
 def to_letterboxed_original(
     detections: Tensor,
     orig_size: tuple[int, int],
@@ -211,6 +329,55 @@ def to_letterboxed_original(
     mapped_points = letterbox.inverse_map(corner_points, orig_size, letterboxed_size)
     mapped_boxes = mapped_points.reshape(batch, num_det, BOX_CORNERS)
     return torch.cat((mapped_boxes, detections[..., BOX_CORNERS:]), dim=-1)
+
+
+def points_to_letterboxed_original(
+    points: Tensor,
+    orig_size: tuple[int, int],
+    letterboxed_size: tuple[int, int],
+    allow_upscale: bool = True,
+) -> Tensor:
+    """Un-letterbox bare ``(x, y)`` points of one image back to original coordinates (A10).
+
+    The point-set twin of :func:`to_letterboxed_original`: the same exact inverse the
+    box corners take, applied to points with no score or class column beside them. Any
+    leading shape is kept — ``(N, K, 2)`` point sets, a flat ``(P, 2)`` list — because
+    every point is folded into one flat list for a single
+    :meth:`~lucid_yolo.data.letterbox.Letterbox.inverse_map` call and the shape restored
+    after, so no row can take a different inverse from its neighbour. A batch whose
+    images have different original sizes calls this once per image.
+
+    An empty input skips the inverse and comes back unchanged, so the trailing point
+    axis survives an image with nothing in it.
+
+    Args:
+        points: Letterboxed-canvas points of shape ``(..., 2)``.
+        orig_size: Original image ``(height, width)``.
+        letterboxed_size: Letterboxed canvas ``(height, width)`` the points live in.
+        allow_upscale: The letterbox ``allow_upscale`` setting used at resize time;
+            must match so the inverse recovers the exact geometry. Defaults to ``True``.
+
+    Returns:
+        Points of the input's shape in original-image coordinates.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> # A 2x4 image letterboxed into a 4x4 canvas gains 1px top/bottom pads.
+        >>> sets = torch.tensor([[[0.0, 1.0], [4.0, 3.0]]])  # one instance, two points
+        >>> points_to_letterboxed_original(sets, orig_size=(2, 4), letterboxed_size=(4, 4))
+        tensor([[[0., 0.],
+                 [4., 2.]]])
+        >>> points_to_letterboxed_original(torch.zeros(0, 17, 2), (2, 4), (4, 4)).shape
+        torch.Size([0, 17, 2])
+
+        ```
+    """
+    if not points.numel():
+        return points
+    letterbox = Letterbox(letterboxed_size, allow_upscale=allow_upscale)
+    flat = letterbox.inverse_map(points.reshape(-1, 2), orig_size, letterboxed_size)
+    return flat.reshape(points.shape)
 
 
 def rboxes_to_letterboxed_original(

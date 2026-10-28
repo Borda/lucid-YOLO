@@ -49,6 +49,7 @@ __all__ = ["decode_instance_masks", "masks_to_original"]
 #: Probability above which a decoded mask pixel is foreground (A37). Unspecified
 #: by the papers; ``0.5`` is the neutral cut of a sigmoid trained with BCE.
 _MASK_THRESHOLD: float = 0.5
+_MASK_CHUNK_SIZE = 32
 
 
 def decode_instance_masks(
@@ -60,10 +61,11 @@ def decode_instance_masks(
 ) -> Tensor:
     """Assemble, upsample, box-crop and binarize per-instance masks (A16, A37).
 
-    Runs the four decode steps of the module docstring in order. Every step is
-    batched — there is no Python loop over images or instances — and every
-    coordinate tensor is built from ``prototypes``, so the function runs wherever
-    its inputs live.
+    Runs the four decode steps of the module docstring in order. Assembly stays
+    batched; upsampling and cropping process at most 32 instances per image at a
+    time, bounding the full-canvas float temporary independently of detection
+    count. The final boolean stack still contains every instance. Coordinate
+    tensors are built from ``prototypes`` on the inputs' device.
 
     ``coefficients`` must **already** be gathered for the kept detections, by the
     very indices ``boxes`` was gathered by
@@ -112,9 +114,30 @@ def decode_instance_masks(
         # which a caller stacking per-image results needs and a raise does not give it.
         return prototypes.new_zeros((prototypes.shape[0], 0, *image_size), dtype=torch.bool)
     probabilities = assemble_masks(prototypes, coefficients).sigmoid()  # (B, N, Hp, Wp)
+    masks = prototypes.new_empty((prototypes.shape[0], coefficients.shape[1], *image_size), dtype=torch.bool)
+    # Keep assembly's matrix multiplication unchanged: splitting it can select a
+    # different kernel. Only the independent resize/crop rows are chunked.
+    for start in range(0, coefficients.shape[1], _MASK_CHUNK_SIZE):
+        stop = start + _MASK_CHUNK_SIZE
+        upsampled = F.interpolate(probabilities[:, start:stop], size=image_size, mode="bilinear", align_corners=False)
+        crop = _box_crop(boxes[:, start:stop], image_size, prototypes)
+        masks[:, start:stop] = (upsampled * crop.to(upsampled.dtype)) > threshold
+    return masks
+
+
+def _decode_instance_masks_unchunked(
+    prototypes: Tensor, coefficients: Tensor, boxes: Tensor, image_size: tuple[int, int]
+) -> Tensor:
+    """Retain the original single-resize segmentation graph for ONNX export.
+
+    Eager evaluation uses bounded chunks; export keeps the pre-existing operations
+    and their shapes, avoiding a traced Python loop and additional graph nodes.
+    Export always supplies a positive fixed detection count.
+    """
+    probabilities = assemble_masks(prototypes, coefficients).sigmoid()
     upsampled = F.interpolate(probabilities, size=image_size, mode="bilinear", align_corners=False)
-    crop = _box_crop(boxes, image_size, prototypes)  # (B, N, H, W)
-    return (upsampled * crop.to(upsampled.dtype)) > threshold
+    crop = _box_crop(boxes, image_size, prototypes)
+    return (upsampled * crop.to(upsampled.dtype)) > _MASK_THRESHOLD
 
 
 def _box_crop(boxes: Tensor, image_size: tuple[int, int], reference: Tensor) -> Tensor:

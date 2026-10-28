@@ -10,32 +10,14 @@ gate that runs it.
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
-from types import ModuleType
+
+from script_loader import load_script
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AUDIT_PATH = REPO_ROOT / "scripts" / "lint" / "audit_license_headers.py"
 
 
-def _load_audit() -> ModuleType:
-    """Load ``scripts/lint/audit_license_headers.py`` as an importable module.
-
-    Examples:
-        >>> module = _load_audit()
-        >>> module.__name__
-        'audit_license_headers'
-        >>> callable(module.find_violations)
-        True
-    """
-    spec = importlib.util.spec_from_file_location("audit_license_headers", AUDIT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-audit = _load_audit()
+audit = load_script("audit_license_headers")
 
 
 def test_license_apache2_accepts_real_header(tmp_path: Path) -> None:

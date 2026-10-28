@@ -36,6 +36,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     # The tag reaches every step through the environment, never through the source
     # of a `run:` script: `git check-ref-format` permits `;`, `$` and backticks in
     # a tag name, and `v0.1.0;<command>` matches the trigger above. Passed as
@@ -50,14 +51,18 @@ jobs:
       - name: "📥 Check out the repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: "🐍 Set up Python"
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-          cache: pip
       - name: "📦 Install uv"
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          # Off: this job publishes distributions, and a restored cache is an input
+          # a poisoned PR run could have written (zizmor cache-poisoning).
+          enable-cache: false
       # `typing` as well as `dev`: `make gate` runs pre-commit, which runs the
       # `language: system` mypy hook against this venv.
       - name: "🧰 Create venv and install dev extras"
@@ -82,11 +87,17 @@ jobs:
         run: .venv/bin/python scripts/absolutize_readme.py --ref "${TAG}"
       - name: "🏗️ Build sdist and wheel"
         run: uv build --out-dir dist
+      # The wheel itself, installed outside the checkout: every other install in CI is
+      # editable, so missing package data or an undeclared import would ship green.
+      # Runs on the README-pinned build above, so `twine check` sees the long
+      # description PyPI would render.
+      - name: "🧪 Wheel smoke (install, console scripts, packaged config, twine check)"
+        uses: ./.github/actions/wheel-smoke # zizmor: ignore[self-repository] the long ./ form is the documented local-action path
       # A rehearsal's distributions are named apart: they are built from the
       # dispatch branch, not the tree a tag names, and an artifact indistinguishable
       # from a release build will eventually be treated as one.
       - name: "📤 Upload distributions as artifacts"
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: lucid-yolo-${{ env.TAG }}${{ github.event_name == 'workflow_dispatch' && '-rehearsal' || '' }}
           path: dist/*

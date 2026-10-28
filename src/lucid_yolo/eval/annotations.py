@@ -64,8 +64,8 @@ import numpy as np
 import torch
 from faster_coco_eval import mask as coco_mask
 from torch import Tensor  # runtime import: LazyTargets' base class subscripts it
-from torchvision.io import ImageReadMode, read_image
 
+from lucid_yolo.data._image import decode_rgb, to_unit_float
 from lucid_yolo.data.coco import parse_coco_keypoints
 from lucid_yolo.data.targets import Targets
 
@@ -75,14 +75,17 @@ if TYPE_CHECKING:
 
     from lucid_yolo.data.letterbox import Letterbox
 
-#: Divisor mapping ``uint8`` pixel values onto the unit float range the model expects.
-_UINT8_MAX = 255.0
-
 #: Element count of a well-formed COCO ``bbox`` (``[x, y, width, height]``).
 _XYWH_LEN = 4
 
 #: Coordinate count of a keypoint ``(x, y)``.
 _POINT_DIM = 2
+
+#: Dimensions of one decoded image, channels first: ``(C, H, W)``.
+_CHW_NDIM = 3
+
+#: Channels of an RGB image, the only layout the model was trained on.
+_RGB_CHANNELS = 3
 
 
 @dataclass(frozen=True)
@@ -549,8 +552,14 @@ def read_letterboxed_image(path: Path, letterbox: Letterbox) -> tuple[Tensor, tu
     validation geometry. :func:`letterboxed_batches` is this function in a loop, and
     single-image inference (:func:`lucid_yolo.predict.predict_image`) is one call of it
     — which is why it is a function rather than three lines inside the batcher. A second
-    copy would be free to read ``ImageReadMode.UNCHANGED``, or to scale by ``256``, and
-    the model would answer plausibly either way.
+    copy would be free to read ``ImageReadMode.UNCHANGED``, or to scale a 16-bit PNG by
+    the 8-bit ``255``, and the model would answer plausibly either way.
+
+    The decode and the scale are the training readers' own
+    (:func:`~lucid_yolo.data._image.decode_rgb`,
+    :func:`~lucid_yolo.data._image.to_unit_float`): codes are divided by their dtype's
+    maximum, so an 8-bit image reads exactly as ``code / 255.0`` and a 16-bit one by
+    ``65535``, as it does in training.
 
     Args:
         path: Image file to read.
@@ -561,6 +570,9 @@ def read_letterboxed_image(path: Path, letterbox: Letterbox) -> tuple[Tensor, tu
         ``(height, width)`` the file decoded to — the frame an inverse letterbox maps
         predictions back onto (A10).
 
+    Raises:
+        OSError: If the file is missing or cannot be decoded; the path is named.
+
     Examples:
         ```pycon
         >>> image, orig_size = read_letterboxed_image(path, letterbox)  # needs an image file  # doctest: +SKIP
@@ -569,9 +581,75 @@ def read_letterboxed_image(path: Path, letterbox: Letterbox) -> tuple[Tensor, tu
 
         ```
     """
-    raw = read_image(str(path), ImageReadMode.RGB)
-    orig_size = (int(raw.shape[-2]), int(raw.shape[-1]))
-    letterboxed, _ = letterbox(raw.to(torch.float32) / _UINT8_MAX, Targets.empty())
+    return letterbox_image_tensor(decode_rgb(path), letterbox)
+
+
+def letterbox_image_tensor(image: Tensor, letterbox: Letterbox) -> tuple[Tensor, tuple[int, int]]:
+    """Letterbox an already-decoded image exactly as :func:`read_letterboxed_image` does a file.
+
+    The tensor half of the file reader, and the one both share: a decoded file and an
+    image a caller already holds reach the model through the same scale and the same
+    letterbox, so a picture passed as a tensor and the same picture saved and read back
+    get the same answer. Unsigned integer codes are divided by their dtype's maximum
+    (:func:`~lucid_yolo.data._image.to_unit_float`); a floating-point image is taken as
+    already in that unit range and refused when it is not, because a ``0..255`` float
+    image would otherwise be letterboxed, run and answered plausibly from saturated
+    pixels.
+
+    Args:
+        image: A ``(3, H, W)`` RGB image: ``uint8``/``uint16`` codes, or floating point
+            in ``[0, 1]``.
+        letterbox: The validation letterbox applied to it.
+
+    Returns:
+        The letterboxed ``(3, out_h, out_w)`` float32 image, and the **original**
+        ``(height, width)`` -- the frame an inverse letterbox maps predictions back onto
+        (A10).
+
+    Raises:
+        ValueError: If ``image`` is not ``(3, H, W)``, or is floating point with any NaN
+            or infinite value or with values outside ``[0, 1]``.
+        TypeError: If ``image`` holds signed integer, boolean or complex values, none of
+            which carries an image code range.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> from lucid_yolo.data.letterbox import Letterbox
+        >>> codes = torch.full((3, 40, 64), 255, dtype=torch.uint8)
+        >>> canvas, orig_size = letterbox_image_tensor(codes, Letterbox(64))
+        >>> tuple(canvas.shape), orig_size, round(canvas.max().item(), 4)
+        ((3, 64, 64), (40, 64), 1.0)
+        >>> letterbox_image_tensor(torch.full((3, 40, 64), 255.0), Letterbox(64))
+        Traceback (most recent call last):
+            ...
+        ValueError: float image values must lie in [0, 1]; got [255.0, 255.0]: pass uint8 codes or divide by 255
+
+        ```
+    """
+    if image.ndim != _CHW_NDIM or image.shape[0] != _RGB_CHANNELS:
+        raise ValueError(
+            f"expected a (3, H, W) RGB image, got shape {tuple(image.shape)}; an (H, W, 3) array from "
+            f"PIL or numpy needs .permute(2, 0, 1) first"
+        )
+    if image.is_floating_point():
+        # Finiteness first: a NaN extremum makes both range comparisons below false.
+        non_finite = int((~torch.isfinite(image)).sum())
+        if non_finite:
+            raise ValueError(
+                f"float image values must be finite and lie in [0, 1]; got {non_finite} NaN or infinite of "
+                f"{image.numel()} values: fix the step that produced the image before passing it"
+            )
+        low, high = float(image.min()), float(image.max())
+        if low < 0.0 or high > 1.0:
+            raise ValueError(
+                f"float image values must lie in [0, 1]; got [{low}, {high}]: pass uint8 codes or divide by 255"
+            )
+        unit = image.to(torch.float32)
+    else:
+        unit = to_unit_float(image)
+    orig_size = (int(image.shape[-2]), int(image.shape[-1]))
+    letterboxed, _ = letterbox(unit, Targets.empty())
     return letterboxed, orig_size
 
 

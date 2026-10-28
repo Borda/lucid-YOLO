@@ -26,12 +26,6 @@ from lucid_yolo.assign import SmallTargetAssigner, UniqueAssigner, make_anchor_p
 _CENTRE_ANCHOR = 5
 
 
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed every RNG source before each test for deterministic tensors."""
-    torch.manual_seed(0)
-
-
 def _grid_points() -> Tensor:
     """Return the 16 stride-8 anchor centres of a 4x4 grid; x fastest, row-major.
 

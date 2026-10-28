@@ -14,10 +14,11 @@ crop carries them off the canvas, rather than being clamped to the edge or zeroe
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 
 import pytest
 import torch
+from tensors import seeded_generator
 
 from lucid_yolo.data import Targets, boxes_from_polygons
 from lucid_yolo.data.mosaic import MosaicAssembly, MosaicParams
@@ -30,23 +31,6 @@ _TILE = 32
 _GREY = 114.0 / 255.0
 #: Mosaic always consumes exactly four images.
 _MOSAIC_COUNT = 4
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed every RNG source before each test so generated geometry is deterministic."""
-    torch.manual_seed(0)
-    yield
-
-
-def _generator(seed: int = 1234) -> torch.Generator:
-    """Return a CPU generator seeded to ``seed`` for reproducible sampling.
-
-    Examples:
-        >>> _generator(42).initial_seed()
-        42
-    """
-    return torch.Generator().manual_seed(seed)
 
 
 def _image() -> torch.Tensor:
@@ -133,7 +117,7 @@ class TestKeypoints:
         same offset its box takes. Anything else puts the landmark somewhere other than the
         pixels it describes, which the merged canvas gives no way to detect later.
         """
-        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
         items = _items(_posed_targets)
 
         _, out = mosaic(items)
@@ -149,7 +133,7 @@ class TestKeypoints:
         Mosaic is on the train path of every task, and the frozen goldens run through it
         with no points at all. The carry-through has to be an exact no-op for them.
         """
-        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
 
         _, out = mosaic(_items(_one_box_targets))
 
@@ -163,7 +147,7 @@ class TestKeypoints:
         every later instance onto its neighbour's landmarks — a silent misalignment, since
         the counts would still agree.
         """
-        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
         vanishing = Targets(
             boxes=torch.tensor([[8.0, 8.0, 16.0, 16.0], [-60.0, -60.0, -50.0, -50.0]]),
             labels=torch.tensor([0, 1]),
@@ -186,7 +170,7 @@ class TestKeypoints:
         zeroing its visibility would overload A66's "never annotated" flag, so it must
         survive exactly as given.
         """
-        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
 
         _, out = mosaic(_items(_posed_targets))
 
@@ -203,7 +187,7 @@ class TestCanvasGeometry:
 
     def test_canvas_twice_target_size(self) -> None:
         """The output image spans ``2S x 2S`` regardless of centre sampling."""
-        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
 
         out_image, _ = mosaic(_items(_one_box_targets))
 
@@ -211,7 +195,7 @@ class TestCanvasGeometry:
 
     def test_every_box_within_canvas_bounds(self) -> None:
         """Every merged box is clamped to ``[0, 2S]`` on both axes."""
-        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
 
         _, out = mosaic(_items(_one_box_targets))
 
@@ -225,7 +209,7 @@ class TestInstanceCounts:
 
     def test_unclipped_inputs_keep_every_instance(self) -> None:
         """Four one-box tiles placed without clipping yield exactly four boxes."""
-        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
 
         _, out = mosaic(_items(_one_box_targets))
 
@@ -236,7 +220,7 @@ class TestInstanceCounts:
         """A box straddling a tile edge is dropped once the off-canvas part is cut away."""
         edge = Targets(boxes=torch.tensor([[28.0, 8.0, 60.0, 16.0]]), labels=torch.tensor([0]))
         items = [(_image(), edge.clone()) for _ in range(_MOSAIC_COUNT)]
-        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator(), min_visibility=0.5)
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator(), min_visibility=0.5)
 
         _, out = mosaic(items)
 
@@ -342,7 +326,7 @@ class TestQuadrantPlacement:
 
     def test_marker_pixels_land_in_expected_quadrants(self) -> None:
         """Each tile's bright marker pixel appears inside that tile's canvas quadrant."""
-        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
         images = [torch.full((1, _TILE, _TILE), _GREY) for _ in range(_MOSAIC_COUNT)]
         for image in images:
             image[0, _TILE // 2, _TILE // 2] = 1.0
@@ -366,7 +350,7 @@ class TestBoxPolygonConsistency:
 
     def test_merged_boxes_match_polygon_extents(self) -> None:
         """Every merged box equals the extent of its merged polygon ring."""
-        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
 
         _, out = mosaic(_items(_polygon_targets))
 
@@ -381,7 +365,7 @@ class TestGreyFill:
     def test_uncovered_canvas_grey(self) -> None:
         """Small tiles leave grey gaps between the quadrants."""
         small = 8
-        mosaic = MosaicAssembly(target_size=_TARGET, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_TARGET, generator=seeded_generator())
         images = [torch.zeros(3, small, small) for _ in range(_MOSAIC_COUNT)]
         items = [(image, Targets.empty()) for image in images]
 

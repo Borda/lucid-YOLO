@@ -49,18 +49,19 @@ pipeline; this container is image-agnostic and stores geometry only.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor
 
+from lucid_yolo.data._common import _BOX_DIM, _POINT_DIM, _QUAD_CORNERS, _RBOX_DIM
+from lucid_yolo.data.rotated_geom import polygons_to_rboxes
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 __all__ = ["Targets"]
 
-#: Column count of an ``xyxy`` axis-aligned box.
-_BOX_DIM = 4
-#: Column count of a long-edge rotated box ``(cx, cy, w, h, theta)``.
-_RBOX_DIM = 5
-#: Column count of a polygon point ``(x, y)``.
-_POINT_DIM = 2
 #: Coordinate count of a keypoint ``(x, y)``.
 _KEYPOINT_DIM = 2
 
@@ -420,6 +421,50 @@ class Targets:
         if not present:
             return _empty_keypoints(), _empty_keypoint_vis()
 
+        # Called for its refusal: the rows joined below carry their K, so the count is not needed.
+        Targets._shared_keypoint_count(present)
+        return (
+            torch.cat([target.keypoints for target in present], dim=0),
+            torch.cat([target.keypoint_vis for target in present], dim=0),
+        )
+
+    @staticmethod
+    def _shared_keypoint_count(items: Sequence[Targets]) -> int:
+        """Return the point count ``K`` that every item carrying point sets agrees on.
+
+        An instance-free item holds the canonical ``(0, 0, 2)`` empty, whose point axis is
+        ``0`` rather than its batch's ``K``, so only items with at least one point set have a
+        say. Both batch-level joins read ``K`` here: :meth:`concat`, which keeps only those
+        items, and the loader's packed transport
+        (:func:`~lucid_yolo.ptl.datamodule.pack_targets`), which reshapes the empties to it.
+
+        Args:
+            items: The targets being joined, in order.
+
+        Returns:
+            The shared ``K``, or ``0`` when no item carries a point set.
+
+        Raises:
+            ValueError: If two items carrying point sets disagree on ``K``.
+
+        Examples:
+            ```pycon
+            >>> posed = Targets(
+            ...     boxes=torch.zeros((1, 4)),
+            ...     labels=torch.tensor([0]),
+            ...     keypoints=torch.zeros((1, 3, 2)),
+            ...     keypoint_vis=torch.ones((1, 3), dtype=torch.int64),
+            ... )
+            >>> Targets._shared_keypoint_count([posed, Targets.empty()])
+            3
+            >>> Targets._shared_keypoint_count([Targets.empty()])
+            0
+
+            ```
+        """
+        present = [target for target in items if target.keypoints.shape[0] > 0]
+        if not present:
+            return 0
         keypoint_count = present[0].keypoints.shape[1]
         for target in present[1:]:
             other_count = target.keypoints.shape[1]
@@ -427,10 +472,7 @@ class Targets:
                 raise ValueError(
                     f"cannot concat targets with differing keypoint counts: {keypoint_count} and {other_count}"
                 )
-        return (
-            torch.cat([target.keypoints for target in present], dim=0),
-            torch.cat([target.keypoint_vis for target in present], dim=0),
-        )
+        return keypoint_count
 
     @classmethod
     def empty(cls) -> Targets:
@@ -456,4 +498,67 @@ class Targets:
             rboxes=_empty_rboxes(),
             keypoints=_empty_keypoints(),
             keypoint_vis=_empty_keypoint_vis(),
+        )
+
+    @classmethod
+    def from_quads(
+        cls,
+        quads: Sequence[Tensor],
+        labels: Tensor,
+        *,
+        difficult: Tensor | None = None,
+        keypoints: Tensor | None = None,
+        keypoint_vis: Tensor | None = None,
+    ) -> Targets:
+        """Build targets from one quadrilateral per instance: its envelope box and its rotated fit.
+
+        Both modalities are derived from the *same* quad, which is what makes ``boxes[i]`` and
+        ``rboxes[i]`` one object rather than two lists that happen to be ordered alike — the
+        shared instance axis the three oriented readings (COCO ``oriented=True``, YOLO's
+        nine-field rows, DOTA's ``labelTxt``) and every rotated transform rely on. ``boxes`` is
+        :func:`~lucid_yolo.data.transforms.boxes_from_polygons` of the quads and ``rboxes`` is
+        :func:`~lucid_yolo.data.rotated_geom.polygons_to_rboxes` of them stacked; ``polygons``
+        stays empty, the quad being carried by ``rboxes`` up to the rectangle fit. Parsing a
+        quad out of its file, and refusing one with the file's name in the message, stays with
+        each reader.
+
+        Args:
+            quads: One ``(4, 2)`` float32 quadrilateral per instance, in instance order.
+            labels: ``(N,)`` int64 class ids aligned with ``quads``.
+            difficult: Optional ``(N,)`` bool R18 flags; omitted means no instance is difficult.
+            keypoints: Optional ``(N, K, 2)`` float32 coordinates, given together with
+                ``keypoint_vis``.
+            keypoint_vis: Optional ``(N, K)`` int64 visibility paired with ``keypoints``.
+
+        Returns:
+            Targets whose boxes, labels, rotated boxes and any channel given share one
+            instance axis; every modality empty when ``quads`` is.
+
+        Raises:
+            ValueError: If a quad is not ``(4, 2)``, or a channel's length disagrees with
+                ``quads`` (the latter from the constructor's own validation).
+
+        Examples:
+            ```pycon
+            >>> quad = torch.tensor([[3.0, 2.0], [7.0, 2.0], [7.0, 4.0], [3.0, 4.0]])
+            >>> targets = Targets.from_quads([quad], torch.tensor([1]))
+            >>> targets.boxes.tolist(), [round(v, 4) for v in targets.rboxes[0].tolist()]
+            ([[3.0, 2.0, 7.0, 4.0]], [5.0, 3.0, 4.0, 2.0, 0.0])
+
+            ```
+        """
+        # Deferred: `transforms` imports this module at load time, so a top-level import would cycle.
+        from lucid_yolo.data.transforms import boxes_from_polygons  # noqa: PLC0415
+
+        rings = list(quads)
+        shapes = sorted({tuple(ring.shape) for ring in rings} - {(_QUAD_CORNERS, _POINT_DIM)})
+        if shapes:
+            raise ValueError(f"from_quads needs ({_QUAD_CORNERS}, {_POINT_DIM}) quadrilaterals; got shapes {shapes}")
+        return cls(
+            boxes=boxes_from_polygons(rings),
+            labels=labels,
+            rboxes=polygons_to_rboxes(torch.stack(rings, dim=0)) if rings else _empty_rboxes(),
+            difficult=_empty_flags() if difficult is None else difficult,
+            keypoints=_empty_keypoints() if keypoints is None else keypoints,
+            keypoint_vis=_empty_keypoint_vis() if keypoint_vis is None else keypoint_vis,
         )

@@ -28,17 +28,27 @@ import warnings
 from typing import TYPE_CHECKING, TypeVar, cast
 
 import torch
-from packaging.version import Version
-from pytorch_lightning import Callback
 from torch import Tensor, nn
 
 from lucid_yolo.models.heads.detect import DualHeadOutput, _DetectionBranch
+from lucid_yolo.ptl import _graph_replay
+from lucid_yolo.ptl._graph_replay import (
+    BF16_REPLAY_SUPPORTED,
+    ReplayLifecycle,
+    copy_out_live_gradients,
+    drain_device,
+    global_hook_breach,
+    module_hook_breach,
+    replay_autocast,
+    tensor_signature,
+)
+from lucid_yolo.ptl._graph_replay import precision_signature as _precision_signature
 
 _Output = TypeVar("_Output")
 _Features = tuple[Tensor, Tensor, Tensor]
 
-#: First verified BF16 replay runtime; 2.4's path does not meet the exact eager oracle.
-_BF16_REPLAY_SUPPORTED = Version(torch.__version__) >= Version("2.9")
+#: First verified BF16 replay runtime, bound here so a patch of this module reaches the gate below.
+_BF16_REPLAY_SUPPORTED = BF16_REPLAY_SUPPORTED
 
 #: Method names through which a module's call reaches its arithmetic; the same name set on
 #: an instance shadows the class method a recording replays or a certificate fingerprints.
@@ -46,8 +56,6 @@ _DISPATCH = ("forward", "forward_branch", "_keypoints", "_base_predictions")
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
-
-    from pytorch_lightning import LightningModule, Trainer
 
 
 def _detection_stages(backbone: nn.Module, neck: nn.Module, head: nn.Module, images: Tensor) -> DualHeadOutput:
@@ -160,47 +168,6 @@ class _StemNetwork(nn.Module):
         return (cast("Tensor", self.stem(feature)),)
 
 
-def _fp32_policy() -> tuple[object, ...]:
-    """Read the float32 matmul and cuDNN policy through the API this torch build exposes.
-
-    Once any ``fp32_precision`` attribute has been set, torch refuses the legacy getters
-    (``get_float32_matmul_precision``, ``allow_tf32``) with a :class:`RuntimeError`. A
-    build that has the new attributes is therefore read only through them; they also
-    reflect values written through the legacy setters.
-    """
-    matmul, cudnn = torch.backends.cuda.matmul, torch.backends.cudnn
-    if not hasattr(matmul, "fp32_precision"):
-        return torch.get_float32_matmul_precision(), matmul.allow_tf32, cudnn.allow_tf32
-    return (
-        getattr(torch.backends, "fp32_precision", None),
-        matmul.fp32_precision,
-        getattr(cudnn, "fp32_precision", None),
-        getattr(getattr(cudnn, "conv", None), "fp32_precision", None),
-        getattr(getattr(cudnn, "rnn", None), "fp32_precision", None),
-    )
-
-
-def _precision_signature() -> tuple[object, ...]:
-    """Read the autocast and CUDA numeric policy a recording keeps for its whole lifetime.
-
-    Raises:
-        RuntimeError: When torch refuses one of the policy queries.
-    """
-    return (
-        torch.is_autocast_enabled(),
-        torch.get_autocast_dtype("cuda"),
-        *_fp32_policy(),
-        torch.backends.cuda.preferred_blas_library(),
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
-        torch.backends.cudnn.deterministic,
-        torch.backends.cudnn.benchmark,
-        torch.backends.cudnn.enabled,
-        torch.are_deterministic_algorithms_enabled(),
-        torch.get_default_dtype(),
-    )
-
-
 def _input_breach(images: Tensor, precision: tuple[object, ...], *, allow_input_grad: bool = False) -> str | None:
     """Name why this call's inputs or autograd mode cannot use a recording, if they cannot."""
     if images.requires_grad and not allow_input_grad:
@@ -240,10 +207,7 @@ def _module_breach(
         ``None`` when no module breaches.
     """
     members = tuple(modules)
-    if any(
-        module._forward_hooks or module._forward_pre_hooks or module._backward_hooks or module._backward_pre_hooks
-        for module in members
-    ):
+    if any(module_hook_breach(module) for module in members):
         return "carries a forward or backward hook"
     overridden = next(
         (name for name in dispatch for module in members if module is not exclude and name in vars(module)), None
@@ -257,16 +221,7 @@ def _module_breach(
 
 def _ineligibility(network: nn.Module) -> str | None:
     """Name the first property of the stages a recording could not keep honouring, if any."""
-    runtime = nn.modules.module
-    if any(
-        getattr(runtime, name, {})
-        for name in (
-            "_global_forward_hooks",
-            "_global_forward_pre_hooks",
-            "_global_backward_hooks",
-            "_global_backward_pre_hooks",
-        )
-    ):
+    if global_hook_breach():
         return "a global module hook is registered"
     modules = tuple(network.modules())
     breach = _module_breach(modules, exclude=network)
@@ -323,18 +278,7 @@ def _network_signature(network: nn.Module) -> tuple[object, ...]:
             )
             for module in modules
         ),
-        tuple(
-            (
-                id(tensor),
-                tensor.data_ptr(),
-                tuple(tensor.shape),
-                tensor.stride(),
-                tensor.dtype,
-                tensor.device,
-                tensor.requires_grad,
-            )
-            for tensor in tensors
-        ),
+        tensor_signature(tensors),
     )
 
 
@@ -374,21 +318,41 @@ class _NetworkCapture:
         self.clear()
 
     def clear(self) -> None:
-        """Release the recording and start a fresh fit's eligibility decision."""
-        for holder in getattr(self, "_stems", {}).values():
-            holder.clear()
+        """Reset the holder, then drain the recorded device before the recordings are released.
+
+        The reset comes first, so a failing drain still leaves an empty holder; the stem holders
+        and this holder's recording stay alive in local references until the drain has finished.
+        Every stem holder is cleared even when an earlier one fails, and the first failure is
+        raised once all are. Without a recording nothing is drained, so a CPU run and
+        :meth:`__setstate__` never touch the CUDA runtime.
+        """
+        stems = tuple(getattr(self, "_stems", {}).values())
+        previous, device = getattr(self, "_network", None), getattr(self, "_device", None)
         self._stems: dict[int, _NetworkCapture] = {}
         self._stem_owners: tuple[int, ...] | None = None
         self._stem_names: dict[int, str] = {}
-        previous = getattr(self, "_network", None)
-        if previous is not None:
-            vars(previous).pop("forward", None)
         self._network: nn.Module | None = None
+        self._device: torch.device | None = None
         self._input: tuple[object, ...] | None = None
         self._state: tuple[object, ...] | None = None
         self._owners: tuple[int, ...] | None = None
         self._disabled = False
         self._pending_backward = False
+        failure: RuntimeError | None = None
+        for holder in stems:
+            try:
+                holder.clear()
+            except RuntimeError as error:
+                failure = failure or error
+        if previous is not None:
+            try:
+                drain_device(device)
+            except RuntimeError as error:
+                failure = failure or error
+            finally:
+                vars(previous).pop("forward", None)
+        if failure is not None:
+            raise failure
 
     def __getstate__(self) -> dict[str, object]:
         """Leave CUDA recordings out of pickle and deepcopy."""
@@ -595,60 +559,51 @@ class _NetworkCapture:
             # A second forward before the previous replay's backward would overwrite the
             # static activations that backward still has to read, so it runs eagerly.
             return eager(images)
-        with torch.autocast(
-            "cuda", enabled=torch.is_autocast_enabled(), dtype=torch.get_autocast_dtype("cuda"), cache_enabled=False
-        ):
+        with replay_autocast():
             if self._network is None:
-                snapshots = [(buffer, buffer.detach().clone()) for buffer in network.buffers()]
-                with torch.random.fork_rng(devices=[images.device.index]):
-                    try:
-                        sample = images.detach().clone().requires_grad_(images.requires_grad)
-                        graphed = cast("nn.Module", torch.cuda.make_graphed_callables(network, (sample,)))
-                    finally:
-                        # Warmup runs on a side stream the recorder owns; a failure there
-                        # can leave BatchNorm writes queued, so drain the device before the
-                        # restore below copies onto the current stream.
-                        torch.cuda.synchronize(images.device)
-                        with torch.no_grad():
-                            for buffer, snapshot in snapshots:
-                                buffer.copy_(snapshot)
+                sample = images.detach().clone().requires_grad_(images.requires_grad)
+                # Looked up through the module: the one seam a CPU test replaces for both holders.
+                graphed = _graph_replay.record_graphed(network, (sample,), images.device)
                 self._network, self._input, self._state, self._owners = graphed, signature, state, owners
+                self._device = images.device
+            self._copy_out_live_gradients()
             outputs = cast("tuple[Tensor, ...]", self._network(images))
         self._await_backward(outputs)
         return rebuild(outputs)
 
     def _await_backward(self, outputs: tuple[Tensor, ...]) -> None:
-        """Guard the static buffers this replay's backward will read and write.
+        """Hold later forwards eager until this replay's backward has read the static buffers.
 
-        The replay's outputs share the graphed function's backward node. Its pre-hook runs
-        just before the replayed backward writes the static gradient buffers; its post-hook
-        runs once that backward has consumed the static activations, and releases the hold
-        that keeps later forwards eager. An output without a backward node (a fully frozen
-        network) leaves nothing to guard.
+        The replay's outputs share the graphed function's backward node; its post-hook runs
+        once that backward has consumed the static activations, and releases the hold. An
+        output without a backward node (a fully frozen network) leaves nothing to guard.
         """
         node = outputs[0].grad_fn
         if node is None:
             return
         self._pending_backward = True
-        node.register_prehook(self._before_replayed_backward)
         node.register_hook(self._backward_replayed)
 
-    def _before_replayed_backward(self, grad_outputs: object) -> None:
-        """Move live parameter gradients out of the storage the replayed backward overwrites.
+    def _copy_out_live_gradients(self) -> None:
+        """Move live parameter gradients out of the storage the next replayed backward overwrites.
 
         A parameter whose ``.grad`` was adopted from the static gradient buffers still
         aliases them, so the next replayed backward would overwrite it and then accumulate
-        onto itself. Any ``.grad`` alive at this point (gradient accumulation, an in-place
-        ``zero_grad``, a callback keeping gradients) is copied out first; after
-        ``zero_grad(set_to_none=True)`` there is none, and nothing is copied.
+        onto itself. Any ``.grad`` alive before a replay (gradient accumulation, an in-place
+        ``zero_grad``, a callback keeping gradients) is copied out first. Lightning clears
+        gradients after the training step's forward, so the previous step's gradients are
+        copied too, at every accumulation setting, and ``zero_grad`` then drops the clones.
+
+        The copy runs at forward time, before the replay. The hold in :meth:`_await_backward`
+        keeps any other replay from running between this forward and its backward, so no
+        gradient can alias the static buffers again before that backward writes them. The
+        same copy made from a pre-hook inside the replayed backward left every accumulated
+        gradient wrong on CUDA (WP-206).
         """
-        del grad_outputs
         network = self._network
         if network is None:
             return
-        for parameter in network.parameters():
-            if parameter.grad is not None:
-                parameter.grad = parameter.grad.clone()
+        copy_out_live_gradients(network.parameters())
 
     def _backward_replayed(self, grad_inputs: object, grad_outputs: object) -> None:
         """Release the hold once a replayed backward has consumed the static activations."""
@@ -666,38 +621,7 @@ class _NetworkCapture:
             holder.start_batch()
 
 
-class _NetworkCaptureLifecycle(Callback):
+class _NetworkCaptureLifecycle(ReplayLifecycle):
     """Discard transient recordings on fit entry, completion and failure."""
 
-    @staticmethod
-    def _holder(module: LightningModule) -> _NetworkCapture | None:
-        holder = getattr(module, "_network_capture", None)
-        return holder if isinstance(holder, _NetworkCapture) else None
-
-    @classmethod
-    def _clear(cls, module: LightningModule) -> None:
-        holder = cls._holder(module)
-        if holder is not None:
-            holder.clear()
-
-    def on_train_batch_start(self, trainer: Trainer, pl_module: LightningModule, batch: object, batch_idx: int) -> None:
-        """Let each training batch replay even when the previous one skipped its backward."""
-        del trainer, batch, batch_idx
-        holder = self._holder(pl_module)
-        if holder is not None:
-            holder.start_batch()
-
-    def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Start the fit without recordings from an earlier run."""
-        del trainer
-        self._clear(pl_module)
-
-    def on_fit_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Release the fit's graph pool after the last training step."""
-        del trainer
-        self._clear(pl_module)
-
-    def on_exception(self, trainer: Trainer, pl_module: LightningModule, exception: BaseException) -> None:
-        """Release recordings when the trainer aborts."""
-        del trainer, exception
-        self._clear(pl_module)
+    attribute, holder_type, flag = "_network_capture", _NetworkCapture, "capture_network"

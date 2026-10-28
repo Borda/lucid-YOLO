@@ -9,7 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
-from packaging.version import Version
+from determinism import deterministic_algorithms
+from markers import BF16_REPLAY_EXPECTED
 
 
 @pytest.fixture
@@ -25,6 +26,22 @@ def graph_recordings() -> Iterator[MagicMock]:
 
 
 @pytest.fixture
+def dry_recording() -> Iterator[MagicMock]:
+    """Replace the shared recording seam with the module itself, so a CPU test drives a holder's whole lifecycle.
+
+    The network and segmentation-head holders record only through
+    ``lucid_yolo.ptl._graph_replay.record_graphed``. Returning the module it was given makes
+    every "replay" the native forward and backward on CPU, while recording, the forward-time
+    gradient copy, the backward hold, its release and ``clear`` run as they do in a CUDA fit.
+    Graph numerics are what this cannot show; the ``gpu`` tests own them.
+    """
+    with patch(
+        "lucid_yolo.ptl._graph_replay.record_graphed", side_effect=lambda module, samples, device: module
+    ) as record:
+        yield record
+
+
+@pytest.fixture
 def replay_spy(graph_recordings: MagicMock) -> Iterator[MagicMock]:
     """Count graph recordings and turn a retirement warning into a failure, so replay cannot silently lapse."""
     with warnings.catch_warnings():
@@ -36,8 +53,28 @@ def replay_spy(graph_recordings: MagicMock) -> Iterator[MagicMock]:
 def bf16_replay_expected() -> bool:
     """Whether this runtime's torch is new enough to record BF16 replay (torch 2.9, the first verified release).
 
-    Derived from ``torch.__version__`` here rather than read from the production gate, so
-    a changed production threshold fails ``test_bf16_gate_tracks_torch_2_9`` instead of
+    Defined in ``markers`` from ``torch.__version__`` rather than read from the production gate,
+    so a changed production threshold fails ``test_bf16_gate_tracks_torch_2_9`` instead of
     silently moving every expectation with it.
     """
-    return Version(torch.__version__) >= Version("2.9")
+    return BF16_REPLAY_EXPECTED
+
+
+@pytest.fixture
+def deterministic_kernels() -> Iterator[None]:
+    """Run the test under deterministic kernels so eager and replayed results compare exactly.
+
+    The caller's deterministic-algorithms policy is restored afterwards.
+    """
+    with deterministic_algorithms():
+        yield
+
+
+@pytest.fixture
+def deterministic_kernels_pinning_cudnn_benchmark() -> Iterator[None]:
+    """Run under deterministic kernels and also restore ``torch.backends.cudnn.benchmark`` afterwards.
+
+    Lightning's trainer setup writes the flag unconditionally, so a test that fits would leak it.
+    """
+    with deterministic_algorithms(restore_cudnn_benchmark=True):
+        yield

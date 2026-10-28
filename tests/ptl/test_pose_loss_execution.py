@@ -9,11 +9,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer, seed_everything
 from pytorch_lightning.plugins.precision import MixedPrecision
 from torch.utils.data import DataLoader
 
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.losses import BranchPrediction
 from lucid_yolo.ptl.loss_capture import _BF16_SUPPORTED, _LossCaptureLifecycle
 from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -41,6 +43,23 @@ def _pose(
         alpha=alpha,
         oks_gain=oks_gain,
     )
+
+
+@pytest.fixture
+def true_fp32(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run cuDNN convolutions in IEEE float32 rather than TF32, the arithmetic a ``32-true`` bound assumes.
+
+    cuDNN defaults to TF32 for float32 convolutions on Ampere and newer. There it rounds operands to a
+    10-bit mantissa, which turns ulp-level differences in a loss gradient into relative gradient
+    distances above 1e-5: an A100 shows 4.7e-5 between replay and native at ``32-true``, and 1e-5 or
+    less with TF32 off (WP-209). Only the legacy flag is set, because a partial set through the newer
+    ``fp32_precision`` attributes makes the legacy getters Lightning reads raise.
+
+    Examples:
+        >>> callable(true_fp32)
+        True
+    """
+    monkeypatch.setattr(torch.backends.cudnn, "allow_tf32", False)
 
 
 def _batch(count: int, visible: bool = True) -> tuple[torch.Tensor, list[Targets]]:
@@ -164,23 +183,31 @@ def test_pose_validation_keeps_native_dispatch_with_certified_criterion() -> Non
     assert torch.isfinite(loss) and not model._loss_capture._disabled
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA execution needs a device")
-@pytest.mark.parametrize("precision", ["32-true", "16-mixed", "bf16-mixed"])
+@requires_cuda
+@pytest.mark.parametrize(
+    "precision",
+    [
+        "32-true",
+        "16-mixed",
+        pytest.param(
+            "bf16-mixed", marks=pytest.mark.skipif(not _BF16_SUPPORTED, reason="BF16 replay requires torch 2.9")
+        ),
+    ],
+)
 @pytest.mark.parametrize("count,visible,records", [(2, True, True), (2, False, True), (0, False, False)])
+@pytest.mark.usefixtures("true_fp32")
 def test_pose_cuda_execution_keeps_objective_and_gradient_direction(
     precision: str, count: int, visible: bool, records: bool
 ) -> None:
     """A real automatic step records assignment and batches the same point objective.
 
-    Loss and gradients must agree with the native step within the precision's epsilon: per parameter in
-    relative L2 distance, and over the whole gradient in direction, as cosine similarity.
+    Loss and gradients must agree with the native step within the precision's epsilon: over the whole gradient in
+    direction, as cosine similarity, and in relative L2 distance; in float32 also per parameter. Under autocast the
+    distance bound is 8 epsilon, set from the 1-ulp noise floor measured on an A100 (WP-209).
 
     Besides a batch of visible points, the step runs one whose points are all invisible and one with no
     instances. An empty batch is answered natively, so the recorder only records for the first two.
     """
-    if precision == "bf16-mixed" and not _BF16_SUPPORTED:
-        pytest.skip("BF16 replay requires torch 2.9")
     seed_everything(23)
     batch = _batch(count, visible)
     results = []
@@ -250,17 +277,25 @@ def test_pose_cuda_execution_keeps_objective_and_gradient_direction(
         assert (left is None) == (right is None), name
         if left is not None:
             assert right is not None and torch.isfinite(left).all() and torch.isfinite(right).all()
-            assert (left - right).norm() <= epsilon * left.norm() + 1e-5, name
+            # Per parameter only in float32. Under autocast a gradient that is zero in exact arithmetic (the
+            # attention BatchNorm biases) holds residue as large as itself: on an A100 a 1-ulp change to the head
+            # output gradients moves one such parameter by up to 922 times this bound, so no per-parameter bound
+            # that admits it would still test anything. The float32 case carries the per-parameter claim.
+            if precision == "32-true":
+                assert (left - right).norm() <= epsilon * left.norm() + 1e-5, name
     # One vector per arm, in float64: a per-parameter cosine on a near-zero gradient is rounding noise.
     native, executed = (
         torch.cat([value.flatten().double() for value in arm.gradients.values() if value is not None])
         for arm in results
     )
     assert torch.cosine_similarity(native, executed, dim=0) >= 1 - epsilon
+    # Whole-gradient distance under autocast: five 1-ulp noise draws on an A100 reach 3.4 epsilon (16-mixed) and
+    # 3.2 epsilon (bf16-mixed), replay 1.3 and 1.2; the bound is 8 epsilon, about 2.5 times the largest draw.
+    assert (native - executed).norm() <= (epsilon if precision == "32-true" else 8 * epsilon) * native.norm()
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA execution needs a device")
+@requires_cuda
+@pytest.mark.usefixtures("true_fp32")
 def test_pose_cuda_execution_composes_with_network_replay() -> None:
     """Pose loss dispatch stays correct alongside the independent backbone/neck network replay.
 
@@ -338,9 +373,14 @@ def test_pose_cuda_execution_composes_with_network_replay() -> None:
 
     assert len(results[0].losses) == len(results[0].gradients) == len(batches)
     assert len(results[1].losses) == len(results[1].gradients) == len(batches)
+    # Step 0 starts both arms from the same weights; every later step starts from weights one optimizer update
+    # apart, and that update carries the previous step's rounding. Five 1-ulp noise draws on the head output
+    # gradients on an A100 move a later step's loss by up to 1.7e-5 and its whole gradient by up to 4.0e-4
+    # relative, and replay by 6.9e-6 and 2.3e-4; the later-step bounds are 5e-5 and 1e-3, about 2.5 times the
+    # largest draw. Step 0 keeps the per-parameter claim.
     for step, (left, right) in enumerate(zip(results[0].losses, results[1].losses, strict=True)):
         torch.testing.assert_close(
-            left, right, rtol=1e-5, atol=1e-6, msg=lambda text, step=step: f"step {step}: {text}"
+            left, right, rtol=1e-5 if step == 0 else 5e-5, atol=1e-6, msg=lambda text, step=step: f"step {step}: {text}"
         )
     for step, (native, executed) in enumerate(zip(results[0].gradients, results[1].gradients, strict=True)):
         assert native.keys() == executed.keys(), step
@@ -349,7 +389,16 @@ def test_pose_cuda_execution_composes_with_network_replay() -> None:
             assert (left is None) == (right is None), (step, name)
             if left is not None:
                 assert right is not None and torch.isfinite(right).all()
-                assert (left - right).norm() <= 1e-5 * left.norm() + 1e-6, (step, name)
+                # The absolute floor is the one the single-step test uses. Some parameters have a gradient that is
+                # zero in exact arithmetic (an attention projection's BatchNorm bias reads 2e-15 in float64), so in
+                # float32 both routes hold rounding residue in steps of 2**-23, which a 1e-6 floor cannot resolve.
+                if step == 0:
+                    assert (left - right).norm() <= 1e-5 * left.norm() + 1e-5, (step, name)
+        left, right = (
+            torch.cat([value.flatten().double() for value in arm.values() if value is not None])
+            for arm in (native, executed)
+        )
+        assert (left - right).norm() <= 1e-3 * left.norm(), step
 
 
 #: The warning a customized criterion raises, for detection and pose alike, when it retires the fit's recorder.
@@ -369,10 +418,8 @@ def test_pose_custom_criterion_keeps_native_keywords() -> None:
     calls = []
 
     def criterion(
-        ml: torch.Tensor,
-        mb: torch.Tensor,
-        ol: torch.Tensor,
-        ob: torch.Tensor,
+        o2m: BranchPrediction,
+        o2o: BranchPrediction,
         points: torch.Tensor,
         boxes: torch.Tensor,
         labels: torch.Tensor,
@@ -382,7 +429,7 @@ def test_pose_custom_criterion_keeps_native_keywords() -> None:
         gt_rboxes: torch.Tensor | None,
     ) -> object:
         calls.append(gt_rboxes)
-        return original(ml, mb, ol, ob, points, boxes, labels, mask, strides=strides, gt_rboxes=gt_rboxes)
+        return original(o2m, o2o, points, boxes, labels, mask, strides=strides, gt_rboxes=gt_rboxes)
 
     model.loss = criterion
     with (
@@ -484,8 +531,7 @@ def test_pose_point_mismatch_clears_recorder_on_fit_exception() -> None:
     assert not model._loss_capture._disabled
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA execution needs a device")
+@requires_cuda
 def test_pose_cuda_point_mismatch_releases_recording() -> None:
     """A recording made before the point-count check raises is released by the fit's exception hook.
 

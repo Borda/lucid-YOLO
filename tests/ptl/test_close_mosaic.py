@@ -31,7 +31,6 @@ from lucid_yolo.ptl.callbacks import CloseMosaicCallback
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
     from lucid_yolo.data.targets import Targets
@@ -42,13 +41,6 @@ _IMG_SIZE = 64
 _MAX_EPOCHS = 5
 #: Samples per batch.
 _BATCH_SIZE = 2
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed torch before each test so the stub module and pipeline are reproducible."""
-    torch.manual_seed(0)
-    yield
 
 
 class _OneParamModule(LightningModule):

@@ -26,3 +26,5 @@ Pages, one per phase group:
 - [Phase 15 — Audit remediation, v0.8.0](engineering/phase-15-audit-remediation.md)
 - [Phase 16 — Training throughput](engineering/phase-16-training-throughput.md)
 - [Phase 17 — R1 pose-objective parity](engineering/phase-17-pose-objective-parity.md)
+- [Phase 18 — CUDA graph replay and pipeline throughput](engineering/phase-18-cuda-replay-throughput.md)
+- [Phase 19 — Codebase audit remediation](engineering/phase-19-codebase-audit.md)

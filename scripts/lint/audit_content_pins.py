@@ -29,7 +29,8 @@ import argparse
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
+from scripts.lint._common import add_repo_root_argument, print_failure
 
 #: Path of the suppression-free decoder, relative to the repository root.
 TOPK_MODULE = Path("src/lucid_yolo/decode/topk_e2e.py")
@@ -136,20 +137,12 @@ def main(argv: list[str] | None = None) -> int:
         Process exit code: ``0`` clean, ``1`` when any pin is violated.
     """
     parser = argparse.ArgumentParser(description="Assert literal content pins on tracked files.")
-    parser.add_argument(
-        "--repo-root",
-        type=Path,
-        default=REPO_ROOT,
-        help=f"repository whose files to read (default: {REPO_ROOT})",
-    )
+    add_repo_root_argument(parser, "repository whose files to read")
     args = parser.parse_args(argv)
 
     violations = find_violations(args.repo_root)
     if violations:
-        print(f"content-pins-audit FAILED: {len(violations)} violation(s)")
-        for item in violations:
-            print(f"  - {item}")
-        return 1
+        return print_failure("content-pins-audit", violations)
     print("content-pins-audit clean: every pinned file holds its claim")
     return 0
 

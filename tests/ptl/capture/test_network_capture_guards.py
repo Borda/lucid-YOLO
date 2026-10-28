@@ -15,11 +15,14 @@ import re
 import subprocess
 import sys
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
+from functools import partial
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from capture_access import network_capture, recording_synchronize, refuse_precision_query
+from markers import requires_cuda
 from pytorch_lightning import Trainer
 
 from lucid_yolo.ptl import DetectionLitModule
@@ -30,6 +33,7 @@ from lucid_yolo.ptl.network_capture import (
     _ineligibility,
     _NetworkCapture,
     _NetworkCaptureLifecycle,
+    _StemNetwork,
 )
 
 
@@ -230,11 +234,7 @@ class TestPrecisionPolicy:
         Losing the text leaves a user unable to tell a mixed legacy/new precision API
         from any other reason the step went eager.
         """
-
-        def refuse() -> tuple[object, ...]:
-            raise RuntimeError("mix of the legacy and new APIs")
-
-        monkeypatch.setattr("lucid_yolo.ptl.network_capture._precision_signature", refuse)
+        monkeypatch.setattr("lucid_yolo.ptl.network_capture._precision_signature", refuse_precision_query)
         model = _module()
         images = torch.zeros(1, 3, 64, 64)
         eager = MagicMock(return_value="eager output")
@@ -263,14 +263,10 @@ class TestPrecisionPolicy:
         assert result.stdout.strip() == "True"
 
 
-_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
-
-
 class TestFailedRecording:
     """A recording that fails still drains queued device work before restoring buffers."""
 
-    @pytest.mark.gpu
-    @_cuda
+    @requires_cuda
     def test_synchronizes_before_buffer_restore(self) -> None:
         """A warmup failure synchronizes the device before the BatchNorm snapshot is copied back.
 
@@ -285,9 +281,7 @@ class TestFailedRecording:
             network(images)
             raise RuntimeError("injected warmup failure")
 
-        def synchronize(device: object = None) -> None:
-            order.append("synchronize")
-            torch.cuda.current_stream().synchronize()
+        synchronize = partial(recording_synchronize, order)
 
         buffer = next(model.backbone.buffers())
         original_copy = buffer.copy_
@@ -304,16 +298,6 @@ class TestFailedRecording:
         ):
             _NetworkCapture().run(images, (model.backbone, model.neck, model.head), model)
         assert order[:2] == ["synchronize", "restore"]
-
-
-@pytest.fixture
-def _deterministic_kernels() -> Iterator[None]:
-    """Use deterministic kernels so eager and replayed gradients compare exactly."""
-    enabled = torch.are_deterministic_algorithms_enabled()
-    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-    torch.use_deterministic_algorithms(True)
-    yield
-    torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
 
 
 class TestReplayBackwardHold:
@@ -333,12 +317,13 @@ class TestReplayBackwardHold:
         output.sum().backward()
         assert (held, holder._pending_backward) == (True, False)
 
-    def test_live_gradient_leaves_storage_before_backward(self) -> None:
-        """A ``.grad`` alive when the replayed backward starts is copied out before that backward.
+    def test_live_gradient_leaves_storage_before_replay(self) -> None:
+        """A ``.grad`` alive when a replay starts is copied out before that replay's backward.
 
         The gradient tensor stands in for one adopted from the static gradient buffers:
         accumulating into it in place would be the silent doubling, so after the backward it
-        must be untouched and the parameter must hold a separate accumulated copy.
+        must be untouched and the parameter must hold a separate accumulated copy. The copy
+        is made at forward time, the order :meth:`_NetworkCapture._run` uses before replaying.
         """
         network = _DetectionNetwork(torch.nn.Linear(3, 3), torch.nn.Identity(), torch.nn.Identity())
         weight = network.backbone.weight
@@ -346,6 +331,7 @@ class TestReplayBackwardHold:
         weight.grad = alias
         holder = _NetworkCapture()
         holder._network = network
+        holder._copy_out_live_gradients()
         output = network.backbone(torch.ones(1, 3))
         holder._await_backward((output,))
         output.sum().backward()
@@ -365,19 +351,20 @@ class TestReplayBackwardHold:
         keep every later forward of the fit eager.
         """
         model = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=4, capture_network=True)
-        model._network_capture._pending_backward = True
+        network_capture(model)._pending_backward = True
         _NetworkCaptureLifecycle().on_train_batch_start(MagicMock(spec=Trainer), model, None, 0)
-        assert not model._network_capture._pending_backward
+        assert not network_capture(model)._pending_backward
 
-    @pytest.mark.gpu
-    @_cuda
-    @pytest.mark.usefixtures("_deterministic_kernels")
+    @requires_cuda
+    @pytest.mark.usefixtures("deterministic_kernels")
     def test_two_forwards_before_backward_match_eager(self) -> None:
         """Two training forwards before one backward give the eager gradients exactly.
 
         Without the hold, the second call replays into the same static buffers and the
         single backward computes the first call's gradient from the second call's
-        activations.
+        activations. The loss reads all four outputs, as the training loss does: the
+        replayed backward writes a gradient for every recorded parameter, zeros for a
+        branch the loss left unread, where eager leaves that branch at ``grad=None``.
         """
         eager = _module().cuda()
         replay = copy.deepcopy(eager)
@@ -387,10 +374,18 @@ class TestReplayBackwardHold:
         stages = (replay.backbone, replay.neck, replay.head)
         eager_outputs = (eager(first), eager(second))
         replay_outputs = (holder.run(first, stages, replay), holder.run(second, stages, replay))
-        sum(out.o2m_cls.square().mean() + out.o2o_box.square().mean() for out in eager_outputs).backward()
-        sum(out.o2m_cls.square().mean() + out.o2o_box.square().mean() for out in replay_outputs).backward()
-        for left, right in zip(eager.parameters(), replay.parameters(), strict=True):
-            assert torch.equal(left.grad, right.grad)
+        for outputs in (eager_outputs, replay_outputs):
+            sum(
+                tensor.square().mean()
+                for out in outputs
+                for tensor in (out.o2m_cls, out.o2m_box, out.o2o_cls, out.o2o_box)
+            ).backward()
+        torch.testing.assert_close(
+            [parameter.grad for parameter in replay.parameters()],
+            [parameter.grad for parameter in eager.parameters()],
+            rtol=0,
+            atol=0,
+        )
         holder.clear()
 
 
@@ -451,3 +446,59 @@ class TestRecordedContractDrift:
         holder = _NetworkCapture()
         holder._input, holder._state, holder._owners = ("shape", ("precision",)), ("state",), (1, 2, 3)
         assert holder._drift(("state",), (1, 2, 3), ("precision",)) is None
+
+
+class TestDryRecordingCycle:
+    """With the recording seam replaced, CPU drives one recording from first forward to ``clear``."""
+
+    @pytest.fixture
+    def _eligible(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pass the CUDA-residency certificate for CPU stages; every other guard of ``_run`` still runs.
+
+        Examples:
+            >>> callable(TestDryRecordingCycle._eligible)
+            True
+        """
+        monkeypatch.setattr("lucid_yolo.ptl.network_capture._ineligibility", lambda network: None)
+
+    @pytest.mark.usefixtures("_eligible")
+    def test_accumulated_microbatches_record_once_and_match_eager(self, dry_recording: MagicMock) -> None:
+        """Two accumulated micro-batches record once, copy the live gradient at forward time and match eager.
+
+        The first forward records and holds; a second forward before its backward stays eager. The
+        second micro-batch's forward replaces the live ``.grad`` with a copy before any backward runs,
+        so the first micro-batch's gradient object is never written again, and the accumulated result
+        equals the same two micro-batches run eagerly. ``clear`` then drops the recording.
+        """
+        stage = torch.nn.Linear(3, 2)
+        reference = copy.deepcopy(stage)
+        holder = _NetworkCapture()
+        eager = MagicMock(side_effect=stage)
+        first, second = torch.linspace(-1.0, 1.0, 12).reshape(4, 3), torch.linspace(2.0, -2.0, 12).reshape(4, 3)
+
+        def replay(images: torch.Tensor) -> torch.Tensor:
+            """Route one micro-batch through the stem holder path, as a pose stem would.
+
+            Examples:
+                >>> callable(replay)
+                True
+            """
+            return holder._run(images, (stage,), eager, lambda: _StemNetwork(stage), lambda outputs: outputs[0])
+
+        output = replay(first)
+        replay(first)
+        held = (holder._pending_backward, eager.call_count)
+        output.sum().backward()
+        live = stage.weight.grad
+        output = replay(second)
+        copied = stage.weight.grad is not live
+        output.sum().backward()
+        reference(first).sum().backward()
+        expected_live = reference.weight.grad.clone()
+        reference(second).sum().backward()
+        holder.clear()
+        assert dry_recording.call_count == 1 and held == (True, 1) and copied
+        assert torch.equal(live, expected_live)
+        assert torch.equal(stage.weight.grad, reference.weight.grad)
+        assert torch.equal(stage.bias.grad, reference.bias.grad)
+        assert not holder._pending_backward and holder._network is None

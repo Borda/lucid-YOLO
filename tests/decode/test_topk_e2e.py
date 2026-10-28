@@ -9,7 +9,9 @@ fixed ``(B, 300, 6)`` shape with score-zero padding rows when fewer anchors
 exist; that scores come out sorted descending; that a crafted class spike is
 decoded to the right class index; that a confidence threshold zeroes low entries
 without changing the shape; that the letterbox inverse round-trips box
-coordinates on a known geometry; and that decoding is deterministic. The structural
+coordinates on a known geometry; and that decoding is deterministic.
+:class:`~lucid_yolo.decode.topk_e2e.RotatedTopKDecoder`, the oriented twin, is held to
+the same fixed ``k`` rows and the same anchor-index contract. The structural
 pin -- the module source names no suppression operator or IoU helper -- is the
 ``content-pins`` pre-commit hook (``scripts/lint/audit_content_pins.py``).
 """
@@ -23,17 +25,13 @@ from torch import Tensor
 from lucid_yolo.assign.grid import make_anchor_points
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.targets import Targets
-from lucid_yolo.decode import TopKDecoder, to_letterboxed_original
+from lucid_yolo.decode import RotatedTopKDecoder, TopKDecoder, to_letterboxed_original
+from lucid_yolo.decode.common import PAD_ANCHOR_INDEX, RBOX_COLUMNS, gather_by_anchor
 from lucid_yolo.models.heads.detect import decode_ltrb
+from lucid_yolo.models.heads.obb import RBOX_DET_WIDTH, decode_rboxes, o2o_rotated_topk
 
 _DET_CAP = 300
 _BOX_CORNERS = 4
-
-
-@pytest.fixture(autouse=True)
-def _seed_rng() -> None:
-    """Seed the torch RNG so any random inputs are deterministic."""
-    torch.manual_seed(0)
 
 
 def _grid(height: int, width: int, stride: int = 8) -> tuple[Tensor, Tensor]:
@@ -269,3 +267,79 @@ def test_decode_with_indices_names_ranked_anchors() -> None:
     assert anchors[1, :6].tolist() == [3, 1, 5, 2, 0, 4]  # and a different order in the second image
     assert real.tolist() == [[True] * 6 + [False] * 2] * 2  # the two padding rows name no anchor
     assert torch.equal(detections[..., :_BOX_CORNERS][real], gathered[real])
+
+
+def _oriented_branch() -> tuple[Tensor, Tensor, Tensor]:
+    """Two images of six-anchor one-to-one outputs whose rotated boxes all differ.
+
+    The class logits are :func:`_ranking_scores`'; each anchor's ltrb decodes a 24x8 box
+    around its own centre, and every anchor of every image carries its own raw angle, so
+    a row paired with the wrong anchor's box or heading is visible.
+
+    Examples:
+        >>> cls_logits, raw_ltrb, raw_angles = _oriented_branch()
+        >>> cls_logits.shape, raw_ltrb.shape, raw_angles.shape
+        (torch.Size([2, 6, 2]), torch.Size([2, 6, 4]), torch.Size([2, 6, 1]))
+    """
+    raw_ltrb = torch.tensor([1.0, 0.5, 2.0, 0.5]).expand(2, 6, 4).clone()
+    raw_angles = torch.linspace(-1.2, 1.3, 12).reshape(2, 6, 1)
+    return _ranking_scores(), raw_ltrb, raw_angles
+
+
+class TestRotatedTopKDecoder:
+    """Tests for :class:`~lucid_yolo.decode.topk_e2e.RotatedTopKDecoder` (CS-10).
+
+    The oriented E2E decode used to be the bare ranking, which returns ``min(k, A)`` rows
+    and no anchor indices; the decoder pads to ``k`` and reports the indices, exactly as
+    :class:`~lucid_yolo.decode.topk_e2e.TopKDecoder` does for the axis-aligned path.
+    """
+
+    def test_small_canvas_padded_to_k(self) -> None:
+        """Six anchors under ``k = 8`` give eight rows, the last two all-zero and anchorless."""
+        points, strides = _grid(2, 3, stride=8)
+        detections, anchors = RotatedTopKDecoder(k=8).decode_with_indices(*_oriented_branch(), points, strides)
+
+        assert detections.shape == (2, 8, RBOX_DET_WIDTH)
+        assert anchors.shape == (2, 8)
+        assert torch.equal(detections[:, 6:], torch.zeros(2, 2, RBOX_DET_WIDTH))
+        assert anchors[:, 6:].eq(PAD_ANCHOR_INDEX).all()
+        assert (anchors[:, :6] >= 0).all()
+
+    def test_leading_rows_match_unpadded_ranking(self) -> None:
+        """Below ``k`` anchors, the real rows are the bare ranking's own, bit for bit."""
+        points, strides = _grid(2, 3, stride=8)
+        cls_logits, raw_ltrb, raw_angles = _oriented_branch()
+        unpadded = o2o_rotated_topk(cls_logits, decode_rboxes(raw_ltrb, raw_angles, points, strides), k=8)
+
+        detections = RotatedTopKDecoder(k=8)(cls_logits, raw_ltrb, raw_angles, points, strides)
+
+        assert unpadded.shape[1] == 6
+        assert torch.equal(detections[:, :6], unpadded)
+
+    def test_equals_unpadded_ranking_when_anchors_reach_k(self) -> None:
+        """With at least ``k`` anchors nothing is padded and the output is the bare ranking's."""
+        points, strides = _grid(2, 3, stride=8)
+        cls_logits, raw_ltrb, raw_angles = _oriented_branch()
+        unpadded = o2o_rotated_topk(cls_logits, decode_rboxes(raw_ltrb, raw_angles, points, strides), k=4)
+
+        detections, anchors = RotatedTopKDecoder(k=4).decode_with_indices(
+            cls_logits, raw_ltrb, raw_angles, points, strides
+        )
+
+        assert torch.equal(detections, unpadded)
+        assert (anchors >= 0).all()
+
+    def test_indices_gather_same_rows(self) -> None:
+        """Gathering the dense rotated boxes by the reported indices reproduces each row's box and heading."""
+        points, strides = _grid(2, 3, stride=8)
+        cls_logits, raw_ltrb, raw_angles = _oriented_branch()
+        decoder = RotatedTopKDecoder(k=8)
+
+        detections, anchors = decoder.decode_with_indices(cls_logits, raw_ltrb, raw_angles, points, strides)
+
+        dense = decode_rboxes(raw_ltrb, raw_angles, points, strides)
+        real = anchors >= 0
+        assert anchors[0, :6].tolist() == [2, 5, 0, 4, 1, 3]  # score order, not anchor order
+        assert anchors[1, :6].tolist() == [3, 1, 5, 2, 0, 4]
+        assert torch.equal(detections[..., :RBOX_COLUMNS][real], gather_by_anchor(dense, anchors)[real])
+        assert torch.equal(detections, decoder(cls_logits, raw_ltrb, raw_angles, points, strides))

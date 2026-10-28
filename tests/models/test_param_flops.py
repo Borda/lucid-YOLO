@@ -25,7 +25,6 @@ training-only one-to-many branch — the R6/YOLOv10 reporting convention (see
 from __future__ import annotations
 
 import pytest
-import torch
 from scripts.check_goldens import DEFAULT_GOLDENS_DIR, check_golden
 
 from lucid_yolo.models import build_detector, build_obb_detector, build_segmenter, count_flops, count_params
@@ -53,12 +52,6 @@ _NUM_CLASSES = 80
 #: FLOP value, so the smallest 32-divisible canvas that still traces is enough —
 #: the 640 px protocol would cost seconds per case for an identical assertion.
 _MODE_PROBE_IMG_SIZE = 64
-
-
-@pytest.fixture(autouse=True)
-def _seed_rng() -> None:
-    """Seed torch RNG so weight init is deterministic across the gate."""
-    torch.manual_seed(0)
 
 
 @pytest.mark.parametrize(

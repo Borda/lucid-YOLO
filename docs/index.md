@@ -1,6 +1,6 @@
 # 🔦 lucid-yolo
 
-> lucid-yolo is an independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance segmentation, and oriented detection methods described in the YOLO26 paper (arXiv:2606.03748), plus a keypoint task composed onto the same trunk whose loss and evaluation protocol are taken from RLE (arXiv:2107.11291) rather than from that paper. "YOLO" refers to the family of real-time detectors originated by Redmon et al. (2016). This project is not affiliated with, endorsed by, or derived from Ultralytics or its codebase. No Ultralytics source code, configurations, or model weights were consulted or used. See docs/PROVENANCE.md.
+> lucid-yolo is an independent, from-scratch PyTorch Lightning implementation of the real-time detection, instance segmentation, and oriented detection methods described in the YOLO26 paper (arXiv:2606.03748), plus a keypoint task composed onto the same trunk whose loss term is taken from RLE (arXiv:2107.11291) and which is scored with the COCO OKS protocol; that paper's pose objective (sec. 3.4.2) builds on RLE, and this task reproduces it in part. "YOLO" refers to the family of real-time detectors originated by Redmon et al. (2016). This project is not affiliated with, endorsed by, or derived from Ultralytics or its codebase. No Ultralytics source code, configurations, or model weights were consulted or used. See docs/PROVENANCE.md.
 
 ## ⚡ In short
 
@@ -11,7 +11,7 @@
 
 ## 🧭 What this is
 
-A paper describes three real-time vision models, and a second paper the keypoint loss a fourth task is built on. This repository implements all four from those descriptions — the equations, the tables, the figures — and from the primary literature the paper cites, and from nothing else. The reference implementation was never opened, and neither was any mirror, package copy, or documentation site generated from it. That constraint is the point of the exercise rather than an obstacle to it: an implementation that shares no lineage with the original is the only kind that can independently test whether the published claims follow from the published method.
+A paper describes three real-time vision models and the pose objective a fourth task is built on, and a second paper the RLE loss that objective draws on. This repository implements all four from those descriptions — the equations, the tables, the figures — and from the primary literature the paper cites, and from nothing else. The reference implementation was never opened, and neither was any mirror, package copy, or documentation site generated from it. That constraint is the point of the exercise rather than an obstacle to it: an implementation that shares no lineage with the original is the only kind that can independently test whether the published claims follow from the published method.
 
 Three habits keep that claim auditable rather than asserted.
 
@@ -36,7 +36,7 @@ Each task is the previous one plus a head, not a new model: all four share one b
 
 That genericity stops at the count, and it is worth being exact about where. `K` buys a head, a loss and a decode path that do not care what a point means; it does not buy an OKS protocol for an arbitrary schema. Scoring one needs a per-point sigma vector and the left/right pairs a mirror must swap, and neither follows from `K`: R12 publishes one sigma table (17 human values, derived from annotator variance), this project adds a single uniform fallback for schemas that have no annotator to measure ([A67](ASSUMPTIONS.md)), and the flip pairs are read off the annotation file's own keypoint *names* — a COCO file that names its points supplies them, a YOLO root never does. A new schema is a modelling decision, not a constructor argument.
 
-Parameter and FLOP counts are from the *What was reproduced* subsection of each release section of the [reproduction report](REPRODUCTION_REPORT.md). Three of the four tasks are gated against the paper's own published tables — detection against R1 Table 7 within ±2% params, segmentation against Table S9 within ±3%, oriented detection against Table S11 within ±3.5% at 1024 px on DOTA's 15 classes, and all three within ±5% FLOPs. The oriented tolerance is the widest because the angle-stem width is inferred rather than published ([A20](ASSUMPTIONS.md) stays open), and the gate is explicit that it admits a rule rather than claiming Table S11 parity; a frozen golden runs beside it as a drift lock. Keypoints have the golden and no published-table gate at all: the source paper (R14) states a loss and an evaluation protocol, never an architecture, so there is no size table in the literature to hold that head to. The golden catches an architecture change; it corroborates nothing.
+Parameter and FLOP counts are from the *What was reproduced* subsection of each release section of the [reproduction report](REPRODUCTION_REPORT.md). Three of the four tasks are gated against the paper's own published tables — detection against R1 Table 7 within ±2% params, segmentation against Table S9 within ±3%, oriented detection against Table S11 within ±3.5% at 1024 px on DOTA's 15 classes, and all three within ±5% FLOPs. The oriented tolerance is the widest because the angle-stem width is inferred rather than published ([A20](ASSUMPTIONS.md) stays open), and the gate is explicit that it admits a rule rather than claiming Table S11 parity; a frozen golden runs beside it as a drift lock. Keypoints have the golden and no published-table gate yet: the YOLO26 paper does publish pose sizes (R1 Table S10, [D22](DECISIONS.md)), but the point stem is narrower than the paper's ([A77](ASSUMPTIONS.md)) and no width has been chosen against that table, so no size gate ships. The golden catches an architecture change; it corroborates nothing.
 
 ## 📊 What was reproduced, in numbers
 
@@ -67,7 +67,9 @@ Four readings the report insists on, and this page repeats rather than smooths o
 
 ## 🗂️ Reading the rest of this site
 
-The top bar has four tabs: **Home** (this page, the method, running a model, the clean-room record), **Results** (the reproduction report), **Models** (model cards and notebooks) and **Project** (roadmap, logs, each roadmap phase with its research and engineering pages, contributing). Which one you want depends on what you came for.
+The top bar has five tabs: **Home** (this page, the method, running a model, the clean-room record), **Results** (the reproduction report), **Models** (model cards and notebooks), **API** (the reference rendered from the docstrings) and **Project** (roadmap, logs, each roadmap phase with its research and engineering pages, contributing). Which one you want depends on what you came for. The first table is for using the project; the second is for auditing it.
+
+### Use it
 
 | If you want to | Read | It answers |
 | -- | -- | -- |
@@ -75,8 +77,13 @@ The top bar has four tabs: **Home** (this page, the method, running a model, the
 | compare NMS with the NMS-free path | [NMS versus NMS-free](method/nms-vs-nms-free.md) | what each path does, and what removing NMS cost in measured AP |
 | run a model yourself | [Launching a training run](TRAINING.md) | the launch command for each of the four tiers, and what to override |
 | get the data first | [Provisioning the datasets](DATASETS.md) | where COCO 2017 and DOTA-v1.0 come from, what has to be on disk, how each layout is read |
-| know what was measured | [Reproduction report](REPRODUCTION_REPORT.md) | one page per release: what was reproduced, what was assumed, what diverged |
 | judge one model before using it | [Model cards](model_cards/detection.md) | intended and out-of-scope use, limitations, licensing, per task family |
+
+### Audit it
+
+| If you want to | Read | It answers |
+| -- | -- | -- |
+| know what was measured | [Reproduction report](REPRODUCTION_REPORT.md) | one page per release: what was reproduced, what was assumed, what diverged |
 | check the clean-room claim | [Provenance log](PROVENANCE.md) | the source allowlist and the audit trail behind every commit trailer |
 | find where the papers ran out | [Assumption register](ASSUMPTIONS.md) | every gap, the choice made, its public basis, and how it was validated |
 | understand why the project is shaped this way | [Decision record](DECISIONS.md) | architecture and policy decisions, including four ADRs |
@@ -92,6 +99,6 @@ The roadmap and the two logs are deliberately split: the roadmap says what a wor
 
 Datasets are never committed and never downloaded by the test suite. [Provisioning the datasets](DATASETS.md) covers acquiring them; [launching a training run](TRAINING.md) carries the exact command for each tier, and the minutes-long overfit gate worth running before a launch that costs hours.
 
-Four commands ship with the package — `lucid-yolo` for training and validation, `lucid-data` for dataset download, checking and tiling, `lucid-eval` for acceptance scoring, and `lucid-predict` for single-image prediction — so a remote run needs no checkout. Contributors and agents working on the repository itself start at `AGENTS.md` in the repository root, which is the execution contract the roadmap is run under.
+Five commands ship with the package — `lucid-yolo` for training and validation, `lucid-data` for dataset download, checking and tiling, `lucid-eval` for acceptance scoring, `lucid-predict` for single-image prediction, and `lucid-export` for writing a checkpoint as an ONNX file — so a remote run needs no checkout once the package is installed; the [Install section of the README](https://github.com/Borda/lucid-YOLO#install) has the one-line command. Contributors and agents working on the repository itself start at `AGENTS.md` in the repository root, which is the execution contract the roadmap is run under.
 
 **`make gate` green is a structural verdict, not a quality one.** The merge gate is entirely offline: linters, types, the unit suite over synthetic fixtures (A26/D12b), and the frozen release goldens. The learned-quality floors — the per-task overfit gates quoted in the [model cards](model_cards/detection.md) — live under `goldens/gpu/`, which the default golden check deliberately never discovers; they run in `make gate-gpu`, whose CI schedule stays a *skipped* job until the `GPU_RUNNER_LABEL` repository variable names a self-hosted accelerator runner. A green gate says nothing was structurally disturbed. It does not say the models are good, and 0.8.0 exists because a defect that cost the keypoint tier most of its overfit floor passed every offline golden.

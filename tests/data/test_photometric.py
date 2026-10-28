@@ -10,30 +10,13 @@ behaviour with targets left untouched, plus the flip's per-modality mirroring
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
 
 import pytest
 import torch
+from tensors import seeded_generator
 
 from lucid_yolo.data import Targets
 from lucid_yolo.data.augment import HorizontalFlip, HSVJitter, hsv_to_rgb, rgb_to_hsv
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed the global RNG before each test so any un-seeded sampling is deterministic."""
-    torch.manual_seed(0)
-    yield
-
-
-def _generator(seed: int = 1234) -> torch.Generator:
-    """Return a CPU generator seeded to ``seed`` for reproducible sampling.
-
-    Examples:
-        >>> _generator(7).initial_seed()
-        7
-    """
-    return torch.Generator().manual_seed(seed)
 
 
 def _targets() -> Targets:
@@ -94,7 +77,7 @@ class TestHSVJitter:
 
     def test_zero_gain_identity(self) -> None:
         """Zeroed gain ranges reduce to a pure rgb->hsv->rgb round trip (identity)."""
-        jitter = HSVJitter(hsv_h=0.0, hsv_s=0.0, hsv_v=0.0, generator=_generator())
+        jitter = HSVJitter(hsv_h=0.0, hsv_s=0.0, hsv_v=0.0, generator=seeded_generator())
         image = torch.rand(3, 16, 16)
         out_image, _ = jitter(image, Targets.empty())
         assert torch.allclose(out_image, image, atol=1e-4)
@@ -112,7 +95,7 @@ class TestHSVJitter:
     def test_output_stays_in_unit_range(self) -> None:
         """Extreme s/v gain ranges never push the output outside [0, 1] (clamp holds)."""
         for seed in range(8):
-            jitter = HSVJitter(hsv_h=0.0, hsv_s=5.0, hsv_v=5.0, generator=_generator(seed))
+            jitter = HSVJitter(hsv_h=0.0, hsv_s=5.0, hsv_v=5.0, generator=seeded_generator(seed))
             image = torch.rand(3, 8, 8) * 0.5 + 0.25
             out_image, _ = jitter(image, Targets.empty())
             assert out_image.min() >= 0.0
@@ -130,7 +113,7 @@ class TestHSVJitter:
 
     def test_targets_pass_through_untouched(self) -> None:
         """The returned targets are the exact same tensors as the input geometry."""
-        jitter = HSVJitter(generator=_generator())
+        jitter = HSVJitter(generator=seeded_generator())
         targets = _targets()
         _, out_targets = jitter(torch.rand(3, 8, 8), targets)
         assert out_targets is targets
@@ -143,7 +126,7 @@ class TestHorizontalFlip:
 
     def test_p_one_flips_boxes(self) -> None:
         """p=1 mirrors a hand-built box about (W-1)/2: x1' = (W-1) - x2, x2' = (W-1) - x1."""
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         image = torch.rand(3, 4, 10)
         boxes = torch.tensor([[2.0, 1.0, 6.0, 3.0]])
         _, out = flip(image, Targets(boxes=boxes, labels=torch.tensor([0])))
@@ -160,7 +143,7 @@ class TestHorizontalFlip:
         the box is carried to ``[7, 8]`` — off by exactly one pixel, and every downstream
         coordinate inherits the error.
         """
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         width = 10
         image = torch.zeros(3, 4, width)
         image[:, :, 2:4] = 1.0
@@ -182,7 +165,7 @@ class TestHorizontalFlip:
         off the left edge. The flip is the last stage of the train pipeline, so without a
         re-clip that negative coordinate is what the assigner receives.
         """
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         width = 10
         boxes = torch.tensor([[4.0, 1.0, float(width), 3.0]])
 
@@ -197,7 +180,7 @@ class TestHorizontalFlip:
         mirror, and the re-clip that keeps the assigner on-canvas necessarily breaks it
         for geometry that started outside the canvas.
         """
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         image = torch.rand(3, 64, 64)
         targets = _targets()
         once_image, once = flip(image, targets)
@@ -207,7 +190,7 @@ class TestHorizontalFlip:
 
     def test_polygon_points_mirror(self) -> None:
         """Every polygon x-coordinate reflects to (W-1) - x; y is untouched."""
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         targets = _targets()
         width = 10
         _, out = flip(torch.rand(3, 4, width), targets)
@@ -217,7 +200,7 @@ class TestHorizontalFlip:
 
     def test_keypoints_mirror_without_identity_swap(self) -> None:
         """Without pairs, every x coordinate mirrors while keypoint-column order stays fixed."""
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         targets = Targets(
             boxes=torch.zeros((1, 4)),
             labels=torch.tensor([0]),
@@ -230,7 +213,7 @@ class TestHorizontalFlip:
 
     def test_keypoints_mirror_and_swap_supplied_pairs(self) -> None:
         """A supplied pair swaps mirrored coordinates and visibility columns together."""
-        flip = HorizontalFlip(p=1.0, generator=_generator(), keypoint_flip_pairs=[(0, 1)])
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator(), keypoint_flip_pairs=[(0, 1)])
         targets = Targets(
             boxes=torch.zeros((1, 4)),
             labels=torch.tensor([0]),
@@ -253,7 +236,7 @@ class TestHorizontalFlip:
         neither moves nor loses its flag.
         """
         width = 10
-        flip = HorizontalFlip(p=1.0, generator=_generator(), keypoint_flip_pairs=[(0, 2)])
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator(), keypoint_flip_pairs=[(0, 2)])
         targets = Targets(
             boxes=torch.zeros((1, 4)),
             labels=torch.tensor([0]),
@@ -277,7 +260,7 @@ class TestHorizontalFlip:
 
     def test_out_of_range_keypoint_pair_raises(self) -> None:
         """Pairs outside the supplied K-point axis are rejected with a clear error."""
-        flip = HorizontalFlip(p=1.0, generator=_generator(), keypoint_flip_pairs=[(0, 2)])
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator(), keypoint_flip_pairs=[(0, 2)])
         targets = Targets(
             boxes=torch.zeros((1, 4)),
             labels=torch.tensor([0]),
@@ -289,7 +272,7 @@ class TestHorizontalFlip:
 
     def test_rbox_centre_mirror_and_theta_negation(self) -> None:
         """Rotated boxes reflect cx -> (W-1) - cx and negate theta (both in range); w/h stay put."""
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         targets = _targets()
         width = 10
         _, out = flip(torch.rand(3, 4, width), targets)
@@ -299,14 +282,14 @@ class TestHorizontalFlip:
 
     def test_image_columns_reversed(self) -> None:
         """The flipped image is the column-reversed original."""
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         image = torch.arange(24.0).reshape(1, 4, 6).expand(3, 4, 6).contiguous()
         out_image, _ = flip(image, Targets.empty())
         assert torch.equal(out_image, image.flip(-1))
 
     def test_p_zero_identity(self) -> None:
         """p=0 never flips: image and targets are returned unchanged."""
-        flip = HorizontalFlip(p=0.0, generator=_generator())
+        flip = HorizontalFlip(p=0.0, generator=seeded_generator())
         image = torch.rand(3, 4, 6)
         targets = _targets()
         out_image, out_targets = flip(image, targets)
@@ -316,7 +299,7 @@ class TestHorizontalFlip:
 
     def test_mirrored_angle_above_quarter_pi_re_canonicalized(self) -> None:
         """An angle above pi/4 mirrors to pi - theta, inside the range the bare negation left (WP-058)."""
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         theta = 3.0 * math.pi / 8.0
         rboxes = torch.tensor([[20.0, 10.0, 15.0, 5.0, theta]])
         targets = Targets(boxes=torch.zeros((0, 4)), labels=torch.zeros(0, dtype=torch.int64), rboxes=rboxes)

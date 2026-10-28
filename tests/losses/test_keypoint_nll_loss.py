@@ -35,18 +35,6 @@ from lucid_yolo.losses.keypoint_nll_loss import _MIN_SIGMA
 _LAPLACE_ATOL = 1e-5
 
 
-@pytest.fixture(autouse=True)
-def _seed_rng() -> None:
-    """Seed torch so the ``RLELoss`` comparison arm's flow initialization is deterministic.
-
-    This loss draws no RNG of its own -- that is one of the properties under test
-    -- but the tests that pin it *against* ``RLELoss`` construct a flow, whose
-    ``Linear`` layers do. Seeded here rather than in those two bodies so the file
-    follows ``test_rle_loss.py``'s own fixture precedent.
-    """
-    torch.manual_seed(0)
-
-
 def _reference_loss(mu_hat: torch.Tensor, sigma_raw: torch.Tensor, mu_gt: torch.Tensor) -> torch.Tensor:
     """Recompute the per-point loss from R14 Eq. 8 without the flow term, independently.
 
@@ -208,7 +196,7 @@ class TestVisibilityMasking:
 
         assert torch.equal(loss_occluded, loss_visible)
 
-    def test_no_visible_points_gives_finite_zero_still_attached_to_graph(self) -> None:
+    def test_no_visible_points_gives_finite_zero_attached_to_graph(self) -> None:
         """All-``v=0`` input returns a finite zero, not ``NaN``, still connected to gradients.
 
         Mirrors :func:`~lucid_yolo.losses.mask_loss.instance_mask_loss`'s

@@ -55,12 +55,6 @@ DEV_SHM = Path("/dev/shm")
 ROOMY_DEV_SHM = os.statvfs_result((4096, 4096, 0, 262144, 262144, 0, 0, 0, 0, 255))
 
 
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed the global RNG before each test (the module is randomly initialized)."""
-    torch.manual_seed(0)
-
-
 @pytest.fixture
 def worker_host(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin what the worker policy reads off the host: two cores and, by default, ``/dev/shm``.
@@ -661,7 +655,7 @@ class TestMergePairing:
                 expected_ground_truth=index.ground_truth,
             )
 
-    def test_reader_publishing_no_image_ids_still_scores_split(
+    def test_reader_publishing_no_image_ids_scores_split(
         self, tiled_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A dataset with no COCO ids keeps the annotation-set check and skips the id one.

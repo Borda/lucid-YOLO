@@ -48,10 +48,9 @@ from torch.nn import functional as F
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.data.coco import CocoDetectionDataset
 from lucid_yolo.data.letterbox import Letterbox
-from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
+from lucid_yolo.losses.dual_loss import BranchPrediction, DualBranchLoss, DualLossOutput
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
     from lucid_yolo.data.targets import Targets
@@ -124,13 +123,6 @@ class _StepResult:
     grads_finite: bool
     logits_grad_norm: float
     box_grad_norm: float
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed the global RNG before each test (the run itself is RNG-free)."""
-    torch.manual_seed(0)
-    yield
 
 
 def _first_nonempty_targets(dataset: CocoDetectionDataset, count: int) -> list[Targets]:
@@ -245,7 +237,8 @@ def _components(out: DualLossOutput) -> tuple[Tensor, ...]:
         >>> gt_labels, gt_mask = torch.zeros(1, 1, dtype=torch.int64), torch.ones(1, 1, dtype=torch.bool)
         >>> logits = torch.zeros(1, 1, 4)
         >>> out = DualBranchLoss()(
-        ...     logits, boxes, logits, boxes, anchor_points, gt_boxes, gt_labels, gt_mask, strides=strides
+        ...     BranchPrediction(logits, boxes), BranchPrediction(logits, boxes),
+        ...     anchor_points, gt_boxes, gt_labels, gt_mask, strides=strides
         ... )
         >>> len(_components(out))
         9
@@ -288,7 +281,8 @@ def _step_is_finite(out: DualLossOutput, logits: Tensor, box_raw: Tensor) -> boo
         >>> logits, box_raw = _new_predictions(batch)
         >>> boxes = _decode_boxes(box_raw, batch.anchor_points, batch.strides)
         >>> out = DualBranchLoss()(
-        ...     logits, boxes, logits, boxes, batch.anchor_points, batch.gt_boxes, batch.gt_labels, batch.gt_mask
+        ...     BranchPrediction(logits, boxes), BranchPrediction(logits, boxes),
+        ...     batch.anchor_points, batch.gt_boxes, batch.gt_labels, batch.gt_mask
         ... )
         >>> out.total.backward()
         >>> _step_is_finite(out, logits, box_raw)
@@ -314,7 +308,14 @@ def _run_overfit(batch: _Batch) -> _Trajectory:
     for _ in range(_STEPS):
         optimizer.zero_grad()
         boxes = _decode_boxes(box_raw, batch.anchor_points, batch.strides)
-        out = loss_fn(logits, boxes, logits, boxes, batch.anchor_points, batch.gt_boxes, batch.gt_labels, batch.gt_mask)
+        out = loss_fn(
+            BranchPrediction(logits, boxes),
+            BranchPrediction(logits, boxes),
+            batch.anchor_points,
+            batch.gt_boxes,
+            batch.gt_labels,
+            batch.gt_mask,
+        )
         out.total.backward()
         all_finite = all_finite and _step_is_finite(out, logits, box_raw)
         optimizer.step()
@@ -339,7 +340,14 @@ def _one_step(batch: _Batch, alpha: float) -> _StepResult:
     loss_fn = DualBranchLoss()
     loss_fn.alpha = alpha
     boxes = _decode_boxes(box_raw, batch.anchor_points, batch.strides)
-    out = loss_fn(logits, boxes, logits, boxes, batch.anchor_points, batch.gt_boxes, batch.gt_labels, batch.gt_mask)
+    out = loss_fn(
+        BranchPrediction(logits, boxes),
+        BranchPrediction(logits, boxes),
+        batch.anchor_points,
+        batch.gt_boxes,
+        batch.gt_labels,
+        batch.gt_mask,
+    )
     out.total.backward()
     logits_grad, box_grad = _grad(logits), _grad(box_raw)
     components_finite = all(bool(torch.isfinite(component).all()) for component in _components(out))
@@ -398,7 +406,7 @@ def test_all_leaf_grads_populated(overfit_batch: _Batch) -> None:
 
 
 @pytest.mark.parametrize("alpha", [pytest.param(0.0, id="alpha-o2o-only"), pytest.param(1.0, id="alpha-o2m-only")])
-def test_alpha_extremes_still_train(overfit_batch: _Batch, alpha: float) -> None:
+def test_alpha_extremes_train(overfit_batch: _Batch, alpha: float) -> None:
     """Both branch-weight extremes yield finite loss components and finite gradients."""
     result = _one_step(overfit_batch, alpha=alpha)
     assert result.components_finite

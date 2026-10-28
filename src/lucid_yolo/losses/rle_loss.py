@@ -557,16 +557,24 @@ class RLELoss(nn.Module):
         return _reduce_selected(self._per_point(offset, sigma_hat))
 
     def _per_point(self, offset: Tensor, sigma_hat: Tensor) -> Tensor:
-        """Score selected rows with the existing density expressions before their mean."""
-        residual = offset / sigma_hat
+        """Score selected rows in at least float32 with autocast off before their mean.
 
-        laplace = Laplace(0.0, _BASE_LAPLACE_SCALE)
-        base_log_prob = cast("Tensor", laplace.log_prob(residual)).sum(dim=-1)  # type: ignore[no-untyped-call]  # (V,)
+        Sigma's 1e-6 floor permits residuals beyond float16's range; autocasting the
+        flow's linear layers would invert a finite residual to a non-finite value.
+        """
+        with torch.autocast(offset.device.type, enabled=False):
+            dtype = torch.promote_types(offset.dtype, torch.float32)
+            offset = offset.to(dtype)
+            sigma_hat = sigma_hat.to(dtype)
+            residual = offset / sigma_hat
 
-        flow_log_prob = self.flow.log_density(residual)  # (V,)
+            laplace = Laplace(0.0, _BASE_LAPLACE_SCALE)
+            base_log_prob = cast("Tensor", laplace.log_prob(residual)).sum(dim=-1)  # type: ignore[no-untyped-call]  # (V,)
 
-        log_sigma_term = torch.log(sigma_hat).sum(dim=-1)  # (V,)
-        per_point = -base_log_prob - flow_log_prob + log_sigma_term  # (V,), R14 Eq. 8 (log s dropped)
+            flow_log_prob = self.flow.log_density(residual)  # (V,)
+
+            log_sigma_term = torch.log(sigma_hat).sum(dim=-1)  # (V,)
+            per_point = -base_log_prob - flow_log_prob + log_sigma_term  # (V,), R14 Eq. 8 (log s dropped)
 
         return per_point
 

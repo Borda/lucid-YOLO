@@ -104,14 +104,10 @@ import math
 import torch
 from torch import Tensor
 
+from lucid_yolo.data._common import _POINT_DIM, _QUAD_CORNERS, _RBOX_DIM
+
 __all__ = ["canonicalize", "points_in_rboxes", "polygons_to_rboxes", "rboxes_to_polygons", "rotated_iou"]
 
-#: Column count of a long-edge rotated box ``(cx, cy, w, h, theta)``.
-_RBOX_DIM = 5
-#: Column count of a point ``(x, y)``.
-_POINT_DIM = 2
-#: Corner count of the quadrilateral form of a rotated box.
-_QUAD_CORNERS = 4
 #: Vertex bound on the intersection of two convex quadrilaterals. Clipping a 4-gon by
 #: ``j`` half-planes yields at most ``4 + j`` vertices, so 8 bounds every intermediate
 #: stage of the four-edge pass as well as its result.
