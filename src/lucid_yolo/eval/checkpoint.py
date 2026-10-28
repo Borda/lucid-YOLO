@@ -23,26 +23,35 @@ one wins". The shadow is also checked to cover every floating-point parameter an
 *before* any copy happens: a partial shadow otherwise leaves the module half EMA and half
 raw, which is neither of the two claims a report can make, and leaves it that way silently.
 
-The two reads of one file are deliberate, and their **order** is the trust boundary. The
-restricted read comes first: ``torch.load(..., weights_only=True)`` refuses any global the
-file names outside torch's allowlist while it is still parsing the pickle stream, so a
-checkpoint carrying an arbitrary reducer is rejected before that reducer runs. Only a file
-that survived that read is handed to Lightning, whose own read is unrestricted on part of
-the supported range -- ``weights_only`` reached ``load_from_checkpoint`` in Lightning
-2.6.0, and ``pyproject.toml`` declares ``>=2.4``, where the argument is swallowed by
-``**kwargs`` as a hyper-parameter override and changes nothing about how the file is read.
-Passing it there would therefore *look* like a policy without being one on every version
-the project claims to support; the ordering is the policy, and it holds on all of them.
+The file is read **once**, restricted. ``torch.load(..., weights_only=True)`` refuses any
+global the file names outside torch's allowlist while it is still parsing the pickle
+stream, so a checkpoint carrying an arbitrary reducer is rejected before that reducer runs,
+and the module is then built from that same payload rather than handed to Lightning's
+``load_from_checkpoint`` for a second, unrestricted read. Earlier releases read the file
+twice -- restricted first, as the gate, then through Lightning --
+which deserialized every tensor twice (twice the peak host memory) and checked the file in
+its first form while loading it in its second if it was replaced between the reads. One
+read closes both.
 
-The cost is that the file is deserialized twice (A03, L-46). Reading it once would mean
-building the module from the payload through Lightning's private ``_load_state``, the
-coupling to unsupported API that M-17 names elsewhere in this repository; two reads of a
-local file is the cheaper of those two prices. One gap is stated rather than closed: a file
-replaced between the reads is checked in its first form and loaded in its second.
+Building the module needs no private Lightning API, because the class is simple to
+build: :class:`~lucid_yolo.ptl.module.DetectionLitModule` takes primitive keyword
+arguments only, so its saved ``hyper_parameters``, filtered to the ``__init__``
+signature, construct it directly. The filter is what a ``lucid-yolo fit`` checkpoint
+needs: LightningCLI saves an ``_instantiator`` entry beside the arguments, which Lightning
+uses to rebuild the class through jsonargparse, and which, for this class, builds the
+same object a plain call does. Then come the public steps Lightning's loader takes
+after construction: the ``on_load_checkpoint`` hook and a ``load_state_dict`` at the
+module's own ``strict_loading``. What this skips is Lightning's legacy-checkpoint
+migration, which rewrites loop and callback state from Lightning 1.x layouts. The
+fields read here, ``hyper_parameters``, ``state_dict``, ``epoch``, ``global_step`` and the
+EMA callback's entry, are written in the same layout by every Lightning release in
+``pyproject.toml``'s supported range.
 """
 
 from __future__ import annotations
 
+import inspect
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
 import torch
@@ -50,7 +59,6 @@ import torch
 from lucid_yolo.ptl.module import DetectionLitModule
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from pathlib import Path
     from typing import Any
 
@@ -63,6 +71,11 @@ __all__ = ["available_devices", "load_eval_module", "pick_device"]
 #: arguments for a parametrized instance, so the entry is found by this substring and then
 #: required to be unique -- see :func:`_ema_state_key`.
 _EMA_CALLBACK_MARKER = "EMACallback"
+
+#: Keyword arguments :class:`DetectionLitModule` accepts, so saved hyper-parameters can be
+#: filtered to them: a ``lucid-yolo fit`` checkpoint saves an ``_instantiator`` entry
+#: beside them, which is Lightning's own bookkeeping, not an argument.
+_INIT_ARGUMENTS = frozenset(inspect.signature(DetectionLitModule.__init__).parameters) - {"self"}
 
 
 def load_eval_module(checkpoint: Path, *, use_ema: bool) -> tuple[DetectionLitModule, dict[str, object]]:
@@ -78,9 +91,10 @@ def load_eval_module(checkpoint: Path, *, use_ema: bool) -> tuple[DetectionLitMo
 
     Raises:
         pickle.UnpicklingError: If the checkpoint names anything restricted loading refuses.
-            Raised by the first read, before any reducer the file carries is called and
-            before the file reaches Lightning -- see the module docstring on the ordering.
-        ValueError: If the checkpoint carries no ``epoch`` or ``global_step``, or -- under
+            Raised by the one read, before any reducer the file carries is called -- see
+            the module docstring.
+        ValueError: If the checkpoint carries no ``hyper_parameters`` or ``state_dict``
+            mapping, no ``epoch`` or ``global_step``, or -- under
             ``use_ema`` -- no ``num_updates`` beside the shadow; and if ``use_ema`` is
             requested and the checkpoint carries no EMA shadow, names the EMA callback in
             more than one ``callbacks`` entry, or carries a shadow that does not cover
@@ -95,9 +109,9 @@ def load_eval_module(checkpoint: Path, *, use_ema: bool) -> tuple[DetectionLitMo
 
         ```
     """
-    # Restricted first, unconditionally: this read is the gate, not a second opinion.
+    # Restricted, unconditionally, and the only read: the module is built from this payload.
     payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    module = DetectionLitModule.load_from_checkpoint(checkpoint, map_location="cpu")
+    module = _module_from_payload(payload, checkpoint)
     info: dict[str, object] = {
         "checkpoint": str(checkpoint),
         "epoch": _required_int(payload, "epoch", str(checkpoint)),
@@ -107,11 +121,81 @@ def load_eval_module(checkpoint: Path, *, use_ema: bool) -> tuple[DetectionLitMo
     if use_ema:
         # One resolution of the callback's key, used for both lookups: the shadow and the
         # counter that says how many updates produced it must come from the same entry.
-        state_key = _overlay_ema(module, payload)
+        state_key = _overlay_ema(module, payload, checkpoint)
         entry = cast("Mapping[str, Any]", payload["callbacks"][state_key])
         info["ema_updates"] = _required_int(entry, "num_updates", f"{checkpoint} callbacks entry {state_key!r}")
     module.eval()
     return module, info
+
+
+def _module_from_payload(payload: Mapping[str, Any], checkpoint: Path) -> DetectionLitModule:
+    """Build the module a checkpoint describes from its already-read payload.
+
+    The public steps of Lightning's own loader, in its order: construct from the saved
+    hyper-parameters, give the module its ``on_load_checkpoint`` hook, then load the
+    weights at the module's ``strict_loading`` -- so a missing or unexpected key raises
+    PyTorch's own ``load_state_dict`` error, as it did through ``load_from_checkpoint``.
+
+    Args:
+        payload: The checkpoint dict, read with ``weights_only=True``.
+        checkpoint: Path to name when a required entry is missing.
+
+    Returns:
+        The module, in training mode, with the checkpoint's raw weights.
+
+    Raises:
+        ValueError: If ``hyper_parameters`` or ``state_dict`` is absent or not a mapping.
+
+    Examples:
+        ```pycon
+        >>> from pathlib import Path
+        >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=2)
+        >>> payload = {"hyper_parameters": dict(module.hparams), "state_dict": module.state_dict()}
+        >>> _module_from_payload(payload, Path("run.ckpt")).task
+        'detect'
+        >>> _module_from_payload({"state_dict": {}}, Path("run.ckpt"))
+        Traceback (most recent call last):
+        ValueError: run.ckpt carries no 'hyper_parameters' mapping; it holds ['state_dict']...
+
+        ```
+    """
+    hparams = _required_mapping(payload, "hyper_parameters", str(checkpoint))
+    state_dict = _required_mapping(payload, "state_dict", str(checkpoint))
+    module = DetectionLitModule(**{name: value for name, value in hparams.items() if name in _INIT_ARGUMENTS})
+    module.on_load_checkpoint(dict(payload))
+    module.load_state_dict(state_dict, strict=module.strict_loading)
+    return module
+
+
+def _required_mapping(payload: Mapping[str, Any], key: str, where: str) -> Mapping[str, Any]:
+    """Read ``key`` as a mapping, or refuse naming the key, the file, and what is there.
+
+    Args:
+        payload: The checkpoint dict.
+        key: The key that must hold a mapping.
+        where: The checkpoint path to name in the refusal.
+
+    Returns:
+        The mapping at ``key``.
+
+    Raises:
+        ValueError: If ``key`` is absent or holds something other than a mapping.
+
+    Examples:
+        ```pycon
+        >>> _required_mapping({"state_dict": {}}, "state_dict", "run.ckpt")
+        {}
+
+        ```
+    """
+    value = payload.get(key)
+    if not isinstance(value, Mapping):
+        raise ValueError(
+            f"{where} carries no {key!r} mapping; it holds {sorted(payload)}. Every Lightning checkpoint of "
+            f"this project is written with one, so the file is truncated, hand-built, or not a checkpoint "
+            f"of this project."
+        )
+    return value
 
 
 def _required_int(payload: Mapping[str, Any], key: str, where: str) -> int:
@@ -242,7 +326,7 @@ def _is_available(device: torch.device) -> bool:
     return True
 
 
-def _ema_state_key(callbacks: dict[str, dict[str, object]]) -> str:
+def _ema_state_key(callbacks: dict[str, dict[str, object]], checkpoint: Path) -> str:
     """Resolve the one ``callbacks`` entry that belongs to the EMA callback.
 
     Lightning keys the ``callbacks`` dict by each callback's ``state_key``, which for a
@@ -253,6 +337,7 @@ def _ema_state_key(callbacks: dict[str, dict[str, object]]) -> str:
 
     Args:
         callbacks: The checkpoint's ``callbacks`` mapping.
+        checkpoint: Path to name when no entry, or more than one, names the EMA callback.
 
     Returns:
         The single key naming the EMA callback.
@@ -263,14 +348,14 @@ def _ema_state_key(callbacks: dict[str, dict[str, object]]) -> str:
     matches = [name for name in callbacks if _EMA_CALLBACK_MARKER in name]
     if len(matches) > 1:
         raise ValueError(
-            f"EMA weights requested but the checkpoint carries {len(matches)} callback entries naming "
+            f"EMA weights requested but {checkpoint} carries {len(matches)} callback entries naming "
             f"{_EMA_CALLBACK_MARKER}: {matches}. Which of them is 'the' EMA shadow is not something this "
             f"loader may decide by iteration order."
         )
     if not matches:
         raise ValueError(
             f"EMA weights requested but no callback entry names {_EMA_CALLBACK_MARKER}; "
-            f"the checkpoint carries {sorted(callbacks)}"
+            f"{checkpoint} carries {sorted(callbacks)}"
         )
     return matches[0]
 
@@ -293,7 +378,7 @@ def _float_tensors(module: DetectionLitModule) -> dict[str, Tensor]:
     return {name: tensor for name, tensor in named if tensor.is_floating_point()}
 
 
-def _overlay_ema(module: DetectionLitModule, payload: dict[str, object]) -> str:
+def _overlay_ema(module: DetectionLitModule, payload: dict[str, object], checkpoint: Path) -> str:
     """Copy the checkpoint's EMA shadow over the module's parameters and buffers.
 
     The callback's key is resolved once and handed back, so the caller's ``num_updates``
@@ -308,6 +393,7 @@ def _overlay_ema(module: DetectionLitModule, payload: dict[str, object]) -> str:
     Args:
         module: The module to overlay in place.
         payload: The raw checkpoint dict.
+        checkpoint: Path to name in every refusal.
 
     Returns:
         The ``callbacks`` key the shadow was taken from.
@@ -318,15 +404,15 @@ def _overlay_ema(module: DetectionLitModule, payload: dict[str, object]) -> str:
             parameter or buffer of ``module``.
     """
     callbacks = cast("dict[str, dict[str, object]]", payload.get("callbacks", {}))
-    state_key = _ema_state_key(callbacks)
+    state_key = _ema_state_key(callbacks, checkpoint)
     shadow = cast("dict[str, Tensor] | None", callbacks[state_key].get("shadow"))
     if not shadow:
-        raise ValueError(f"EMA weights requested but {payload.get('checkpoint', 'the checkpoint')} carries no shadow")
+        raise ValueError(f"EMA weights requested but {checkpoint} carries no shadow")
     tensors = _float_tensors(module)
     missing = sorted(set(tensors) - set(shadow))
     if missing:
         raise ValueError(
-            f"EMA shadow in {payload.get('checkpoint', 'the checkpoint')} covers {len(shadow)} tensors but omits "
+            f"EMA shadow in {checkpoint} covers {len(shadow)} tensors but omits "
             f"{len(missing)} of the module's floating-point parameters and buffers: {missing}. Overlaying it "
             f"would report a mixture of EMA and raw weights under the EMA name."
         )

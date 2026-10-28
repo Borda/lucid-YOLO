@@ -21,7 +21,9 @@ import argparse
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
+from scripts.lint._common import add_repo_root_argument, print_failure, sorted_rglob
+
 SPDX_LINE = "# SPDX-License-Identifier: Apache-2.0"
 
 #: The Apache appendix's own placeholder for the copyright line, left in the file by
@@ -181,7 +183,7 @@ def check_source_files_carry_spdx_header(repo_root: Path) -> list[str]:
     missing = [
         str(path.relative_to(repo_root))
         for name in HEADER_DIRS
-        for path in sorted((repo_root / name).rglob("*.py"))
+        for path in sorted_rglob(repo_root / name, "*.py")
         if not _carries_spdx_header(path.read_text(encoding="utf-8"))
     ]
     if not missing:
@@ -231,20 +233,12 @@ def main(argv: list[str] | None = None) -> int:
         Process exit code: ``0`` clean, ``1`` when any check finds a violation.
     """
     parser = argparse.ArgumentParser(description="Audit LICENSE/NOTICE/README and per-file SPDX headers.")
-    parser.add_argument(
-        "--repo-root",
-        type=Path,
-        default=REPO_ROOT,
-        help=f"repository root to scan (default: {REPO_ROOT})",
-    )
+    add_repo_root_argument(parser, "repository root to scan")
     args = parser.parse_args(argv)
 
     violations = find_violations(args.repo_root)
     if violations:
-        print(f"license-headers-audit FAILED: {len(violations)} violation(s)")
-        for item in violations:
-            print(f"  - {item}")
-        return 1
+        return print_failure("license-headers-audit", violations)
     print(f"license-headers-audit clean: LICENSE, NOTICE, README, and {'/, '.join(HEADER_DIRS)}/ headers all check out")
     return 0
 

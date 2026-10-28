@@ -34,10 +34,11 @@ selected detections is what makes the guarantee unconditional: a caller that
 decodes without ranking (a loss, an assigner, an export graph) cannot end up with
 an un-normalized angle by taking a shorter path.
 
-**Selection happens exactly once.** :func:`o2o_rotated_topk` does not rank
-anything itself — it delegates to
+**Selection happens exactly once.** :func:`o2o_rotated_topk_with_indices` does not
+rank anything itself — it delegates to
 :func:`~lucid_yolo.models.heads.detect.o2o_topk_with_indices` and gathers the
-angle by the anchor indices that helper reports. A second ranking computed here
+angle by the anchor indices that helper reports, and :func:`o2o_rotated_topk` is its
+detections-only view. A second ranking computed here
 would be free to disagree with the first, pairing one anchor's orientation with
 another anchor's box: a detection with a correct centre, a correct score, and a
 silently wrong heading.
@@ -59,8 +60,9 @@ from torch import Tensor
 
 from lucid_yolo.data.rotated_geom import canonicalize
 from lucid_yolo.models.heads.detect import decode_ltrb, o2o_topk_with_indices
+from lucid_yolo.tasks import _MAX_DETECTIONS
 
-__all__ = ["RBOX_DET_WIDTH", "decode_rboxes", "o2o_rotated_topk"]
+__all__ = ["RBOX_DET_WIDTH", "decode_rboxes", "o2o_rotated_topk", "o2o_rotated_topk_with_indices"]
 
 #: Width of the oriented detection tuple ``[cx, cy, w, h, theta, score, class]``.
 RBOX_DET_WIDTH = 7
@@ -69,7 +71,7 @@ RBOX_DET_WIDTH = 7
 _RBOX_COLUMNS = 5
 
 #: Default per-image detection cap, shared with the axis-aligned path (A9).
-_DEFAULT_TOPK = 300
+_DEFAULT_TOPK = _MAX_DETECTIONS
 
 
 def decode_rboxes(distances: Tensor, angles: Tensor, anchor_points: Tensor, strides: Tensor) -> Tensor:
@@ -131,6 +133,45 @@ def decode_rboxes(distances: Tensor, angles: Tensor, anchor_points: Tensor, stri
     return canonicalize(rboxes.reshape(-1, _RBOX_COLUMNS)).reshape(rboxes.shape)
 
 
+def o2o_rotated_topk_with_indices(scores: Tensor, rboxes: Tensor, k: int = _DEFAULT_TOPK) -> tuple[Tensor, Tensor]:
+    """Rank the one-to-one branch's oriented detections and report each row's source anchor.
+
+    :func:`o2o_rotated_topk` with the anchor indices kept, exactly as
+    :func:`~lucid_yolo.models.heads.detect.o2o_topk_with_indices` is to
+    :func:`~lucid_yolo.models.heads.detect.o2o_topk`. The ranking is that helper's, not a
+    second copy: the four centre-and-extent columns ride through it as its box argument
+    and ``theta`` is gathered by the indices it reports, so the orientation of row ``n``
+    provably comes from the same anchor as its box — and the same indices are what any
+    other per-anchor value would be gathered by.
+
+    Args:
+        scores: Raw class logits of shape ``(B, A, C)``.
+        rboxes: Canonical rotated boxes of shape ``(B, A, 5)`` from
+            :func:`decode_rboxes`, aligned with ``scores`` on the anchor axis.
+        k: Maximum detections kept per image. Defaults to 300 (A9).
+
+    Returns:
+        A pair: the ``(B, min(k, A), 7)`` tensor :func:`o2o_rotated_topk` returns, and the
+        ``(B, min(k, A))`` long tensor naming the anchor each row came from.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> scores = torch.tensor([[[-2.0, -1.0], [3.0, 0.5]]])  # anchor 1 is the confident one
+        >>> rboxes = torch.tensor([[[0.0, 0.0, 4.0, 2.0, 0.3], [9.0, 9.0, 2.0, 1.0, -0.2]]])
+        >>> detections, anchors = o2o_rotated_topk_with_indices(scores, rboxes, k=2)
+        >>> anchors
+        tensor([[1, 0]])
+        >>> detections[0, 0, 4]  # the top row's heading is anchor 1's
+        tensor(-0.2000)
+
+        ```
+    """
+    partial, anchor_index = o2o_topk_with_indices(scores, rboxes[..., :4], k=k)
+    theta = rboxes[..., 4].gather(1, anchor_index).unsqueeze(-1)
+    return torch.cat((partial[..., :4], theta, partial[..., 4:]), dim=-1), anchor_index
+
+
 def o2o_rotated_topk(scores: Tensor, rboxes: Tensor, k: int = _DEFAULT_TOPK) -> Tensor:
     """Reduce the one-to-one branch to the top-k score-ranked oriented detections.
 
@@ -142,11 +183,11 @@ def o2o_rotated_topk(scores: Tensor, rboxes: Tensor, k: int = _DEFAULT_TOPK) -> 
     defining property of the end-to-end path (R3 sec. 4). When the anchor count
     ``A`` is below ``k`` every anchor is returned.
 
-    The ranking itself is
-    :func:`~lucid_yolo.models.heads.detect.o2o_topk_with_indices`', not a second
-    copy: the four centre-and-extent columns ride through that helper as its box
-    argument and ``theta`` is gathered by the anchor indices it reports, so the
-    orientation of row ``n`` provably comes from the same anchor as its box.
+    The ranking itself is :func:`o2o_rotated_topk_with_indices`', with the anchor
+    indices dropped; that function states why the orientation of row ``n`` provably
+    comes from the same anchor as its box. The output is **not** padded to ``k``:
+    :class:`~lucid_yolo.decode.topk_e2e.RotatedTopKDecoder` is the fixed-shape decoder
+    built on this ranking.
 
     Args:
         scores: Raw class logits of shape ``(B, A, C)``.
@@ -174,6 +215,5 @@ def o2o_rotated_topk(scores: Tensor, rboxes: Tensor, k: int = _DEFAULT_TOPK) -> 
 
         ```
     """
-    partial, anchor_index = o2o_topk_with_indices(scores, rboxes[..., :4], k=k)
-    theta = rboxes[..., 4].gather(1, anchor_index).unsqueeze(-1)
-    return torch.cat((partial[..., :4], theta, partial[..., 4:]), dim=-1)
+    detections, _ = o2o_rotated_topk_with_indices(scores, rboxes, k=k)
+    return detections

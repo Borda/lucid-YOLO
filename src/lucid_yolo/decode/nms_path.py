@@ -54,20 +54,18 @@ import torch
 from torch import Tensor, nn
 from torchvision.ops import batched_nms
 
-from lucid_yolo.decode.common import DET_WIDTH, PAD_ANCHOR_INDEX, pad_anchor_indices, pad_detections
+from lucid_yolo.decode.common import (
+    DEFAULT_IOU_THRESHOLD,
+    DET_WIDTH,
+    EVAL_CONF_THRESHOLD,
+    MAX_DETECTIONS,
+    PAD_ANCHOR_INDEX,
+    pad_anchor_indices,
+    pad_detections,
+)
 from lucid_yolo.models.heads.detect import decode_ltrb
 
 __all__ = ["NMSDecoder"]
-
-#: Default per-image detection cap (R1 sec. 3.2.1, R3 sec. 4, A9).
-_DEFAULT_MAX_DET = 300
-
-#: Default evaluation-time confidence threshold — permissive so the mAP
-#: integration sees the low-confidence tail.
-_DEFAULT_CONF_THRESHOLD = 0.001
-
-#: Default class-wise NMS IoU threshold.
-_DEFAULT_IOU_THRESHOLD = 0.7
 
 
 class NMSDecoder(nn.Module):
@@ -111,9 +109,9 @@ class NMSDecoder(nn.Module):
 
     def __init__(
         self,
-        conf_threshold: float = _DEFAULT_CONF_THRESHOLD,
-        iou_threshold: float = _DEFAULT_IOU_THRESHOLD,
-        max_det: int = _DEFAULT_MAX_DET,
+        conf_threshold: float = EVAL_CONF_THRESHOLD,
+        iou_threshold: float = DEFAULT_IOU_THRESHOLD,
+        max_det: int = MAX_DETECTIONS,
     ) -> None:
         super().__init__()
         self.conf_threshold = conf_threshold

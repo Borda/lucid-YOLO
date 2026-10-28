@@ -9,34 +9,15 @@ This file is the functional-core check pytest owns; the hook is the lint gate th
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
-from types import ModuleType
 
 import pytest
+from script_loader import load_script
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AUDIT_PATH = REPO_ROOT / "scripts" / "lint" / "audit_wp_links.py"
 
 
-def _load_audit() -> ModuleType:
-    """Load ``scripts/lint/audit_wp_links.py`` as an importable module.
-
-    Examples:
-        >>> module = _load_audit()
-        >>> module.__name__
-        'audit_wp_links'
-        >>> callable(module.find_stale)
-        True
-    """
-    spec = importlib.util.spec_from_file_location("audit_wp_links", AUDIT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-audit = _load_audit()
+audit = load_script("audit_wp_links")
 
 _ROADMAP = "| 001 | a | s | d | — | ✅ |\n| 002 | b | s | d | 001 | ✅ |\n| 003 | c | s | d | 002 | ⬜ |\n"
 

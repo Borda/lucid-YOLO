@@ -19,7 +19,9 @@ from pathlib import Path
 
 import pytest
 import torch
+from PIL import Image
 
+from lucid_yolo.cli import data as data_cli
 from lucid_yolo.data import tiles as build
 from lucid_yolo.data.coco import CocoDetectionDataset
 from lucid_yolo.data.dota import DOTA_CLASSES
@@ -112,6 +114,36 @@ def _dataset_index(root: Path, file_name: str, split: str = "val") -> int:
     """
     names = [str(record["file_name"]) for record in _payload(root, split)["images"]]
     return names.index(file_name)
+
+
+def test_built_root_passes_lucid_data_check(tmp_path: Path) -> None:
+    """A two-split root ``build-tiles`` writes is one ``lucid-data check`` accepts unaided.
+
+    The build writes ``train/``, ``val/`` and ``annotations/instances_{split}.json`` — the plain
+    COCO spelling the layout probe resolves and the OBB tier trains on. The tier's pre-flight
+    used to demand COCO 2017's ``train2017`` and its published counts of that tree instead.
+    """
+    line = _axis_aligned_line(2.0, 2.0, 6.0, 4.0, "plane", 0)
+    _write_split(tmp_path / "dota", "train", {"P0001": [line]})
+    _write_split(tmp_path / "dota", "val", {"P0002": [line]})
+    build.build_tiles(tmp_path / "dota", tmp_path / "tiles", patch=PATCH, overlap=OVERLAP, workers=1, progress=False)
+
+    assert data_cli.main(["check", "--data_root", str(tmp_path / "tiles")]) == 0
+
+
+def test_16_bit_source_refused_by_name(tmp_path: Path) -> None:
+    """A 16-bit source image fails with this build's own message, naming the file.
+
+    Tiles are written as 8-bit JPEG or PNG, so a ``uint16`` decode cannot be encoded as-is;
+    the encoder's own refusal named neither the source nor the remedy.
+    """
+    split_dir = _write_split(tmp_path / "dota", "val", {"P0001": [_axis_aligned_line(2.0, 2.0, 6.0, 4.0, "plane", 0)]})
+    deep = Image.new("I;16", (SIDE, SIDE))
+    deep.putdata([60000] * (SIDE * SIDE))
+    deep.save(split_dir / "images" / "P0001.png")
+
+    with pytest.raises(ValueError, match=r"P0001\.png: decodes to torch\.uint16"):
+        build.convert_split(split_dir, tmp_path / "tiles", "val", patch=PATCH, overlap=OVERLAP)
 
 
 def test_every_window_of_every_source_image_written(built_root: Path) -> None:

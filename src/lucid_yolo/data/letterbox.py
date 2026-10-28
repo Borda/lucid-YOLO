@@ -51,17 +51,11 @@ from fuse_augmentations import (  # type: ignore[import-untyped]
 )
 from torch import Tensor
 
+from lucid_yolo.data._common import _DEFAULT_PAD_VALUE, _POINT_DIM
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.data.transforms import apply_affine_to_points
 
 __all__ = ["Letterbox"]
-
-#: Default pad colour: mid-grey ``114/255`` per the YOLO-lineage convention (A10).
-_DEFAULT_PAD_VALUE = 114.0 / 255.0
-
-#: Coordinate count of a plane point ``(x, y)`` — the width every modality flattens to
-#: before the shared affine maps it.
-_POINT_DIM = 2
 
 
 def _as_hw(target_size: int | tuple[int, int]) -> tuple[int, int]:

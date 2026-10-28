@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from markers import requires_cuda
 from torch import nn
 
 from lucid_yolo.losses.rle_loss import RLELoss
@@ -220,8 +221,7 @@ def test_pair_tensor_subclass_at_any_input_keeps_native_calls(position: str, sid
         assert torch.equal(a, b)
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+@requires_cuda
 def test_pair_device_mismatch_keeps_native_calls() -> None:
     """Branches on different devices are never concatenated; each is scored by its own call.
 

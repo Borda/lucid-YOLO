@@ -26,9 +26,11 @@ exported wrong, which is the same vacuity the first test guards against, one lay
 
 The route is the point. The fixture writes a Lightning checkpoint, loads it back
 through :func:`~lucid_yolo.eval.checkpoint.load_eval_module` — the path an operator's
-``lucid-eval`` and ``lucid-predict`` runs both take — and exports the deployed view of
-*that*. Weights are random: this project ships no trained weights (D14) and the gate is
-offline, so random weights are the honest substitute. Nothing here measures accuracy;
+``lucid-eval``, ``lucid-predict`` and ``lucid-export`` runs all take — and exports the
+deployed view of *that*, built by :func:`~lucid_yolo.export.graph_from_module`, the
+shipped bridge from a checkpoint-loaded module to its graph. Weights are random: this
+project ships no trained weights (D14) and the gate is offline, so random weights are the
+honest substitute. Nothing here measures accuracy;
 it measures that two backends agree along a real route.
 
 **Why the fixture is doctored, and why it has to be.** A freshly built model is
@@ -82,7 +84,7 @@ import onnx
 import onnxruntime as ort
 import pytest
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 
 from lucid_yolo.assign.grid import anchor_grid
 from lucid_yolo.decode.topk_e2e import TopKDecoder
@@ -97,8 +99,9 @@ from lucid_yolo.export import (
     OrientedExportGraph,
     SegmentExportGraph,
     export_graph,
+    graph_from_module,
 )
-from lucid_yolo.models.build import Detector, KeypointDetector, OrientedDetector, Segmenter
+from lucid_yolo.models.build import Detector, OrientedDetector, Segmenter
 from lucid_yolo.models.heads.keypoint import decode_keypoints
 from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.registry import scale_spec
@@ -135,14 +138,6 @@ _EXPORT_CASES = (
 #: constructor argument, and a gate that only ever ran at 17 would not catch a shape
 #: baked to that number (A64).
 _NUM_KEYPOINTS = 3
-
-#: Deployable model class per task; each exposes the ``deploy()`` view under test.
-_MODELS: dict[str, type[Detector] | type[Segmenter] | type[OrientedDetector] | type[KeypointDetector]] = {
-    "detect": Detector,
-    "segment": Segmenter,
-    "obb": OrientedDetector,
-    "keypoints": KeypointDetector,
-}
 
 #: Standard deviation the classification logits are rescaled to, so the top-k ranking is
 #: decided by the scores rather than by the tie-break (see the module docstring).
@@ -186,9 +181,11 @@ class _Exported:
     reference: list[Tensor]
 
 
-#: Deployable graph class per task. Promoted to :mod:`lucid_yolo.export` (WP-112) so
-#: this fixture and :mod:`lucid_yolo.predict`'s single-image "e2e" path are provably
-#: the same composition rather than two that merely resemble each other.
+#: Export graph class each task's module must come back as from
+#: :func:`~lucid_yolo.export.graph_from_module`. The classes were promoted to
+#: :mod:`lucid_yolo.export` (WP-112) so this fixture and :mod:`lucid_yolo.predict`'s
+#: single-image "e2e" path are provably the same composition rather than two that merely
+#: resemble each other.
 _GRAPHS: dict[str, type[E2EExportGraph]] = {
     "detect": DetectExportGraph,
     "segment": SegmentExportGraph,
@@ -309,43 +306,6 @@ def _checkpoint_module(task: str, variant: str, tmp: Path) -> DetectionLitModule
     )
     loaded, _ = load_eval_module(path, use_ema=False)
     return loaded
-
-
-def _deployed(module: DetectionLitModule, task: str, variant: str) -> nn.Module:
-    """Move the checkpoint's weights into the task's model and return its deploy view.
-
-    The Lightning module keeps ``backbone``/``neck``/``head`` as flat attributes
-    precisely so its state-dict keys match the composite models' (WP-087), which is what
-    lets the shipped ``deploy()`` be exercised here rather than re-implemented. The
-    missing-key assertion pins that: every deployed parameter came from the checkpoint.
-
-    Args:
-        module: The checkpoint-loaded module.
-        task: One of ``"detect"``, ``"segment"``, ``"obb"``, ``"keypoints"``.
-        variant: Registry scale the model is built at, matching ``module``'s.
-
-    Returns:
-        The eval-mode ``deploy()`` view, sharing the checkpoint's weights.
-
-    Examples:
-        >>> import tempfile
-        >>> from pathlib import Path
-        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
-        <torch._C.Generator object at ...>
-        >>> with tempfile.TemporaryDirectory() as tmp:
-        ...     module = _checkpoint_module("detect", _VARIANT, Path(tmp))
-        >>> deployed = _deployed(module, "detect", _VARIANT)
-        >>> deployed.training
-        False
-    """
-    model = (
-        KeypointDetector(variant, num_classes=_NUM_CLASSES, num_keypoints=_NUM_KEYPOINTS)
-        if task == "keypoints"
-        else _MODELS[task](variant, num_classes=_NUM_CLASSES)
-    )
-    missing, _ = model.load_state_dict(module.state_dict(), strict=False)
-    assert not missing, f"deployed {task} model has parameters the checkpoint did not supply: {missing}"
-    return model.eval().deploy().eval()
 
 
 def _eager_reference(module: DetectionLitModule, task: str, image: Tensor) -> list[Tensor]:
@@ -529,7 +489,7 @@ def exported(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFa
     torch.manual_seed(0)
 
     module = _checkpoint_module(task, variant, tmp)
-    graph = _GRAPHS[task](_deployed(module, task, variant), canvas=_CANVAS).eval()
+    graph = graph_from_module(module, canvas=_CANVAS)
     image = torch.rand(1, 3, *_CANVAS, generator=torch.Generator().manual_seed(7))
     reference = _eager_reference(module, task, image)
 
@@ -682,15 +642,31 @@ class TestGraphConstruction:
     def test_segment_rejects_canvas_below_detection_cap(self) -> None:
         """A segmentation canvas yielding fewer anchors than ``k`` is refused at construction.
 
-        64 px yields 84 anchors against a 300-row output, so the decode emits padding rows
-        carrying anchor index -1 and the mask-coefficient gather has no valid position to
-        read. Left to the forward pass the failure is ``index -1 is out of bounds``, raised
-        mid-trace during export, naming neither the canvas nor the cap.
+        64 px yields 84 anchors against a 300-row output, so the decode would emit padding
+        rows carrying anchor index -1, rows with no coefficients of their own. The refusal
+        names the canvas and the cap at construction rather than leaving the graph to
+        answer for rows no anchor produced.
         """
         deployed = Segmenter(_VARIANT, num_classes=_NUM_CLASSES).eval().deploy().eval()
 
         with pytest.raises(ValueError, match=r"84 anchors, below the 300-detection cap"):
             SegmentExportGraph(deployed, canvas=(64, 64))
+
+    def test_oriented_small_canvas_padded_to_detection_cap(self) -> None:
+        """An oriented graph on a canvas under ``k`` anchors still answers with ``k`` rows (CS-10).
+
+        64 px yields 84 anchors. The rotated top-k used to return 84 rows there, which
+        made the oriented graph the only one whose output length followed the canvas;
+        it now pads like the axis-aligned decoder, and the padding rows are all zero.
+        """
+        deployed = OrientedDetector(_VARIANT, num_classes=_NUM_CLASSES).eval().deploy().eval()
+        graph = OrientedExportGraph(deployed, canvas=(64, 64)).eval()
+
+        with torch.no_grad():
+            detections = graph(torch.rand(1, 3, 64, 64, generator=torch.Generator().manual_seed(3)))
+
+        assert detections.shape == (1, _DET_CAP, 7)
+        assert torch.equal(detections[0, 84:], torch.zeros(_DET_CAP - 84, 7))
 
     def test_moves_wrapped_model_onto_requested_device(self) -> None:
         """``device`` places the wrapped model, not only the anchor buffers.
@@ -706,3 +682,115 @@ class TestGraphConstruction:
 
         assert graph.anchor_points.device.type == "meta"
         assert next(graph.deployed.parameters()).device.type == "meta"
+
+
+#: Multipliers of the small module the bridge tests build: deliberately no registry row,
+#: since the bridge rebuilds at a module's own numbers rather than a variant name.
+_RAW_SCALING = {"depth": 0.34, "width": 0.25, "max_channels": 64}
+
+
+def _raw_module(task: str) -> DetectionLitModule:
+    """Build a small eval-mode module of ``task`` at multipliers no registry row has.
+
+    Examples:
+        >>> _raw_module("obb").task
+        'obb'
+    """
+    points = _NUM_KEYPOINTS if task == "keypoints" else None
+    return DetectionLitModule(**_RAW_SCALING, num_classes=_NUM_CLASSES, task=task, num_keypoints=points).eval()
+
+
+class TestGraphFromModule:
+    """What the checkpoint-to-graph bridge builds, and which modules it refuses.
+
+    The parity tests above run the bridge on the gate's own route. These pin its
+    contract at the edges: the graph class per task, the strict key check in both
+    directions, the shape check behind it, and that the caller's module is left alone.
+    """
+
+    @pytest.mark.parametrize("task", ["detect", "segment", "obb", "keypoints"])
+    def test_builds_task_graph_at_module_scaling(self, task: str) -> None:
+        """Each task's module comes back as that task's graph, carrying the module's own weights.
+
+        The module is built at multipliers matching no registry row, so a bridge that
+        resolved a variant name instead of rebuilding at the module's numbers would
+        refuse it or load the wrong shapes. The first backbone weight is compared by
+        value to show the copy happened.
+        """
+        module = _raw_module(task)
+
+        graph = graph_from_module(module, canvas=_CANVAS)
+
+        assert type(graph) is _GRAPHS[task]
+        assert not graph.training
+        assert torch.equal(graph.deployed.backbone.state_dict()["stem.conv.weight"], module.backbone.stem.conv.weight)
+
+    def test_graph_weights_copied_not_shared(self) -> None:
+        """The graph owns its weights, so building it never touches the caller's module.
+
+        A shared view would move the module's backbone to the graph's device in place and
+        leave its one-to-many branch behind, a half-moved module the caller still holds.
+        """
+        module = _raw_module("detect")
+
+        graph = graph_from_module(module, canvas=_CANVAS, device=torch.device("meta"))
+
+        assert next(graph.deployed.parameters()).device.type == "meta"
+        assert next(module.parameters()).device.type == "cpu"
+
+    def test_unexpected_key_refused_naming_it(self) -> None:
+        """A key the composite does not hold is refused, by name.
+
+        This is what ``strict=False`` used to hide: the stray entry would have been
+        skipped and the export would have gone ahead without whatever branch it belonged to.
+        """
+        module = _raw_module("detect")
+        module.register_buffer("stray", torch.zeros(1))
+
+        with pytest.raises(ValueError, match=r"missing \[\]; unexpected \['stray'\]"):
+            graph_from_module(module, canvas=_CANVAS)
+
+    def test_missing_key_refused_naming_it(self) -> None:
+        """A key the composite holds and the module does not supply is refused, by name."""
+        module = _raw_module("detect")
+        conv = module.head.o2o.cls_stems[0][-1]
+        name = next(key for key, value in module.named_parameters() if value is conv.bias)
+        conv.bias = None
+
+        with pytest.raises(ValueError, match=rf"missing \['{name}'\]; unexpected \[\]"):
+            graph_from_module(module, canvas=_CANVAS)
+
+    def test_rle_flow_state_dropped_as_training_only(self) -> None:
+        """A keypoint module's RLE flow weights are the one extra the check tolerates.
+
+        They are trained, so they ride in every keypoint checkpoint, and nothing at
+        inference reads them; refusing them would refuse every keypoint checkpoint.
+        """
+        module = _raw_module("keypoints")
+        assert any(key.startswith("rle_loss.") for key in module.state_dict())
+
+        graph = graph_from_module(module, canvas=_CANVAS)
+
+        assert type(graph) is KeypointExportGraph
+
+    def test_shape_disagreement_refused(self) -> None:
+        """Hyperparameters that disagree with the weights are refused rather than exported.
+
+        Every key matches here; only the class count recorded beside the weights is wrong,
+        so the composite is rebuilt one class short and its classifier shapes differ.
+        """
+        module = _raw_module("detect")
+        module.hparams["num_classes"] = _NUM_CLASSES - 1
+
+        with pytest.raises(ValueError, match="do not fit the detect model"):
+            graph_from_module(module, canvas=_CANVAS)
+
+    def test_unknown_task_refused_by_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A module whose task no graph exists for is refused, naming the task and the four that do."""
+        module = _raw_module("detect")
+        monkeypatch.setattr(module, "_task", "classify")
+
+        with pytest.raises(
+            ValueError, match=r"task must be one of \('detect', 'segment', 'obb', 'keypoints'\); got 'classify'"
+        ):
+            graph_from_module(module, canvas=_CANVAS)

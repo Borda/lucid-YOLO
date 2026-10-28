@@ -18,7 +18,7 @@ Provenance: R11 (arXiv:2501.13400), R1 Fig. S2. Assumptions: A3.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 import torch
 from torch import Tensor, nn
@@ -513,6 +513,39 @@ class SPPF(nn.Module):
         return x + y if self.add_shortcut else y
 
 
+class _FullPrecisionAttentionWeights(torch.autograd.Function):
+    """Keep attention logits and softmax finite and independent of backward autocast.
+
+    CUDA-graph capture records backward under the caller's autocast state, unlike
+    eager training, so both passes must explicitly disable autocast.
+    """
+
+    @staticmethod
+    def forward(ctx: Any, q: Tensor, k: Tensor, scale: float) -> Tensor:
+        """Compute attention weights without overflowing mixed-precision logits."""
+        ctx.device_type = q.device.type
+        ctx.q_dtype, ctx.k_dtype = q.dtype, k.dtype
+        ctx.scale = scale
+        dtype = torch.promote_types(q.dtype, torch.float32)
+        q, k = q.to(dtype), k.to(dtype)
+        ctx.save_for_backward(q, k)
+        with torch.autocast(ctx.device_type, enabled=False):
+            weights = ((q.transpose(-2, -1) @ k) * scale).softmax(dim=-1)
+        return weights.to(ctx.q_dtype)
+
+    @staticmethod
+    @torch.autograd.function.once_differentiable
+    def backward(ctx: Any, grad: Tensor) -> tuple[Tensor, Tensor, None]:
+        """Recompute autograd's derivatives with autocast disabled."""
+        q, k = ctx.saved_tensors
+        with torch.enable_grad(), torch.autocast(ctx.device_type, enabled=False):
+            q_ = q.detach().requires_grad_()
+            k_ = k.detach().requires_grad_()
+            weights = ((q_.transpose(-2, -1) @ k_) * ctx.scale).softmax(dim=-1)
+            q_grad, k_grad = torch.autograd.grad(weights, (q_, k_), grad.to(weights.dtype))
+        return q_grad.to(ctx.q_dtype), k_grad.to(ctx.k_dtype), None
+
+
 class SpatialAttention(nn.Module):
     """Multi-head self-attention over the spatial positions of a feature map.
 
@@ -566,6 +599,11 @@ class SpatialAttention(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         """Mix spatial positions by scaled dot-product attention.
 
+        Under autocast, logits and softmax run in float32 with autocast off in
+        forward and backward to prevent float16 overflow. A recorded backward,
+        such as CUDA-graph capture, runs under the caller's autocast state;
+        eager training's backward does not.
+
         Args:
             x: Input tensor of shape ``(N, C, H, W)``.
 
@@ -578,8 +616,12 @@ class SpatialAttention(nn.Module):
         q = qkv[:, :, : self.key_dim]
         k = qkv[:, :, self.key_dim : 2 * self.key_dim]
         v = qkv[:, :, 2 * self.key_dim :]
-        attn = (q.transpose(-2, -1) @ k) * self.scale  # (N, num_heads, HW, HW)
-        attn = attn.softmax(dim=-1)
+        if torch.is_autocast_enabled(x.device.type):
+            attn = _FullPrecisionAttentionWeights.apply(q, k, self.scale)
+            attn = attn.to(v.dtype)
+        else:
+            attn = (q.transpose(-2, -1) @ k) * self.scale  # (N, num_heads, HW, HW)
+            attn = attn.softmax(dim=-1)
         out = (v @ attn.transpose(-2, -1)).reshape(n, c, h, w)
         out = out + cast(Tensor, self.pe(v.reshape(n, c, h, w)))
         return cast(Tensor, self.proj(out))

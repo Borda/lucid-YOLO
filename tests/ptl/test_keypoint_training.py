@@ -41,12 +41,16 @@ here is generic over, and three points exercise it as well as seventeen.
 from __future__ import annotations
 
 import math
+import typing
 from typing import TYPE_CHECKING
 
 import pytest
 import torch
-from torch import Tensor, nn
+from torch import Tensor
+from training import LogRecorder, has_gradient, tiny_module
+from training import keypoint_targets as _posed_targets
 
+import lucid_yolo.ptl
 from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.eval.coco_eval import COCO_KEYPOINT_OKS_SIGMAS, SYMBOL_KEYPOINT_OKS_SIGMA
@@ -54,7 +58,7 @@ from lucid_yolo.losses.keypoint_nll_loss import LaplaceNLLLoss
 from lucid_yolo.losses.oks_loss import OKSLoss
 from lucid_yolo.losses.rle_loss import RLELoss
 from lucid_yolo.ptl import DetectionLitModule, normalize_keypoints_to_box, pad_keypoints
-from lucid_yolo.ptl import module as ptl_module
+from lucid_yolo.ptl import _validation as validation_metrics
 from lucid_yolo.ptl.datamodule import DetectionDataModule, collate_detection, unpack_targets
 from lucid_yolo.ptl.module import _StepContext
 
@@ -76,24 +80,6 @@ _BOX_GAIN, _CLS_GAIN, _L1_GAIN, _KEYPOINT_GAIN, _ALPHA = 7.5, 0.5, 6.0, 1.0, 0.5
 #: totals of order 1e3 resolves to ~1e-4, so a term recovered from that difference is
 #: good to a few parts in 1e6; this bounds the cancellation, not the arithmetic.
 _LEVERAGE_RTOL = 1e-3
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed torch before each test so model init and synthetic batches are reproducible."""
-    torch.manual_seed(0)
-
-
-class _LogRecorder:
-    """Stand-in for ``LightningModule.log`` that records every logged scalar."""
-
-    def __init__(self) -> None:
-        self.values: dict[str, float] = {}
-
-    def __call__(self, name: str, value: Tensor, **kwargs: object) -> None:
-        """Record ``value`` under ``name``, ignoring Lightning's keyword arguments."""
-        del kwargs
-        self.values[name] = float(value.detach())
 
 
 def _tiny_module(task: str = "keypoints", keypoint_loss: str = "rle", **overrides: float) -> DetectionLitModule:
@@ -118,43 +104,14 @@ def _tiny_module(task: str = "keypoints", keypoint_loss: str = "rle", **override
         "alpha": _ALPHA,
     }
     gains.update(overrides)
-    module = DetectionLitModule(
-        depth=0.34,
-        width=0.25,
-        max_channels=256,
-        num_classes=_NUM_CLASSES,
-        task=task,
+    module = tiny_module(
+        task,
         num_keypoints=_NUM_KEYPOINTS if task == "keypoints" else None,
         keypoint_loss=keypoint_loss,
         **gains,
     )
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
     return module
-
-
-def _posed_targets(num_boxes: int, visibility: Tensor | None = None) -> Targets:
-    """Build boxes with one point set per instance, inside the canvas.
-
-    The points are placed independently of the boxes on purpose: nothing in the
-    objective ties a point to its own box's interior, and a fixture that put them
-    at box centres would let a decode that ignored the anchor grid look correct.
-
-    Examples:
-        >>> targets = _posed_targets(2)
-        >>> targets.boxes.shape, targets.keypoints.shape, targets.keypoint_vis.shape
-        (torch.Size([2, 4]), torch.Size([2, 3, 2]), torch.Size([2, 3]))
-    """
-    top_left = torch.rand(num_boxes, 2) * 80.0
-    size = torch.rand(num_boxes, 2) * 40.0 + 10.0
-    points = torch.rand(num_boxes, _NUM_KEYPOINTS, 2) * float(_IMG_SIZE)
-    return Targets(
-        boxes=torch.cat([top_left, top_left + size], dim=1),
-        labels=torch.randint(0, _NUM_CLASSES, (num_boxes,)),
-        keypoints=points,
-        keypoint_vis=torch.full((num_boxes, _NUM_KEYPOINTS), 2, dtype=torch.int64)
-        if visibility is None
-        else visibility,
-    )
 
 
 def _posed_batch() -> tuple[Tensor, list[Targets]]:
@@ -177,20 +134,6 @@ def _boxes_only(targets: list[Targets]) -> list[Targets]:
         [0]
     """
     return [Targets(boxes=target.boxes, labels=target.labels) for target in targets]
-
-
-def _has_gradient(module: nn.Module) -> bool:
-    """Return whether any parameter of ``module`` carries a non-zero gradient.
-
-    Examples:
-        >>> layer = nn.Linear(2, 1)
-        >>> _has_gradient(layer)
-        False
-        >>> layer(torch.ones(1, 2)).backward()
-        >>> _has_gradient(layer)
-        True
-    """
-    return any(parameter.grad is not None and bool(parameter.grad.abs().sum() > 0) for parameter in module.parameters())
 
 
 class TestHeadConstruction:
@@ -233,7 +176,7 @@ class TestHeadConstruction:
         ``save_hyperparameters`` still recorded a ``K`` the head has no stem to predict,
         leaving a later reader a documented point schema and no points (audit L-25). The
         refusal keeps the state-dict guarantee and drops the silence; the shape half is
-        pinned by ``test_state_dict_detection_state_dict_plus_point_stems_and_flow``.
+        pinned by ``test_task_state_dict_keeps_detection_keys``.
         """
         with pytest.raises(ValueError, match="meaningless for task='detect'"):
             DetectionLitModule(
@@ -250,23 +193,6 @@ class TestHeadConstruction:
         """
         with pytest.raises(ValueError, match="num_keypoints"):
             DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=1, task="keypoints")
-
-    def test_state_dict_detection_state_dict_plus_point_stems_and_flow(self) -> None:
-        """Dropping the point-stem and flow keys from a keypoints module leaves a detect module's.
-
-        Pins the composition rule WP-087 established and WP-088 re-pinned: the pose module
-        builds through :func:`~lucid_yolo.models.build.build_detection_stages` and keeps its
-        stages flat. Nesting a pose-specific container inside it would prefix every key with
-        that attribute name and invalidate the accepted checkpoints — a change no shape,
-        count or loss value would reveal.
-        """
-        posed = _tiny_module()
-        detection = _tiny_module(task="detect")
-
-        keys = [key for key in posed.state_dict() if ".keypoint_stems." not in key and not key.startswith("rle_loss.")]
-
-        assert keys == list(detection.state_dict())
-        assert any(".keypoint_stems." in key for key in posed.state_dict())
 
 
 class TestKeypointLossSelection:
@@ -346,7 +272,7 @@ class TestKeypointLossSelection:
         effect for the flow.
         """
         module = _tiny_module(keypoint_loss="laplace_nll")
-        recorder = _LogRecorder()
+        recorder = LogRecorder()
         module.log = recorder  # type: ignore[method-assign]
 
         loss = module.training_step(_posed_batch(), 0)
@@ -354,30 +280,13 @@ class TestKeypointLossSelection:
 
         assert bool(torch.isfinite(loss))
         assert loss.ndim == 0
-        assert _has_gradient(module.head.o2o.keypoint_stems)
-        assert _has_gradient(module.head.o2m.keypoint_stems)
+        assert has_gradient(module.head.o2o.keypoint_stems)
+        assert has_gradient(module.head.o2m.keypoint_stems)
         assert math.isfinite(recorder.values["train/keypoint"])
 
 
 class TestTrainingStep:
     """What one ``task="keypoints"`` step does to the total and to the gradients."""
-
-    def test_gradients_reach_both_branches_point_stems_and_flow(self) -> None:
-        """One step leaves non-zero gradients on both branches' point stems and on the flow.
-
-        This is the test that would have caught the Phase 12 gap: the stems and the loss
-        both existed, were constructed, appeared in the parameter count, and received no
-        gradient because nothing in the objective read them. The flow is asserted beside
-        them because it is the half of R14 that has no other way to be trained.
-        """
-        module = _tiny_module()
-
-        module.training_step(_posed_batch(), 0).backward()
-
-        assert _has_gradient(module.head.o2o.keypoint_stems)
-        assert _has_gradient(module.head.o2m.keypoint_stems)
-        assert module.rle_loss is not None
-        assert _has_gradient(module.rle_loss)
 
     def test_keypoint_gain_enters_total_at_weight(self) -> None:
         """Zeroing ``keypoint_gain`` drops exactly ``gain * term`` from the total.
@@ -390,7 +299,7 @@ class TestTrainingStep:
         weighted = _tiny_module()
         zeroed = _tiny_module(keypoint_gain=0.0)
         zeroed.load_state_dict(weighted.state_dict())
-        recorder = _LogRecorder()
+        recorder = LogRecorder()
         weighted.log = recorder  # type: ignore[method-assign]
         batch = _posed_batch()
 
@@ -438,7 +347,7 @@ class TestTrainingStep:
         weighted = _tiny_module(oks_gain=1.0)
         default = _tiny_module()
         default.load_state_dict(weighted.state_dict())
-        recorder = _LogRecorder()
+        recorder = LogRecorder()
         weighted.log = recorder  # type: ignore[method-assign]
         batch = _posed_batch()
 
@@ -487,7 +396,7 @@ class TestTrainingStep:
 
         Its sigma table is the ``val/oks_mAP`` evaluator's own, at the tiny head's ``K``
         (A67's uniform value, since 3 is not COCO's 17), and it lives in a non-persistent
-        buffer so the pinned key set of ``test_state_dict_detection_state_dict_plus_point_stems_and_flow``
+        buffer so the pinned key set of ``test_task_state_dict_keeps_detection_keys``
         is untouched.
         """
         posed = _tiny_module()
@@ -498,20 +407,21 @@ class TestTrainingStep:
         assert detection.oks_loss is None
         assert not any(key.startswith("oks_loss.") for key in posed.state_dict())
 
-    def test_image_without_instances_gives_finite_loss(self) -> None:
-        """An empty batch yields a finite, exactly-zero keypoint term rather than a ``0 / 0`` NaN.
+    def test_image_without_instances_beside_posed_image_trains(self) -> None:
+        """``Targets.empty()``'s ``(0, 0, 2)`` points beside a posed image still give a real point term.
 
-        With no ground truth there are no positives to gather and the padded point axis has
-        length zero, which no gather can index. The term has to answer with a real zero.
+        The empty image's point axis disagrees with the schema's, which is what the full
+        ``demo_keypoints`` run's validation tripped on; the training path must pad past it too.
         """
         module = _tiny_module()
-        recorder = _LogRecorder()
+        recorder = LogRecorder()
         module.log = recorder  # type: ignore[method-assign]
+        images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
 
-        loss = module.training_step((torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE), [Targets.empty()]), 0)
+        loss = module.training_step((images, [Targets.empty(), _posed_targets(1)]), 0)
 
         assert bool(torch.isfinite(loss))
-        assert recorder.values["train/keypoint"] == 0.0
+        assert recorder.values["train/keypoint"] > 0.0
 
     def test_detection_batch_refused_rather_than_trained_on(self) -> None:
         """Point-free targets under ``task="keypoints"`` raise instead of training on nothing.
@@ -571,7 +481,7 @@ class TestVisibilityMasking:
         )
         images = torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE)
         module = _tiny_module()
-        recorder = _LogRecorder()
+        recorder = LogRecorder()
         module.log = recorder  # type: ignore[method-assign]
 
         module.training_step((images, [target]), 0)
@@ -779,6 +689,24 @@ class TestLoaderTransport:
         assert packed.keypoints_cat.shape == (0, 0, 2)
         assert packed.keypoints_per_image.tolist() == [0, 0]
 
+    def test_differing_point_counts_refused_naming_both(self) -> None:
+        """Two images whose point sets disagree on ``K`` are refused with both counts named.
+
+        No single head predicts both, so the batch cannot pack. The refusal is the same ``K``
+        read ``Targets.concat`` makes, not a shape error from inside ``torch.cat``.
+        """
+        five_points = Targets(
+            boxes=torch.tensor([[0.0, 0.0, 8.0, 8.0]]),
+            labels=torch.tensor([0]),
+            keypoints=torch.zeros((1, 5, 2)),
+            keypoint_vis=torch.full((1, 5), 2, dtype=torch.int64),
+        )
+        targets = [_posed_targets(1), five_points]
+        images = torch.rand(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
+
+        with pytest.raises(ValueError, match=f"differing keypoint counts: {_NUM_KEYPOINTS} and 5"):
+            collate_detection(list(zip(images, targets, strict=True)))
+
 
 #: The animal fixture's own left/right swap, as named by its 16-point category schema
 #: (``front_elbow_left``/``front_elbow_right`` and the three limb pairs after it). Written
@@ -871,6 +799,19 @@ class TestBoxFrameNormalization:
     the property that motivated it — that what the loss actually receives on a real batch
     is ``O(1)`` and not ``O(10^3)``.
     """
+
+    def test_annotations_resolve_at_runtime(self) -> None:
+        """The public export's annotations resolve, so annotation-reading callers see ``Tensor``.
+
+        ``typing.get_type_hints`` evaluates the postponed annotations against the defining
+        module's globals; a ``Tensor`` imported for type checking only would leave the name
+        unbound there and raise ``NameError`` for every caller that reads them (a doc
+        generator, a runtime type checker), which the function did not do while it lived in
+        :mod:`lucid_yolo.ptl.module`.
+        """
+        hints = typing.get_type_hints(lucid_yolo.ptl.normalize_keypoints_to_box)
+
+        assert hints == {"points": Tensor, "boxes": Tensor, "return": Tensor}
 
     def test_box_corners_map_to_unit_square(self) -> None:
         """The frame is the box: its top-left is the origin, its bottom-right is ``(1, 1)``."""
@@ -966,7 +907,7 @@ class TestKeypointValidation:
     def test_validation_step_accumulates_and_logs_val_oks_map(self) -> None:
         """One validation step feeds both buffers; epoch end logs and clears them.
 
-        Mirrors :attr:`DetectionLitModule._val_rotated_preds`'s own accumulate-then-
+        Mirrors :attr:`DetectionLitModule._val_rotated`'s own accumulate-then-
         score-once shape (WP-088): OKS is one whole-document matching, not a
         per-batch running average, so there is nothing to update incrementally.
         """
@@ -977,15 +918,35 @@ class TestKeypointValidation:
         with torch.no_grad():
             module.validation_step((images, targets), 0)
 
-        assert len(module._val_keypoint_preds) == len(targets)
-        assert len(module._val_keypoint_targets) == len(targets)
+        assert len(module._val_keypoints._images()[0]) == len(targets)
+        assert len(module._val_keypoints._images()[1]) == len(targets)
 
         module.on_validation_epoch_end()
 
         assert "val/oks_mAP" in module.log.values
         assert math.isfinite(module.log.values["val/oks_mAP"])
-        assert module._val_keypoint_preds == []
-        assert module._val_keypoint_targets == []
+        assert module._val_keypoints.image_count == 0
+        assert module._val_keypoints._images() == ([], [])
+
+    def test_validation_step_accepts_image_without_instances(self) -> None:
+        """An image with no person beside a posed one is scored, not a crash in the host transfer.
+
+        A COCO keypoint loader answers an image without annotations with ``Targets.empty()``, whose
+        ``(0, 0, 2)`` keypoints disagree with the batch's point count. The full ``demo_keypoints`` run
+        met exactly that batch in its validation sanity check.
+        """
+        module = _tiny_module()
+        module.eval()
+        images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
+        targets = [Targets.empty(), _posed_targets(1)]
+
+        with torch.no_grad():
+            module.validation_step((images, targets), 0)
+        stored = [tuple(target["keypoints"].shape) for target in module._val_keypoints._images()[1]]
+        module.on_validation_epoch_end()
+
+        assert stored == [(0, 0, 2), (1, _NUM_KEYPOINTS, 2)]
+        assert math.isfinite(module.log.values["val/oks_mAP"])
 
     def test_val_map_stays_beside_val_oks_map_not_replaced_by_it(self) -> None:
         """A keypoints module logs both ``val/mAP`` and ``val/oks_mAP``, unlike ``"obb"``.
@@ -1022,18 +983,17 @@ class TestKeypointValidation:
             captured["sigmas"] = sigmas
             return {"AP_all": 0.0}
 
-        monkeypatch.setattr(ptl_module, "evaluate_keypoints", _record_sigmas)
+        monkeypatch.setattr(validation_metrics, "evaluate_keypoints", _record_sigmas)
         module = _tiny_module()  # built at _NUM_KEYPOINTS == 3
-        module._val_keypoint_preds = [{}]
-        module._val_keypoint_targets = [{}]
+        module._val_keypoints.update([], [], [])
 
         module._log_oks_map()
 
         assert tuple(captured["sigmas"]) == (SYMBOL_KEYPOINT_OKS_SIGMA,) * _NUM_KEYPOINTS
 
-        module._num_keypoints = len(COCO_KEYPOINT_OKS_SIGMAS)
-        module._val_keypoint_preds = [{}]
-        module._val_keypoint_targets = [{}]
+        module = tiny_module(task="keypoints", num_keypoints=len(COCO_KEYPOINT_OKS_SIGMAS))
+        module.log = LogRecorder()
+        module._val_keypoints.update([], [], [])
 
         module._log_oks_map()
 

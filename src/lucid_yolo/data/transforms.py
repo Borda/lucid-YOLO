@@ -23,12 +23,11 @@ from typing import Protocol, runtime_checkable
 import torch
 from torch import Tensor
 
+from lucid_yolo.data._common import _BOX_DIM, _POINT_DIM
 from lucid_yolo.data.targets import Targets
 
 __all__ = ["Compose", "GeometricTransform", "apply_affine_to_points", "boxes_from_polygons"]
 
-_POINT_DIM = 2
-_BOX_DIM = 4
 _AFFINE_SHAPE = (3, 3)
 
 

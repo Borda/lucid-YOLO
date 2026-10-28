@@ -818,7 +818,7 @@ class TestCliVerify:
         expected = f"lucid-data download --data_root {tmp_path / 'coco'} --splits '[val]' --force true"
         assert expected in err  # repair hint
 
-    def test_repair_hint_names_command_still_parses(
+    def test_repair_hint_names_command_that_parses(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """The printed repair hint is a command a caller can paste back into a shell.

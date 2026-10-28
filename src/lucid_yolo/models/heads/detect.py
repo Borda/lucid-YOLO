@@ -85,6 +85,7 @@ import torch
 from torch import Tensor, nn
 
 from lucid_yolo.models.blocks import ConvBNAct, DepthwiseConv
+from lucid_yolo.tasks import _MAX_DETECTIONS
 from lucid_yolo.validate import require_one_of
 
 __all__ = [
@@ -118,7 +119,7 @@ _KEYPOINT_SIGMA_OUTPUTS = 2
 DEFAULT_NUM_COEFFS = 32
 
 #: Default per-image detection cap of the one-to-one branch (R3 sec. 4, A9).
-_DEFAULT_TOPK = 300
+_DEFAULT_TOPK = _MAX_DETECTIONS
 
 #: Prior probability for the classification-output bias init (RetinaNet sec. 5.1,
 #: R24 arXiv:1708.02002: "we set pi = 0.01"; A30). Every class sigmoid starts

@@ -15,12 +15,18 @@ The four task models and the builders that construct them from a variant name. E
 ## Task models
 
 ::: lucid_yolo.models.Detector
+    options:
+      inherited_members: [forward, deploy]
 
 ::: lucid_yolo.models.Segmenter
 
 ::: lucid_yolo.models.OrientedDetector
+    options:
+      inherited_members: [forward, deploy]
 
 ::: lucid_yolo.models.KeypointDetector
+    options:
+      inherited_members: [forward, deploy]
 
 ## Heads and outputs
 

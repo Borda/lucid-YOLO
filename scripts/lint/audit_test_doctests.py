@@ -42,7 +42,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
+from scripts.lint._common import REPO_ROOT, print_failure, sorted_rglob
+
 DEFAULT_TESTS_DIR = REPO_ROOT / "tests"
 DEFAULT_SCRIPTS_TESTS_DIR = REPO_ROOT / "scripts" / "_tests"
 DEFAULT_SRC_DIR = REPO_ROOT / "src"
@@ -253,7 +255,7 @@ def find_missing(tests_dir: Path, pattern: str = "test_*.py", include_private: b
         ['test_sample.py::_bare -- no Example']
     """
     missing = []
-    for path in sorted(tests_dir.rglob(pattern)):
+    for path in sorted_rglob(tests_dir, pattern):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         documented = {
             node.name: ast.get_docstring(node)
@@ -332,10 +334,7 @@ def main(argv: list[str] | None = None) -> int:
 
     missing = [item for root in roots for item in find_missing(root.path, root.pattern, root.include_private)]
     if missing:
-        print(f"doctest-audit FAILED: {len(missing)} function(s) without an executable Example")
-        for item in missing:
-            print(f"  - {item}")
-        return 1
+        return print_failure("doctest-audit", missing, "function(s) without an executable Example")
     print("doctest-audit clean: every scanned function carries an Example that runs")
     return 0
 

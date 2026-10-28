@@ -189,7 +189,7 @@ def test_members_read_live_registration_and_null_children() -> None:
     assert all(map(is_, buffers, tuple(owner.buffers())))
 
 
-def test_backward_protection_uses_recorded_parameters_without_traversal() -> None:
+def test_live_gradient_copy_uses_recorded_parameters_without_traversal() -> None:
     """A captured parameter's live gradient is detached from its static replay storage once."""
     network = _network()
     holder = _NetworkCapture()
@@ -199,7 +199,7 @@ def test_backward_protection_uses_recorded_parameters_without_traversal() -> Non
     parameter.grad = torch.arange(parameter.numel(), dtype=parameter.dtype).reshape(parameter.shape)
     before = parameter.grad
     with patch.object(network, "parameters", side_effect=AssertionError("traversed during backward")):
-        holder._before_replayed_backward(None)
+        holder._copy_out_live_gradients()
     assert parameter.grad is not before
     assert torch.equal(parameter.grad.view(torch.int32), before.view(torch.int32))
     assert network[1].weight.grad is None
@@ -318,7 +318,7 @@ def test_real_stem_retires_when_eval_changes_a_training_descriptor() -> None:
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-def test_warmup_scalar_drift_still_retires_against_the_original_recording_stamp() -> None:
+def test_warmup_scalar_drift_retires_against_original_recording_stamp() -> None:
     """Caching a post-record binding must not hide the scalar drift the original guard observes."""
 
     class CountingLinear(nn.Linear):

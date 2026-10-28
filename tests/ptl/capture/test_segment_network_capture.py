@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import copy
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager, nullcontext
 from dataclasses import fields
 from types import SimpleNamespace
@@ -13,6 +13,8 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from capture_access import network_capture
+from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer
 from pytorch_lightning.callbacks import GradientAccumulationScheduler
 from torch.utils.data import DataLoader
@@ -21,26 +23,13 @@ from lucid_yolo.cli.train import DetectionCLI, packaged_config
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.models.build import SegmentOutput
 from lucid_yolo.models.heads.detect import DualHeadOutput
+from lucid_yolo.ptl._graph_replay import copy_out_live_gradients
 from lucid_yolo.ptl.callbacks import EMACallback
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.module import DetectionLitModule
 from lucid_yolo.ptl.network_capture import _BF16_REPLAY_SUPPORTED
 
-
-@pytest.fixture(autouse=True)
-def _deterministic(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Restore the caller's deterministic policy and cudnn benchmark flag after each test.
-
-    Lightning's trainer setup writes `torch.backends.cudnn.benchmark` unconditionally, so a fit test would leak it.
-    """
-    monkeypatch.setattr(torch.backends.cudnn, "benchmark", torch.backends.cudnn.benchmark)
-    enabled = torch.are_deterministic_algorithms_enabled()
-    warning = torch.is_deterministic_algorithms_warn_only_enabled()
-    torch.use_deterministic_algorithms(True)
-    try:
-        yield
-    finally:
-        torch.use_deterministic_algorithms(enabled, warn_only=warning)
+pytestmark = pytest.mark.usefixtures("deterministic_kernels_pinning_cudnn_benchmark")
 
 
 def _module(**kwargs: object) -> DetectionLitModule:
@@ -113,6 +102,57 @@ def _batch(empty: bool = False, size: int = 2) -> tuple[torch.Tensor, list[Targe
     return images, targets, masks
 
 
+class _WindowPosition(Callback):
+    """Tell whether the current training batch continues an accumulation window rather than opening one.
+
+    Lightning counts ``batch_idx`` from zero in every epoch and opens a window at each multiple of
+    the accumulation, so a batch at any other index meets gradients its window accumulated.
+
+    Examples:
+        >>> position = _WindowPosition(3)
+        >>> position.on_train_batch_start(None, None, None, 4)
+        >>> position.inside
+        True
+    """
+
+    def __init__(self, accumulation: int) -> None:
+        self.accumulation, self.inside = accumulation, False
+
+    def on_train_batch_start(self, trainer: object, pl_module: object, batch: object, batch_idx: int) -> None:
+        """Record whether this batch follows another batch of the same window."""
+        del trainer, pl_module, batch
+        self.inside = batch_idx % self.accumulation != 0
+
+
+def _live_gradient_spy(
+    seen: set[tuple[int, ...]], position: _WindowPosition
+) -> Callable[[Iterable[torch.Tensor]], None]:
+    """Wrap the forward-time gradient copy so each group replaying onto accumulated gradients is recorded.
+
+    The holder calls the copy only on its replay route, so a group in ``seen`` replayed inside an
+    accumulation window and met the gradients that window's earlier batches left alive. A batch
+    opening a window is not counted: Lightning clears gradients only after the training step's
+    forward, so the previous step's gradients are alive there at every accumulation setting.
+
+    Examples:
+        >>> seen, position = set(), _WindowPosition(3)
+        >>> position.inside = True
+        >>> weight = torch.nn.Parameter(torch.zeros(1))
+        >>> weight.grad = torch.ones(1)
+        >>> _live_gradient_spy(seen, position)([weight])
+        >>> len(seen)
+        1
+    """
+
+    def copy_out(parameters: Iterable[torch.Tensor]) -> None:
+        group = tuple(parameters)
+        if position.inside and any(parameter.grad is not None for parameter in group):
+            seen.add(tuple(id(parameter) for parameter in group))
+        copy_out_live_gradients(group)
+
+    return copy_out
+
+
 def test_segment_request_preserves_defaults_and_checkpoint_keys() -> None:
     """A requested feature recorder adds no parameters and stays inactive off CUDA."""
     native, replay = _module(), _module(capture_network=True)
@@ -123,7 +163,7 @@ def test_segment_request_preserves_defaults_and_checkpoint_keys() -> None:
         replay.setup("fit")
     with patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("CPU must stay native")):
         assert replay.forward_segmentation(torch.rand(2, 3, 64, 64)).prototypes.shape == (2, 32, 16, 16)
-    assert replay._network_capture._network is None
+    assert network_capture(replay)._network is None
 
 
 @pytest.mark.parametrize(
@@ -135,8 +175,7 @@ def test_segment_request_preserves_defaults_and_checkpoint_keys() -> None:
         pytest.param(True, torch.bfloat16, id="heads-bf16"),
     ],
 )
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA graph execution")
+@requires_cuda
 def test_segment_shared_replay_preserves_predictions_and_unused_gradients(heads: bool, dtype: torch.dtype) -> None:
     """Changing mask demand keeps every prediction, gradient and BatchNorm byte native."""
     torch.manual_seed(347)
@@ -173,11 +212,9 @@ def test_segment_shared_replay_preserves_predictions_and_unused_gradients(heads:
                 assert left.grad is None and right.grad is None
                 unused += 1
         assert use_masks or unused > 0, "no mask-only parameter matched the unused-gradient filter"
-        assert (replay._network_capture._network is not None) == (dtype != torch.bfloat16 or _BF16_REPLAY_SUPPORTED)
+        assert (network_capture(replay)._network is not None) == (dtype != torch.bfloat16 or _BF16_REPLAY_SUPPORTED)
 
 
-#: Retirement warning of the network holder under gradient accumulation, which segmentation replay lacks validation for.
-_ACCUMULATION_RETIRE = "capture_network=True stays eager: segmentation replay requires accumulate_grad_batches=1"
 #: Retirement warning of the head holder outside BF16 mixed precision.
 _HEAD_PRECISION_RETIRE = "capture_segment_heads=True stays eager"
 
@@ -189,19 +226,21 @@ _HEAD_PRECISION_RETIRE = "capture_segment_heads=True stays eager"
         pytest.param(False, "16-mixed", 1, None, id="network-fp16"),
         pytest.param(False, "32-true", 1, None, id="network-fp32"),
         pytest.param(True, "bf16-mixed", 1, None, id="heads-bf16"),
-        pytest.param(True, "bf16-mixed", 2, _ACCUMULATION_RETIRE, id="heads-bf16-accumulated"),
+        pytest.param(False, "32-true", 2, None, id="network-fp32-accumulated"),
+        pytest.param(True, "bf16-mixed", 2, None, id="heads-bf16-accumulated"),
         pytest.param(True, "16-mixed", 1, _HEAD_PRECISION_RETIRE, id="heads-fp16-stay-eager"),
     ],
 )
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires public CUDA training")
+@requires_cuda
 def test_segment_fit_replays_across_empty_partial_validation_and_ema(
     heads: bool, precision: str, accumulation: int, retire: str | None
 ) -> None:
-    """Real fits preserve MuSGD and EMA through validation and unsupported accumulation or precision.
+    """Real fits preserve MuSGD and EMA through validation, accumulation and unsupported head precision.
 
-    Network-only cells cover every precision; head replay adds the supported bf16 cell, the accumulation
-    retirement and the fp16 retirement, whose warning must name the holder that stays eager.
+    Network-only cells cover every precision and accumulation 2, which carries live gradients
+    into each second replay. Head replay adds the supported bf16 cell, the accumulated cell, where
+    both holders replay and carry live gradients into each second replay, and the fp16
+    retirement, whose warning must name the holder that stays eager.
     """
     torch.manual_seed(23)
     batches = [_batch(), _batch(True), _batch(size=1)]
@@ -216,7 +255,7 @@ def test_segment_fit_replays_across_empty_partial_validation_and_ema(
             self, trainer: Trainer, pl_module: DetectionLitModule, outputs: object, batch: object, batch_idx: int
         ) -> None:
             """Record whether the public route owns a real graphed network."""
-            recordings.append(pl_module._network_capture._network is not None)
+            recordings.append(network_capture(pl_module)._network is not None)
 
     for capture in (False, True):
         torch.manual_seed(23)
@@ -240,7 +279,7 @@ def test_segment_fit_replays_across_empty_partial_validation_and_ema(
             gradient_clip_val=1.0,
         )
         replays = precision != "bf16-mixed" or _BF16_REPLAY_SUPPORTED
-        combined = capture and heads and accumulation == 1 and precision == "bf16-mixed" and _BF16_REPLAY_SUPPORTED
+        combined = capture and heads and precision == "bf16-mixed" and _BF16_REPLAY_SUPPORTED
         expectation = (
             pytest.warns(UserWarning, match=retire)
             if capture and retire
@@ -259,7 +298,7 @@ def test_segment_fit_replays_across_empty_partial_validation_and_ema(
             )
         assert trainer.state.finished
         feature_records = [call for call in record.call_args_list if type(call.args[0]).__name__ == "_FeatureNetwork"]
-        assert len(feature_records) == int(capture and accumulation == 1 and replays)
+        assert len(feature_records) == int(capture and replays)
         head_records = [call for call in record.call_args_list if type(call.args[0]).__name__ == "_PredictionGroup"]
         assert len(head_records) >= int(combined)
         scaler = getattr(trainer.precision_plugin, "scaler", None)
@@ -271,11 +310,11 @@ def test_segment_fit_replays_across_empty_partial_validation_and_ema(
                 copy.deepcopy(scaler.state_dict()) if scaler is not None else None,
             )
         )
-        assert model._network_capture._network is None
+        assert network_capture(model)._network is None
         assert model._segment_head_capture.entries == {}
     _same(*snapshots)
     assert recordings[:6] == [False] * 6
-    assert recordings[6:] == [accumulation == 1 and replays] * 6
+    assert recordings[6:] == [replays] * 6
 
 
 class _CudaMarked(torch.Tensor):
@@ -301,7 +340,6 @@ _NATIVE_BEFORE_RECORDER = (
 
 #: Reason completing the `capture_network=True stays eager: ` warning of each retiring mode; others run warning-free.
 _RETIRE_REASON = {
-    "accumulate": "segmentation replay requires accumulate_grad_batches=1$",
     "override": "the segmentation forward is overridden or compiled$",
     "head-hook": "a segmentation head module is hooked, overridden or compiled$",
     "head-helper": "a prediction branch overrides its native dispatch$",
@@ -362,14 +400,14 @@ def test_segment_host_routing_and_native_fallback(mode: str) -> None:
         context,
         warning,
         patch.object(
-            model._network_capture, "run_features", return_value=features if mode == "record" else None
+            network_capture(model), "run_features", return_value=features if mode == "record" else None
         ) as run,
         patch.object(model.backbone, "forward", wraps=model.backbone.forward) as backbone,
     ):
         actual = model.forward_segmentation(images)
     assert run.call_count == int(expected_call)
     assert backbone.call_count == int(mode != "record")
-    assert model._network_capture.retired == (reason is not None)
+    assert network_capture(model).retired == (reason is not None)
     assert actual.prototypes.shape == (2, 32, 16, 16)
     if mode == "record":
         expected = model.head(features)
@@ -407,7 +445,7 @@ def test_segment_class_level_forward_override_retires_to_native() -> None:
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("overridden forward must stay native")),
     ):
         actual = model.forward_segmentation(images)
-    assert model._network_capture.retired
+    assert network_capture(model).retired
     assert actual.prototypes.shape == (2, 32, 16, 16)
 
 
@@ -422,7 +460,7 @@ def test_segment_head_topology_swap_retires_with_topology_reason() -> None:
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("swapped head must stay native")),
     ):
         actual = model.forward_segmentation(images)
-    assert model._network_capture.retired
+    assert network_capture(model).retired
     assert actual.prototypes.shape == (2, 32, 16, 16)
 
 
@@ -437,14 +475,14 @@ def test_retired_holder_skips_segment_replay_predicates() -> None:
     model._capture_network_active = True
     model._trainer = SimpleNamespace(training=True, accumulate_grad_batches=1)
     with pytest.warns(UserWarning, match="stays eager: a test cause"):
-        model._network_capture.retire("a test cause")
+        network_capture(model).retire("a test cause")
     images = torch.rand(2, 3, 64, 64).as_subclass(_CudaMarked)
     with (
         warnings.catch_warnings(),
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("retired holder must stay native")),
         patch("lucid_yolo.ptl.module._segment_head_breach", autospec=True) as dispatch,
         patch("lucid_yolo.ptl.module._head_topology_breach", autospec=True) as topology,
-        patch.object(model._network_capture, "run_features") as run,
+        patch.object(network_capture(model), "run_features") as run,
     ):
         warnings.simplefilter("error")
         features = model._segmentation_features(images)
@@ -452,7 +490,7 @@ def test_retired_holder_skips_segment_replay_predicates() -> None:
     topology.assert_not_called()
     run.assert_not_called()
     assert len(features) == 3
-    assert model._network_capture.retired
+    assert network_capture(model).retired
 
 
 def test_frozen_segment_features_retire_before_cuda_submission() -> None:
@@ -468,7 +506,7 @@ def test_frozen_segment_features_retire_before_cuda_submission() -> None:
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("frozen stages must stay native")),
     ):
         model.forward_segmentation(images)
-    assert model._network_capture._disabled
+    assert network_capture(model)._disabled
     model.backbone.requires_grad_(True)
     model.neck.requires_grad_(True)
     with (
@@ -477,8 +515,8 @@ def test_frozen_segment_features_retire_before_cuda_submission() -> None:
     ):
         warnings.simplefilter("error")
         model.forward_segmentation(images)
-    assert model._network_capture._disabled
-    assert model._network_capture._network is None
+    assert network_capture(model)._disabled
+    assert network_capture(model)._network is None
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -521,10 +559,10 @@ def test_segment_head_hook_retires_feature_replay_and_stays_observable() -> None
         patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("custom head must stay native")),
     ):
         model.forward_segmentation(images)
-    assert observed == [True] and model._network_capture._disabled
+    assert observed == [True] and network_capture(model)._disabled
     handle.remove()
     model.forward_segmentation(images)
-    assert model._network_capture._network is None
+    assert network_capture(model)._network is None
 
 
 #: Trainer arguments shared by the CUDA lifecycle fits, which differ only in precision and callbacks.
@@ -540,7 +578,6 @@ _LIFECYCLE_FIT = {
     "enable_model_summary": False,
     "num_sanity_val_steps": 0,
 }
-_skip_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires public CUDA training")
 _skip_no_bf16_replay = pytest.mark.skipif(not _BF16_REPLAY_SUPPORTED, reason="BF16 replay requires torch>=2.9")
 
 
@@ -574,8 +611,7 @@ def _fit_batches() -> DataLoader[object]:
     return DataLoader([_batch(), _batch(True), _batch(size=1)], batch_size=None)  # type: ignore[arg-type]
 
 
-@pytest.mark.gpu
-@_skip_no_cuda
+@requires_cuda
 @_skip_no_bf16_replay
 def test_segment_fit_exception_after_recording_releases_both_holders() -> None:
     """A failing step after recording leaves no graph, pending backward or head entry behind."""
@@ -596,13 +632,12 @@ def test_segment_fit_exception_after_recording_releases_both_holders() -> None:
     ):
         trainer.fit(model, train_dataloaders=_fit_batches())
     assert any(type(call.args[0]).__name__ == "_FeatureNetwork" for call in record.call_args_list)
-    assert model._network_capture._network is None
-    assert model._network_capture._pending_backward is False
+    assert network_capture(model)._network is None
+    assert network_capture(model)._pending_backward is False
     assert model._segment_head_capture.entries == {}
 
 
-@pytest.mark.gpu
-@_skip_no_cuda
+@requires_cuda
 def test_segment_second_fit_records_once_per_fit() -> None:
     """Fitting the same module twice records its shared features once in each fit."""
     torch.manual_seed(23)
@@ -616,8 +651,7 @@ def test_segment_second_fit_records_once_per_fit() -> None:
     assert counts == [1, 1]
 
 
-@pytest.mark.gpu
-@_skip_no_cuda
+@requires_cuda
 def test_segment_freeze_after_recording_retires_once() -> None:
     """Freezing then releasing the backbone after recording reports a single retirement."""
     torch.manual_seed(23)
@@ -628,14 +662,88 @@ def test_segment_freeze_after_recording_retires_once() -> None:
     assert sum("capture_network=True stays eager" in str(warning.message) for warning in record) == 1
 
 
-@pytest.mark.gpu
-@_skip_no_cuda
-def test_segment_accumulation_change_after_recording_retires_through_holder() -> None:
-    """Raising accumulate_grad_batches after epoch one retires the recording with the accumulation reason."""
+@requires_cuda
+def test_segment_accumulation_change_after_recording_keeps_replay_and_matches_native() -> None:
+    """Raising accumulate_grad_batches after epoch one keeps the recording and the native result.
+
+    The recording is made at accumulation 1; epoch two accumulates two batches, so live
+    gradients reach a replay the recording never saw. One recording, no retirement and
+    bitwise-equal weights and optimizer state show the change needs no fallback.
+    """
+    initial = _module().state_dict()
+    snapshots = []
+    for capture in (False, True):
+        torch.manual_seed(23)
+        model = _module(capture_network=capture)
+        model.load_state_dict(initial)
+        scheduler = GradientAccumulationScheduler({0: 1, 1: 2})
+        trainer = Trainer(**_LIFECYCLE_FIT, precision="16-mixed", callbacks=[scheduler])
+        with (
+            _no_retire_warning(),
+            patch("torch.cuda.make_graphed_callables", wraps=torch.cuda.make_graphed_callables) as record,
+        ):
+            trainer.fit(model, train_dataloaders=_fit_batches())
+        feature_records = sum(type(call.args[0]).__name__ == "_FeatureNetwork" for call in record.call_args_list)
+        assert feature_records == int(capture)
+        assert network_capture(model)._network is None
+        snapshots.append((copy.deepcopy(model.state_dict()), copy.deepcopy(trainer.optimizers[0].state_dict())))
+    _same(*snapshots)
+
+
+@requires_cuda
+@_skip_no_bf16_replay
+def test_segment_head_replay_under_accumulation_matches_native() -> None:
+    """Head replay at accumulation 3 ends with the weights, MuSGD, EMA and scaler bytes of a native fit.
+
+    Mirrors ``test_segment_fit_replays_across_empty_partial_validation_and_ema`` with the head holder
+    as the only difference between the arms. Each window opens with a full batch that replays, then
+    a partial batch that misses the recorded signature and accumulates natively, then a second full
+    batch whose replay meets the gradients both left. Every recorded prediction group must replay
+    onto its window's accumulated gradients at least once, so a run whose in-window replay silently
+    went native cannot pass; the gradients leave the static buffers at forward time. The
+    empty-target batch, alone in the last window, leaves mask groups without a backward, so the
+    skipped-backward hold and its release at the next batch run too. The replay arm warns nothing.
+    """
     torch.manual_seed(23)
-    model = _module(capture_network=True)
-    scheduler = GradientAccumulationScheduler({0: 1, 1: 2})
-    trainer = Trainer(**_LIFECYCLE_FIT, precision="16-mixed", callbacks=[scheduler])
-    with pytest.warns(UserWarning, match=_ACCUMULATION_RETIRE):
-        trainer.fit(model, train_dataloaders=_fit_batches())
-    assert model._network_capture._network is None
+    batches = [_batch(), _batch(size=1), _batch(), _batch(True)]
+    initial = _module().state_dict()
+    snapshots = []
+    for heads in (False, True):
+        torch.manual_seed(23)
+        model = _module(capture_segment_heads=heads, lr=1e-4, warmup_epochs=0.0)
+        model.load_state_dict(initial)
+        ema, position = EMACallback(), _WindowPosition(3)
+        trainer = Trainer(
+            **_LIFECYCLE_FIT,
+            precision="bf16-mixed",
+            accumulate_grad_batches=3,
+            callbacks=[ema, position],
+            gradient_clip_val=1.0,
+        )
+        live: set[tuple[int, ...]] = set()
+        with (
+            warnings.catch_warnings(),
+            patch("torch.cuda.make_graphed_callables", wraps=torch.cuda.make_graphed_callables) as record,
+            patch("lucid_yolo.ptl.segment_head_capture.copy_out_live_gradients", _live_gradient_spy(live, position)),
+        ):
+            warnings.filterwarnings("error", message="capture_segment_heads=True", category=UserWarning)
+            trainer.fit(
+                model,
+                train_dataloaders=DataLoader(batches, batch_size=None),
+                val_dataloaders=DataLoader([_batch()], batch_size=None),
+            )
+        assert trainer.state.finished
+        head_records = [call for call in record.call_args_list if type(call.args[0]).__name__ == "_PredictionGroup"]
+        assert bool(head_records) == heads
+        assert len(live) == len(head_records)
+        scaler = getattr(trainer.precision_plugin, "scaler", None)
+        snapshots.append(
+            (
+                copy.deepcopy(model.state_dict()),
+                copy.deepcopy(trainer.optimizers[0].state_dict()),
+                copy.deepcopy(ema.state_dict()),
+                copy.deepcopy(scaler.state_dict()) if scaler is not None else None,
+            )
+        )
+        assert model._segment_head_capture.entries == {}
+    _same(*snapshots)

@@ -21,12 +21,6 @@ from lucid_yolo.models import SemanticAux
 _CONFIDENT = 20.0
 
 
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed every RNG source before each test for deterministic tensors."""
-    torch.manual_seed(0)
-
-
 def test_confident_correct_predictions_drive_both_terms_to_zero() -> None:
     """Saturated logits matching their targets leave both terms near zero.
 
@@ -158,7 +152,7 @@ class TestEmptyBatch:
             assert bool(torch.isfinite(term)), f"{name} is not finite"
             assert float(term) == 0.0, f"{name} is not exactly zero"
 
-    def test_zero_still_carries_gradient_to_logits(self) -> None:
+    def test_zero_carries_gradient_to_logits(self) -> None:
         """The zero is a function of ``logits``, so the composition site needs no branch."""
         logits = torch.zeros(0, 3, 4, 4, requires_grad=True)
 

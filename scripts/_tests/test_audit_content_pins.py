@@ -8,34 +8,15 @@ pre-commit hook reads.
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
-from types import ModuleType
 
 import pytest
+from script_loader import load_script
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AUDIT_PATH = REPO_ROOT / "scripts" / "lint" / "audit_content_pins.py"
 
 
-def _load_audit() -> ModuleType:
-    """Load ``scripts/lint/audit_content_pins.py`` as an importable module.
-
-    Examples:
-        >>> module = _load_audit()
-        >>> module.__name__
-        'audit_content_pins'
-        >>> callable(module.find_violations)
-        True
-    """
-    spec = importlib.util.spec_from_file_location("audit_content_pins", AUDIT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-audit = _load_audit()
+audit = load_script("audit_content_pins")
 
 
 def _write(root: Path, relative: Path | str, text: str) -> None:

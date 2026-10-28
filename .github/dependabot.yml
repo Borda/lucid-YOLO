@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+# Action pins are full commit SHAs with a version comment; Dependabot bumps both.
+# `github-actions` only: `uv.lock` is gitignored by decision, so there is no lockfile
+# for a pip/uv ecosystem to update.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]

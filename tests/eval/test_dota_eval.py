@@ -81,12 +81,6 @@ _EDGE_CASES = [
 _SWEEP_ANGLES = torch.linspace(-math.pi / 4, 3 * math.pi / 4 - 1e-4, 24)
 
 
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed every RNG source before each test for deterministic tensors."""
-    torch.manual_seed(0)
-
-
 def oracle_iou(box_a: Tensor, box_b: Tensor) -> float:
     """Shapely's polygon intersection over union for one pair of rotated boxes.
 

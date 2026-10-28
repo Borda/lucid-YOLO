@@ -128,6 +128,7 @@ import torch
 from torch import Tensor
 
 from lucid_yolo.data.rotated_geom import rotated_iou
+from lucid_yolo.decode.common import MAX_DETECTIONS
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -151,11 +152,6 @@ IOU_THRESHOLDS: tuple[float, ...] = tuple(round(0.50 + 0.05 * step, 2) for step 
 #: Recall sample count of the interpolated average precision (decision 2): the COCO
 #: 101-point grid ``0.00, 0.01, ..., 1.00``, matching :mod:`lucid_yolo.eval.coco_eval`.
 RECALL_POINTS = 101
-
-#: Detections scored per image (decision 3). 300, not COCO's 100, because
-#: :func:`~lucid_yolo.models.heads.obb.o2o_rotated_topk` emits 300 and a lower cap would
-#: measure a truncation rather than the model.
-MAX_DETECTIONS = 300
 
 #: The four summary statistics. ``map``/``map_50``/``map_75`` carry the names
 #: :mod:`lucid_yolo.eval.coco_eval` gives the same quantities, so the oriented and

@@ -396,6 +396,15 @@ class TestCheckDatasetDispatch:
         with pytest.raises(ValueError, match="oriented applies to --dataset yolo"):
             check_data.check_dataset(Path("/nonexistent"), dataset="coco", oriented=True)
 
+    def test_rejects_keypoints_flag_on_another_layout(self) -> None:
+        """``keypoints`` names COCO's pose annotation files, so a YOLO check refuses it.
+
+        The YOLO reader refuses keypoint supervision outright; a flag accepted there and then
+        ignored would print a PASS that reads as though keypoint files had been looked for.
+        """
+        with pytest.raises(ValueError, match="keypoints applies to --dataset coco"):
+            check_data.check_dataset(Path("/nonexistent"), dataset="yolo", keypoints=True)
+
     def test_rejects_count_expectation_aimed_at_coco(self) -> None:
         """The count expectations belong to the two layouts with no published totals.
 

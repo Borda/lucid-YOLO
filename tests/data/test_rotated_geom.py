@@ -299,7 +299,7 @@ class TestPointsInRboxes:
 
         assert bool(inside.diagonal().all())
 
-    def test_point_just_beyond_corner_outside(self) -> None:
+    def test_point_nudged_past_corner_outside(self) -> None:
         """A point nudged diagonally past a corner falls outside."""
         box = torch.tensor([[0.0, 0.0, 4.0, 2.0, 0.0]], dtype=torch.float32)
         beyond = torch.tensor([[2.001, 1.001]], dtype=torch.float32)
@@ -347,7 +347,7 @@ class TestPointsInRboxes:
             pytest.param(0, 0, id="neither"),
         ],
     )
-    def test_empty_inputs_give_correctly_shaped_output(self, n_points: int, n_boxes: int) -> None:
+    def test_empty_inputs_give_output_of_matching_shape(self, n_points: int, n_boxes: int) -> None:
         """Empty points or boxes give an empty bool tensor of the right shape."""
         points = torch.zeros((n_points, 2), dtype=torch.float32)
         boxes = torch.zeros((n_boxes, 5), dtype=torch.float32)

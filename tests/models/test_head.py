@@ -24,12 +24,6 @@ _STRIDES = [8, 16, 32]
 _N_SCALE_CHANNELS = (64, 128, 256)
 
 
-@pytest.fixture(autouse=True)
-def _seed_rng() -> None:
-    """Seed torch RNG so weight init and random inputs are deterministic."""
-    torch.manual_seed(0)
-
-
 def _feature_sizes(input_size: int) -> list[tuple[int, int]]:
     """Return the per-level ``(H, W)`` cell counts for a square input.
 

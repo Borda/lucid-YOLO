@@ -10,32 +10,14 @@ This file is the functional-core check pytest owns; the hook is the lint gate th
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
-from types import ModuleType
+
+from script_loader import load_script
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AUDIT_PATH = REPO_ROOT / "scripts" / "lint" / "audit_flat_test_groups.py"
 
 
-def _load_audit() -> ModuleType:
-    """Load ``scripts/lint/audit_flat_test_groups.py`` as an importable module.
-
-    Examples:
-        >>> module = _load_audit()
-        >>> module.__name__
-        'audit_flat_test_groups'
-        >>> callable(module.find_flat_groups)
-        True
-    """
-    spec = importlib.util.spec_from_file_location("audit_flat_test_groups", AUDIT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-audit = _load_audit()
+audit = load_script("audit_flat_test_groups")
 
 
 class TestFindFlatGroups:
@@ -60,7 +42,7 @@ class TestFindFlatGroups:
         sample = tmp_path / "test_sample.py"
         sample.write_text(
             "def test_named_worker_count_reaches_val_loader(): ...\n"
-            "def test_an_auto_chosen_worker_count_is_still_capped(): ...\n"
+            "def test_an_auto_chosen_worker_count_is_capped(): ...\n"
             "def test_the_val_worker_cap_scales_with_the_side(): ...\n",
             encoding="utf-8",
         )

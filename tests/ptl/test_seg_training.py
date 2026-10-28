@@ -23,12 +23,14 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 from pytorch_lightning import Trainer
-from torch import Tensor, nn
+from torch import Tensor
+from training import LogRecorder, tiny_module
+from training import segment_targets as _synthetic_targets
 
 from lucid_yolo.assign import make_anchor_points
 from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.data.targets import Targets
-from lucid_yolo.losses.dual_loss import DualBranchLoss
+from lucid_yolo.losses.dual_loss import BranchPrediction, DualBranchLoss
 from lucid_yolo.losses.mask_loss import instance_mask_loss
 from lucid_yolo.models.build import SegmentOutput
 from lucid_yolo.models.heads.detect import DualHeadOutput, decode_ltrb
@@ -50,24 +52,6 @@ _STRIDES: tuple[int, int, int] = (8, 16, 32)
 _BOX_GAIN, _CLS_GAIN, _L1_GAIN, _ALPHA = 7.5, 0.5, 6.0, 0.5
 
 
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed torch before each test so model init and synthetic batches are reproducible."""
-    torch.manual_seed(0)
-
-
-class _LogRecorder:
-    """Stand-in for ``LightningModule.log`` that records every logged scalar."""
-
-    def __init__(self) -> None:
-        self.values: dict[str, float] = {}
-
-    def __call__(self, name: str, value: Tensor, **kwargs: object) -> None:
-        """Record ``value`` under ``name``, ignoring Lightning's keyword arguments."""
-        del kwargs
-        self.values[name] = float(value.detach())
-
-
 def _tiny_module(task: str = "segment") -> DetectionLitModule:
     """Build an n-scale module with a low channel cap for fast CPU tests.
 
@@ -78,48 +62,7 @@ def _tiny_module(task: str = "segment") -> DetectionLitModule:
         >>> _tiny_module(task="detect").task
         'detect'
     """
-    return DetectionLitModule(
-        depth=0.34,
-        width=0.25,
-        max_channels=256,
-        num_classes=_NUM_CLASSES,
-        task=task,
-        box_gain=_BOX_GAIN,
-        cls_gain=_CLS_GAIN,
-        l1_gain=_L1_GAIN,
-        alpha=_ALPHA,
-    )
-
-
-def _rectangle_ring(box: Tensor) -> Tensor:
-    """Return the four-point polygon ring tracing an ``xyxy`` box.
-
-    Examples:
-        >>> _rectangle_ring(torch.tensor([0.0, 0.0, 4.0, 2.0]))
-        tensor([[0., 0.],
-                [4., 0.],
-                [4., 2.],
-                [0., 2.]])
-    """
-    x1, y1, x2, y2 = box.tolist()
-    return torch.tensor([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=torch.float32)
-
-
-def _synthetic_targets(num_boxes: int) -> Targets:
-    """Build ``num_boxes`` valid ``xyxy`` targets, each with its own polygon ring.
-
-    Examples:
-        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
-        <torch._C.Generator object at ...>
-        >>> targets = _synthetic_targets(2)
-        >>> targets.boxes.shape, len(targets.polygons)
-        (torch.Size([2, 4]), 2)
-    """
-    top_left = torch.rand(num_boxes, 2) * 80.0
-    size = torch.rand(num_boxes, 2) * 40.0 + 10.0
-    boxes = torch.cat([top_left, top_left + size], dim=1)
-    labels = torch.randint(0, _NUM_CLASSES, (num_boxes,))
-    return Targets(boxes=boxes, labels=labels, polygons=[_rectangle_ring(box) for box in boxes])
+    return tiny_module(task, box_gain=_BOX_GAIN, cls_gain=_CLS_GAIN, l1_gain=_L1_GAIN, alpha=_ALPHA)
 
 
 def _synthetic_batch() -> tuple[Tensor, list[Targets]]:
@@ -132,20 +75,6 @@ def _synthetic_batch() -> tuple[Tensor, list[Targets]]:
     """
     images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
     return images, [_synthetic_targets(2), _synthetic_targets(1)]
-
-
-def _has_gradient(module: nn.Module) -> bool:
-    """Return whether any parameter of ``module`` carries a non-zero gradient.
-
-    Examples:
-        >>> layer = nn.Linear(2, 1)
-        >>> _has_gradient(layer)
-        False
-        >>> layer(torch.ones(1, 2)).backward()
-        >>> _has_gradient(layer)
-        True
-    """
-    return any(parameter.grad is not None and bool(parameter.grad.abs().sum() > 0) for parameter in module.parameters())
 
 
 def _reference_detection_loss(module: DetectionLitModule, batch: tuple[Tensor, list[Targets]]) -> Tensor:
@@ -164,10 +93,8 @@ def _reference_detection_loss(module: DetectionLitModule, batch: tuple[Tensor, l
     gt_boxes, gt_labels, gt_mask = pad_targets(targets)
     loss = DualBranchLoss(box_gain=_BOX_GAIN, cls_gain=_CLS_GAIN, l1_gain=_L1_GAIN, alpha=_ALPHA)
     return loss(
-        head_out.o2m_cls,
-        decode_ltrb(head_out.o2m_box, anchor_points, strides),
-        head_out.o2o_cls,
-        decode_ltrb(head_out.o2o_box, anchor_points, strides),
+        BranchPrediction(head_out.o2m_cls, decode_ltrb(head_out.o2m_box, anchor_points, strides)),
+        BranchPrediction(head_out.o2o_cls, decode_ltrb(head_out.o2o_box, anchor_points, strides)),
         anchor_points,
         gt_boxes,
         gt_labels,
@@ -186,51 +113,14 @@ def test_segment_loss_exceeds_detection_only_loss() -> None:
     segment = _tiny_module(task="segment")
     segment.load_state_dict(detect.state_dict(), strict=False)
     batch = _synthetic_batch()
-    detect.log = _LogRecorder()  # type: ignore[method-assign]
-    segment.log = _LogRecorder()  # type: ignore[method-assign]
+    detect.log = LogRecorder()  # type: ignore[method-assign]
+    segment.log = LogRecorder()  # type: ignore[method-assign]
 
     detect_loss = detect.training_step(batch, 0)
     segment_loss = segment.training_step(batch, 0)
 
     assert bool(torch.isfinite(segment_loss)) and segment_loss.ndim == 0
     assert bool(segment_loss.detach() > detect_loss.detach())
-
-
-def test_gradients_reach_every_mask_branch() -> None:
-    """Backward through the segment loss reaches the prototype, auxiliary and coefficient stems.
-
-    Catches an inert ``_task_extra_loss``, a detached mask target path, and a
-    branch left unsupervised — in particular the one-to-one coefficient stem,
-    whose absence from the loss would leave the deployed decode reading
-    never-trained coefficients while every other test still passed.
-    """
-    module = _tiny_module()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
-
-    module.training_step(_synthetic_batch(), 0).backward()
-
-    assert _has_gradient(module.protonet)
-    assert _has_gradient(module.proto_fusion)
-    assert _has_gradient(module.semantic)
-    assert _has_gradient(module.head.o2o.coeff_stems)
-    assert _has_gradient(module.head.o2m.coeff_stems)
-
-
-def test_image_without_instances_gives_finite_zero_mask_term() -> None:
-    """An empty image yields a finite loss and no positives, not a ``0 / 0`` NaN.
-
-    Catches a mean over an empty instance axis: the mask term would be NaN and
-    poison the whole batch's total on the first background-only image.
-    """
-    module = _tiny_module()
-    recorder = _LogRecorder()
-    module.log = recorder  # type: ignore[method-assign]
-    batch = (torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE), [Targets.empty()])
-
-    loss = module.training_step(batch, 0)
-
-    assert bool(torch.isfinite(loss))
-    assert recorder.values["train/mask"] == 0.0
 
 
 def test_boxes_without_polygons_rejected() -> None:
@@ -241,7 +131,7 @@ def test_boxes_without_polygons_rejected() -> None:
     only symptom would be a segm mAP nobody could explain.
     """
     module = _tiny_module()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
     images, targets = _synthetic_batch()
     boxes_only = [Targets(boxes=target.boxes, labels=target.labels) for target in targets]
 
@@ -256,7 +146,7 @@ def test_validation_step_runs_without_training_only_semantic_branch() -> None:
     so the first validation batch of every tier run would raise on a ``None``.
     """
     module = _tiny_module().eval()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
 
     loss = module.validation_step(_synthetic_batch(), 0)
 
@@ -385,7 +275,7 @@ def test_detect_total_exactly_dual_detection_loss() -> None:
     would silently invalidate the frozen Det-smoke trajectory and its goldens.
     """
     module = _tiny_module(task="detect")
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
     batch = _synthetic_batch()
 
     total = module.training_step(batch, 0)
@@ -448,7 +338,7 @@ def test_loader_rasterised_masks_give_identical_loss() -> None:
     inputs, one batch with the third element and one without.
     """
     module = _tiny_module()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
     images, targets = _synthetic_batch()
 
     from_loader = module.training_step((images, targets, _collated_masks(images, targets)), 0)
@@ -466,7 +356,7 @@ def test_masks_rasterised_for_another_grid_rejected() -> None:
     disagreement has to be an error rather than a shape coincidence.
     """
     module = _tiny_module()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
     images, targets = _synthetic_batch()
     coarse = [mask[:, ::2, ::2] for mask in _collated_masks(images, targets)]
 
@@ -474,15 +364,15 @@ def test_masks_rasterised_for_another_grid_rejected() -> None:
         module.training_step((images, targets, coarse), 0)
 
 
-def _validated_module(batch: tuple[Tensor, list[Targets]] | tuple[Tensor, list[Targets], list[Tensor]]) -> _LogRecorder:
+def _validated_module(batch: tuple[Tensor, list[Targets]] | tuple[Tensor, list[Targets], list[Tensor]]) -> LogRecorder:
     """Run one validation batch plus the epoch end, and return the log recorder.
 
     Examples:
-        >>> callable(_validated_module)  # needs a live _LogRecorder-backed module
+        >>> callable(_validated_module)  # needs a live LogRecorder-backed module
         True
     """
     module = _tiny_module("segment" if len(batch) == 3 else "detect").eval()
-    recorder = _LogRecorder()
+    recorder = LogRecorder()
     module.log = recorder  # type: ignore[method-assign]
     module.validation_step(batch, 0)
     module.on_validation_epoch_end()
@@ -523,9 +413,9 @@ def test_mask_map_skipped_when_batch_carries_no_ground_truth_masks() -> None:
     assert "val/segm_mAP" not in recorder.values
 
     module = _tiny_module().eval()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
     module.validation_step(_synthetic_batch(), 0)
-    epoch_recorder = _LogRecorder()
+    epoch_recorder = LogRecorder()
     module.log = epoch_recorder  # type: ignore[method-assign]
     module.on_validation_epoch_end()
 
@@ -551,7 +441,7 @@ class TestMaskMetricGuardIsCollective:
         strategy = MagicMock()
         strategy.reduce_boolean_decision.return_value = decision
         module._trainer = MagicMock(spec=Trainer, strategy=strategy)
-        module.log = _LogRecorder()  # type: ignore[method-assign]
+        module.log = LogRecorder()  # type: ignore[method-assign]
         return module
 
     def test_computes_when_another_rank_saw_masks(self) -> None:
@@ -559,7 +449,7 @@ class TestMaskMetricGuardIsCollective:
         module = self._module_with_strategy_decision(True)
         module.validation_step(_synthetic_batch(), 0)
         assert module._val_segm_seen is False
-        recorder = _LogRecorder()
+        recorder = LogRecorder()
         module.log = recorder  # type: ignore[method-assign]
 
         module.on_validation_epoch_end()
@@ -572,7 +462,7 @@ class TestMaskMetricGuardIsCollective:
         images, targets = _synthetic_batch()
         module.validation_step((images, targets, _collated_masks(images, targets)), 0)
         assert module._val_segm_seen is True
-        recorder = _LogRecorder()
+        recorder = LogRecorder()
         module.log = recorder  # type: ignore[method-assign]
 
         module.on_validation_epoch_end()
@@ -699,7 +589,7 @@ def test_scored_masks_and_ground_truth_share_prototype_grid() -> None:
     of the mask work for rows COCO's ``maxDets`` then drops.
     """
     module = _tiny_module().eval()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
     images, targets = _synthetic_batch()
     ground_truth_masks = _collated_masks(images, targets)
     captured: list[tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]] = []

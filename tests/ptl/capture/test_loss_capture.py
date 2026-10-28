@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from capture_access import loss_objective, network_capture
+from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer, seed_everything
 from pytorch_lightning.plugins.precision import MixedPrecision
 from torch.utils.data import DataLoader
@@ -24,23 +26,13 @@ from lucid_yolo.assign.tal import TaskAlignedAssigner
 from lucid_yolo.cli.train import DetectionCLI, packaged_config
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.losses import detection_loss
-from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
+from lucid_yolo.losses.dual_loss import BranchPrediction, DualBranchLoss, DualLossOutput
 from lucid_yolo.ptl import loss_capture as capture_module
 from lucid_yolo.ptl.datamodule import DetectionDataModule
-from lucid_yolo.ptl.loss_capture import _BF16_SUPPORTED, _LossCapture, _LossCaptureLifecycle
+from lucid_yolo.ptl.loss_capture import _BF16_SUPPORTED, _LossCapture, _LossCaptureLifecycle, _LossInputs
 from lucid_yolo.ptl.module import DetectionLitModule
 
-
-@pytest.fixture(autouse=True)
-def _deterministic_loss_kernels() -> Iterator[None]:
-    """Keep the byte oracle deterministic and restore the caller's numeric policy."""
-    enabled = torch.are_deterministic_algorithms_enabled()
-    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-    torch.use_deterministic_algorithms(True)
-    try:
-        yield
-    finally:
-        torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
+pytestmark = pytest.mark.usefixtures("deterministic_kernels")
 
 
 def _inputs(
@@ -98,7 +90,9 @@ def _native(source: DualBranchLoss, inputs: tuple[torch.Tensor, ...]) -> DualLos
         >>> bool(torch.isfinite(_native(DualBranchLoss(), _inputs(0, device="cpu")).total))
         True
     """
-    return source(*inputs[:8], strides=inputs[8], alpha=inputs[9])
+    return source(
+        BranchPrediction(*inputs[:2]), BranchPrediction(*inputs[2:4]), *inputs[4:8], strides=inputs[8], alpha=inputs[9]
+    )
 
 
 def _bits(left: torch.Tensor, right: torch.Tensor) -> None:
@@ -121,6 +115,7 @@ def _same(left: DualLossOutput, right: DualLossOutput) -> None:
         >>> output = _native(DualBranchLoss(), _inputs(0, device="cpu"))
         >>> _same(output, output)
     """
+    assert left.alpha == right.alpha
     for a, b in (
         (left.total, right.total),
         *((getattr(left.o2m, key), getattr(right.o2m, key)) for key in ("total", "box", "cls", "l1")),
@@ -132,14 +127,15 @@ def _same(left: DualLossOutput, right: DualLossOutput) -> None:
             _bits(getattr(a, key), getattr(b, key))
 
 
-def test_cpu_stays_eager_and_copy_discards_recordings() -> None:
+def test_cpu_stays_eager_and_copy_discards_recordings(graph_recordings: MagicMock) -> None:
     """The off-device path never asks CUDA to record and keeps the public output."""
     holder, source, inputs = _LossCapture(), DualBranchLoss(), _inputs(3, device="cpu")
-    with patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("CPU capture")):
-        _same(_native(source, inputs), holder.run(source, *inputs))
+    recordings_before = graph_recordings.call_count
+    _same(_native(source, inputs), holder.run(source, _LossInputs(*inputs)))
+    assert graph_recordings.call_count == recordings_before
     holder._disabled = True
     for restored in (copy.deepcopy(holder), pickle.loads(pickle.dumps(holder))):
-        assert restored._objective is None and not restored._disabled
+        assert loss_objective(restored) is None and not restored._disabled
 
 
 @pytest.mark.parametrize(
@@ -188,7 +184,7 @@ def test_host_workspace_growth_shrinkage_and_output_ownership(_host_recorder: Ma
         inputs = _inputs(count, device="cpu")
         reference = tuple(value.detach().clone().requires_grad_(value.requires_grad) for value in inputs)
         expected = _native(source, reference)
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
         _same(expected, actual)
         expected.total.backward()
         actual.total.backward()
@@ -203,7 +199,34 @@ def test_host_workspace_growth_shrinkage_and_output_ownership(_host_recorder: Ma
     assert holder._workspace is not None
     assert not holder._workspace[2][:, 2:].any()
     holder.clear()
-    assert holder._objective is None and holder._workspace is None
+    assert loss_objective(holder) is None and holder._workspace is None
+
+
+def test_recorder_preserves_flat_input_order(_host_recorder: MagicMock) -> None:
+    """The recorder receives ten flat tensors in the pre-refactor positional order."""
+    holder = _LossCapture()
+    inputs = _LossInputs(*_inputs(3, device="cpu"))
+    holder.run(DualBranchLoss(), inputs).total.backward()
+
+    samples = _host_recorder.call_args.args[1]
+    assert type(samples) is tuple and len(samples) == 10
+    assert holder._workspace is not None
+    expected = (*inputs[:5], *holder._workspace, inputs.strides, inputs.alpha)
+    for sample, value in zip(samples, expected, strict=True):
+        _bits(sample, value)
+        assert sample.requires_grad == value.requires_grad
+
+
+def test_replay_records_live_alpha_override(_host_recorder: MagicMock) -> None:
+    """Reusing one recording returns each call's override rather than the stale attribute."""
+    holder, source = _LossCapture(), DualBranchLoss(alpha=0.5)
+    for alpha in (0.8, 0.1, 0.25):
+        inputs = _LossInputs(*_inputs(3, device="cpu"))._replace(alpha=torch.tensor(alpha, dtype=torch.float64))
+        output = holder.run(source, inputs)
+        assert output.alpha is inputs.alpha
+        _same(_native(source, inputs), output)
+        output.total.backward()
+    assert _host_recorder.call_count == 1
 
 
 @pytest.mark.parametrize("collection_enabled", [False, True])
@@ -221,9 +244,9 @@ def test_host_capture_failure_restores_gc_and_releases_workspace(
             patch("torch.cuda.synchronize", side_effect=RuntimeError("injected host fence failure")),
             pytest.raises(RuntimeError, match="injected host"),
         ):
-            holder.run(DualBranchLoss(), *_inputs(3, device="cpu"))
+            holder.run(DualBranchLoss(), _LossInputs(*_inputs(3, device="cpu")))
         assert gc.isenabled() is collection_enabled
-        assert holder._objective is None and holder._workspace is None
+        assert loss_objective(holder) is None and holder._workspace is None
         assert holder._signature is None and holder._capacity == 0
     finally:
         gc.enable() if original else gc.disable()
@@ -233,7 +256,7 @@ def test_host_capture_failure_restores_gc_and_releases_workspace(
 def test_host_contract_changes_retire_once(_host_recorder: MagicMock, change: str) -> None:
     """Changed live policies retire a recording before it can reuse stale operations."""
     holder, source = _LossCapture(), DualBranchLoss()
-    holder.run(source, *_inputs(3, device="cpu")).total.backward()
+    holder.run(source, _LossInputs(*_inputs(3, device="cpu"))).total.backward()
     if change == "settings":
         source._o2m_loss.box_gain += 1
     elif change == "custom":
@@ -244,10 +267,10 @@ def test_host_contract_changes_retire_once(_host_recorder: MagicMock, change: st
         elif change == "unreadable":
             precision.side_effect = RuntimeError("policy query failed")
         with pytest.warns(UserWarning, match="stays eager") as warnings:
-            _same(_native(source, _inputs(1, device="cpu")), holder.run(source, *_inputs(1, device="cpu")))
-            holder.run(source, *_inputs(1, device="cpu"))
+            _same(_native(source, _inputs(1, device="cpu")), holder.run(source, _LossInputs(*_inputs(1, device="cpu"))))
+            holder.run(source, _LossInputs(*_inputs(1, device="cpu")))
     assert len(warnings) == 1 and holder._disabled
-    assert holder._objective is None and _host_recorder.call_count == 1
+    assert loss_objective(holder) is None and _host_recorder.call_count == 1
 
 
 _FLOAT32_TINY = torch.finfo(torch.float32).tiny
@@ -309,7 +332,7 @@ def test_host_replaced_delegated_stage_keeps_native_route(
     """
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
-        holder.run(source, *_inputs(3, device="cpu")).total.backward()
+        holder.run(source, _LossInputs(*_inputs(3, device="cpu"))).total.backward()
     original = getattr(owner, name)
     calls: list[int] = []
 
@@ -318,12 +341,12 @@ def test_host_replaced_delegated_stage_keeps_native_route(
         return original(*args, **kwargs)
 
     with patch.object(owner, name, observed), pytest.warns(UserWarning, match="customized"):
-        actual = holder.run(source, *_inputs(2, device="cpu"))
+        actual = holder.run(source, _LossInputs(*_inputs(2, device="cpu")))
         replaced_calls = len(calls)
         expected = _native(source, _inputs(2, device="cpu"))
     assert replaced_calls > 0
     _same(expected, actual)
-    assert holder._objective is None and holder._disabled
+    assert loss_objective(holder) is None and holder._disabled
 
 
 _GUARDED_INPUTS = {"match_logits": 0, "match_boxes": 1, "unique_logits": 2, "unique_boxes": 3, "target_boxes": 5}
@@ -338,43 +361,43 @@ def test_host_fallback_preserves_current_inputs(_host_recorder: MagicMock, case:
     fallback from a replay at the same capacity, hence the forward-call count.
     """
     holder, source = _LossCapture(), DualBranchLoss()
-    holder.run(source, *_inputs(3, device="cpu")).total.backward()
+    holder.run(source, _LossInputs(*_inputs(3, device="cpu"))).total.backward()
     inputs = _inputs(0 if case == "empty" else 1, batch=1 if case == "shape" else 2, device="cpu")
     original = capture_module._LossObjective.forward
     with patch.object(capture_module._LossObjective, "forward", autospec=True, side_effect=original) as replayed:
         if case == "labels":
             inputs[6][1, 0] = 3
             with pytest.raises(ValueError, match="gt_labels must be"):
-                holder.run(source, *inputs)
+                holder.run(source, _LossInputs(*inputs))
         elif case.startswith("nonfinite_"):
             with torch.no_grad():
                 inputs[_GUARDED_INPUTS[case.removeprefix("nonfinite_")]].view(-1)[0] = float("inf")
-            expected, actual = _native(source, inputs), holder.run(source, *inputs)
+            expected, actual = _native(source, inputs), holder.run(source, _LossInputs(*inputs))
             assert torch.equal(expected.total.isnan(), actual.total.isnan())
             assert torch.equal(expected.o2m_assign.fg_mask, actual.o2m_assign.fg_mask)
         else:
-            _same(_native(source, inputs), holder.run(source, *inputs))
+            _same(_native(source, inputs), holder.run(source, _LossInputs(*inputs)))
     assert replayed.call_count == 0
     assert _host_recorder.call_count == 1 and holder._capacity == 4
 
 
-@pytest.mark.parametrize("name,index", [("anchor_points", 4), ("strides", 8)])
+@pytest.mark.parametrize("name,index", [("anchor_points", 4), ("strides", 8), ("alpha", 9)])
 def test_host_unpadded_nonfinite_inputs_replay_with_native_bits(
     _host_recorder: MagicMock, name: str, index: int
 ) -> None:
-    """Anchor points and strides are never padded, so their non-finite values need no fallback.
+    """Anchor points, strides and alpha are never padded, so their non-finite values need no fallback.
 
     Padded rows only meet predictions and target boxes in arithmetic. Anchor points
-    enter comparisons and strides scale each branch's own terms, so replay and the
-    native route must agree even when the values are infinite.
+    enter comparisons, strides scale each branch's own terms and alpha weights the two
+    branches, so replay and the native route must agree even when the values are infinite.
     """
     holder, source = _LossCapture(), DualBranchLoss()
-    holder.run(source, *_inputs(3, device="cpu")).total.backward()
+    holder.run(source, _LossInputs(*_inputs(3, device="cpu"))).total.backward()
     inputs = _inputs(2, device="cpu")
-    inputs[index][0] = float("inf")
+    torch.atleast_1d(inputs[index])[0] = float("inf")  # alpha is 0-dim; the others index as before
     original = capture_module._LossObjective.forward
     with patch.object(capture_module._LossObjective, "forward", autospec=True, side_effect=original) as replayed:
-        expected, actual = _native(source, inputs), holder.run(source, *inputs)
+        expected, actual = _native(source, inputs), holder.run(source, _LossInputs(*inputs))
     assert replayed.call_count == 1, name
     assert torch.equal(expected.total.isnan(), actual.total.isnan())
     _bits(expected.o2m_assign.fg_mask, actual.o2m_assign.fg_mask)
@@ -385,12 +408,12 @@ def test_host_skipped_backward_resets_at_batch_start(_host_recorder: MagicMock) 
     """A skipped backward keeps same-batch calls eager until the automatic next-batch hook."""
     model = DetectionLitModule(0.5, 0.25, 64, 3, capture_loss=True)
     holder, source = model._loss_capture, DualBranchLoss()
-    holder.run(source, *_inputs(3, device="cpu"))
+    holder.run(source, _LossInputs(*_inputs(3, device="cpu")))
     assert holder._pending_backward
-    _same(_native(source, _inputs(1, device="cpu")), holder.run(source, *_inputs(1, device="cpu")))
+    _same(_native(source, _inputs(1, device="cpu")), holder.run(source, _LossInputs(*_inputs(1, device="cpu"))))
     _LossCaptureLifecycle().on_train_batch_start(MagicMock(spec=Trainer), model, None, 1)
     assert not holder._pending_backward
-    holder.run(source, *_inputs(1, device="cpu")).total.backward()
+    holder.run(source, _LossInputs(*_inputs(1, device="cpu"))).total.backward()
     assert _host_recorder.call_count == 1
 
 
@@ -399,7 +422,7 @@ def test_host_old_bf16_contract_stays_native(_host_recorder: MagicMock) -> None:
     holder, source = _LossCapture(), DualBranchLoss()
     with patch.object(capture_module, "_BF16_SUPPORTED", False):
         inputs = _inputs(1, device="cpu", dtype=torch.bfloat16)
-        _same(_native(source, inputs), holder.run(source, *inputs))
+        _same(_native(source, inputs), holder.run(source, _LossInputs(*inputs)))
     _host_recorder.assert_not_called()
     assert holder._workspace is None and not holder._disabled
 
@@ -419,6 +442,21 @@ def test_unsupported_configurations_raise(kwargs: dict[str, object]) -> None:
         DetectionLitModule(0.5, 0.25, 64, 3, capture_loss=True, **kwargs)
 
 
+def test_later_retire_cause_stays_silent() -> None:
+    """Only the first cause of a fit warns; a second retire leaves the retired holder as it is.
+
+    A second retire used to clear the holder again and repeat the warning, about a state nothing
+    could change any more. The network and segmentation-head holders already reported only their
+    first cause; the loss holder now shares that contract.
+    """
+    holder = _LossCapture()
+    with pytest.warns(UserWarning, match=r"^capture_loss=True stays eager: first cause$") as record:
+        holder.retire("first cause")
+        holder.retire("second cause")
+    assert len(record) == 1
+    assert holder._disabled
+
+
 @pytest.mark.parametrize("hook", ["on_fit_start", "on_fit_end", "on_exception"])
 def test_fit_boundaries_reset_holder(hook: str) -> None:
     """Success, reuse and failure all clear the fit's transient owner."""
@@ -430,24 +468,32 @@ def test_fit_boundaries_reset_holder(hook: str) -> None:
     assert not model._loss_capture._disabled
 
 
-CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
-
-
-@pytest.mark.gpu
-@CUDA
-@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+@requires_cuda
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        pytest.param(torch.float32, id="float32"),
+        pytest.param(
+            torch.bfloat16,
+            id="bfloat16",
+            marks=pytest.mark.skipif(
+                not _BF16_SUPPORTED,
+                reason="BF16 replay begins at the verified 2.9 runtime; separate test proves native fallback",
+            ),
+        ),
+        pytest.param(torch.float16, id="float16"),
+    ],
+)
 def test_variable_target_capacity_matches_native_bits_and_gradients(dtype: torch.dtype) -> None:
     """Growth, shrinkage and empty targets keep each branch's real assignment unchanged."""
-    if dtype == torch.bfloat16 and not _BF16_SUPPORTED:
-        pytest.skip("BF16 replay begins at the verified 2.9 runtime; separate test proves native fallback")
     holder, source = _LossCapture(), DualBranchLoss()
     for count in (3, 1, 0, 7, 2, 0, 9, 1):
         inputs = _inputs(count, dtype=dtype)
         reference = tuple(value.detach().clone().requires_grad_(value.requires_grad) for value in inputs)
         with torch.autocast("cuda", enabled=dtype != torch.float32, dtype=dtype, cache_enabled=False):
             expected = _native(source, reference)
-            actual = holder.run(source, *inputs)
-        assert holder._objective is not None
+            actual = holder.run(source, _LossInputs(*inputs))
+        assert loss_objective(holder) is not None
         _same(expected, actual)
         expected.total.backward()
         actual.total.backward()
@@ -457,47 +503,44 @@ def test_variable_target_capacity_matches_native_bits_and_gradients(dtype: torch
             _bits(a.grad, b.grad)
     assert holder._capacity == 16
     holder.clear()
-    assert holder._objective is None and holder._workspace is None
+    assert loss_objective(holder) is None and holder._workspace is None
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_outputs_survive_replay_and_second_forward_stays_eager() -> None:
     """Saved results own their values and an outstanding backward cannot be overwritten."""
     holder, source, inputs = _LossCapture(), DualBranchLoss(), _inputs(3)
-    first = holder.run(source, *inputs)
+    first = holder.run(source, _LossInputs(*inputs))
     saved = first.total.detach().clone(), first.o2m_assign.target_boxes.clone()
-    second = holder.run(source, *_inputs(1))
+    second = holder.run(source, _LossInputs(*_inputs(1)))
     _same(second, _native(source, _inputs(1)))
     first.total.backward()
     assert not holder._pending_backward
-    third = holder.run(source, *_inputs(2))
+    third = holder.run(source, _LossInputs(*_inputs(2)))
     third.total.backward()
     _bits(first.total, saved[0])
     _bits(first.o2m_assign.target_boxes, saved[1])
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("bad,padded", [(3, False), (-1, False), (3, True)])
 def test_current_invalid_labels_fail_before_replay(bad: int, padded: bool) -> None:
     """A valid first call never exempts the next batch, including its padding, from bounds checks."""
     holder, source = _LossCapture(), DualBranchLoss()
-    first = holder.run(source, *_inputs(3))
+    first = holder.run(source, _LossInputs(*_inputs(3)))
     first.total.backward()
     inputs = _inputs(1)
     inputs[6][1, 0] = bad
     inputs[7][1, 0] = not padded
     with pytest.raises(ValueError, match="gt_labels must be"):
-        holder.run(source, *inputs)
+        holder.run(source, _LossInputs(*inputs))
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_replay_removes_python_assignment_and_scoring_calls() -> None:
     """A silent reversion to eager fails the work-count oracle after a real recording."""
     holder, source = _LossCapture(), DualBranchLoss()
-    first = holder.run(source, *_inputs(3))
+    first = holder.run(source, _LossInputs(*_inputs(3)))
     first.total.backward()
     codes = {source.o2m_assigner._assign.__code__, source._score.__code__}
     calls: list[str] = []
@@ -509,26 +552,25 @@ def test_replay_removes_python_assignment_and_scoring_calls() -> None:
     previous = sys.getprofile()
     try:
         sys.setprofile(observe)
-        next_output = holder.run(source, *_inputs(2))
+        next_output = holder.run(source, _LossInputs(*_inputs(2)))
         next_output.total.backward()
     finally:
         sys.setprofile(previous)
-    assert holder._objective is not None
+    assert loss_objective(holder) is not None
     assert calls == []
     _native(source, _inputs(2)).total.backward()
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_changed_gain_retires_recording_and_keeps_native_result() -> None:
     """Mutable loss settings cannot silently keep the old graph's constants."""
     holder, source = _LossCapture(), DualBranchLoss()
-    holder.run(source, *_inputs(3)).total.backward()
+    holder.run(source, _LossInputs(*_inputs(3))).total.backward()
     source._o2m_loss.box_gain = 2.5
     inputs = _inputs(2)
     with pytest.warns(UserWarning, match="settings.*changed"):
-        actual = holder.run(source, *inputs)
-    assert holder._objective is None and holder._disabled
+        actual = holder.run(source, _LossInputs(*inputs))
+    assert loss_objective(holder) is None and holder._disabled
     _same(_native(source, inputs), actual)
 
 
@@ -572,13 +614,12 @@ def test_cli_forwards_loss_option() -> None:
     assert any(isinstance(callback, _LossCaptureLifecycle) for callback in cli.model.configure_callbacks())
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_partial_batch_and_noncontiguous_inputs_keep_recording() -> None:
     """Unsupported signatures stay native without displacing the normal batch's graph."""
     holder, source = _LossCapture(), DualBranchLoss()
-    holder.run(source, *_inputs(3)).total.backward()
-    recording = holder._objective
+    holder.run(source, _LossInputs(*_inputs(3))).total.backward()
+    recording = loss_objective(holder)
     for original_inputs in (_inputs(1, batch=1), _inputs(2)):
         inputs = original_inputs
         if inputs[0].shape[0] == 2:
@@ -586,27 +627,25 @@ def test_partial_batch_and_noncontiguous_inputs_keep_recording() -> None:
             values[0] = values[0].transpose(1, 2).contiguous().transpose(1, 2).detach().requires_grad_()
             inputs = tuple(values)
             assert not inputs[0].is_contiguous()
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
         _same(_native(source, inputs), actual)
         actual.total.backward()
-        assert holder._objective is recording
-    holder.run(source, *_inputs(2)).total.backward()
-    assert holder._objective is recording
+        assert loss_objective(holder) is recording
+    holder.run(source, _LossInputs(*_inputs(2))).total.backward()
+    assert loss_objective(holder) is recording
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_old_bf16_runtime_keeps_native_path() -> None:
     """An unverified BF16 runtime never silently records the operation."""
     holder, source, inputs = _LossCapture(), DualBranchLoss(), _inputs(3, dtype=torch.bfloat16)
     with patch("lucid_yolo.ptl.loss_capture._BF16_SUPPORTED", False), torch.autocast("cuda", dtype=torch.bfloat16):
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
         _same(_native(source, inputs), actual)
-    assert holder._objective is None
+    assert loss_objective(holder) is None
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_recording_failure_never_publishes_workspace() -> None:
     """A failed recorder clears its buffers and propagates the actionable failure."""
     holder, source = _LossCapture(), DualBranchLoss()
@@ -614,12 +653,11 @@ def test_recording_failure_never_publishes_workspace() -> None:
         patch("torch.cuda.make_graphed_callables", side_effect=RuntimeError("injected recording failure")),
         pytest.raises(RuntimeError, match="injected recording failure"),
     ):
-        holder.run(source, *_inputs(3))
-    assert holder._objective is None and holder._workspace is None and holder._capacity == 0
+        holder.run(source, _LossInputs(*_inputs(3)))
+    assert loss_objective(holder) is None and holder._workspace is None and holder._capacity == 0
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_settings_and_implementations_changed_before_capture_stay_observable() -> None:
     """Custom criteria cannot be hidden behind the built-in loss recording."""
 
@@ -629,13 +667,12 @@ def test_settings_and_implementations_changed_before_capture_stay_observable() -
 
     holder, source, inputs = _LossCapture(), CustomLoss(), _inputs(3)
     with pytest.warns(UserWarning, match="customized"):
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
     _same(_native(source, inputs), actual)
-    assert holder._objective is None and holder._disabled
+    assert loss_objective(holder) is None and holder._disabled
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_public_fit_records_loss_and_releases_owner() -> None:
     """A real automatic Trainer activates replay and clears it after fit completion."""
     seen: list[int] = []
@@ -644,7 +681,7 @@ def test_public_fit_records_loss_and_releases_owner() -> None:
         def on_train_batch_end(
             self, trainer: Trainer, pl_module: DetectionLitModule, outputs: object, batch: object, batch_idx: int
         ) -> None:
-            assert pl_module._loss_capture._objective is not None
+            assert loss_objective(pl_module._loss_capture) is not None
             seen.append(pl_module._loss_capture._capacity)
 
     batches = [
@@ -670,30 +707,28 @@ def test_public_fit_records_loss_and_releases_owner() -> None:
     )
     trainer.fit(model, train_dataloaders=loader)
     assert len(seen) == 3 and all(capacity >= 1 for capacity in seen)
-    assert model._loss_capture._objective is None and model._loss_capture._workspace is None
+    assert loss_objective(model._loss_capture) is None and model._loss_capture._workspace is None
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 def test_custom_callable_without_assignment_attributes_keeps_native_route() -> None:
     """A replacement criterion need not expose the built-in criterion's private fields."""
     source = DualBranchLoss()
     holder, inputs = _LossCapture(), _inputs(2)
     criterion = source.__call__
     with pytest.warns(UserWarning, match="customized"):
-        actual = holder.run(criterion, *inputs)
+        actual = holder.run(criterion, _LossInputs(*inputs))
     _same(_native(source, inputs), actual)
-    assert holder._objective is None
+    assert loss_objective(holder) is None
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("record_first", [False, True])
 def test_replaced_public_assigner_entry_stays_observable(record_first: bool) -> None:
     """Recording must not bypass a public assignment override before or after setup."""
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
-        holder.run(source, *_inputs(3)).total.backward()
+        holder.run(source, _LossInputs(*_inputs(3))).total.backward()
     original = TaskAlignedAssigner.__call__
     calls: list[int] = []
 
@@ -702,14 +737,13 @@ def test_replaced_public_assigner_entry_stays_observable(record_first: bool) -> 
         return original(assigner, *args, **kwargs)
 
     with patch.object(TaskAlignedAssigner, "__call__", observed), pytest.warns(UserWarning, match="customized"):
-        actual = holder.run(source, *_inputs(2))
+        actual = holder.run(source, _LossInputs(*_inputs(2)))
     assert len(calls) == 2
     _same(_native(source, _inputs(2)), actual)
-    assert holder._objective is None and holder._disabled
+    assert loss_objective(holder) is None and holder._disabled
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("collection_enabled", [False, True])
 def test_recording_suspends_collection_and_restores_previous_mode(collection_enabled: bool) -> None:
     """Old graph cycles cannot be destroyed inside capture; the caller retains its GC policy."""
@@ -725,7 +759,7 @@ def test_recording_suspends_collection_and_restores_previous_mode(collection_ena
     try:
         holder = _LossCapture()
         with patch("torch.cuda.make_graphed_callables", record):
-            holder.run(DualBranchLoss(), *_inputs(3)).total.backward()
+            holder.run(DualBranchLoss(), _LossInputs(*_inputs(3))).total.backward()
         assert seen == [False]
         assert gc.isenabled() is collection_enabled
         holder.clear()
@@ -733,31 +767,32 @@ def test_recording_suspends_collection_and_restores_previous_mode(collection_ena
         gc.enable() if was_enabled else gc.disable()
 
 
-@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=[pytest.mark.gpu, CUDA])])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=requires_cuda)])
 def test_fallback_preserves_keyword_only_custom_criterion(device: str) -> None:
     """A custom loss receives strides by keyword, as it does through the native module."""
     source, holder, inputs = DualBranchLoss(), _LossCapture(), _inputs(2, device=device)
 
-    def criterion(*predictions_and_targets: torch.Tensor, strides: torch.Tensor, alpha: torch.Tensor) -> DualLossOutput:
+    def criterion(
+        *predictions_and_targets: BranchPrediction | torch.Tensor, strides: torch.Tensor, alpha: torch.Tensor
+    ) -> DualLossOutput:
         return source(*predictions_and_targets, strides=strides, alpha=alpha)
 
     if device == "cuda":
         with pytest.warns(UserWarning, match="customized"):
-            actual = holder.run(criterion, *inputs)
+            actual = holder.run(criterion, _LossInputs(*inputs))
     else:
-        actual = holder.run(criterion, *inputs)
+        actual = holder.run(criterion, _LossInputs(*inputs))
     _same(_native(source, inputs), actual)
-    assert holder._objective is None
+    assert loss_objective(holder) is None
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("record_first", [False, True])
 def test_replaced_empty_assignment_stays_observable(record_first: bool) -> None:
     """Masked capacity cannot hide an override of the native empty-target result."""
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
-        holder.run(source, *_inputs(3)).total.backward()
+        holder.run(source, _LossInputs(*_inputs(3))).total.backward()
     original = TaskAlignedAssigner._empty_result
     calls: list[int] = []
 
@@ -769,62 +804,68 @@ def test_replaced_empty_assignment_stays_observable(record_first: bool) -> None:
         patch.object(TaskAlignedAssigner, "_empty_result", staticmethod(observed)),
         pytest.warns(UserWarning, match="customized"),
     ):
-        actual = holder.run(source, *_inputs(0))
+        actual = holder.run(source, _LossInputs(*_inputs(0)))
     assert len(calls) == 2
     _same(_native(source, _inputs(0)), actual)
-    assert holder._objective is None and holder._disabled
+    assert loss_objective(holder) is None and holder._disabled
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("record_first", [False, True])
 @pytest.mark.parametrize(
     "count,index,value",
-    [(0, 1, float("nan")), (0, 0, float("inf")), (3, 1, float("nan")), (3, 5, float("nan")), (3, 9, float("nan"))],
+    [(0, 1, float("nan")), (0, 0, float("inf")), (3, 1, float("nan")), (3, 5, float("nan"))],
 )
-def test_nonfinite_inputs_preserve_native_outputs(count: int, index: int, value: float, record_first: bool) -> None:
-    """Non-finite values cannot turn masked capacity into extra NaN contributions."""
+def test_nonfinite_inputs_preserve_native_outputs(
+    count: int, index: int, value: float, record_first: bool, graph_recordings: MagicMock
+) -> None:
+    """Non-finite values cannot turn masked capacity into extra NaN contributions.
+
+    The cases are the inputs that meet padded rows: predictions and target boxes, plus the
+    empty-target route. Unpadded inputs replay by contract and are covered by
+    ``test_host_unpadded_nonfinite_inputs_replay_with_native_bits``.
+    """
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
-        holder.run(source, *_inputs(3)).total.backward()
-    recording = holder._objective
+        holder.run(source, _LossInputs(*_inputs(3))).total.backward()
+    recording = loss_objective(holder)
     inputs = _inputs(count)
     with torch.no_grad():
         inputs[index].reshape(-1)[0] = value
     expected = _native(source, inputs)
     _same(expected, _native(source, inputs))
-    with patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("non-finite capture")):
-        actual = holder.run(source, *inputs)
+    recordings_before = graph_recordings.call_count
+    actual = holder.run(source, _LossInputs(*inputs))
+    assert graph_recordings.call_count == recordings_before
     _same(expected, actual)
-    assert holder._objective is recording and not holder._pending_backward
+    assert loss_objective(holder) is recording and not holder._pending_backward
     if recording is not None:
-        holder.run(source, *_inputs(2)).total.backward()
-        assert holder._objective is recording
+        holder.run(source, _LossInputs(*_inputs(2))).total.backward()
+        assert loss_objective(holder) is recording
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("record_first", [False, True])
-def test_empty_targets_keep_native_finite_overflow_behavior(record_first: bool) -> None:
+def test_empty_targets_keep_native_finite_overflow_behavior(record_first: bool, graph_recordings: MagicMock) -> None:
     """Finite decoded coordinates can still overflow area arithmetic on an empty batch."""
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
-        holder.run(source, *_inputs(3)).total.backward()
-    recording, inputs = holder._objective, _inputs(0)
+        holder.run(source, _LossInputs(*_inputs(3))).total.backward()
+    recording, inputs = loss_objective(holder), _inputs(0)
     with torch.no_grad():
         inputs[1][0, 0] = torch.tensor([0.0, -2e38, 0.0, 2e38], device="cuda")
     assert all(bool(value.isfinite().all()) for value in inputs)
     expected = _native(source, inputs)
     _same(expected, _native(source, inputs))
     assert bool(expected.total.isfinite())
-    with patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("empty capture")):
-        actual = holder.run(source, *inputs)
+    recordings_before = graph_recordings.call_count
+    actual = holder.run(source, _LossInputs(*inputs))
+    assert graph_recordings.call_count == recordings_before
     _same(expected, actual)
-    assert holder._objective is recording and not holder._pending_backward
+    assert loss_objective(holder) is recording and not holder._pending_backward
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("record_first", [False, True])
 @pytest.mark.parametrize(
     "registration",
@@ -839,8 +880,8 @@ def test_global_module_hooks_keep_native_criterion(registration: str, record_fir
     """The auxiliary recorder must not introduce hook calls absent from the plain criterion."""
     holder, source = _LossCapture(), DualBranchLoss()
     if record_first:
-        holder.run(source, *_inputs(3)).total.backward()
-    recording, calls = holder._objective, []
+        holder.run(source, _LossInputs(*_inputs(3))).total.backward()
+    recording, calls = loss_objective(holder), []
 
     def observe(*args: object) -> None:
         calls.append(1)
@@ -848,16 +889,15 @@ def test_global_module_hooks_keep_native_criterion(registration: str, record_fir
     with getattr(torch.nn.modules.module, registration)(observe):
         inputs = _inputs(3)
         expected = _native(source, inputs)
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
         _same(expected, actual)
         actual.total.backward()
-    assert calls == [] and holder._objective is recording
-    holder.run(source, *_inputs(2)).total.backward()
-    assert holder._objective is not None
+    assert calls == [] and loss_objective(holder) is recording
+    holder.run(source, _LossInputs(*_inputs(2))).total.backward()
+    assert loss_objective(holder) is not None
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("mode", ["accumulation_clip", "overflow", "resume_assign", "network"])
 def test_real_trainer_accumulation_amp_and_resume(mode: str, tmp_path: Path) -> None:
     """Real AMP, accumulation, clipping, network replay and resume keep native state bits."""
@@ -887,9 +927,9 @@ def test_real_trainer_accumulation_amp_and_resume(mode: str, tmp_path: Path) -> 
                 self, trainer: Trainer, pl_module: DetectionLitModule, outputs: object, batch: object, batch_idx: int
             ) -> None:
                 if mode == "network":
-                    assert pl_module._network_capture._network is not None
+                    assert network_capture(pl_module)._network is not None
                 if capture:
-                    assert pl_module._loss_capture._objective is not None
+                    assert loss_objective(pl_module._loss_capture) is not None
                     seen.append(pl_module._loss_capture._capacity)
 
         def make_model() -> DetectionLitModule:
@@ -940,8 +980,8 @@ def test_real_trainer_accumulation_amp_and_resume(mode: str, tmp_path: Path) -> 
         assert trainer.optimizers[0].state  # An all-skipped run cannot prove recovery.
         if capture:
             assert len(seen) == (6 if mode == "resume_assign" else 3)
-            assert model._loss_capture._objective is None
-        assert model._network_capture._network is None
+            assert loss_objective(model._loss_capture) is None
+        assert network_capture(model)._network is None
         torch.cuda.synchronize()
         return {
             "model": copy.deepcopy(model.state_dict()),
@@ -978,7 +1018,7 @@ def _same_training_state(left: object, right: object) -> None:
         assert left == right
 
 
-@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=[pytest.mark.gpu, CUDA])])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=requires_cuda)])
 @pytest.mark.parametrize("branch", ["o2m_assigner", "o2o_assigner"])
 def test_constructor_valid_tiny_epsilon_keeps_native_loss(device: str, branch: str) -> None:
     """A positive Python epsilon that vanishes in float32 must not justify padded replay."""
@@ -994,14 +1034,14 @@ def test_constructor_valid_tiny_epsilon_keeps_native_loss(device: str, branch: s
     assert bool(torch.isfinite(expected.total))
     if device == "cuda":
         with pytest.warns(UserWarning, match="customized"):
-            actual = holder.run(source, *inputs)
+            actual = holder.run(source, _LossInputs(*inputs))
     else:
-        actual = holder.run(source, *inputs)
+        actual = holder.run(source, _LossInputs(*inputs))
     _same(expected, actual)
-    assert holder._objective is None
+    assert loss_objective(holder) is None
 
 
-@pytest.fixture(params=["cpu", pytest.param("cuda", marks=[pytest.mark.gpu, CUDA])])
+@pytest.fixture(params=["cpu", pytest.param("cuda", marks=requires_cuda)])
 def replay_device(request: pytest.FixtureRequest) -> str:
     """Run a case through the stubbed CPU recorder, and again through real CUDA graph replay."""
     if request.param == "cpu":
@@ -1020,7 +1060,7 @@ def _replay_matches_native(
     """
     reference = tuple(value.detach().clone().requires_grad_(value.requires_grad) for value in inputs)
     expected = _native(source, reference)
-    actual = holder.run(source, *inputs)
+    actual = holder.run(source, _LossInputs(*inputs))
     _same(expected, actual)
     expected.total.backward()
     actual.total.backward()
@@ -1080,10 +1120,10 @@ def test_replay_follows_live_branch_weight(replay_device: str) -> None:
         inputs = _inputs(3, device=replay_device)
         inputs = (*inputs[:9], torch.tensor(weight, dtype=torch.float64, device=replay_device))
         totals.append(float(_replay_matches_native(holder, source, inputs).total.detach()))
-        recording = holder._objective
+        recording = loss_objective(holder)
         assert recording is not None
     assert len(set(totals)) == 3
-    assert holder._objective is recording and not holder._disabled
+    assert loss_objective(holder) is recording and not holder._disabled
 
 
 def test_replay_matches_native_top_k_truncation_and_ties(replay_device: str) -> None:
@@ -1121,7 +1161,7 @@ def test_images_without_targets_match_native(replay_device: str, rows: tuple[int
         for assignment in (actual.o2m_assign, actual.o2o_assign):
             assert not assignment.fg_mask[list(rows)].any()
             assert not assignment.align_weights[list(rows)].any()
-    assert holder._objective is not None and holder._capacity == 16
+    assert loss_objective(holder) is not None and holder._capacity == 16
 
 
 @contextmanager
@@ -1179,8 +1219,7 @@ def _swap(index: int, transform: Callable[[torch.Tensor], torch.Tensor]) -> Call
     return change
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize(
     "change",
     [
@@ -1207,8 +1246,7 @@ def test_eligible_rejects_unsupported_inputs(change: Callable[[tuple[torch.Tenso
     assert capture_module._eligible(change(inputs)) is False
 
 
-@pytest.mark.gpu
-@CUDA
+@requires_cuda
 @pytest.mark.parametrize("name,value", [("current_device", 99), ("is_current_stream_capturing", True)])
 def test_eligible_rejects_other_current_device_and_stream_capture(name: str, value: object) -> None:
     """A current device other than the predictions' device, or an open capture, keeps native."""
@@ -1217,18 +1255,19 @@ def test_eligible_rejects_other_current_device_and_stream_capture(name: str, val
         assert capture_module._eligible(inputs) is False
 
 
-@pytest.mark.gpu
-@CUDA
-def test_other_stream_keeps_native_route_and_recording() -> None:
+@requires_cuda
+def test_other_stream_keeps_native_route_and_recording(graph_recordings: MagicMock) -> None:
     """A recording made on one stream is not replayed on another."""
     holder, source = _LossCapture(), DualBranchLoss()
-    holder.run(source, *_inputs(3)).total.backward()
-    recording, inputs = holder._objective, _inputs(2)
+    holder.run(source, _LossInputs(*_inputs(3))).total.backward()
+    recording, inputs = loss_objective(holder), _inputs(2)
     other = torch.cuda.Stream()
     other.wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(other), patch("torch.cuda.make_graphed_callables", side_effect=AssertionError("stream")):
-        actual = holder.run(source, *inputs)
+    recordings_before = graph_recordings.call_count
+    with torch.cuda.stream(other):
+        actual = holder.run(source, _LossInputs(*inputs))
         expected = _native(source, inputs)
+    assert graph_recordings.call_count == recordings_before
     torch.cuda.synchronize()
     _same(expected, actual)
-    assert holder._objective is recording and not holder._pending_backward
+    assert loss_objective(holder) is recording and not holder._pending_backward

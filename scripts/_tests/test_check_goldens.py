@@ -118,7 +118,7 @@ def test_non_freezable_golden_under_frozen_fails(tmp_path: Path) -> None:
     assert "freezable" in result.error
 
 
-def test_non_freezable_golden_outside_frozen_still_passes(tmp_path: Path) -> None:
+def test_non_freezable_golden_outside_frozen_passes(tmp_path: Path) -> None:
     """A golden marked ``"freezable": false`` is checked normally when it is a live golden."""
     golden = tmp_path / "fixture_checksums.json"
     data = json.loads(REAL_GOLDEN.read_text())

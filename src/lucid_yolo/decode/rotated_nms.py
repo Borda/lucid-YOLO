@@ -75,7 +75,13 @@ import torch
 from torch import Tensor, nn
 
 from lucid_yolo.data.rotated_geom import rotated_iou
-from lucid_yolo.decode.common import RBOX_COLUMNS, pad_detections
+from lucid_yolo.decode.common import (
+    DEFAULT_IOU_THRESHOLD,
+    EVAL_CONF_THRESHOLD,
+    MAX_DETECTIONS,
+    RBOX_COLUMNS,
+    pad_detections,
+)
 from lucid_yolo.models.heads.obb import decode_rboxes
 
 __all__ = ["ROTATED_NMS_IOU_THRESHOLD", "RotatedNMSDecoder"]
@@ -87,18 +93,11 @@ __all__ = ["ROTATED_NMS_IOU_THRESHOLD", "RotatedNMSDecoder"]
 #: geometry rather than to a second knob turned at the same time. No source on the
 #: allowlist states a value for rotated suppression on this architecture; the register row
 #: records both that gap and the measured exposure the carry-over accepts.
-ROTATED_NMS_IOU_THRESHOLD = 0.7
+ROTATED_NMS_IOU_THRESHOLD = DEFAULT_IOU_THRESHOLD
 
 #: Width of the A45 oriented tuple ``[cx, cy, w, h, theta, score, class]`` — the five
 #: box columns of :data:`~lucid_yolo.decode.common.RBOX_COLUMNS` plus score and class.
 _RDET_WIDTH = RBOX_COLUMNS + 2
-
-#: Default per-image detection cap (R1 sec. 3.2.1, A9, A47).
-_DEFAULT_MAX_DET = 300
-
-#: Default evaluation-time confidence threshold — permissive, so the mAP integration sees
-#: the low-confidence tail, exactly as the axis-aligned path's default does.
-_DEFAULT_CONF_THRESHOLD = 0.001
 
 
 def _suppressible(best: Tensor, rest: Tensor, best_class: Tensor, rest_classes: Tensor) -> Tensor:
@@ -195,9 +194,9 @@ class RotatedNMSDecoder(nn.Module):
 
     def __init__(
         self,
-        conf_threshold: float = _DEFAULT_CONF_THRESHOLD,
+        conf_threshold: float = EVAL_CONF_THRESHOLD,
         iou_threshold: float = ROTATED_NMS_IOU_THRESHOLD,
-        max_det: int = _DEFAULT_MAX_DET,
+        max_det: int = MAX_DETECTIONS,
     ) -> None:
         super().__init__()
         self.conf_threshold = conf_threshold

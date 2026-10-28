@@ -21,13 +21,7 @@ import torch
 from torch import Tensor
 
 from lucid_yolo.assign import make_anchor_points
-from lucid_yolo.losses import DualBranchLoss, DualLossOutput
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed every RNG source before each test for deterministic tensors."""
-    torch.manual_seed(0)
+from lucid_yolo.losses import BranchPrediction, DualBranchLoss, DualLossOutput
 
 
 def _grid_points() -> Tensor:
@@ -102,9 +96,9 @@ def test_alpha_weights_two_branch_totals() -> None:
     points = _grid_points()
     loss = DualBranchLoss()
 
-    default = loss(logits, boxes, logits, boxes, points, gt, labels, mask)
+    default = loss(BranchPrediction(logits, boxes), BranchPrediction(logits, boxes), points, gt, labels, mask)
     loss.alpha = 0.25
-    changed = loss(logits, boxes, logits, boxes, points, gt, labels, mask)
+    changed = loss(BranchPrediction(logits, boxes), BranchPrediction(logits, boxes), points, gt, labels, mask)
 
     assert default.alpha == 0.5
     assert math.isclose(default.total.item(), 0.5 * default.o2m.total.item() + 0.5 * default.o2o.total.item())
@@ -114,12 +108,12 @@ def test_alpha_weights_two_branch_totals() -> None:
 
 
 @pytest.mark.parametrize("alpha", [0.8, 0.1, 0.25])
-def test_tensor_alpha_blends_bit_equal_to_attribute_and_records_attribute(alpha: float) -> None:
-    """A keyword ``alpha`` tensor drives the blend, bit-equal to the float attribute; ``out.alpha`` stays the float.
+def test_tensor_alpha_blends_bit_equal_to_attribute_and_records_override(alpha: float) -> None:
+    """A keyword ``alpha`` tensor drives the blend and records the weight actually used.
 
     The compiled step (WP-187) passes the weight as a ``float64`` 0-d tensor so the
-    region does not guard on its value; the recorded ``alpha`` is the attribute the
-    schedule wrote, which under that step is the same number. ``0.8`` is the case a
+    region does not guard on its value; a stale attribute must not change the
+    recorded weight. ``0.8`` is the case a
     ``float32`` tensor would put one ulp off.
     """
     gt = torch.tensor([[[0.0, 0.0, 32.0, 32.0]]])
@@ -131,12 +125,14 @@ def test_tensor_alpha_blends_bit_equal_to_attribute_and_records_attribute(alpha:
     loss = DualBranchLoss(alpha=alpha)
     tensor_alpha = torch.tensor(alpha, dtype=torch.float64)
 
-    from_attribute = loss(logits, boxes, logits, boxes, points, gt, labels, mask)
+    from_attribute = loss(BranchPrediction(logits, boxes), BranchPrediction(logits, boxes), points, gt, labels, mask)
     loss.alpha = 0.5  # a stale attribute must not leak into a tensor-driven blend
-    from_tensor = loss(logits, boxes, logits, boxes, points, gt, labels, mask, alpha=tensor_alpha)
+    from_tensor = loss(
+        BranchPrediction(logits, boxes), BranchPrediction(logits, boxes), points, gt, labels, mask, alpha=tensor_alpha
+    )
 
     assert torch.equal(from_tensor.total, from_attribute.total)
-    assert from_tensor.alpha == 0.5
+    assert from_tensor.alpha == tensor_alpha
     assert from_attribute.alpha == alpha
 
 
@@ -149,7 +145,14 @@ def test_zero_gt_batch_finite() -> None:
     empty_mask = torch.zeros(1, 0, dtype=torch.bool)
     loss = DualBranchLoss()
 
-    out = loss(logits, boxes, logits, boxes, _grid_points(), empty_boxes, empty_labels, empty_mask)
+    out = loss(
+        BranchPrediction(logits, boxes),
+        BranchPrediction(logits, boxes),
+        _grid_points(),
+        empty_boxes,
+        empty_labels,
+        empty_mask,
+    )
 
     assert isinstance(out, DualLossOutput)
     assert torch.isfinite(out.total).all()
@@ -169,7 +172,9 @@ def test_gradients_flow_through_both_branches() -> None:
     o2m_boxes = _boxes_from_leaf(o2m_leaf)
     o2o_boxes = _boxes_from_leaf(o2o_leaf)
 
-    out = DualBranchLoss()(o2m_logits, o2m_boxes, o2o_logits, o2o_boxes, points, gt, labels, mask)
+    out = DualBranchLoss()(
+        BranchPrediction(o2m_logits, o2m_boxes), BranchPrediction(o2o_logits, o2o_boxes), points, gt, labels, mask
+    )
     out.total.backward()
 
     for grad in (o2m_logits.grad, o2o_logits.grad, o2m_leaf.grad, o2o_leaf.grad):

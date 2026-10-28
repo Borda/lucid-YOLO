@@ -85,6 +85,7 @@ from fuse_augmentations import (
 )
 from torch import Tensor
 
+from lucid_yolo.data._common import _BOX_DIM, _RBOX_DIM
 from lucid_yolo.data.rotated_geom import canonicalize, polygons_to_rboxes, rboxes_to_polygons
 from lucid_yolo.data.targets import Targets
 
@@ -103,10 +104,6 @@ __all__ = [
     "warp_rboxes",
 ]
 
-#: Column count of a long-edge rotated box ``(cx, cy, w, h, theta)``.
-_RBOX_DIM = 5
-#: Column count of an ``xyxy`` axis-aligned box.
-_BOX_DIM = 4
 #: Minimum vertex count for a clipped ring to enclose any area (matches WP-057).
 _MIN_AREA_CORNERS = 3
 

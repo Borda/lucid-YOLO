@@ -6,7 +6,9 @@ from leftover state, and exposes the WP-007 synthetic micro-datasets (A26) as
 session-scoped fixtures.
 Both sets are generated once into a gitignored on-disk cache
 (``tests/fixtures/_generated/``) and reused across the session; the generator
-helpers are idempotent, so a warm cache is left untouched.
+helpers are idempotent, so a warm cache is left untouched, and each set is published
+by atomic rename, so pytest-xdist workers racing on a cold cache never read a
+half-written one.
 
 Import mechanism: ``synthetic.py`` lives in ``tests/fixtures/`` (a non-package
 directory, no ``__init__.py``). We prepend that directory to ``sys.path`` here so
@@ -41,8 +43,7 @@ if TYPE_CHECKING:
 #: Persistent, gitignored generation cache shared across the session.
 _GENERATED_CACHE = _FIXTURES_DIR / "_generated"
 
-#: Global seed applied before every test; matches the value the per-module
-#: fixtures already use, so files carrying their own seeding see no change.
+#: Global seed applied before every test.
 _SEED = 0
 
 
@@ -50,23 +51,18 @@ _SEED = 0
 def _seed_torch_rng() -> None:
     """Reset the torch RNG before every test so no module draws from leftover state.
 
-    Suite-wide default: a handful of modules (model, decode and rasterisation
-    tests) build random tensors with no seeding of their own, which makes their
-    inputs depend on whichever test ran before them. Seeding centrally here is
-    the repo convention over per-test seeding, and is deliberately additive --
-    ``torch.manual_seed`` is idempotent, so the ~30 modules that already declare
-    their own ``autouse`` seeding fixture at the same value are unaffected
-    whichever order the two fixtures run in.
+    Suite-wide default: modules that build random tensors would otherwise draw
+    inputs that depend on whichever test ran before them. Seeding centrally here
+    is the repo convention; a test module needs no seeding fixture of its own
+    unless it seeds differently or does more than seed.
 
     Only torch is seeded: the suite draws no randomness from ``numpy.random`` or
     the stdlib ``random`` module (verified by grep over ``tests/``), so seeding
     those would be dead code. ``torch.manual_seed`` already covers all CUDA
     devices, so no separate ``manual_seed_all`` call is needed.
 
-    The name is deliberately distinct from the three per-module fixture names in
-    use (``reset_random_seeds``, ``_seed_rng``, ``_seed``): a same-named fixture
-    in a test module *overrides* the conftest one rather than composing with it,
-    which would silently disable this for every module that already has one.
+    A module fixture of this exact name would *override* this one rather than
+    compose with it, silently disabling the seeding for that module.
     """
     torch.manual_seed(_SEED)
 

@@ -15,10 +15,9 @@ true coordinate and its visibility, neither clamped to the edge nor zeroed.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 import pytest
 import torch
+from tensors import seeded_generator
 
 from lucid_yolo.data import AffineParams, RandomAffine, Targets, boxes_from_polygons
 from lucid_yolo.data.affine import _DEFAULT_PAD_VALUE
@@ -28,23 +27,6 @@ _CANVAS = 64
 #: A stated pad value distinct from the default, exact in binary so no rounding can hide a
 #: fill that came from the default instead.
 _STATED_PAD = 0.25
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed every RNG source before each test so generated geometry is deterministic."""
-    torch.manual_seed(0)
-    yield
-
-
-def _generator(seed: int = 1234) -> torch.Generator:
-    """Return a CPU generator seeded to ``seed`` for reproducible sampling.
-
-    Examples:
-        >>> torch.rand(1, generator=_generator()).item()
-        0.028979241847991943
-    """
-    return torch.Generator().manual_seed(seed)
 
 
 def _image() -> torch.Tensor:
@@ -109,7 +91,7 @@ class TestKeypoints:
         dropped them, as this one did before WP-132 — supervises the model against the
         pre-augmentation scene.
         """
-        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=_generator())
+        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=seeded_generator())
         points = torch.tensor([[[12.0, 14.0], [28.0, 32.0]]])
         targets = _posed_targets(torch.tensor([[10.0, 12.0, 30.0, 34.0]]), points, torch.tensor([[2, 1]]))
 
@@ -126,7 +108,7 @@ class TestKeypoints:
         annotated. Silently rewriting these values would corrupt the flag the OKS scorer
         and the loss mask both read.
         """
-        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=_generator())
+        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=seeded_generator())
         visibility = torch.tensor([[2, 1]])
         targets = _posed_targets(
             torch.tensor([[10.0, 12.0, 30.0, 34.0]]), torch.tensor([[[12.0, 14.0], [28.0, 32.0]]]), visibility
@@ -142,7 +124,7 @@ class TestKeypoints:
         Every golden in the repo sits on this path. If the keypoint carry-through were not
         an exact no-op for point-free targets, detect/segment/obb results would move.
         """
-        affine = RandomAffine(degrees=0.0, translate=0.1, scale=0.0, shear=0.0, generator=_generator())
+        affine = RandomAffine(degrees=0.0, translate=0.1, scale=0.0, shear=0.0, generator=seeded_generator())
 
         _, out = affine(_image(), _polygon_targets())
 
@@ -216,7 +198,7 @@ class TestBoxMaskConsistency:
 
     def test_box_mask_consistency(self) -> None:
         """After a rotation+scale warp, boxes equal boxes_from_polygons(output rings)."""
-        affine = RandomAffine(degrees=25.0, translate=0.0, scale=0.2, shear=0.0, generator=_generator())
+        affine = RandomAffine(degrees=25.0, translate=0.0, scale=0.2, shear=0.0, generator=seeded_generator())
 
         _, out = affine(_image(), _polygon_targets())
 
@@ -256,7 +238,7 @@ class TestKnownTranslation:
 
     def test_box_centres_shift_by_sampled_offset(self) -> None:
         """Box centres move by exactly the sampled (tx, ty) recovered from last_params."""
-        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=_generator())
+        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=seeded_generator())
         targets = _polygon_targets()
         in_centres = torch.stack(
             [(targets.boxes[:, 0] + targets.boxes[:, 2]) / 2, (targets.boxes[:, 1] + targets.boxes[:, 3]) / 2], dim=1
@@ -273,7 +255,7 @@ class TestKnownTranslation:
 
     def test_bright_pixel_shifts_same_direction(self) -> None:
         """A single bright pixel lands near centre + sampled offset (content follows boxes)."""
-        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=_generator())
+        affine = RandomAffine(degrees=0.0, translate=0.15, scale=0.0, shear=0.0, generator=seeded_generator())
         image = torch.full((1, _CANVAS, _CANVAS), 114.0 / 255.0)
         row0, col0 = _CANVAS // 2, _CANVAS // 2
         image[0, row0, col0] = 1.0
@@ -435,9 +417,9 @@ class TestLetterboxCanvas:
         """
         image = _image()
         targets = _polygon_targets()
-        plain = RandomAffine(degrees=12.0, translate=0.1, scale=0.2, shear=3.0, generator=_generator(5))
+        plain = RandomAffine(degrees=12.0, translate=0.1, scale=0.2, shear=3.0, generator=seeded_generator(5))
         boxed = RandomAffine(
-            degrees=12.0, translate=0.1, scale=0.2, shear=3.0, generator=_generator(5), letterbox=_CANVAS
+            degrees=12.0, translate=0.1, scale=0.2, shear=3.0, generator=seeded_generator(5), letterbox=_CANVAS
         )
 
         _, plain_targets = plain(image.clone(), targets.clone())
@@ -480,7 +462,7 @@ class TestGateStreamSeeding:
         unseeded gate stream looks reproducible under test while being reproducible for a
         reason nothing here owns.
         """
-        affine = RandomAffine(generator=_generator(1234))
+        affine = RandomAffine(generator=seeded_generator(1234))
 
         assert affine._gate_stream.initial_seed() != torch.Generator().initial_seed()
 
@@ -490,8 +472,8 @@ class TestGateStreamSeeding:
         Every affine sharing one stream is the shape of the bug this guards: two pipelines
         built under different seeds would agree on a sequence neither of them chose.
         """
-        first = RandomAffine(generator=_generator(1))
-        second = RandomAffine(generator=_generator(2))
+        first = RandomAffine(generator=seeded_generator(1))
+        second = RandomAffine(generator=seeded_generator(2))
 
         assert first._gate_stream.initial_seed() != second._gate_stream.initial_seed()
 
@@ -501,8 +483,8 @@ class TestGateStreamSeeding:
         The point of seeding it at all is reproducibility, so the property the module
         docstring claims — one seed determines the whole pipeline — must hold here too.
         """
-        first = RandomAffine(generator=_generator(7))
-        second = RandomAffine(generator=_generator(7))
+        first = RandomAffine(generator=seeded_generator(7))
+        second = RandomAffine(generator=seeded_generator(7))
 
         assert first._gate_stream.initial_seed() == second._gate_stream.initial_seed()
 
@@ -513,7 +495,7 @@ class TestGateStreamSeeding:
         stream shifts every subsequent transform's draw, so an upstream change in how many
         gates exist would silently re-roll the whole augmentation sequence.
         """
-        caller = _generator(1234)
+        caller = seeded_generator(1234)
         affine = RandomAffine(generator=caller)
 
         assert affine._gate_stream is not caller
@@ -560,14 +542,14 @@ class TestCenteredInput:
         """
         image = _image()
         plain = RandomAffine(
-            degrees=15.0, translate=0.3, scale=0.4, shear=5.0, generator=_generator(99), pad_value=pad_value
+            degrees=15.0, translate=0.3, scale=0.4, shear=5.0, generator=seeded_generator(99), pad_value=pad_value
         )
         centered = RandomAffine(
             degrees=15.0,
             translate=0.3,
             scale=0.4,
             shear=5.0,
-            generator=_generator(99),
+            generator=seeded_generator(99),
             pad_value=pad_value,
             centered_input=True,
         )
@@ -615,7 +597,7 @@ class TestCenteredInput:
         image = torch.arange(3 * _CANVAS * _CANVAS, dtype=torch.float32).reshape(3, _CANVAS, _CANVAS)
         image = image.remainder(256).div(255)
         plain = RandomAffine(
-            degrees=0.0, translate=0.0, scale=0.0, shear=0.0, letterbox=letterbox, generator=_generator(7)
+            degrees=0.0, translate=0.0, scale=0.0, shear=0.0, letterbox=letterbox, generator=seeded_generator(7)
         )
         centered = RandomAffine(
             degrees=0.0,
@@ -623,7 +605,7 @@ class TestCenteredInput:
             scale=0.0,
             shear=0.0,
             letterbox=letterbox,
-            generator=_generator(7),
+            generator=seeded_generator(7),
             centered_input=True,
         )
         out_plain, _ = plain(image.clone(), Targets.empty())
@@ -642,8 +624,8 @@ class TestCenteredInput:
         the shift — the plausible regression the byte-identity test above also catches, less
         directly than reading the wiring itself.
         """
-        plain = RandomAffine(translate=0.3, generator=_generator(1))
-        centered = RandomAffine(translate=0.3, generator=_generator(1), centered_input=True)
+        plain = RandomAffine(translate=0.3, generator=seeded_generator(1))
+        centered = RandomAffine(translate=0.3, generator=seeded_generator(1), centered_input=True)
 
         plain(_image(), Targets.empty())
         centered(_image(), Targets.empty())

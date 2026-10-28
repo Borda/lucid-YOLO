@@ -27,12 +27,6 @@ _LN2 = math.log(2.0)
 _LEVEL_STRIDES = (8.0, 16.0, 32.0)
 
 
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed every RNG source before each test for deterministic tensors."""
-    torch.manual_seed(0)
-
-
 def _make_assign(
     fg_mask: Tensor,
     target_labels: Tensor,

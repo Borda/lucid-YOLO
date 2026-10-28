@@ -35,10 +35,10 @@ Dropping, not flagging:
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
 
 import pytest
 import torch
+from tensors import seeded_generator
 from torch import Tensor
 
 from lucid_yolo.data import (
@@ -90,23 +90,6 @@ _THETA_CASES = [
     pytest.param(-1.5, id="out-of-range-low"),
     pytest.param(3.5, id="out-of-range-high"),
 ]
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed the global RNG before each test so any un-seeded sampling is deterministic."""
-    torch.manual_seed(0)
-    yield
-
-
-def _generator(seed: int = 1234) -> torch.Generator:
-    """Return a CPU generator seeded to ``seed`` for reproducible sampling.
-
-    Examples:
-        >>> _generator(7).initial_seed()
-        7
-    """
-    return torch.Generator().manual_seed(seed)
 
 
 def _rboxes(*thetas: float, cx: float = 64.0, cy: float = 60.0, w: float = 20.0, h: float = 8.0) -> Tensor:
@@ -236,7 +219,7 @@ class TestCanonicalOutput:
     @pytest.mark.parametrize("theta", _THETA_CASES)
     def test_flip_output_canonical(self, theta: float) -> None:
         """The horizontal flip re-canonicalizes the mirrored angle."""
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
 
         _, out = flip(_image(), _paired(_rboxes(theta)))
 
@@ -245,7 +228,7 @@ class TestCanonicalOutput:
     @pytest.mark.parametrize("theta", _THETA_CASES)
     def test_affine_output_canonical(self, theta: float) -> None:
         """A rotating, scaling, shearing affine re-fits to a canonical box."""
-        affine = RandomAffine(degrees=25.0, translate=0.05, scale=0.2, shear=10.0, generator=_generator())
+        affine = RandomAffine(degrees=25.0, translate=0.05, scale=0.2, shear=10.0, generator=seeded_generator())
 
         _, out = affine(_image(), _paired(_rboxes(theta)))
 
@@ -254,7 +237,7 @@ class TestCanonicalOutput:
     @pytest.mark.parametrize("theta", _THETA_CASES)
     def test_mosaic_output_canonical(self, theta: float) -> None:
         """Mosaic placement leaves every surviving rotated box canonical."""
-        mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=seeded_generator())
         carried = _paired(_rboxes(theta, cx=30.0, cy=30.0, w=4.0, h=2.0))
         items = [(_image(_MOSAIC_SIDE), carried)] + [(_image(_MOSAIC_SIDE), Targets.empty()) for _ in range(3)]
 
@@ -265,7 +248,7 @@ class TestCanonicalOutput:
     @pytest.mark.parametrize("theta", _THETA_CASES)
     def test_mixup_output_canonical(self, theta: float) -> None:
         """Mixup carries rotated boxes through the blend still canonical."""
-        mixup = Mixup(p=1.0, generator=_generator())
+        mixup = Mixup(p=1.0, generator=seeded_generator())
         first = _paired(canonicalize(_rboxes(theta)))
         second = _paired(canonicalize(_rboxes(-theta)))
 
@@ -280,7 +263,7 @@ class TestHorizontalFlipRotated:
     @pytest.mark.parametrize("theta", _THETA_CASES)
     def test_mirrored_box_matches_mirrored_corners(self, theta: float) -> None:
         """The flipped box describes the rectangle obtained by mirroring the corners alone."""
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         targets = _paired(_rboxes(theta))
         expected = rboxes_to_polygons(targets.rboxes).clone()
         expected[:, :, 0] = (_CANVAS - 1) - expected[:, :, 0]
@@ -291,7 +274,7 @@ class TestHorizontalFlipRotated:
 
     def test_double_flip_restores_original_geometry(self) -> None:
         """Flipping twice returns every swept angle's rectangle to its starting place."""
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
 
         image, once = flip(_image(), targets)
@@ -301,7 +284,7 @@ class TestHorizontalFlipRotated:
 
     def test_nothing_dropped_by_mirror(self) -> None:
         """An isometry keeps every instance, so all three modalities keep their length."""
-        flip = HorizontalFlip(p=1.0, generator=_generator())
+        flip = HorizontalFlip(p=1.0, generator=seeded_generator())
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
 
         _, out = flip(_image(), targets)
@@ -315,7 +298,7 @@ class TestAffineRotated:
 
     def test_identity_affine_returns_input_boxes(self) -> None:
         """A zero-parameter affine is the identity on every swept rotated box."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=_generator())
+        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
 
         _, out = affine(_image(), targets)
@@ -324,7 +307,7 @@ class TestAffineRotated:
 
     def test_similarity_warp_exact(self) -> None:
         """With no shear the warped corners are reproduced exactly, not approximated."""
-        affine = RandomAffine(degrees=20.0, translate=0.05, scale=0.3, shear=0.0, generator=_generator())
+        affine = RandomAffine(degrees=20.0, translate=0.05, scale=0.3, shear=0.0, generator=seeded_generator())
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
         corners = rboxes_to_polygons(targets.rboxes)
 
@@ -335,7 +318,7 @@ class TestAffineRotated:
 
     def test_sheared_warp_matches_derived_fit_residual(self) -> None:
         """Under shear every corner misses by exactly ``2 |q| sin(s / 2)`` (module docstring)."""
-        affine = RandomAffine(degrees=10.0, translate=0.0, scale=0.1, shear=15.0, generator=_generator(5))
+        affine = RandomAffine(degrees=10.0, translate=0.0, scale=0.1, shear=15.0, generator=seeded_generator(5))
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
         corners = rboxes_to_polygons(targets.rboxes)
 
@@ -351,7 +334,7 @@ class TestAffineRotated:
 
     def test_envelope_tracks_rotated_geometry(self) -> None:
         """An unclipped instance's box is exactly the envelope of its rotated box (A40)."""
-        affine = RandomAffine(degrees=20.0, translate=0.05, scale=0.2, shear=5.0, generator=_generator())
+        affine = RandomAffine(degrees=20.0, translate=0.05, scale=0.2, shear=5.0, generator=seeded_generator())
         targets = _paired(_rboxes(*_SWEEP_ANGLES))
 
         _, out = affine(_image(), targets)
@@ -360,7 +343,7 @@ class TestAffineRotated:
 
     def test_offcanvas_instance_dropped_from_every_modality(self) -> None:
         """An instance outside the canvas leaves, taking its box and label with it."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=_generator())
+        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
         inside = _rboxes(0.4)
         outside = _rboxes(0.4, cx=-200.0, cy=-200.0)
         targets = _paired(torch.cat([inside, outside], dim=0))
@@ -372,7 +355,7 @@ class TestAffineRotated:
 
     def test_clipped_instance_keeps_envelope_inside_canvas(self) -> None:
         """A straddling instance survives with an envelope cut to the canvas edge."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=_generator())
+        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
         targets = _paired(_rboxes(0.0, cx=float(_CANVAS) - 4.0, cy=60.0))
 
         _, out = affine(_image(), targets)
@@ -382,7 +365,7 @@ class TestAffineRotated:
 
     def test_clipped_rotated_box_keeps_orientation_and_covers_survivor(self) -> None:
         """The re-fit invents no angle: it keeps theta and contains the region that survived."""
-        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=_generator())
+        affine = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
         targets = _paired(_rboxes(0.6, cx=float(_CANVAS) - 4.0, cy=60.0))
 
         _, out = affine(_image(), targets)
@@ -394,8 +377,8 @@ class TestAffineRotated:
 
     def test_zero_angle_box_agrees_with_axis_aligned_path(self) -> None:
         """A theta=0 instance gets the same box whether or not the rotated path runs."""
-        rotated = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=_generator())
-        plain = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=_generator())
+        rotated = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
+        plain = RandomAffine(degrees=0.0, translate=0.0, scale=0.0, shear=0.0, generator=seeded_generator())
         targets = _paired(_rboxes(0.0))
 
         _, with_rboxes = rotated(_image(), targets)
@@ -405,7 +388,7 @@ class TestAffineRotated:
 
     def test_polygons_alongside_rboxes_rejected(self) -> None:
         """The oriented path carries no polygons, so a mixed input raises (WP-056)."""
-        affine = RandomAffine(degrees=10.0, generator=_generator())
+        affine = RandomAffine(degrees=10.0, generator=seeded_generator())
         targets = _paired(_rboxes(0.3))
         mixed = Targets(
             boxes=targets.boxes,
@@ -423,7 +406,7 @@ class TestMosaicRotated:
 
     def test_placed_box_follows_quadrant_offset(self) -> None:
         """The surviving box sits at its image-local position plus the sampled offset."""
-        mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=seeded_generator())
         carried = _paired(_rboxes(0.4, cx=30.0, cy=30.0, w=4.0, h=2.0))
         items = [(_image(_MOSAIC_SIDE), carried)] + [(_image(_MOSAIC_SIDE), Targets.empty()) for _ in range(3)]
 
@@ -435,7 +418,7 @@ class TestMosaicRotated:
 
     def test_offcanvas_instance_drops_every_modality(self) -> None:
         """An instance placed outside the canvas leaves all three modalities together."""
-        mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=seeded_generator())
         kept = _rboxes(0.4, cx=30.0, cy=30.0, w=4.0, h=2.0)
         lost = _rboxes(0.4, cx=-100.0, cy=-100.0, w=4.0, h=2.0)
         carried = _paired(torch.cat([kept, lost], dim=0))
@@ -448,7 +431,7 @@ class TestMosaicRotated:
 
     def test_envelope_tracks_rotated_geometry(self) -> None:
         """The merged box is the envelope of the merged rotated box (A40)."""
-        mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=_generator())
+        mosaic = MosaicAssembly(target_size=_MOSAIC_SIDE, generator=seeded_generator())
         carried = _paired(_rboxes(0.4, cx=30.0, cy=30.0, w=4.0, h=2.0))
         items = [(_image(_MOSAIC_SIDE), carried)] + [(_image(_MOSAIC_SIDE), Targets.empty()) for _ in range(3)]
 
@@ -462,7 +445,7 @@ class TestMixupRotated:
 
     def test_rboxes_concatenated_untouched(self) -> None:
         """Both inputs' rotated boxes survive the blend bit for bit, in input order."""
-        mixup = Mixup(p=1.0, generator=_generator())
+        mixup = Mixup(p=1.0, generator=seeded_generator())
         first = _paired(canonicalize(_rboxes(0.3)))
         second = _paired(canonicalize(_rboxes(1.4, cx=20.0, cy=20.0)))
 
@@ -471,9 +454,9 @@ class TestMixupRotated:
         _assert_one_instance_axis(out)
         assert torch.equal(out.rboxes, torch.cat([first.rboxes, second.rboxes], dim=0))
 
-    def test_copy_paste_still_rejects_rotated_boxes(self) -> None:
+    def test_copy_paste_rejects_rotated_boxes(self) -> None:
         """Copy-paste transfers polygon masks, which the oriented path does not carry."""
-        copy_paste = CopyPaste(p=1.0, generator=_generator())
+        copy_paste = CopyPaste(p=1.0, generator=seeded_generator())
         carried = _paired(_rboxes(0.3))
 
         with pytest.raises(NotImplementedError, match="polygon"):

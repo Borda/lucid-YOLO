@@ -51,19 +51,18 @@ protocol and the OKS sigma table), R14. Assumptions: A9, A10, A37.
 
 from __future__ import annotations
 
-import json
-import math
-import time
 from typing import TYPE_CHECKING
 
 from tqdm.auto import tqdm
 
-from lucid_yolo.data.letterbox import Letterbox
-from lucid_yolo.decode.nms_path import NMSDecoder
-from lucid_yolo.decode.topk_e2e import TopKDecoder
-from lucid_yolo.eval.annotations import letterboxed_batches, load_eval_annotations
-from lucid_yolo.eval.checkpoint import pick_device
-from lucid_yolo.eval.coco_eval import COCO_KEYPOINT_OKS_SIGMAS, DualPathEvaluator
+from lucid_yolo.eval.coco_score import (
+    _coco_paths,
+    _prepare_coco_run,
+    _print_timing,
+    _require_coco_person_schema,
+    _score_run,
+    _write_report,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -71,10 +70,6 @@ if TYPE_CHECKING:
     from lucid_yolo.ptl.module import DetectionLitModule
 
 __all__ = ["run"]
-
-#: Points in COCO's person schema, and so in this protocol's ground truth, its sigma
-#: table and any checkpoint it can score.
-_COCO_PERSON_POINTS = len(COCO_KEYPOINT_OKS_SIGMAS)
 
 
 def run(
@@ -88,6 +83,8 @@ def run(
     limit: int,
     output: Path | None,
     eval_backend: str = "faster_coco_eval",
+    ann_file: Path | None = None,
+    images_dir: Path | None = None,
 ) -> int:
     """Run the dual-path keypoint evaluation for an already-loaded checkpoint.
 
@@ -105,6 +102,8 @@ def run(
             statistics are unaffected either way — they stay on hand-driven
             ``faster_coco_eval`` (A73), the box branch's own protocol, not this
             report's.
+        ann_file: Annotation JSON override; defaults to annotations/person_keypoints_val2017.json under data_root.
+        images_dir: Image directory override; defaults to val2017 under data_root.
 
     Returns:
         ``0`` on success; ``1`` when the checkpoint's point count is not COCO's.
@@ -116,63 +115,43 @@ def run(
 
         ```
     """
-    num_keypoints = int(module.hparams["num_keypoints"])
-    if num_keypoints != _COCO_PERSON_POINTS:
-        # Refused rather than scored on an invented sigma table. This protocol's ground
-        # truth is COCO's 17-point person schema, so a checkpoint predicting some other
-        # K has no correspondence to it at all -- point i of the prediction is not point
-        # i of the annotation, and R12's sigmas measure annotator variance on joints
-        # that are not the ones being predicted (A67 makes the same argument for the
-        # synthetic symbol schema, which is scored by its own gate on its own uniform
-        # sigma, never here).
-        print(
-            f"FAIL: this protocol scores COCO's {_COCO_PERSON_POINTS}-point person schema; "
-            f"checkpoint has K={num_keypoints}"
-        )
+    try:
+        # Refused rather than scored on an invented sigma table; the reason is the
+        # helper's docstring. A library caller gets the ValueError, the command a FAIL line.
+        num_keypoints = _require_coco_person_schema(module)
+    except ValueError as refusal:
+        print(f"FAIL: {refusal}")
         return 1
-    ann_file = data_root / "annotations" / "person_keypoints_val2017.json"
-    images_dir = data_root / "val2017"
-    images, targets, label_to_category = load_eval_annotations(ann_file, with_keypoints=True)
-    if limit:
-        images = images[:limit]
+    ann_file, images_dir = _coco_paths("keypoints", data_root, ann_file, images_dir)
     info["keypoints"] = num_keypoints
     info["eval_backend"] = eval_backend
-    device = pick_device(device_name)
-    letterbox = Letterbox(img_size)
-    evaluator = DualPathEvaluator(
+    coco_run = _prepare_coco_run(
         module,
-        TopKDecoder(),
-        NMSDecoder(),
-        label_to_category,
-        letterbox,
-        keypoint_sigmas=COCO_KEYPOINT_OKS_SIGMAS,
-        backend=eval_backend,
+        ann_file=ann_file,
+        images_dir=images_dir,
+        img_size=img_size,
+        batch_size=batch_size,
+        device_name=device_name,
+        limit=limit,
+        eval_backend=eval_backend,
+        masks=False,
+        keypoints=True,
     )
 
     print(
-        f"eval-pose: {len(images)} images, device={device.type}, ema={info.get('ema')}, "
+        f"eval-pose: {len(coco_run.images)} images, device={coco_run.device.type}, ema={info.get('ema')}, "
         f"img_size={img_size}, K={num_keypoints}"
     )
-    start = time.perf_counter()
-    batches = tqdm(
-        letterboxed_batches(images, images_dir, letterbox, batch_size),
-        total=math.ceil(len(images) / batch_size),
-        desc="eval-pose",
-        unit="batch",
-    )
-    report = evaluator.evaluate(batches, targets, device)
-    elapsed = time.perf_counter() - start
-    print(f"done in {elapsed:.1f}s ({len(images) / elapsed:.1f} img/s)")
+    batches = tqdm(coco_run.batches(), total=coco_run.num_batches, desc="eval-pose", unit="batch")
+    score = _score_run(coco_run, batches)
+    _print_timing(score)
 
     for path in ("e2e", "nms"):
-        stats = report[path]
+        stats = score.report[path]
         print(f"[{path}] box mAP50-95={stats['map']:.4f} mAP50={stats['map_50']:.4f} mAP75={stats['map_75']:.4f}")
         print(f"[{path}] OKS AP={stats['oks_AP_all']:.4f} AP50={stats['oks_AP_50']:.4f} AP75={stats['oks_AP_75']:.4f}")
     print("the e2e row is the one comparable to a training run's own val/mAP; nms is the dense branch")
 
     if output:
-        payload = {"info": info, "images": len(images), "seconds": round(elapsed, 1), "report": report}
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(payload, indent=2) + "\n")
-        print(f"report -> {output}")
+        _write_report(output, info, score)
     return 0

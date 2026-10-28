@@ -51,9 +51,9 @@ from lucid_yolo.cli import eval as cli_eval
 from lucid_yolo.data.coco import CocoDetectionDataset
 from lucid_yolo.data.letterbox import Letterbox
 from lucid_yolo.data.targets import Targets
-from lucid_yolo.decode import NMSDecoder, TopKDecoder
-from lucid_yolo.eval import DualPathEvaluator, coco_eval, detections_to_predictions, evaluate_bbox
-from lucid_yolo.eval.coco_eval import _METRIC_KEYS, COCO_RECALL_GRID
+from lucid_yolo.decode import NMSDecoder, TopKDecoder, gather_by_anchor
+from lucid_yolo.eval import DualPathEvaluator, _coco_streaming, coco_eval, detections_to_predictions, evaluate_bbox
+from lucid_yolo.eval.coco_eval import _METRIC_KEYS, COCO_RECALL_GRID, gather_keypoints
 from lucid_yolo.models.heads.detect import DualHeadOutput
 from lucid_yolo.ptl.module import DetectionLitModule
 
@@ -266,6 +266,35 @@ def test_each_path_scored_from_own_decoder() -> None:
 
     assert report["e2e"]["map"] == pytest.approx(1.0)
     assert report["nms"]["map"] == pytest.approx(0.0)
+
+
+def test_gather_keypoints_binds_its_own_keyword_names() -> None:
+    """The public keypoint gather keeps the ``keypoints`` / ``anchor_index`` names it shipped with.
+
+    The training module's ``val/oks_mAP`` imports it from here, and callers outside the
+    package may spell the call by keyword. An alias of the shared gather renamed the first
+    parameter and turned that spelling into a ``TypeError``; the answer, padding row
+    included, must be the shared gather's own.
+    """
+    points = torch.arange(12.0).reshape(1, 3, 2, 2)
+    indices = torch.tensor([[2, -1]])
+
+    gathered = gather_keypoints(keypoints=points, anchor_index=indices)
+
+    assert torch.equal(gathered, gather_by_anchor(points, indices))
+    assert torch.equal(gathered[0, 1], torch.zeros(2, 2))
+
+
+def test_gather_keypoints_delegates_to_shared_gather(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The public keypoint gather calls the decode package's one gather, not a copy of it.
+
+    Prediction and export gather through :mod:`lucid_yolo.decode` directly; one padding
+    rule is what keeps the three from drifting apart.
+    """
+    sentinel = torch.full((1, 1, 2, 2), 7.0)
+    monkeypatch.setattr(coco_eval, "gather_by_anchor", lambda *_args: sentinel)
+
+    assert gather_keypoints(torch.zeros(1, 3, 2, 2), torch.tensor([[0]])) is sentinel
 
 
 def test_evaluate_bbox_empty_preds_zeroed() -> None:
@@ -626,7 +655,7 @@ class TestRecallGridBoundary:
         which would restore the downward bias with nothing to show for it. This substitutes
         exactly that metric and requires the guard to raise.
         """
-        monkeypatch.setattr(coco_eval, "MeanAveragePrecision", _IgnoresRecThresholds)
+        monkeypatch.setattr(_coco_streaming, "MeanAveragePrecision", _IgnoresRecThresholds)
         pred, target = _single_image_gt()
 
         with pytest.raises(RuntimeError, match="rec_thresholds"):
@@ -802,15 +831,30 @@ class TestBackendDefaults:
 
         assert default == "faster_coco_eval"
 
-    def test_cli_default_auto(self) -> None:
+    def test_cli_default_auto(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """``lucid-eval`` defaults ``--eval_backend`` to ``auto``, not to the library default.
 
-        The half the prose used to omit. ``auto`` is a resolution rule rather than
-        an engine, so the two tests below say what it resolves to.
+        The signature uses an unset sentinel to distinguish omission from an
+        explicitly supplied option. Check the effective resolution rule and the
+        engine forwarded to scoring, rather than that internal representation.
         """
-        default = inspect.signature(cli_eval.evaluate).parameters["eval_backend"].default
+        module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=1)
+        requested_backends: list[str] = []
 
-        assert default == "auto"
+        def resolve(requested: str) -> tuple[str, None]:
+            requested_backends.append(requested)
+            return "faster_coco_eval", None
+
+        def score(_module: object, _info: object, **kwargs: object) -> int:
+            assert kwargs["eval_backend"] == "faster_coco_eval"
+            return 0
+
+        monkeypatch.setattr(cli_eval, "load_eval_module", lambda *args, **kwargs: (module, {}))
+        monkeypatch.setattr(cli_eval, "_resolve_eval_backend", resolve)
+        monkeypatch.setattr(cli_eval.detect_eval, "run", score)
+
+        assert cli_eval.evaluate(tmp_path / "model.ckpt", tmp_path) == 0
+        assert requested_backends == ["auto"]
 
     def test_auto_takes_hotcoco_when_hotcoco_usable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With a usable hotcoco, ``auto`` resolves to hotcoco -- silently, and with no reason recorded.

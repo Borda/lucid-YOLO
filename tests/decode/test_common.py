@@ -10,14 +10,34 @@ input they used to return unchanged — a pass-through that quietly turned the f
 shape into a variable one at whichever caller stopped capping. The two are exercised
 against the same row counts, since their whole contract is that row ``n`` of the
 detections and entry ``n`` of the indices survive or vanish together.
+
+The same module holds the one per-anchor gather and the point-set letterbox inverse,
+both pinned here against the forms they replaced, and the detection cap and image side
+the ``models`` package reads from the shared task leaf, pinned to the decode defaults.
 """
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 import torch
 
-from lucid_yolo.decode.common import DET_WIDTH, PAD_ANCHOR_INDEX, pad_anchor_indices, pad_detections
+from lucid_yolo.data.letterbox import Letterbox
+from lucid_yolo.decode.common import (
+    COCO_IMG_SIZE,
+    DET_WIDTH,
+    MAX_DETECTIONS,
+    PAD_ANCHOR_INDEX,
+    gather_by_anchor,
+    pad_anchor_indices,
+    pad_detections,
+    points_to_letterboxed_original,
+)
+from lucid_yolo.models.build import count_flops
+from lucid_yolo.models.heads.detect import o2o_topk, o2o_topk_with_indices
+from lucid_yolo.models.heads.obb import o2o_rotated_topk, o2o_rotated_topk_with_indices
+from lucid_yolo.tasks import Task
 
 
 @pytest.mark.parametrize(
@@ -111,3 +131,90 @@ def test_short_indices_filled_with_padding_sentinel() -> None:
     padded = pad_anchor_indices(torch.tensor([[3, 7]]), max_det=4)
 
     assert padded[0, 2:].tolist() == [PAD_ANCHOR_INDEX, PAD_ANCHOR_INDEX]
+
+
+class TestGatherByAnchor:
+    """Tests for :func:`~lucid_yolo.decode.common.gather_by_anchor`, the one per-anchor gather."""
+
+    @pytest.mark.parametrize("trailing", [pytest.param((3,), id="coefficients"), pytest.param((4, 2), id="points")])
+    def test_real_rows_bit_equal_to_bare_gather(self, trailing: tuple[int, ...]) -> None:
+        """With no padding row, the clamp and the product by one leave a bare gather's values untouched.
+
+        This is what lets the export graphs, which used to gather mask coefficients with
+        no padding rule at all, call the shared gather without moving a single output bit
+        on any canvas that reaches the detection cap.
+        """
+        values = torch.randn(2, 5, *trailing, generator=torch.Generator().manual_seed(1))
+        anchors = torch.tensor([[4, 0, 2], [1, 1, 3]])
+        index = anchors.reshape(2, 3, *([1] * len(trailing))).expand(-1, -1, *trailing)
+
+        gathered = gather_by_anchor(values, anchors)
+
+        assert torch.equal(gathered, values.gather(1, index))
+
+    @pytest.mark.parametrize("trailing", [pytest.param((3,), id="coefficients"), pytest.param((4, 2), id="points")])
+    def test_padding_rows_zeroed_not_last_anchor(self, trailing: tuple[int, ...]) -> None:
+        """A padding index yields all zeros rather than the last anchor's values.
+
+        ``-1`` used directly as a gather index would read the last anchor: a plausible mask
+        or pose for a row that is not a detection.
+        """
+        values = torch.ones(1, 5, *trailing)
+
+        gathered = gather_by_anchor(values, torch.tensor([[2, PAD_ANCHOR_INDEX]]))
+
+        assert torch.equal(gathered[0, 0], torch.ones(trailing))
+        assert torch.equal(gathered[0, 1], torch.zeros(trailing))
+
+
+class TestPointsToLetterboxedOriginal:
+    """Tests for :func:`~lucid_yolo.decode.common.points_to_letterboxed_original`."""
+
+    def test_matches_letterbox_inverse_point_for_point(self) -> None:
+        """Every point takes the exact inverse the letterbox itself defines, whatever the leading shape.
+
+        The function exists so the single-image and the batch keypoint paths stop each
+        writing their own fold-map-unfold around this call; folding must not reorder points.
+        """
+        points = torch.rand(3, 5, 2, generator=torch.Generator().manual_seed(2)) * 64.0
+        letterbox = Letterbox(64, allow_upscale=False)
+
+        mapped = points_to_letterboxed_original(points, (40, 100), (64, 64), allow_upscale=False)
+
+        expected = letterbox.inverse_map(points.reshape(-1, 2), (40, 100), (64, 64)).reshape(3, 5, 2)
+        assert torch.equal(mapped, expected)
+
+    def test_empty_input_keeps_point_axis(self) -> None:
+        """An image with no detection comes back as an empty stack that still states ``K``."""
+        mapped = points_to_letterboxed_original(torch.zeros(0, 17, 2), (40, 100), (64, 64))
+
+        assert mapped.shape == (0, 17, 2)
+
+
+def test_detection_cap_matches_model_ranking_defaults() -> None:
+    """The model-side rankings default to the same cap the decoders import.
+
+    ``models`` sits below ``decode`` in the import graph. Both layers must read the
+    same leaf constant, preserving the public decode name as a re-export.
+    """
+    defaults = [
+        parameters["k"].default
+        for parameters in (
+            inspect.signature(o2o_topk_with_indices).parameters,
+            inspect.signature(o2o_topk).parameters,
+            inspect.signature(o2o_rotated_topk_with_indices).parameters,
+            inspect.signature(o2o_rotated_topk).parameters,
+        )
+    ]
+
+    assert MAX_DETECTIONS == 300
+    assert all(default is MAX_DETECTIONS for default in defaults)
+
+
+def test_flop_measurement_side_matches_coco_img_size() -> None:
+    """The FLOP counter measures at the COCO tiers' letterbox side.
+
+    The model default derives from the detection task spec, whose COCO side stays
+    pinned to :data:`COCO_IMG_SIZE`.
+    """
+    assert inspect.signature(count_flops).parameters["img_size"].default == Task.DETECT.spec.img_size == COCO_IMG_SIZE

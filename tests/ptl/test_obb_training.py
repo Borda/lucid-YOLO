@@ -39,13 +39,15 @@ from pathlib import Path
 import pytest
 import torch
 from torch import Tensor, nn
+from training import LogRecorder, tiny_module
+from training import oriented_targets as _oriented_targets
 
 from lucid_yolo.assign.tal import AssignResult
 from lucid_yolo.data.coco import build_scale_policy
-from lucid_yolo.data.rotated_geom import canonicalize, rboxes_to_polygons
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.decode.common import rboxes_to_letterboxed_original
 from lucid_yolo.eval.dota_eval import evaluate_rotated_map
+from lucid_yolo.losses import BranchPrediction
 from lucid_yolo.losses.oriented_loss import oriented_branch_terms
 from lucid_yolo.models.heads.detect import decode_ltrb
 from lucid_yolo.ptl import DetectionLitModule, pad_rboxes, pad_targets
@@ -92,12 +94,6 @@ _SNAPSHOT_ATOL = 1e-6
 _GRAD_NORM_RTOL = 1e-4
 
 
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed torch before each test so model init and synthetic batches are reproducible."""
-    torch.manual_seed(0)
-
-
 @pytest.fixture
 def single_threaded() -> Iterator[None]:
     """Pin torch's intra-op thread count to one, restoring it afterwards.
@@ -110,18 +106,6 @@ def single_threaded() -> Iterator[None]:
     torch.set_num_threads(1)
     yield
     torch.set_num_threads(previous)
-
-
-class _LogRecorder:
-    """Stand-in for ``LightningModule.log`` that records every logged scalar."""
-
-    def __init__(self) -> None:
-        self.values: dict[str, float] = {}
-
-    def __call__(self, name: str, value: Tensor, **kwargs: object) -> None:
-        """Record ``value`` under ``name``, ignoring Lightning's keyword arguments."""
-        del kwargs
-        self.values[name] = float(value.detach())
 
 
 def _tiny_module(task: str = "obb", **overrides: float) -> DetectionLitModule:
@@ -140,34 +124,7 @@ def _tiny_module(task: str = "obb", **overrides: float) -> DetectionLitModule:
         "alpha": _ALPHA,
     }
     gains.update(overrides)
-    return DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=_NUM_CLASSES, task=task, **gains)
-
-
-def _oriented_targets(num_boxes: int, difficult: Tensor | None = None) -> Targets:
-    """Build elongated, rotated ground truths with envelopes fitted to the same corners.
-
-    Elongation and rotation are load-bearing, not incidental: an axis-aligned or square
-    target sits at the stationary point of both angular terms, where a correctly wired
-    angle stem legitimately receives zero gradient.
-
-    Examples:
-        >>> targets = _oriented_targets(2)
-        >>> targets.boxes.shape, targets.rboxes.shape
-        (torch.Size([2, 4]), torch.Size([2, 5]))
-    """
-    centre = torch.rand(num_boxes, 2) * 60.0 + 50.0
-    long_edge = torch.rand(num_boxes) * 30.0 + 30.0
-    short_edge = torch.rand(num_boxes) * 8.0 + 8.0
-    theta = torch.rand(num_boxes) * 0.9 + 0.2
-    rboxes = canonicalize(torch.stack([centre[:, 0], centre[:, 1], long_edge, short_edge, theta], dim=1))
-    corners = rboxes_to_polygons(rboxes)
-    boxes = torch.cat([corners.amin(dim=1), corners.amax(dim=1)], dim=1)
-    return Targets(
-        boxes=boxes,
-        labels=torch.randint(0, _NUM_CLASSES, (num_boxes,)),
-        rboxes=rboxes,
-        difficult=torch.zeros(num_boxes, dtype=torch.bool) if difficult is None else difficult,
-    )
+    return tiny_module(task, **gains)
 
 
 def _oriented_batch() -> tuple[Tensor, list[Targets]]:
@@ -180,36 +137,6 @@ def _oriented_batch() -> tuple[Tensor, list[Targets]]:
     """
     images = torch.randn(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
     return images, [_oriented_targets(2), _oriented_targets(1)]
-
-
-def _has_gradient(module: nn.Module) -> bool:
-    """Return whether any parameter of ``module`` carries a non-zero gradient.
-
-    Examples:
-        >>> layer = nn.Linear(2, 1)
-        >>> _has_gradient(layer)
-        False
-        >>> layer(torch.ones(1, 2)).backward()
-        >>> _has_gradient(layer)
-        True
-    """
-    return any(parameter.grad is not None and bool(parameter.grad.abs().sum() > 0) for parameter in module.parameters())
-
-
-def test_gradients_reach_both_branches_angle_stems() -> None:
-    """One ``task="obb"`` step leaves non-zero gradients on the o2o *and* o2m angle stems.
-
-    This is the test that would have caught the Phase 8 defect: the stems existed,
-    were constructed, appeared in the state dict and in the parameter count, and
-    received no gradient because nothing in the objective read them.
-    """
-    module = _tiny_module()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
-
-    module.training_step(_oriented_batch(), 0).backward()
-
-    assert _has_gradient(module.head.o2o.angle_stems)
-    assert _has_gradient(module.head.o2m.angle_stems)
 
 
 @pytest.mark.parametrize(
@@ -233,9 +160,9 @@ def test_each_oriented_gain_enters_total_at_weight(gain: str, term: str, value: 
     weighted = _tiny_module()
     zeroed = _tiny_module(**{gain: 0.0})
     zeroed.load_state_dict(weighted.state_dict())
-    recorder = _LogRecorder()
+    recorder = LogRecorder()
     weighted.log = recorder  # type: ignore[method-assign]
-    zeroed.log = _LogRecorder()  # type: ignore[method-assign]
+    zeroed.log = LogRecorder()  # type: ignore[method-assign]
     batch = _oriented_batch()
 
     with_gain = weighted.training_step(batch, 0)
@@ -258,24 +185,6 @@ def test_angle_gain_default_registered_a22_value() -> None:
     ``0.25``, with the run-to-run spread falling from 0.667 to 0.096).
     """
     assert DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=1, task="obb")._angle_gain == 0.25
-
-
-def test_obb_state_dict_detection_state_dict_plus_angle_stems() -> None:
-    """Dropping the angle-stem keys from an ``obb`` module leaves exactly a ``detect`` module's.
-
-    Pins the composition rule WP-087 established: the oriented module builds through
-    :func:`~lucid_yolo.models.build.build_detection_stages` and keeps its stages flat.
-    Nesting an :class:`~lucid_yolo.models.build.OrientedDetector` inside it would
-    prefix every key with that attribute name and invalidate the accepted Det-smoke
-    checkpoint — a change no shape, count or loss value would reveal.
-    """
-    oriented = _tiny_module()
-    detection = _tiny_module(task="detect")
-
-    keys = [key for key in oriented.state_dict() if ".angle_stems." not in key]
-
-    assert keys == list(detection.state_dict())
-    assert any(".angle_stems." in key for key in oriented.state_dict())
 
 
 def test_detect_step_reproduces_pre_change_snapshot(single_threaded: None) -> None:
@@ -330,7 +239,7 @@ def test_detect_step_reproduces_pre_change_snapshot(single_threaded: None) -> No
         l1_gain=snapshot["gains"]["l1"],
         alpha=snapshot["gains"]["alpha"],
     )
-    recorder = _LogRecorder()
+    recorder = LogRecorder()
     module.log = recorder  # type: ignore[method-assign]
     torch.manual_seed(snapshot["batch_seed"])
     images = torch.randn(_BATCH_SIZE, 3, snapshot["img_size"], snapshot["img_size"])
@@ -386,7 +295,7 @@ def test_obb_step_needs_one_rotated_box_per_instance() -> None:
     positives forever while the loss curve looked entirely ordinary.
     """
     module = _tiny_module()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
     images, targets = _oriented_batch()
     boxes_only = [Targets(boxes=target.boxes, labels=target.labels) for target in targets]
 
@@ -404,7 +313,7 @@ def test_image_without_instances_gives_finite_loss() -> None:
     batch that left an angle gradient absent would make a recorded backward differ.
     """
     module = _tiny_module()
-    recorder = _LogRecorder()
+    recorder = LogRecorder()
     module.log = recorder  # type: ignore[method-assign]
 
     loss = module.training_step((torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE), [Targets.empty()]), 0)
@@ -453,7 +362,7 @@ def test_rotated_candidacy_reaches_assigner() -> None:
     assert int(axis_aligned.o2m_assign.fg_mask.sum()) > 0
 
 
-def _dense_inputs(module: DetectionLitModule, images: Tensor, target: Targets) -> tuple[Tensor, ...]:
+def _dense_inputs(module: DetectionLitModule, images: Tensor, target: Targets) -> tuple[BranchPrediction | Tensor, ...]:
     """Return the positional arguments ``DualBranchLoss`` takes for a one-image batch.
 
     Examples:
@@ -461,16 +370,14 @@ def _dense_inputs(module: DetectionLitModule, images: Tensor, target: Targets) -
         >>> images = torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE)
         >>> inputs = _dense_inputs(module, images, _oriented_targets(1))
         >>> len(inputs)
-        9
+        7
     """
     head_out = module(images)
     anchor_points, strides = module._anchor_grid(images.shape[-2], images.shape[-1], images.device)
     gt_boxes, gt_labels, gt_mask = pad_targets([target])
     return (
-        head_out.o2m_cls,
-        decode_ltrb(head_out.o2m_box, anchor_points, strides),
-        head_out.o2o_cls,
-        decode_ltrb(head_out.o2o_box, anchor_points, strides),
+        BranchPrediction(head_out.o2m_cls, decode_ltrb(head_out.o2m_box, anchor_points, strides)),
+        BranchPrediction(head_out.o2o_cls, decode_ltrb(head_out.o2o_box, anchor_points, strides)),
         anchor_points,
         gt_boxes,
         gt_labels,
@@ -523,17 +430,17 @@ def test_oriented_terms_follow_assignment_not_positive_order() -> None:
     assert float(naive.angle) > 0.0
 
 
-def _validated_module(batch: tuple[Tensor, list[Targets]]) -> tuple[DetectionLitModule, _LogRecorder]:
+def _validated_module(batch: tuple[Tensor, list[Targets]]) -> tuple[DetectionLitModule, LogRecorder]:
     """Run one validation batch plus the epoch end on an ``obb`` module.
 
     Examples:
-        >>> callable(_validated_module)  # needs a live _LogRecorder-backed module
+        >>> callable(_validated_module)  # needs a live LogRecorder-backed module
         True
     """
     module = _tiny_module().eval()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
     module.validation_step(batch, 0)
-    recorder = _LogRecorder()
+    recorder = LogRecorder()
     module.log = recorder  # type: ignore[method-assign]
     module.on_validation_epoch_end()
     return module, recorder
@@ -559,9 +466,9 @@ def test_validation_logs_rotated_map_and_not_box_map() -> None:
 def test_detection_validation_logs_no_rotated_metric() -> None:
     """A detection module has no angle branch, so it must not report a rotated metric."""
     module = _tiny_module(task="detect").eval()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
     module.validation_step(_oriented_batch(), 0)
-    recorder = _LogRecorder()
+    recorder = LogRecorder()
     module.log = recorder  # type: ignore[method-assign]
 
     module.on_validation_epoch_end()
@@ -574,8 +481,8 @@ def test_epoch_metric_clears_buffers() -> None:
     """The accumulators are emptied at the epoch end, so no epoch scores another's detections."""
     module, _ = _validated_module(_oriented_batch())
 
-    assert module._val_rotated_preds == []
-    assert module._val_rotated_targets == []
+    assert module._val_rotated.image_count == 0
+    assert module._val_rotated._images() == ([], [])
 
 
 def test_rotated_targets_survive_loader_transport_into_metric() -> None:
@@ -591,11 +498,11 @@ def test_rotated_targets_survive_loader_transport_into_metric() -> None:
     images = torch.rand(_BATCH_SIZE, 3, _IMG_SIZE, _IMG_SIZE)
     restored = unpack_targets(collate_detection(list(zip(images, targets, strict=True)))[1])
     module = _tiny_module().eval()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
 
     module.validation_step((images, restored), 0)
 
-    collected = module._val_rotated_targets
+    collected = module._val_rotated._images()[1]
     perfect = [
         {"rboxes": target.rboxes, "scores": torch.ones(target.rboxes.shape[0]), "labels": target.labels}
         for target in targets
@@ -619,9 +526,9 @@ def test_difficult_flags_reach_metric_through_loader() -> None:
 
     assert torch.equal(restored[0].difficult, flagged.difficult)
     module = _tiny_module().eval()
-    module.log = _LogRecorder()  # type: ignore[method-assign]
+    module.log = LogRecorder()  # type: ignore[method-assign]
     module.validation_step((images, restored), 0)
-    assert torch.equal(module._val_rotated_targets[0]["difficult"], flagged.difficult)
+    assert torch.equal(module._val_rotated._images()[1][0]["difficult"], flagged.difficult)
 
 
 def test_oriented_train_pipeline_suppresses_copy_paste() -> None:

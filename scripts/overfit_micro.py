@@ -113,8 +113,8 @@ from lucid_yolo.ptl.callbacks import CloseMosaicCallback
 from lucid_yolo.ptl.datamodule import DetectionDataModule
 from lucid_yolo.ptl.module import DetectionLitModule
 
-#: Repository root (``scripts/`` is one level below it).
-REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root for path-based entry points
+from scripts._common import REPO_ROOT
 
 #: The recipe whose hyperparameters this run reuses (single source of truth);
 #: read from the packaged configs tree (``lucid_yolo/configs``).

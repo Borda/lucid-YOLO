@@ -18,30 +18,43 @@ concurrency:
 jobs:
   # Lint, strict mypy and the copyleft audit live in lint.yml, whose `trailers` job
   # checks the pull request's own commits (WP-144); a squash merge replaces the
-  # messages a check here would read. The matrix covers every `requires-python`
-  # interpreter on both CPU platforms; before it only 3.11 on Linux ever ran.
+  # messages a check here would read. Linux covers every `requires-python`
+  # interpreter; macOS runs the newest one only (P6): its cells exercise no
+  # accelerator path and cost 18-23 min each against ~11 on Linux, so three of them
+  # bought platform coverage a single cell already gives.
   # `UV_TORCH_BACKEND: cpu` stops each cell from downloading a CUDA torch wheel.
   testing:
     runs-on: ${{ matrix.os }}
+    # Measured: successful runs took 11-44 min wall (median 22); the macOS cell is
+    # the long one at 18-23 min. 45 would sit on the outlier, so 60.
+    timeout-minutes: 60
     strategy:
       # Every cell reports: one failing interpreter is a finding, and cancelling
       # its siblings hides whether the others agree.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
         python-version: ["3.11", "3.12", "3.13"]
+        include:
+          - os: macos-latest
+            python-version: "3.13"
     env:
       UV_TORCH_BACKEND: "cpu"
+      # Coverage is measured in exactly one cell: `fail_under` gives the same verdict
+      # in all of them, and tracing slows the suite. `COV=` empties the Makefile's
+      # default `--cov` options, so the other cells run plain pytest.
+      COV_ARGS: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && '--cov=lucid_yolo --cov-report=term' || '' }}
     steps:
       - name: "📥 Check out the repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: "🐍 Set up Python"
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
       - name: "📦 Install uv"
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - name: "🧰 Create venv and install the dev dependency group"
         run: |
           uv venv --python ${{ matrix.python-version }} .venv
@@ -50,38 +63,101 @@ jobs:
       # and `src scripts`, so CI collected 1548 tests where the Makefile collects
       # 2668 -- every `scripts/_tests/` check and some 879 doctests never ran here.
       # The Makefile's `PY` is `.venv/bin/python`, the venv created above.
-      - name: "🧪 Offline unit suite with coverage (make test)"
-        run: make test
-      # Frozen golden sweep, and the only one CI runs. WP-162 took `golden-check` off
-      # the commit stage; the suite's own three copies (a doctest, a test and the
-      # exit-code test, ~55 s each, two thirds of `make test`) are gone too. It lives
-      # here because the harness recomputes model metrics: a test-shaped check.
-      #
-      # One cell only: the values were frozen on Linux under 3.11, and the
-      # tolerances are sized for code drift, not interpreter or BLAS drift.
+      - name: "🧪 Offline unit suite (make test)"
+        run: make test COV="${COV_ARGS}"
+
+  # Frozen golden sweep, and the only one CI runs. WP-162 took `golden-check` off
+  # the commit stage; the suite's own three copies (a doctest, a test and the
+  # exit-code test, ~55 s each, two thirds of `make test`) are gone too. It lives
+  # here because the harness recomputes model metrics: a test-shaped check.
+  #
+  # Its own job, parallel to the matrix, so the ~3 min sweep is off the critical
+  # path. One cell only: the values were frozen on Linux under 3.11, and the
+  # tolerances are sized for code drift, not interpreter or BLAS drift.
+  goldens:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UV_TORCH_BACKEND: "cpu"
+    steps:
+      - name: "📥 Check out the repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: "🐍 Set up Python"
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: "📦 Install uv"
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: "🧰 Create venv and install the dev dependency group"
+        run: |
+          uv venv --python 3.11 .venv
+          uv pip install --python .venv/bin/python -e . --group dev
       - name: "🥇 Frozen golden regression"
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         run: .venv/bin/python scripts/check_goldens.py
 
-  # One check name for the matrix. Branch protection names checks, and a cell's name
-  # carries its coordinates (`testing (macos-latest, 3.13)`): requiring cells means
-  # editing the rule whenever the matrix changes, and an unlisted red cell does not
-  # block the merge. `if: always()` makes this a guardian rather than a rubber stamp:
-  # without it a skipped or cancelled matrix skips this job too, and a skipped
-  # required check counts as passing. Both results fail here on purpose.
+  # K2: every other install here is editable, so a missing package-data file or an
+  # undeclared import ships green. Build the wheel and run what a wheel-only user
+  # would; the steps live in a composite action shared with release.yml.
+  wheel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: "📥 Check out the repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: "📦 Install uv"
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: "🏗️ Build sdist and wheel"
+        run: uv build --out-dir dist
+      - name: "🧪 Wheel smoke"
+        uses: ./.github/actions/wheel-smoke # zizmor: ignore[self-repository] the long ./ form is the documented local-action path
+
+  # actionlint (syntax, expressions, shellcheck over `run:`) and zizmor (workflow
+  # security: injection, over-broad permissions, credential persistence, unpinned
+  # actions) over this repository's own workflows and composite actions. Both run
+  # through `uvx` at pinned versions, so no third-party action is added. zizmor runs
+  # offline: the online audits need a token and only check action refs against the
+  # GitHub API, which the SHA pins already cover. Lives here, not in lint.yml, so
+  # `testing-guardian` can `needs` it: a failed audit must turn the required check red.
+  workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: "📥 Check out the repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: "📦 Install uv"
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: "🔎 actionlint"
+        run: uvx --from actionlint-py==1.7.12.25 actionlint
+      - name: "🛡️ zizmor"
+        run: uvx zizmor==1.31.1 --offline .github
+
+  # One check name for the jobs above. Branch protection names checks, and a matrix
+  # cell's name carries its coordinates (`testing (macos-latest, 3.13)`): requiring
+  # cells means editing the rule whenever the matrix changes, and an unlisted red
+  # cell does not block the merge. `if: always()` makes this a guardian rather than
+  # a rubber stamp: without it a skipped or cancelled job skips this one too, and a
+  # skipped required check counts as passing. Both results fail here on purpose.
   testing-guardian:
     permissions: {}
     runs-on: ubuntu-latest
-    needs: testing
+    timeout-minutes: 15
+    needs: [testing, goldens, wheel, workflows]
     if: always()
     steps:
-      - name: "📋 Report the matrix result"
+      - name: "📋 Report the results"
         env:
-          RESULT: ${{ needs.testing.result }}
-        run: echo "testing matrix result ${RESULT}"
-      - name: "❌ Fail on a failed cell"
-        if: needs.testing.result == 'failure'
-        run: exit 1
-      - name: "⏭️ Fail on a cancelled or skipped matrix"
-        if: contains(fromJSON('["cancelled", "skipped"]'), needs.testing.result)
-        run: exit 1
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: echo "testing goldens wheel workflows results - ${RESULTS}"
+      - name: "❌ Fail on a failed, cancelled or skipped job"
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in ${RESULTS}; do
+            [ "${result}" = "success" ] || exit 1
+          done

@@ -47,12 +47,6 @@ _STRIDES = [8, 16, 32]
 _IMG_SIZE = 128
 
 
-@pytest.fixture(autouse=True)
-def _seed_rng() -> None:
-    """Seed torch so module initialization and input features are deterministic."""
-    torch.manual_seed(0)
-
-
 def _anchor_grid(input_size: int) -> tuple[torch.Tensor, torch.Tensor]:
     """Return the shared anchor points and per-anchor strides for a square input.
 

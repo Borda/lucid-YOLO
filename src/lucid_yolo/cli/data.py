@@ -40,6 +40,8 @@ What is deliberately *not* here:
 
 from __future__ import annotations
 
+import inspect
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from jsonargparse import ArgumentParser
@@ -100,7 +102,27 @@ def build_parser() -> ArgumentParser:
         # the flag has to be asked for here -- per subparser, because that is the level
         # the arguments a config file would set actually live at.
         subparser.add_argument(f"--{_CONFIG_FLAG}", action="config")
-        subparser.add_function_arguments(function)
+        if name == "build-tiles":
+            # Preserve the operation's root/config key while accepting the spelling
+            # shared by the other commands. Keep library-only rST out of CLI help.
+            subparser.add_function_arguments(function, skip={"root", "suffix"})
+            subparser.add_argument(
+                "--root",
+                "--data_root",
+                dest="root",
+                type=Path,
+                required=True,
+                help="Provisioned dataset root, holding one directory per split.",
+            )
+            subparser.add_argument(
+                "--suffix",
+                type=str,
+                # Read off the signature so the CLI cannot drift from the library default.
+                default=inspect.signature(function).parameters["suffix"].default,
+                help="Tile image format: .png (lossless), .jpg or .jpeg.",
+            )
+        else:
+            subparser.add_function_arguments(function)
         subcommands.add_subcommand(name, subparser, help=_summary(function))
     return parser
 

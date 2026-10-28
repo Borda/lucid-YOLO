@@ -28,7 +28,7 @@ The third is the only one producing a reviewable artifact rather than a promise,
 
 ### Signing off
 
-Add `-s` to your commit, or write the trailer yourself:
+The full sign-off rule, merges and cherry-picks included, is AGENTS.md sec. 5. For your own commit, add `-s`, or write the trailer yourself:
 
 ```bash
 git commit -s -m "fix(data): ..."
@@ -44,7 +44,7 @@ The provenance trailers are checked on the pull request's **title and descriptio
 
 Most of this repository's history is one work package per commit: a numbered row in [`ROADMAP.md`](ROADMAP.md), a definition of done, a green gate, and a commit carrying provenance trailers. That contract is a **reproduction instrument, not a permanent process** (D18), and it has an end condition.
 
-Once the reproduction report carries all four accepted tiers *and this repository is public*, a change that
+The reproduction report carries all four accepted tiers, this repository is public and O3 is cleared (D30), so D18 is in force: a change that
 
 - alters no shipped behaviour,
 - adds or removes no public symbol,

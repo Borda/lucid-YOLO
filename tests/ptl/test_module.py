@@ -9,7 +9,8 @@ term), the :func:`~lucid_yolo.ptl.module.pad_targets` ragged-to-dense contract
 automatic-optimization wiring proved by a ``fast_dev_run`` Lightning smoke run,
 the ``alpha`` delegation seam (WP-035), and the task conditioning: an invalid
 task is rejected, the ``_task_extra_loss`` stub is an inert zero for every task,
-and a ``segment`` module trains identically to a ``detect`` module.
+and a ``segment`` module trains identically to a ``detect`` module. ``setup``'s
+warning for an opted-in recording it cannot activate names the line that called it.
 
 The module is built at n-scale multipliers with a low channel cap and a 160-px
 input so the real backbone/neck/head stack runs in a couple of seconds on CPU.
@@ -21,25 +22,25 @@ Batches are synthetic tensors plus hand-built :class:`~lucid_yolo.data.targets.T
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
 import torch
+from markers import requires_cuda
 from pytorch_lightning import Trainer
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
+from training import collate_unpacked, tiny_module
 
 from lucid_yolo.data.targets import Targets
+from lucid_yolo.losses import BranchPrediction
 from lucid_yolo.losses.dual_loss import DualLossOutput
 from lucid_yolo.models.heads.detect import decode_ltrb
 from lucid_yolo.optim.musgd import MuSGD
-from lucid_yolo.ptl import DetectionLitModule, collate_detection, pad_targets, unpack_batch
+from lucid_yolo.ptl import DetectionLitModule, pad_targets
 from lucid_yolo.ptl.module import _host_split, _StepContext
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 #: Frozen pre-WP-087 state-dict key sequence of a default detection module.
 _PRECHANGE_KEYS_FILE = Path(__file__).parent / "prechange_detect_state_dict_keys.txt"
@@ -62,32 +63,6 @@ _TRAIN_LOG_KEYS = {
     "train/o2o_cls",
     "train/o2o_l1",
 }
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed torch before each test so model init and synthetic batches are reproducible."""
-    torch.manual_seed(0)
-    yield
-
-
-def _tiny_module(task: str = "detect", **kwargs: Any) -> DetectionLitModule:
-    """Build an n-scale module with a low channel cap for fast CPU tests.
-
-    ``kwargs`` reaches the constructor untouched, for the task-specific arguments a few
-    tasks require (``num_keypoints`` for ``"keypoints"``, which has no default because the
-    point count is the dataset's property rather than the model's).
-
-    Examples:
-        >>> module = _tiny_module()
-        >>> module.task
-        'detect'
-        >>> _tiny_module(task="segment").task
-        'segment'
-        >>> _tiny_module(task="keypoints", num_keypoints=3).task
-        'keypoints'
-    """
-    return DetectionLitModule(depth=0.34, width=0.25, max_channels=256, num_classes=_NUM_CLASSES, task=task, **kwargs)
 
 
 def _synthetic_targets(num_boxes: int) -> Targets:
@@ -164,7 +139,7 @@ def _dual_loss_output(module: DetectionLitModule, images: Tensor, targets: list[
     Examples:
         >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
         <torch._C.Generator object at ...>
-        >>> module = _tiny_module()
+        >>> module = tiny_module()
         >>> images, targets = _synthetic_batch()
         >>> out = _dual_loss_output(module, images, targets)
         >>> isinstance(out, DualLossOutput)
@@ -176,37 +151,14 @@ def _dual_loss_output(module: DetectionLitModule, images: Tensor, targets: list[
     points, strides = module._anchor_grid(images.shape[-2], images.shape[-1], images.device)
     gt_boxes, gt_labels, gt_mask = pad_targets(targets)
     return module.loss(
-        head_out.o2m_cls,
-        decode_ltrb(head_out.o2m_box, points, strides),
-        head_out.o2o_cls,
-        decode_ltrb(head_out.o2o_box, points, strides),
+        BranchPrediction(head_out.o2m_cls, decode_ltrb(head_out.o2m_box, points, strides)),
+        BranchPrediction(head_out.o2o_cls, decode_ltrb(head_out.o2o_box, points, strides)),
         points,
         gt_boxes,
         gt_labels,
         gt_mask,
         strides=strides,
     )
-
-
-def _collate_unpacked(batch: list[tuple[Tensor, Targets]]) -> tuple[Tensor, list[Targets]]:
-    """Collate, then restore the ``list[Targets]`` the module consumes.
-
-    Without a datamodule the transfer hook that restores the transport form never
-    fires, so this loader-side wrapper reproduces the same collate -> restore round
-    trip the datamodule runs in production (dequantizing the uint8 images and
-    unpacking the targets), handing the module its float images and ragged list.
-
-    Examples:
-        >>> torch.manual_seed(0)  # doctest: +ELLIPSIS
-        <torch._C.Generator object at ...>
-        >>> sample = (torch.randn(3, _IMG_SIZE, _IMG_SIZE), _synthetic_targets(2))
-        >>> images, targets = _collate_unpacked([sample])
-        >>> images.shape
-        torch.Size([1, 3, 160, 160])
-        >>> len(targets)
-        1
-    """
-    return unpack_batch(collate_detection(batch))
 
 
 class _SyntheticDetectionDataset(Dataset[tuple[Tensor, Targets]]):
@@ -226,7 +178,7 @@ class _SyntheticDetectionDataset(Dataset[tuple[Tensor, Targets]]):
 
 def test_training_step(monkeypatch: pytest.MonkeyPatch) -> None:
     """A training step returns a finite scalar requiring grad and logs every component."""
-    module = _tiny_module()
+    module = tiny_module()
     recorder = MagicMock()
     monkeypatch.setattr(module, "log", recorder)
     loss = module.training_step(_synthetic_batch(), 0)
@@ -239,7 +191,7 @@ def test_training_step(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_validation_step_logs_under_val_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
     """A validation step returns a finite scalar and logs its total under ``val/``."""
-    module = _tiny_module()
+    module = tiny_module()
     recorder = MagicMock()
     monkeypatch.setattr(module, "log", recorder)
     loss = module.validation_step(_synthetic_batch(), 0)
@@ -250,7 +202,7 @@ def test_validation_step_logs_under_val_prefix(monkeypatch: pytest.MonkeyPatch) 
 
 def test_configure_optimizers_musgd_over_all_parameters() -> None:
     """configure_optimizers returns a MuSGD covering every module parameter."""
-    module = _tiny_module()
+    module = tiny_module()
     optimizer = module.configure_optimizers()
     assert isinstance(optimizer, MuSGD)
     optim_param_count = sum(len(group["params"]) for group in optimizer.param_groups)
@@ -260,7 +212,7 @@ def test_configure_optimizers_musgd_over_all_parameters() -> None:
 
 def test_alpha_property_delegates_to_loss() -> None:
     """The alpha property reads and writes the underlying DualBranchLoss weight."""
-    module = _tiny_module()
+    module = tiny_module()
     module.alpha = 0.8
     assert module.alpha == 0.8
     assert module.loss.alpha == 0.8
@@ -297,7 +249,7 @@ class TestPadTargets:
 def test_invalid_task_raises() -> None:
     """An unsupported task name is rejected at construction."""
     with pytest.raises(ValueError, match="task must be one of"):
-        _tiny_module(task="pose")
+        tiny_module(task="pose")
 
 
 def test_task_extra_loss_inert_zero_for_detection() -> None:
@@ -308,7 +260,7 @@ def test_task_extra_loss_inert_zero_for_detection() -> None:
     is the task whose total must stay *exactly* the dual detection loss, so the zero is
     asserted rather than assumed.
     """
-    module = _tiny_module(task="detect")
+    module = tiny_module(task="detect")
     images, targets = _synthetic_batch()
     gt_boxes, _, _ = pad_targets(targets)
     head_out = module(images)
@@ -344,7 +296,7 @@ def test_segment_task_with_zero_gains_trains_identically_to_detect() -> None:
     re-run assignment — would break this equality while the ordinary gains hid it
     inside a larger total.
     """
-    detect = _tiny_module(task="detect")
+    detect = tiny_module(task="detect")
     segment = DetectionLitModule(
         depth=0.34,
         width=0.25,
@@ -370,9 +322,9 @@ def test_segment_task_with_zero_gains_trains_identically_to_detect() -> None:
 
 def test_fast_dev_run_smoke() -> None:
     """A fast_dev_run Trainer drives one train and one val batch end to end."""
-    module = _tiny_module()
+    module = tiny_module()
     loader: DataLoader[tuple[Tensor, Targets]] = DataLoader(
-        _SyntheticDetectionDataset(_BATCH_SIZE), batch_size=_BATCH_SIZE, collate_fn=_collate_unpacked
+        _SyntheticDetectionDataset(_BATCH_SIZE), batch_size=_BATCH_SIZE, collate_fn=collate_unpacked
     )
     trainer = Trainer(fast_dev_run=True, accelerator="cpu", logger=False, enable_progress_bar=False)
     trainer.fit(module, train_dataloaders=loader, val_dataloaders=loader)
@@ -383,7 +335,7 @@ def test_fast_dev_run_smoke() -> None:
 
 def test_val_map_metric_leaves_state_dict_unchanged() -> None:
     """The WP-077 val mAP metric adds no state_dict entries, so older checkpoints still load."""
-    module = _tiny_module()
+    module = tiny_module()
     assert not [key for key in module.state_dict() if key.startswith("_val_")]
 
 
@@ -391,7 +343,7 @@ def test_compile_step_leaves_state_dict_keys_unchanged() -> None:
     """``compile_step=True`` keeps the pre-WP-087 key sequence: the flag names no submodule (WP-184)."""
     expected = tuple(_PRECHANGE_KEYS_FILE.read_text().split())
 
-    keys = tuple(_tiny_module(compile_step=True).state_dict())
+    keys = tuple(tiny_module(compile_step=True).state_dict())
 
     assert keys == expected
     assert len(keys) == 714
@@ -411,7 +363,7 @@ def test_compile_step_leaves_state_dict_keys_unchanged() -> None:
             "cuda",
             "cuda",
             id="cuda-goes-to-cuda",
-            marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available"),
+            marks=requires_cuda,
         ),
     ],
 )
@@ -424,7 +376,7 @@ def test_alpha_tensor_device_follows_what_can_hold_float64(device: str, expected
     tensor multiplies a device tensor through scalar promotion, so the host is the
     answer for MPS.
     """
-    module = _tiny_module()
+    module = tiny_module()
 
     alpha = module._alpha_tensor(torch.device(device))
 
@@ -435,9 +387,9 @@ def test_alpha_tensor_device_follows_what_can_hold_float64(device: str, expected
 
 def test_compile_step_on_cpu_trainer_warns_once_and_stays_eager(monkeypatch: pytest.MonkeyPatch) -> None:
     """Off CUDA the flag warns at the first ``setup`` only, keeps the bare method and the same loss."""
-    reference = _tiny_module()
+    reference = tiny_module()
     torch.manual_seed(0)  # same weights as ``reference``, the flag being the only difference
-    module = _tiny_module(compile_step=True)
+    module = tiny_module(compile_step=True)
     module._trainer = Trainer(accelerator="cpu", devices=1, logger=False, enable_checkpointing=False)
     monkeypatch.setattr(reference, "log", MagicMock())
     monkeypatch.setattr(module, "log", MagicMock())
@@ -452,6 +404,44 @@ def test_compile_step_on_cpu_trainer_warns_once_and_stays_eager(monkeypatch: pyt
     assert len(record) == 1
     assert module._objective == module._detect_objective
     assert torch.equal(total, expected)
+
+
+@pytest.mark.parametrize("flag", ["capture_network", "capture_loss"])
+def test_ignored_capture_warning_names_setup_caller(flag: str) -> None:
+    """An opted-in recording ``setup`` cannot activate warns at the line that called ``setup``.
+
+    The activation check runs in a helper one frame below ``setup``, so its ``stacklevel``
+    has to skip that frame too: pointing into the module instead would break a user's
+    warning filter keyed on their own calling module. A detached module is never on
+    CUDA, so either flag warns at ``fit``.
+    """
+    module = tiny_module(**{flag: True})
+
+    with pytest.warns(UserWarning, match=f"{flag}=True is ignored outside") as record:
+        module.setup("fit")
+
+    assert [warning.filename for warning in record] == [__file__]
+
+
+@pytest.mark.parametrize("flag", ["capture_network", "capture_loss"])
+def test_ignored_capture_clears_activation_before_warning(flag: str) -> None:
+    """A recording ``setup`` refuses is switched off even when its warning is raised as an error.
+
+    A module reused across trainers can arrive at ``setup`` with the flag still on from a
+    run that activated it. The activation is decided and stored before the warning is
+    emitted, so a filter promoting that warning to an exception cannot leave the stale
+    ``True`` behind for the next step to record under. A detached module is never on
+    CUDA, so either flag is refused at ``fit``.
+    """
+    module = tiny_module(**{flag: True})
+    setattr(module, f"_{flag}_active", True)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(UserWarning, match=f"{flag}=True is ignored outside"):
+            module.setup("fit")
+
+    assert getattr(module, f"_{flag}_active") is False
 
 
 class TestHostSplit:
@@ -478,16 +468,30 @@ class TestHostSplit:
         """No targets means no transfer to make, rather than a ``torch.cat`` on an empty list."""
         assert _host_split([]) == ()
 
-    def test_every_image_empty_still_splits(self) -> None:
+    def test_every_image_empty_splits(self) -> None:
         """A batch where no image carries a box yields one empty piece per image."""
         split = _host_split([torch.zeros(0, 4), torch.zeros(0, 4)])
 
         assert [tuple(piece.shape) for piece in split] == [(0, 4), (0, 4)]
 
+    def test_zero_row_piece_keeps_own_trailing_shape(self) -> None:
+        """An image without instances keeps its canonical empty shape beside images that have points.
+
+        ``Targets.empty()`` carries ``(0, 0, 2)`` keypoints and ``(0, 0)`` visibility whatever the
+        schema's point count, so a keypoint batch mixing it with 17-point images disagrees after the
+        first axis. That piece holds no values, so it is handed back as it is rather than concatenated.
+        """
+        keypoints = [torch.rand(2, 17, 2), torch.zeros(0, 0, 2), torch.rand(1, 17, 2)]
+
+        split = _host_split(keypoints)
+
+        assert [tuple(piece.shape) for piece in split] == [(2, 17, 2), (0, 0, 2), (1, 17, 2)]
+        assert all(torch.equal(got, want) for got, want in zip(split, keypoints, strict=True))
+
 
 def test_validation_ground_truth_matches_per_target_transfer() -> None:
     """WP-163's batched transfer feeds the mAP metric exactly what the per-target one did."""
-    module = _tiny_module()
+    module = tiny_module()
     images, targets = _synthetic_batch()
     recorded: list[list[dict[str, Tensor]]] = []
     module._val_map.update = lambda preds, ground_truth: recorded.append(ground_truth)  # type: ignore[method-assign]
@@ -508,34 +512,20 @@ def _guarded_module(task: str) -> DetectionLitModule:
         'keypoints'
     """
     extra = {"num_keypoints": _GUARD_NUM_KEYPOINTS} if task == "keypoints" else {}
-    return _tiny_module(task=task, **extra)
+    return tiny_module(task=task, **extra)
 
 
 class TestDistributedValidationGuard:
-    """Tasks whose epoch metric accumulates rank-local lists refuse to run multi-process.
-
-    ``val/rotated_mAP`` and ``val/oks_mAP`` are scored off plain Python lists that nothing
-    gathers, so on more than one process each rank would score its own shard and log it as
-    the split's metric (audit A07/M-04). Average precision ranks every detection of the
-    split against every other by confidence, so per-rank values cannot be averaged back into
-    the right number — the run is refused at ``setup`` rather than allowed to log a
-    plausible wrong one. ``detect``/``segment`` use torchmetrics metrics, which synchronise.
-    """
+    """Every task accepts multi-process validation with gathered epoch metrics."""
 
     @pytest.mark.parametrize("task", [pytest.param("obb", id="obb"), pytest.param("keypoints", id="keypoints")])
     @pytest.mark.parametrize("stage", [pytest.param("fit", id="fit"), pytest.param("validate", id="validate")])
-    def test_rejects_multi_process_runs(self, task: str, stage: str) -> None:
-        """A two-process trainer is refused for both guarded tasks, naming the limitation.
-
-        Both ``fit`` and ``validate`` are checked: the metric is computed in the validation
-        epoch end either way, so guarding only the training entry point would leave
-        ``lucid-yolo validate`` free to produce the same rank-local number.
-        """
+    def test_accepts_multi_process_runs(self, task: str, stage: str) -> None:
+        """Both fit and standalone validation accept the distributed scorer."""
         module = _guarded_module(task)
         module._trainer = MagicMock(spec=Trainer, world_size=2)
 
-        with pytest.raises(RuntimeError, match="single-process only"):
-            module.setup(stage)
+        module.setup(stage)
 
     @pytest.mark.parametrize(
         "task",

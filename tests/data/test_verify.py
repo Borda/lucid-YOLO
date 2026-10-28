@@ -111,6 +111,39 @@ class TestVerifySplit:
         assert result.annotation_present is False
         assert any("failed to parse" in problem for problem in result.problems)
 
+    @pytest.mark.parametrize(
+        ("content", "reason"),
+        [
+            pytest.param(b"\xff\xfe{", "'utf-8' codec can't decode", id="invalid-utf8"),
+            pytest.param(b'[{"file_name": "a.jpg"}]', "top level is not a JSON object", id="top-level-array"),
+            pytest.param(b'{"images": null}', "images is not a JSON array", id="images-null"),
+            pytest.param(b'{"images": {"file_name": "a.jpg"}}', "images is not a JSON array", id="images-object"),
+            pytest.param(b'{"images": [{"file_name": "a.jpg"}, 7]}', "images entry 1 is not", id="entry-number"),
+            pytest.param(b'{"images": ["file_name"]}', "images entry 0 is not", id="entry-string"),
+            pytest.param(b'{"images": [], "n": ' + b"9" * 5000 + b"}", "integer string conversion", id="huge-int"),
+            pytest.param(b"[" * 200_000 + b"]" * 200_000, "failed to parse", id="deep-nesting"),
+        ],
+    )
+    def test_malformed_annotation_fails_naming_file(self, tmp_path: Path, content: bytes, reason: str) -> None:
+        """A malformed annotation file is a located parse failure naming the file, never an exception.
+
+        Each case used to escape ``verify_split``: a decode error, an ``AttributeError`` on a
+        top level without ``.get``, or a ``TypeError`` from iterating ``images`` or indexing an
+        entry.
+        """
+        (tmp_path / "val2017").mkdir()
+        (tmp_path / "annotations").mkdir()
+        annotation_file = tmp_path / "annotations" / "instances_val2017.json"
+        annotation_file.write_bytes(content)
+
+        result = verify.verify_split("val2017", tmp_path / "val2017", annotation_file)
+
+        assert not result.ok
+        assert result.annotation_present is False
+        assert result.expected == 0
+        assert result.problems[0].startswith(f"annotation file failed to parse: {annotation_file} (")
+        assert reason in result.problems[0]
+
     def test_missing_images_directory_fails(self, tmp_path: Path) -> None:
         """A split whose image directory is absent fails even with valid annotations."""
         (tmp_path / "annotations").mkdir()
@@ -137,6 +170,56 @@ class TestVerifySplit:
 
         assert result.missing_count == 30
         assert result.missing == annotated[:4]
+
+    def test_nested_file_name_present_not_missing(self, tmp_path: Path) -> None:
+        """A nested ``file_name`` whose file exists under the images directory verifies OK.
+
+        The reader opens ``images_dir / file_name``, so a flat directory listing alone
+        reported ``nested/a.jpg`` missing although the reader could load it.
+        """
+        _write_split(tmp_path, "val2017", "instances_val2017.json", ["flat.jpg", "nested/a.jpg"], on_disk=["flat.jpg"])
+        (tmp_path / "val2017" / "nested").mkdir()
+        (tmp_path / "val2017" / "nested" / "a.jpg").write_bytes(b"jpegbytes")
+
+        result = verify.verify_split(
+            "val2017", tmp_path / "val2017", tmp_path / "annotations" / "instances_val2017.json"
+        )
+
+        assert result.ok, result.problems
+        assert (result.expected, result.present, result.missing_count) == (2, 2, 0)
+
+    def test_nested_file_name_absent_reported_missing(self, tmp_path: Path) -> None:
+        """A nested ``file_name`` with no file on disk is reported missing by its annotated name.
+
+        The nested branch must still catch an absent file, not treat every name with a
+        separator as present.
+        """
+        _write_split(tmp_path, "val2017", "instances_val2017.json", ["flat.jpg", "nested/a.jpg"], on_disk=["flat.jpg"])
+
+        result = verify.verify_split(
+            "val2017", tmp_path / "val2017", tmp_path / "annotations" / "instances_val2017.json"
+        )
+
+        assert not result.ok
+        assert (result.expected, result.present, result.missing_count) == (2, 1, 1)
+        assert result.missing == ["nested/a.jpg"]
+
+    def test_flat_file_name_absent_beside_nested_reported_missing(self, tmp_path: Path) -> None:
+        """A flat ``file_name`` absent from disk is reported missing alongside a present nested one.
+
+        Mixed annotations keep the flat fast path: the directory listing still decides flat
+        names while nested names are checked by path.
+        """
+        _write_split(tmp_path, "val2017", "instances_val2017.json", ["flat.jpg", "nested/a.jpg"], on_disk=[])
+        (tmp_path / "val2017" / "nested").mkdir()
+        (tmp_path / "val2017" / "nested" / "a.jpg").write_bytes(b"jpegbytes")
+
+        result = verify.verify_split(
+            "val2017", tmp_path / "val2017", tmp_path / "annotations" / "instances_val2017.json"
+        )
+
+        assert (result.expected, result.present, result.missing_count) == (2, 1, 1)
+        assert result.missing == ["flat.jpg"]
 
 
 class TestVerifyCocoRoot:
@@ -169,6 +252,32 @@ class TestVerifyCocoRoot:
         result = verify.verify_coco_root(tmp_path, ["val", "val"])
 
         assert [split.name for split in result.splits] == ["val2017"]
+
+    def test_plain_spelling_resolved_through_layout(self, tmp_path: Path) -> None:
+        """A ``val/`` + ``instances_val.json`` root is verified where the reader would read it.
+
+        The layout probe and the reader both accept this spelling, so a verifier that knew
+        only ``val2017`` reported a correct tree as missing its images and its annotations.
+        """
+        _write_split(tmp_path, "val", "instances_val.json", _names(3))
+
+        result = verify.verify_coco_root(tmp_path, ["val"])
+
+        assert result.ok, [split.problems for split in result.splits]
+        assert [split.name for split in result.splits] == ["val"]
+
+    def test_unresolved_split_named_by_2017_spelling(self, tmp_path: Path) -> None:
+        """A split no spelling resolves is reported under COCO 2017's names, as before.
+
+        The resolver falls back to the published pair when nothing matches, so a missing
+        download still names the ``val2017`` paths the downloader would have written.
+        """
+        result = verify.verify_coco_root(tmp_path, ["val"])
+
+        assert [split.name for split in result.splits] == ["val2017"]
+        assert result.splits[0].problems[0] == (
+            f"annotation file missing: {tmp_path / 'annotations' / 'instances_val2017.json'}"
+        )
 
     def test_unknown_split_raises(self, tmp_path: Path) -> None:
         """An unknown split name raises a helpful ValueError."""

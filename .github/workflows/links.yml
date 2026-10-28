@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Links
+
+# Weekly, non-blocking check of every link in the docs and README. External sites
+# move and rate-limit, so this never runs on a pull request and is not a required
+# check; a failure here is a to-do, not a red merge. `workflow_dispatch` is the
+# manual rerun. Relative links resolve against the checkout; mkdocs-only links may
+# report, which is the point of reading the result rather than gating on it.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: links-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: "📥 Check out the repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: "🔗 Check links in README.md and docs/"
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: --no-progress --accept 200,206,429 README.md 'docs/**/*.md'
+          fail: true

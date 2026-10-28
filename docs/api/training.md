@@ -13,3 +13,13 @@ The Lightning pieces a training run is assembled from: the module that owns the 
 ::: lucid_yolo.ptl.EMACallback
 
 ::: lucid_yolo.ptl.CloseMosaicCallback
+
+## Detection loss
+
+`DualBranchLoss` takes one `BranchPrediction(logits, boxes)` per branch, followed by shared anchor points and padded targets. Its output records the attribute alpha float by default, or the supplied alpha tensor when overridden.
+
+::: lucid_yolo.losses.BranchPrediction
+
+::: lucid_yolo.losses.DualBranchLoss
+
+::: lucid_yolo.losses.DualLossOutput

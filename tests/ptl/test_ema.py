@@ -38,6 +38,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import torch
+from markers import requires_cuda
 from pytorch_lightning import Callback, LightningModule, Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch import Tensor, nn
@@ -46,7 +47,6 @@ from torch.utils.data import DataLoader, Dataset
 from lucid_yolo.ptl import EMACallback
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
 #: Feature width of the tiny module's parameter and batch-norm layer.
@@ -76,13 +76,6 @@ class _StepTrainer:
     def step(self) -> None:
         """Mark one optimizer step as completed."""
         self.global_step += 1
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed torch before each test so module init and synthetic data are reproducible."""
-    torch.manual_seed(0)
-    yield
 
 
 class _TinyEMAModule(LightningModule):
@@ -380,8 +373,7 @@ def test_zero_decay_copies_live_weights_into_shadow() -> None:
         assert torch.equal(callback._shadow[name], live.detach()), name
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="the production foreach path needs CUDA")
+@requires_cuda
 def test_foreach_shadow_runs_on_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
     """The unwidened CUDA callback reaches one foreach bucket and matches the scalar formula."""
     module = _TinyEMAModule().cuda()

@@ -17,9 +17,37 @@ Caching:
     is always warm, and an existence-keyed cache meant any change to a seed, an image
     count, ``DEFAULT_SHAPES`` or the pinned upstream SHA left the warm machine running
     every fixture-consuming test against the previous scene while CI ran the new one
-    (M-45). A fingerprint mismatch removes the stale set and regenerates it; an absent
-    fingerprint counts as a mismatch, so caches written before this existed refresh
-    once. ``make clean`` clears the whole cache directory.
+    (M-45). A fingerprint mismatch replaces the stale set with a regenerated one; an
+    absent fingerprint counts as a mismatch, so caches written before this existed
+    refresh once. ``make clean`` clears the whole cache directory.
+
+Concurrency:
+    ``make test`` runs under pytest-xdist, so several worker processes can reach a cold
+    or stale cache at the same moment. A set whose fingerprint already matches is
+    returned without taking any lock, so readers of a valid set never wait. Every other
+    caller takes an exclusive ``fcntl.flock`` on a dot-prefixed lock file beside the
+    target (``.detseg.lock`` beside ``detseg``) and checks the fingerprint again once it
+    holds the lock; inspecting the set, generating its replacement and publishing it all
+    happen under that one lock. A worker that judged the set stale just before another
+    published the current one therefore finds it current on the second check and
+    returns it untouched. Only a lock holder ever changes the target, and it replaces
+    only a set that is not current, so a path any caller has returned stays present and
+    complete for the rest of the session.
+
+    The replacement is generated into a private dot-prefixed staging directory beside
+    the target, fingerprint written last, and published with one ``rename``, so a
+    lock-free reader finds either no set, a complete stale one or a complete current
+    one, never a half-written tree. A crash or failed rename mid-replacement can leave
+    the target absent, but only where a set no caller had returned used to be: the next
+    caller, which waits on the same lock, finds it missing and generates it again. The
+    kernel drops the lock when its holder exits, however it exits. The lock file is never
+    deleted, since deleting it while another process waits on it would let two holders
+    in at once; ``make clean`` removes it with the rest of the cache.
+
+    The invariant is for callers sharing one generation request. Two sessions running
+    different code against one cache directory each hold a different fingerprint, and
+    each replaces the other's set. ``fcntl`` is POSIX-only: CI runs Linux and macOS,
+    and Windows is not supported.
 
 The detection/segmentation and oriented-box sets pass an explicit geometric-only
 ``shapes=DEFAULT_SHAPES`` rather than relying on the vocabulary default, and the
@@ -52,9 +80,13 @@ Examples:
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import shutil
+import tempfile
 from importlib import metadata
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fuse_augmentations.data import generate_dataset  # type: ignore[import-untyped]
@@ -62,7 +94,7 @@ from fuse_augmentations.data.animals import AnimalShape  # type: ignore[import-u
 from fuse_augmentations.data.config import DEFAULT_SHAPES, SplitRatios  # type: ignore[import-untyped]
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Iterator
 
 #: Seeds are fixed so regeneration is byte-identical (A26 determinism validation).
 DETSEG_SEED = 20260731
@@ -103,6 +135,10 @@ _FINGERPRINT_NAME = ".fixture-fingerprint.json"
 #: cache key, since a bump changes the scene without changing any argument below.
 _GENERATOR_DIST = "fuse-augmentations"
 
+#: Suffix of the advisory lock file kept beside each published set. The file is
+#: dot-prefixed like the staging directories, so directory walks over the cache skip it.
+_LOCK_SUFFIX = ".lock"
+
 
 def _generator_identity() -> dict[str, str]:
     """Return the installed generator release, as specifically as the install allows.
@@ -139,28 +175,123 @@ def _fingerprint(spec: dict[str, Any]) -> str:
     return json.dumps({"generator": _generator_identity(), "spec": spec}, sort_keys=True, default=str)
 
 
+def _is_current(dataset_dir: Path, fingerprint: str) -> bool:
+    """Report whether ``dataset_dir`` holds a complete set generated for ``fingerprint``.
+
+    The fingerprint file is the completion marker: it is written last, inside the staging
+    directory, before the tree is published, so its presence means every other file is
+    already there. A directory that disappears mid-check (another worker moving a stale
+    set aside) reads as not current.
+
+    Args:
+        dataset_dir: Directory a set is published at.
+        fingerprint: The cache key the caller needs, from :func:`_fingerprint`.
+
+    Returns:
+        ``True`` when the recorded fingerprint equals ``fingerprint`` and the split's
+        annotation document exists.
+    """
+    try:
+        recorded = (dataset_dir / _FINGERPRINT_NAME).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+    return recorded == fingerprint and (dataset_dir / _SPLIT / _COCO_ANNOTATION).is_file()
+
+
+def _lock_path(dataset_dir: Path) -> Path:
+    """Return the advisory lock file guarding ``dataset_dir``: ``.<name>.lock`` beside it.
+
+    Args:
+        dataset_dir: Directory a set is published at.
+
+    Returns:
+        The lock file path in ``dataset_dir``'s parent; it may not exist yet.
+    """
+    return dataset_dir.parent / f".{dataset_dir.name}{_LOCK_SUFFIX}"
+
+
+@contextlib.contextmanager
+def _exclusive(dataset_dir: Path) -> Iterator[None]:
+    """Hold the cross-process lock that every change to ``dataset_dir`` is made under.
+
+    The lock is an ``fcntl.flock`` on a dot-prefixed file beside ``dataset_dir``. It
+    belongs to the open file description, so two processes exclude each other, and so do
+    two threads of one process that each open the file. Closing the file releases it, and
+    the kernel releases it when the holder dies, so a crashed worker cannot leave the
+    cache locked. The file is created on first use and never deleted: unlinking it while
+    another caller waits on the old inode would let a third caller lock a new file and
+    hold the lock alongside it.
+
+    Args:
+        dataset_dir: Directory the set is published at; its parent must already exist.
+
+    Yields:
+        Nothing; the lock is held for the body of the ``with`` block.
+    """
+    with _lock_path(dataset_dir).open("a") as handle:  # append mode creates the file without truncating it
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
+def _replace(dataset_dir: Path, spec: dict[str, Any], fingerprint: str) -> None:
+    """Generate a fresh set and swap it in for whatever ``dataset_dir`` holds now.
+
+    The caller must hold :func:`_exclusive` for ``dataset_dir`` and must have found the
+    set there not current, which is what makes moving it aside safe: no caller has
+    returned it. The set is generated into a private dot-prefixed staging directory
+    beside ``dataset_dir``, its fingerprint written last, and published with one
+    ``rename``, so a lock-free reader never sees a half-written tree. Whatever ends up in
+    the staging directory, the moved-aside set included, is removed on the way out,
+    whether the swap succeeded or not.
+
+    Args:
+        dataset_dir: Directory the set is published at.
+        spec: The exact keyword arguments to hand ``generate_dataset``.
+        fingerprint: The cache key ``spec`` renders to, from :func:`_fingerprint`.
+
+    Raises:
+        OSError: When moving the old set aside or renaming the new one in fails; the
+            target is then absent and the next caller generates it again.
+    """
+    staging = Path(tempfile.mkdtemp(prefix=f".{dataset_dir.name}-staging-", dir=dataset_dir.parent))
+    try:
+        candidate = staging / dataset_dir.name
+        generate_dataset(candidate, **spec)
+        (candidate / _FINGERPRINT_NAME).write_text(fingerprint, encoding="utf-8")
+        with contextlib.suppress(FileNotFoundError):  # a cold cache has nothing to move aside
+            dataset_dir.rename(staging / f"{dataset_dir.name}-stale")
+        candidate.rename(dataset_dir)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
 def _generate_cached(dataset_dir: Path, spec: dict[str, Any]) -> Path:
     """Return ``dataset_dir``, generating it unless a matching fingerprint is already there.
 
-    A mismatched or missing fingerprint removes the whole directory before regenerating:
-    a smaller image count than last time would otherwise leave the surplus images behind,
-    and a set that is partly old and partly new is worse than either.
+    A set whose fingerprint matches is returned without taking the lock. Otherwise the
+    caller takes :func:`_exclusive` and checks again, because another worker may have
+    published the current set while this one waited; only a set still not current under
+    the lock is replaced, by :func:`_replace`. A mismatched or missing fingerprint
+    replaces the whole directory rather than regenerating into it: a smaller image count
+    than last time would otherwise leave the surplus images behind, and a set that is
+    partly old and partly new is worse than either. Generating under the lock means one
+    pytest-xdist worker builds each set while the rest wait for it, instead of every
+    worker building a copy and all but one throwing theirs away.
 
     Args:
-        dataset_dir: Directory the set is generated into (removed when stale).
+        dataset_dir: Directory the set is published at (replaced when stale).
         spec: The exact keyword arguments to hand ``generate_dataset``.
 
     Returns:
         ``dataset_dir``, holding a set that matches ``spec`` and the installed generator.
     """
     fingerprint = _fingerprint(spec)
-    marker = dataset_dir / _FINGERPRINT_NAME
-    annotations = dataset_dir / _SPLIT / _COCO_ANNOTATION
-    if annotations.is_file() and marker.is_file() and marker.read_text(encoding="utf-8") == fingerprint:
+    if _is_current(dataset_dir, fingerprint):
         return dataset_dir
-    shutil.rmtree(dataset_dir, ignore_errors=True)
-    generate_dataset(dataset_dir, **spec)
-    marker.write_text(fingerprint, encoding="utf-8")
+    dataset_dir.parent.mkdir(parents=True, exist_ok=True)
+    with _exclusive(dataset_dir):
+        if not _is_current(dataset_dir, fingerprint):
+            _replace(dataset_dir, spec, fingerprint)
     return dataset_dir
 
 

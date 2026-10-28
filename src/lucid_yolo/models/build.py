@@ -37,8 +37,9 @@ Provenance: R1 Table 7, R6. Assumptions: A3, A4, A28, A29.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
-from typing import cast
+from dataclasses import dataclass
+from dataclasses import fields as dataclass_fields
+from typing import ClassVar, cast
 
 import torch
 from fvcore.nn import FlopCountAnalysis
@@ -55,7 +56,8 @@ from lucid_yolo.models.heads import (
 )
 from lucid_yolo.models.heads.detect import DEFAULT_NUM_COEFFS
 from lucid_yolo.models.neck import DetectionNeck
-from lucid_yolo.models.registry import scale_spec
+from lucid_yolo.models.registry import ScaleSpec, scale_spec
+from lucid_yolo.tasks import Task
 
 __all__ = [
     "Detector",
@@ -74,7 +76,7 @@ __all__ = [
 ]
 
 #: Default detection input side in pixels (square), R1 Table 7 protocol.
-_DEFAULT_IMG_SIZE = 640
+_DEFAULT_IMG_SIZE = Task.DETECT.spec.img_size
 
 #: Default COCO detection class count.
 _DEFAULT_NUM_CLASSES = 80
@@ -199,7 +201,225 @@ def build_segmentation_stages(
     return proto_fusion, protonet, semantic
 
 
-class Detector(nn.Module):
+def _resolve_scaling(variant: str | ScaleSpec) -> ScaleSpec:
+    """Return the compound-scaling multipliers a composite model is built at.
+
+    A name is looked up in the registry; a :class:`~lucid_yolo.models.registry.ScaleSpec`
+    is taken as given. The second form exists for the one caller that holds multipliers
+    rather than a name: a :class:`~lucid_yolo.ptl.module.DetectionLitModule` is
+    configured with raw ``depth``/``width``/``max_channels`` (ADR-001), and nothing
+    requires those to be a registry row, so rebuilding its architecture as a composite —
+    what :func:`~lucid_yolo.export.graph_from_module` does — has to accept them as they
+    are rather than refuse every module the training CLI did not configure.
+
+    Args:
+        variant: Scale name (``"n"``/``"s"``/``"m"``/``"l"``/``"x"``) or raw multipliers.
+
+    Returns:
+        The multipliers to build at.
+
+    Raises:
+        KeyError: If ``variant`` is a name that is not one of the five published ones.
+
+    Examples:
+        ```pycon
+        >>> _resolve_scaling("s")
+        ScaleSpec(depth=0.5, width=0.5, max_channels=1024)
+        >>> _resolve_scaling(ScaleSpec(depth=0.34, width=0.25, max_channels=64))
+        ScaleSpec(depth=0.34, width=0.25, max_channels=64)
+
+        ```
+    """
+    return variant if isinstance(variant, ScaleSpec) else scale_spec(variant)
+
+
+class _SingleHeadModel(nn.Module):
+    """Backbone -> neck -> dual detection head: the body every single-head composite shares.
+
+    :class:`Detector`, :class:`OrientedDetector` and :class:`KeypointDetector` used to be
+    three copies of this class that differed in one stage option each — none,
+    ``predict_angle`` and ``num_keypoints`` — and in which one-to-one fields their
+    :meth:`deploy` view returned. Both differences are data now: the stage option is an
+    argument here, and the field list is :attr:`_DEPLOYED_FIELDS`, a class attribute each
+    subclass sets (subclass hook).
+
+    The three stages are assigned as ``backbone``, ``neck`` and ``head``, in that order,
+    exactly as each copy assigned them, so every state-dict key and module name is the one
+    the composite carried before it shared this body. The WP-023 parameter and FLOP
+    goldens read those models, and a renamed key would move them.
+
+    Args:
+        variant: Scale name resolved through
+            :func:`~lucid_yolo.models.registry.scale_spec`, or a
+            :class:`~lucid_yolo.models.registry.ScaleSpec` of raw multipliers (see
+            :func:`_resolve_scaling`). Stored as given on ``variant``.
+        num_classes: Number of object classes the head predicts.
+        predict_angle: Build the head's A20 orientation stems on both branches.
+        num_keypoints: Build the head's point stems on both branches for this many
+            points; ``None`` leaves the head keypoint-free.
+    """
+
+    #: One-to-one :class:`~lucid_yolo.models.heads.BranchOutput` fields :meth:`deploy`
+    #: returns, in this order (subclass hook).
+    _DEPLOYED_FIELDS: ClassVar[tuple[str, ...]] = ("cls", "box")
+
+    def __init__(
+        self,
+        variant: str | ScaleSpec,
+        num_classes: int,
+        *,
+        predict_angle: bool = False,
+        num_keypoints: int | None = None,
+    ) -> None:
+        super().__init__()
+        scaling = _resolve_scaling(variant)
+        self.variant = variant
+        self.num_classes = num_classes
+        self.backbone, self.neck, self.head = build_detection_stages(
+            scaling.depth,
+            scaling.width,
+            scaling.max_channels,
+            num_classes,
+            predict_angle=predict_angle,
+            num_keypoints=num_keypoints,
+        )
+
+    def forward(self, image: Tensor) -> DualHeadOutput:
+        """Run the backbone, neck, and dual head over an image batch.
+
+        Args:
+            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
+                ``W`` divisible by 32.
+
+        Returns:
+            The head's :class:`~lucid_yolo.models.heads.DualHeadOutput` with dense
+            class logits and raw ltrb distances for both branches, plus the optional
+            fields the model's stage option enables (angle, or keypoints and
+            keypoint sigma), populated for both branches.
+        """
+        output: DualHeadOutput = self.head(self.neck(self.backbone(image)))
+        return output
+
+    def deploy(self) -> nn.Module:
+        """Return the NMS-free inference model: backbone -> neck -> one-to-one head.
+
+        The one-to-many branch is training-only (R6) and never runs at E2E inference,
+        so the deployed model executes a single detection branch, including only that
+        branch's optional stems. The returned module **shares** this model's
+        parameters (no copy); each subclass docstring states which tensors it returns
+        and which golden reads its FLOPs.
+
+        Returns:
+            A :class:`torch.nn.Module` whose forward maps an image batch to the
+            one-to-one branch's :attr:`_DEPLOYED_FIELDS` tensors, in that order.
+        """
+        return _DeployedO2O(self.backbone, self.neck, self.head.o2o, self._DEPLOYED_FIELDS)
+
+
+class _DeployedO2O(nn.Module):
+    """Single-branch inference view: backbone, neck and the one-to-one head branch.
+
+    The one view every composite's ``deploy()`` returns, replacing four per-task copies
+    that differed only in the fields they returned and, for segmentation, in also
+    running the prototype path. It holds references to the parent's submodules under the
+    names those copies used — ``backbone``, ``neck`` and ``o2o``, plus ``proto_fusion``
+    and ``protonet`` when the prototype path is given — so it shares parameters, adds
+    none of its own, and presents the same module tree to FLOP counting.
+
+    What it does not hold matters as much. The one-to-many branch — its box, class,
+    angle and point stems alike — is not an attribute here at all, and neither is
+    segmentation's auxiliary semantic branch (A17), which is what makes their removal
+    checkable by parameter identity rather than by trusting a flag.
+
+    Args:
+        backbone: The parent's backbone.
+        neck: The parent's neck.
+        o2o: The parent head's one-to-one branch.
+        fields: :class:`~lucid_yolo.models.heads.BranchOutput` field names returned
+            from that branch, in order.
+        proto_fusion: The parent's prototype-fusion stage; given together with
+            ``protonet`` or not at all.
+        protonet: The parent's prototype stack. When given, the raw prototype maps are
+            appended to the returned tuple.
+
+    Raises:
+        ValueError: If ``fields`` names something :class:`BranchOutput` has no field
+            for, or if only one of ``proto_fusion`` and ``protonet`` is given.
+
+    Examples:
+        ```pycon
+        >>> import torch
+        >>> detector = Detector("n", num_classes=4).eval()
+        >>> view = _DeployedO2O(detector.backbone, detector.neck, detector.head.o2o, ("cls", "box")).eval()
+        >>> with torch.no_grad():
+        ...     cls, box = view(torch.zeros(1, 3, 64, 64))
+        >>> cls.shape, box.shape
+        (torch.Size([1, 84, 4]), torch.Size([1, 84, 4]))
+        >>> _DeployedO2O(detector.backbone, detector.neck, detector.head.o2o, ("cls", "angel"))
+        Traceback (most recent call last):
+            ...
+        ValueError: unknown one-to-one fields ['angel']; BranchOutput has cls, box, coeff, ...
+
+        ```
+    """
+
+    def __init__(
+        self,
+        backbone: nn.Module,
+        neck: nn.Module,
+        o2o: nn.Module,
+        fields: tuple[str, ...],
+        *,
+        proto_fusion: nn.Module | None = None,
+        protonet: nn.Module | None = None,
+    ) -> None:
+        super().__init__()
+        known = [field.name for field in dataclass_fields(BranchOutput)]
+        unknown = [name for name in fields if name not in known]
+        if unknown:
+            raise ValueError(f"unknown one-to-one fields {unknown}; BranchOutput has {', '.join(known)}")
+        if (proto_fusion is None) != (protonet is None):
+            raise ValueError("proto_fusion and protonet are given together or not at all")
+        self.backbone = backbone
+        self.neck = neck
+        self.o2o = o2o
+        self.fields = fields
+        self.proto_fusion = proto_fusion
+        self.protonet = protonet
+
+    def forward(self, image: Tensor) -> tuple[Tensor, ...]:
+        """Run the backbone, neck, one-to-one branch and, when held, the prototype stack.
+
+        Args:
+            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
+                ``W`` divisible by 32.
+
+        Returns:
+            The one-to-one branch's ``fields`` in order — dense class logits
+            ``(N, A, num_classes)``, raw ltrb distances ``(N, A, 4)``, and whichever of
+            tanh mask coefficients ``(N, A, K)``, raw angles ``(N, A, 1)`` or raw point
+            offsets ``(N, A, K, 2)`` were asked for — followed by the raw prototype maps
+            ``(N, K, H/4, W/4)`` when the prototype path is held.
+
+        Raises:
+            RuntimeError: If a requested field is ``None`` because the branch was built
+                without its stems — a view wired to the wrong task, which has to fail
+                loudly rather than hand a decoder a missing tensor.
+        """
+        features: tuple[Tensor, Tensor, Tensor] = self.neck(self.backbone(image))
+        branch: BranchOutput = self.o2o(features)
+        outputs: list[Tensor] = []
+        for name in self.fields:
+            value = getattr(branch, name)
+            if value is None:
+                raise RuntimeError(f"the one-to-one branch was built without {name!r} stems")
+            outputs.append(value)
+        if self.proto_fusion is not None and self.protonet is not None:
+            outputs.append(self.protonet(self.proto_fusion(features)))
+        return tuple(outputs)
+
+
+class Detector(_SingleHeadModel):
     """Composite YOLO26 detector: backbone -> neck -> dual detection head.
 
     A single typed module wiring the three WP-020…WP-022 stages for one scale
@@ -207,9 +427,19 @@ class Detector(nn.Module):
     :class:`~lucid_yolo.models.heads.DualHeadOutput` (both the one-to-one and
     one-to-many dense predictions).
 
+    :meth:`deploy` returns the NMS-free inference model: backbone -> neck -> one-to-one
+    head. The one-to-many branch is training-only (R6) and never runs at E2E inference,
+    so the deployed model executes a single detection branch. This is the module whose
+    FLOPs match the R1 Table 7 GFLOP column (see the module docstring); its parameters
+    are a strict subset of the full detector's, so model size is still reported from the
+    whole :class:`Detector`. The returned module **shares** this detector's parameters
+    (no copy), and its forward maps an image batch to the one-to-one branch's
+    ``(cls_logits, ltrb)`` tensor pair.
+
     Args:
         variant: Scale name (``"n"``/``"s"``/``"m"``/``"l"``/``"x"``) resolved
-            through :func:`~lucid_yolo.models.registry.scale_spec`.
+            through :func:`~lucid_yolo.models.registry.scale_spec`, or a
+            :class:`~lucid_yolo.models.registry.ScaleSpec` of raw multipliers.
         num_classes: Number of object classes the head predicts.
 
     Examples:
@@ -222,89 +452,21 @@ class Detector(nn.Module):
         (torch.Size([1, 8400, 80]), torch.Size([1, 8400, 4]))
 
         ```
+
+        The deployed view runs the one-to-one branch only:
+
+        ```pycon
+        >>> deployed = Detector("n").deploy().eval()
+        >>> with torch.no_grad():
+        ...     cls, box = deployed(torch.zeros(1, 3, 640, 640))
+        >>> cls.shape, box.shape
+        (torch.Size([1, 8400, 80]), torch.Size([1, 8400, 4]))
+
+        ```
     """
 
-    def __init__(self, variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> None:
-        super().__init__()
-        spec = scale_spec(variant)
-        self.variant = variant
-        self.num_classes = num_classes
-        self.backbone, self.neck, self.head = build_detection_stages(
-            spec.depth, spec.width, spec.max_channels, num_classes
-        )
-
-    def forward(self, image: Tensor) -> DualHeadOutput:
-        """Run the backbone, neck, and dual head over an image batch.
-
-        Args:
-            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
-                ``W`` divisible by 32.
-
-        Returns:
-            The head's :class:`~lucid_yolo.models.heads.DualHeadOutput` with dense
-            class logits and raw ltrb distances for both branches.
-        """
-        output: DualHeadOutput = self.head(self.neck(self.backbone(image)))
-        return output
-
-    def deploy(self) -> nn.Module:
-        """Return the NMS-free inference model: backbone -> neck -> one-to-one head.
-
-        The one-to-many branch is training-only (R6) and never runs at E2E
-        inference, so the deployed model executes a single detection branch. This
-        is the module whose FLOPs match the R1 Table 7 GFLOP column (see the module
-        docstring); its parameters are a strict subset of the full detector's, so
-        model size is still reported from the whole :class:`Detector`. The returned
-        module **shares** this detector's parameters (no copy).
-
-        Returns:
-            A :class:`torch.nn.Module` whose forward maps an image batch to the
-            one-to-one branch's ``(cls_logits, ltrb)`` tensor pair.
-
-        Examples:
-            ```pycon
-            >>> import torch
-            >>> deployed = Detector("n").deploy().eval()
-            >>> with torch.no_grad():
-            ...     cls, box = deployed(torch.zeros(1, 3, 640, 640))
-            >>> cls.shape, box.shape
-            (torch.Size([1, 8400, 80]), torch.Size([1, 8400, 4]))
-
-            ```
-        """
-        return _DeployedDetector(self)
-
-
-class _DeployedDetector(nn.Module):
-    """Single-branch inference view of a :class:`Detector` (backbone/neck/o2o).
-
-    Runs the backbone, neck, and only the one-to-one head branch, returning that
-    branch's dense ``(cls, box)`` tensors. Holds references to the parent's
-    submodules, so it shares parameters and adds none of its own.
-
-    Args:
-        detector: The full detector to expose an inference view of.
-    """
-
-    def __init__(self, detector: Detector) -> None:
-        super().__init__()
-        self.backbone = detector.backbone
-        self.neck = detector.neck
-        self.o2o = detector.head.o2o
-
-    def forward(self, image: Tensor) -> tuple[Tensor, Tensor]:
-        """Run the backbone, neck, and one-to-one branch over an image batch.
-
-        Args:
-            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
-                ``W`` divisible by 32.
-
-        Returns:
-            The one-to-one branch's ``(cls, box)`` pair: dense class logits of
-            shape ``(N, A, num_classes)`` and raw ltrb distances ``(N, A, 4)``.
-        """
-        branch: BranchOutput = self.o2o(self.neck(self.backbone(image)))
-        return branch.cls, branch.box
+    def __init__(self, variant: str | ScaleSpec, num_classes: int = _DEFAULT_NUM_CLASSES) -> None:
+        super().__init__(variant, num_classes)
 
 
 def build_detector(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> Detector:
@@ -333,7 +495,7 @@ def build_detector(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> Det
     return Detector(variant, num_classes)
 
 
-class OrientedDetector(nn.Module):
+class OrientedDetector(_SingleHeadModel):
     """Composite YOLO26 oriented detector: the detector plus the A20 angle branch.
 
     Structurally :class:`Detector` with ``predict_angle=True``: identical
@@ -342,6 +504,8 @@ class OrientedDetector(nn.Module):
     sec. 3.4.3. The angle is predicted raw (R1 Eq. 13, ``theta_hat = z``); the
     oriented box is assembled and normalized by
     :func:`~lucid_yolo.models.heads.obb.decode_rboxes` (A23), not by the model.
+    :meth:`forward` returns a :class:`~lucid_yolo.models.heads.DualHeadOutput` whose
+    angle fields are populated for both branches.
 
     The angle stems sit on the head's two branches rather than in a fourth
     top-level module, which is what makes the one-to-many angle stems training-only
@@ -349,9 +513,16 @@ class OrientedDetector(nn.Module):
     dropped by :meth:`deploy` with the branch that owns them, rather than needing
     a rule of their own.
 
+    :meth:`deploy` therefore executes a single detection branch — including only that
+    branch's angle stems — and maps an image batch to the one-to-one branch's
+    ``(cls_logits, ltrb, angle)`` tensor triple. This is the module whose FLOPs the
+    R1 Table S11 gate reads, at the table's 1024-pixel input. The returned module
+    **shares** this detector's parameters (no copy).
+
     Args:
         variant: Scale name (``"n"``/``"s"``/``"m"``/``"l"``/``"x"``) resolved
-            through :func:`~lucid_yolo.models.registry.scale_spec`.
+            through :func:`~lucid_yolo.models.registry.scale_spec`, or a
+            :class:`~lucid_yolo.models.registry.ScaleSpec` of raw multipliers.
         num_classes: Number of object classes the head predicts. Defaults to 80
             for signature consistency with :class:`Detector`; the R1 Table S11
             fidelity gate and the DOTA path pass 15 explicitly.
@@ -366,93 +537,23 @@ class OrientedDetector(nn.Module):
         (torch.Size([1, 336, 15]), torch.Size([1, 336, 4]), torch.Size([1, 336, 1]))
 
         ```
+
+        The deployed view returns the one-to-one angles beside the boxes:
+
+        ```pycon
+        >>> deployed = OrientedDetector("n", num_classes=15).deploy().eval()
+        >>> with torch.no_grad():
+        ...     cls, box, angle = deployed(torch.zeros(1, 3, 128, 128))
+        >>> cls.shape, box.shape, angle.shape
+        (torch.Size([1, 336, 15]), torch.Size([1, 336, 4]), torch.Size([1, 336, 1]))
+
+        ```
     """
 
-    def __init__(self, variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> None:
-        super().__init__()
-        spec = scale_spec(variant)
-        self.variant = variant
-        self.num_classes = num_classes
-        self.backbone, self.neck, self.head = build_detection_stages(
-            spec.depth, spec.width, spec.max_channels, num_classes, predict_angle=True
-        )
+    _DEPLOYED_FIELDS: ClassVar[tuple[str, ...]] = ("cls", "box", "angle")
 
-    def forward(self, image: Tensor) -> DualHeadOutput:
-        """Run the backbone, neck, and dual head with the angle branch active.
-
-        Args:
-            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
-                ``W`` divisible by 32.
-
-        Returns:
-            The head's :class:`~lucid_yolo.models.heads.DualHeadOutput`, whose
-            angle fields are populated for both branches.
-        """
-        output: DualHeadOutput = self.head(self.neck(self.backbone(image)))
-        return output
-
-    def deploy(self) -> nn.Module:
-        """Return the NMS-free inference model: backbone -> neck -> one-to-one head.
-
-        The one-to-many branch is training-only (R6) and never runs at E2E
-        inference, so the deployed model executes a single detection branch —
-        including only that branch's angle stems. This is the module whose FLOPs
-        the R1 Table S11 gate reads, at the table's 1024-pixel input. The returned
-        module **shares** this detector's parameters (no copy).
-
-        Returns:
-            A :class:`torch.nn.Module` whose forward maps an image batch to the
-            one-to-one branch's ``(cls_logits, ltrb, angle)`` tensor triple.
-
-        Examples:
-            ```pycon
-            >>> import torch
-            >>> deployed = OrientedDetector("n", num_classes=15).deploy().eval()
-            >>> with torch.no_grad():
-            ...     cls, box, angle = deployed(torch.zeros(1, 3, 128, 128))
-            >>> cls.shape, box.shape, angle.shape
-            (torch.Size([1, 336, 15]), torch.Size([1, 336, 4]), torch.Size([1, 336, 1]))
-
-            ```
-        """
-        return _DeployedOrientedDetector(self)
-
-
-class _DeployedOrientedDetector(nn.Module):
-    """Single-branch inference view of an :class:`OrientedDetector`.
-
-    Runs the backbone, neck, and only the one-to-one head branch, returning that
-    branch's dense ``(cls, box, angle)`` tensors. Holds references to the parent's
-    submodules, so it shares parameters and adds none of its own; the one-to-many
-    branch — its box, class, and angle stems alike — is not an attribute here at
-    all, which is what makes its removal checkable by parameter identity rather
-    than by trusting a flag.
-
-    Args:
-        detector: The full oriented detector to expose an inference view of.
-    """
-
-    def __init__(self, detector: OrientedDetector) -> None:
-        super().__init__()
-        self.backbone = detector.backbone
-        self.neck = detector.neck
-        self.o2o = detector.head.o2o
-
-    def forward(self, image: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        """Run the backbone, neck, and one-to-one branch over an image batch.
-
-        Args:
-            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
-                ``W`` divisible by 32.
-
-        Returns:
-            The one-to-one branch's ``(cls, box, angle)`` triple: dense class
-            logits ``(N, A, num_classes)``, raw ltrb distances ``(N, A, 4)``, and
-            raw orientation angles ``(N, A, 1)``.
-        """
-        branch: BranchOutput = self.o2o(self.neck(self.backbone(image)))
-        assert branch.angle is not None  # an OrientedDetector always builds the angle stems
-        return branch.cls, branch.box, branch.angle
+    def __init__(self, variant: str | ScaleSpec, num_classes: int = _DEFAULT_NUM_CLASSES) -> None:
+        super().__init__(variant, num_classes, predict_angle=True)
 
 
 def build_obb_detector(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) -> OrientedDetector:
@@ -483,7 +584,7 @@ def build_obb_detector(variant: str, num_classes: int = _DEFAULT_NUM_CLASSES) ->
     return OrientedDetector(variant, num_classes)
 
 
-class KeypointDetector(nn.Module):
+class KeypointDetector(_SingleHeadModel):
     """Composite YOLO26 keypoint detector: the detector plus the R14 point branch.
 
     Structurally :class:`Detector` with ``num_keypoints=K``: identical backbone,
@@ -493,7 +594,9 @@ class KeypointDetector(nn.Module):
     the anchor centre and stride by
     :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` (A70), not by the
     model; sigma stays raw (A65) because the RLE flow (R14 Eq. 12) is what
-    interprets it.
+    interprets it. :meth:`forward` returns a
+    :class:`~lucid_yolo.models.heads.DualHeadOutput` whose keypoint and keypoint-sigma
+    fields are populated for both branches.
 
     The point stems sit on the head's two branches rather than in a fourth
     top-level module, which is what makes the one-to-many point stems training-only
@@ -501,12 +604,27 @@ class KeypointDetector(nn.Module):
     dropped by :meth:`deploy` with the branch that owns them, rather than needing
     a rule of their own. This mirrors :class:`OrientedDetector`'s angle stems.
 
+    :meth:`deploy` therefore executes a single detection branch — including only that
+    branch's point stems — and maps an image batch to the one-to-one branch's
+    ``(cls_logits, ltrb, keypoints)`` tensor triple. This is the module the keypoint
+    golden's GFLOPs are measured on, at detection's 640-pixel protocol. The returned
+    module **shares** this detector's parameters (no copy).
+
+    Sigma is **not** returned by the deployed view. It is consumed by the R14 loss during
+    training and by nothing on the inference path: the decode
+    (:func:`~lucid_yolo.models.heads.keypoint.decode_keypoints`, and
+    :func:`~lucid_yolo.eval.coco_eval.gather_keypoints` after it) composes the
+    coordinate offsets alone. Its cost is still counted, because one stem emits
+    coordinates and sigma from the same convolution — omitting it from the return
+    tuple drops a tensor, not a computation.
+
     The task is generic in ``K``: nothing here knows what a point *means*, so
     human pose is one instantiation rather than the subject.
 
     Args:
         variant: Scale name (``"n"``/``"s"``/``"m"``/``"l"``/``"x"``) resolved
-            through :func:`~lucid_yolo.models.registry.scale_spec`.
+            through :func:`~lucid_yolo.models.registry.scale_spec`, or a
+            :class:`~lucid_yolo.models.registry.ScaleSpec` of raw multipliers.
         num_classes: Number of object classes the head predicts. Defaults to 80
             for signature consistency with :class:`Detector`; COCO's
             ``person_keypoints`` path passes 1.
@@ -531,102 +649,26 @@ class KeypointDetector(nn.Module):
         torch.Size([1, 336, 3, 2])
 
         ```
+
+        The deployed view returns the one-to-one point offsets, and no sigma:
+
+        ```pycon
+        >>> deployed = KeypointDetector("n", num_classes=4, num_keypoints=3).deploy().eval()
+        >>> with torch.no_grad():
+        ...     cls, box, keypoints = deployed(torch.zeros(1, 3, 128, 128))
+        >>> cls.shape, box.shape, keypoints.shape
+        (torch.Size([1, 336, 4]), torch.Size([1, 336, 4]), torch.Size([1, 336, 3, 2]))
+
+        ```
     """
 
-    def __init__(self, variant: str, num_classes: int = _DEFAULT_NUM_CLASSES, *, num_keypoints: int) -> None:
-        super().__init__()
-        spec = scale_spec(variant)
-        self.variant = variant
-        self.num_classes = num_classes
+    _DEPLOYED_FIELDS: ClassVar[tuple[str, ...]] = ("cls", "box", "keypoints")
+
+    def __init__(
+        self, variant: str | ScaleSpec, num_classes: int = _DEFAULT_NUM_CLASSES, *, num_keypoints: int
+    ) -> None:
+        super().__init__(variant, num_classes, num_keypoints=num_keypoints)
         self.num_keypoints = num_keypoints
-        self.backbone, self.neck, self.head = build_detection_stages(
-            spec.depth, spec.width, spec.max_channels, num_classes, num_keypoints=num_keypoints
-        )
-
-    def forward(self, image: Tensor) -> DualHeadOutput:
-        """Run the backbone, neck, and dual head with the point branch active.
-
-        Args:
-            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
-                ``W`` divisible by 32.
-
-        Returns:
-            The head's :class:`~lucid_yolo.models.heads.DualHeadOutput`, whose
-            keypoint and keypoint-sigma fields are populated for both branches.
-        """
-        output: DualHeadOutput = self.head(self.neck(self.backbone(image)))
-        return output
-
-    def deploy(self) -> nn.Module:
-        """Return the NMS-free inference model: backbone -> neck -> one-to-one head.
-
-        The one-to-many branch is training-only (R6) and never runs at E2E
-        inference, so the deployed model executes a single detection branch —
-        including only that branch's point stems. This is the module the keypoint
-        golden's GFLOPs are measured on, at detection's 640-pixel protocol. The
-        returned module **shares** this detector's parameters (no copy).
-
-        Returns:
-            A :class:`torch.nn.Module` whose forward maps an image batch to the
-            one-to-one branch's ``(cls_logits, ltrb, keypoints)`` tensor triple.
-
-        Examples:
-            ```pycon
-            >>> import torch
-            >>> deployed = KeypointDetector("n", num_classes=4, num_keypoints=3).deploy().eval()
-            >>> with torch.no_grad():
-            ...     cls, box, keypoints = deployed(torch.zeros(1, 3, 128, 128))
-            >>> cls.shape, box.shape, keypoints.shape
-            (torch.Size([1, 336, 4]), torch.Size([1, 336, 4]), torch.Size([1, 336, 3, 2]))
-
-            ```
-        """
-        return _DeployedKeypointDetector(self)
-
-
-class _DeployedKeypointDetector(nn.Module):
-    """Single-branch inference view of a :class:`KeypointDetector`.
-
-    Runs the backbone, neck, and only the one-to-one head branch, returning that
-    branch's dense ``(cls, box, keypoints)`` tensors. Holds references to the
-    parent's submodules, so it shares parameters and adds none of its own; the
-    one-to-many branch — its box, class, and point stems alike — is not an
-    attribute here at all, which is what makes its removal checkable by parameter
-    identity rather than by trusting a flag.
-
-    Sigma is **not** returned. It is consumed by the R14 loss during training and
-    by nothing on the inference path: the decode
-    (:func:`~lucid_yolo.models.heads.keypoint.decode_keypoints`, and
-    :func:`~lucid_yolo.eval.coco_eval.gather_keypoints` after it) composes the
-    coordinate offsets alone. Its cost is still counted, because one stem emits
-    coordinates and sigma from the same convolution — omitting it from the return
-    tuple drops a tensor, not a computation.
-
-    Args:
-        detector: The full keypoint detector to expose an inference view of.
-    """
-
-    def __init__(self, detector: KeypointDetector) -> None:
-        super().__init__()
-        self.backbone = detector.backbone
-        self.neck = detector.neck
-        self.o2o = detector.head.o2o
-
-    def forward(self, image: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        """Run the backbone, neck, and one-to-one branch over an image batch.
-
-        Args:
-            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
-                ``W`` divisible by 32.
-
-        Returns:
-            The one-to-one branch's ``(cls, box, keypoints)`` triple: dense class
-            logits ``(N, A, num_classes)``, raw ltrb distances ``(N, A, 4)``, and
-            raw point-coordinate offsets ``(N, A, K, 2)``.
-        """
-        branch: BranchOutput = self.o2o(self.neck(self.backbone(image)))
-        assert branch.keypoints is not None  # a KeypointDetector always builds the point stems
-        return branch.cls, branch.box, branch.keypoints
 
 
 def build_keypoint_detector(
@@ -710,7 +752,8 @@ class Segmenter(nn.Module):
 
     Args:
         variant: Scale name (``"n"``/``"s"``/``"m"``/``"l"``/``"x"``) resolved
-            through :func:`~lucid_yolo.models.registry.scale_spec`.
+            through :func:`~lucid_yolo.models.registry.scale_spec`, or a
+            :class:`~lucid_yolo.models.registry.ScaleSpec` of raw multipliers.
         num_classes: Number of object classes the head and the auxiliary branch
             predict.
         num_coeffs: Mask-coefficient width ``K`` (A14), also the prototype count.
@@ -733,12 +776,12 @@ class Segmenter(nn.Module):
 
     def __init__(
         self,
-        variant: str,
+        variant: str | ScaleSpec,
         num_classes: int = _DEFAULT_NUM_CLASSES,
         num_coeffs: int = DEFAULT_NUM_COEFFS,
     ) -> None:
         super().__init__()
-        spec = scale_spec(variant)
+        spec = _resolve_scaling(variant)
         self.variant = variant
         self.num_classes = num_classes
         self.num_coeffs = num_coeffs
@@ -777,11 +820,15 @@ class Segmenter(nn.Module):
         branch, which exists only to shape the shared prototype features (A17).
         Neither is disabled or skipped — neither is held at all. The returned
         module **shares** this segmenter's parameters (no copy), so it is a view
-        rather than a second model.
+        rather than a second model. This is the module whose parameters and FLOPs the
+        Phase 7 segmentation fidelity gate is measured on.
 
         Returns:
             A :class:`torch.nn.Module` whose forward maps an image batch to the
-            ``(cls, box, coeff, prototypes)`` tuple needed to assemble masks.
+            ``(cls, box, coeff, prototypes)`` tuple needed to assemble masks: dense
+            class logits ``(N, A, num_classes)``, raw ltrb distances ``(N, A, 4)``,
+            tanh mask coefficients ``(N, A, K)``, and raw prototype maps
+            ``(N, K, H/4, W/4)``.
 
         Examples:
             ```pycon
@@ -796,54 +843,14 @@ class Segmenter(nn.Module):
 
             ```
         """
-        return _DeployedSegmenter(self)
-
-
-class _DeployedSegmenter(nn.Module):
-    """Inference view of a :class:`Segmenter` (backbone/neck/o2o + prototypes).
-
-    Runs the backbone, the neck, the one-to-one head branch, and the prototype
-    path, returning the four tensors :func:`~lucid_yolo.models.heads.assemble_masks`
-    and the E2E decode need. Holds references to the parent's submodules, so it
-    shares parameters and adds none of its own.
-
-    The one-to-many detection branch is training-only (R6) and the auxiliary
-    semantic branch is training-only (A17), so this module carries neither: the
-    auxiliary branch is not an attribute here at all, which is what makes its
-    removal checkable by parameter identity rather than by trusting a flag. This
-    is the module whose parameters and FLOPs the Phase 7 segmentation fidelity
-    gate is measured on.
-
-    Args:
-        segmenter: The full segmentation model to expose an inference view of.
-    """
-
-    def __init__(self, segmenter: Segmenter) -> None:
-        super().__init__()
-        self.backbone = segmenter.backbone
-        self.neck = segmenter.neck
-        self.o2o = segmenter.head.o2o
-        self.proto_fusion = segmenter.proto_fusion
-        self.protonet = segmenter.protonet
-
-    def forward(self, image: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        """Run the backbone, neck, one-to-one branch, and prototype stack.
-
-        Args:
-            image: Input image batch of shape ``(N, 3, H, W)`` with ``H`` and
-                ``W`` divisible by 32.
-
-        Returns:
-            The tuple ``(cls, box, coeff, prototypes)``: dense class logits
-            ``(N, A, num_classes)``, raw ltrb distances ``(N, A, 4)``,
-            tanh mask coefficients ``(N, A, K)``, and raw prototype maps
-            ``(N, K, H/4, W/4)``.
-        """
-        features: tuple[Tensor, Tensor, Tensor] = self.neck(self.backbone(image))
-        branch: BranchOutput = self.o2o(features)
-        assert branch.coeff is not None  # a Segmenter always builds the coefficient stems
-        prototypes: Tensor = self.protonet(self.proto_fusion(features))
-        return branch.cls, branch.box, branch.coeff, prototypes
+        return _DeployedO2O(
+            self.backbone,
+            self.neck,
+            self.head.o2o,
+            ("cls", "box", "coeff"),
+            proto_fusion=self.proto_fusion,
+            protonet=self.protonet,
+        )
 
 
 def build_segmenter(
@@ -956,7 +963,7 @@ def _tensor_fields(output: DualHeadOutput | SegmentOutput) -> tuple[Tensor, ...]
         ```
     """
     collected: list[Tensor] = []
-    for field in fields(output):
+    for field in dataclass_fields(output):
         value = getattr(output, field.name)
         if isinstance(value, Tensor):
             collected.append(value)

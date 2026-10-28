@@ -16,8 +16,6 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-import pytest
-import torch
 from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -43,12 +41,6 @@ def _load_module(name: str, path: Path) -> ModuleType:
 harness = _load_module("check_goldens", REPO_ROOT / "scripts" / "check_goldens.py")
 producers = _load_module("golden_producers", REPO_ROOT / "scripts" / "golden_producers.py")
 visualizer = _load_module("dump_debug_grid", REPO_ROOT / "scripts" / "dump_debug_grid.py")
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> None:
-    """Seed the global RNG before each test (the pipeline uses explicit generators)."""
-    torch.manual_seed(0)
 
 
 def test_data_golden_passes_check() -> None:

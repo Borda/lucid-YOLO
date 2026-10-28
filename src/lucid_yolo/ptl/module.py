@@ -167,9 +167,10 @@ Provenance: R1 sec. 3.2, R1 Eq. 2-3, R1 Tables S2/S5. Assumptions: A8.
 
 from __future__ import annotations
 
+import copy
+import inspect
 import warnings
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 from pytorch_lightning import Callback, LightningModule
@@ -179,19 +180,13 @@ from pytorch_lightning.strategies import SingleDeviceStrategy
 from torch import Tensor
 
 from lucid_yolo.assign import make_anchor_points
-from lucid_yolo.decode.common import BOX_CORNERS, SCORE_COLUMN
+from lucid_yolo.decode.common import BOX_CORNERS, MAX_DETECTIONS, SCORE_COLUMN
 from lucid_yolo.decode.topk_e2e import TopKDecoder
-from lucid_yolo.eval.coco_eval import (
-    COCO_KEYPOINT_OKS_SIGMAS,
-    COCO_RECALL_GRID,
-    SYMBOL_KEYPOINT_OKS_SIGMA,
-    evaluate_keypoints,
-    gather_keypoints,
-)
-from lucid_yolo.eval.dota_eval import MAX_DETECTIONS, evaluate_rotated_map, rotated_detections_to_predictions
+from lucid_yolo.eval.coco_eval import gather_keypoints
+from lucid_yolo.eval.dota_eval import rotated_detections_to_predictions
 from lucid_yolo.eval.segment_decode import decode_instance_masks
 from lucid_yolo.losses import oriented_loss
-from lucid_yolo.losses.dual_loss import DualBranchLoss, DualLossOutput
+from lucid_yolo.losses.dual_loss import BranchPrediction, DualBranchLoss, DualLossOutput
 from lucid_yolo.losses.keypoint_nll_loss import LaplaceNLLLoss
 from lucid_yolo.losses.mask_loss import instance_mask_loss
 from lucid_yolo.losses.oks_loss import OKSLoss
@@ -219,10 +214,36 @@ from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
-from lucid_yolo.ptl.coco_backend import build_mean_average_precision
+from lucid_yolo.ptl._padding import (
+    _BOX_DIM,
+    _KEYPOINT_DIM,
+    StepBatch,
+    _host_split,
+    _pad_mask_targets,
+    _split_batch,
+    pad_keypoints,
+    pad_rboxes,
+    pad_targets,
+)
+from lucid_yolo.ptl._task_strategies import _STRATEGIES
+from lucid_yolo.ptl._task_terms import (
+    _KEYPOINT_LOSSES,
+    _blend,
+    _keypoint_oks_sigmas,
+    _KeypointPositives,
+    _StepContext,
+    normalize_keypoints_to_box,
+)
+from lucid_yolo.ptl._validation import _KeypointAP, _RotatedMAP, _ValidationMetric, _ValidationTargets
 from lucid_yolo.ptl.gradient_norm_capture import _SUPPORTED as _NORM_CAPTURE_SUPPORTED
 from lucid_yolo.ptl.gradient_norm_capture import _GradientNormCapture, _GradientNormLifecycle
-from lucid_yolo.ptl.loss_capture import _LossCapture, _LossCaptureLifecycle, _native_loss, _source_signature
+from lucid_yolo.ptl.loss_capture import (
+    _LossCapture,
+    _LossCaptureLifecycle,
+    _LossInputs,
+    _native_loss,
+    _source_signature,
+)
 from lucid_yolo.ptl.network_capture import (
     _detection_stages,
     _module_breach,
@@ -232,9 +253,11 @@ from lucid_yolo.ptl.network_capture import (
 from lucid_yolo.ptl.seg_targets import instance_mask_targets, scale_boxes_to_grid, semantic_target
 from lucid_yolo.ptl.segment_head_capture import _head_breach as _segment_head_breach
 from lucid_yolo.ptl.segment_head_capture import _SegmentHeadCapture, _SegmentHeadCaptureLifecycle
+from lucid_yolo.tasks import TASK_NAMES, Task
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
+    from types import FrameType
 
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.optim import Optimizer
@@ -254,83 +277,12 @@ _NATIVE_PRECISION_CLIPPING = {
 #: Feature-level input-pixel strides of the P3/P4/P5 detection head (8, 16, 32).
 _STRIDES: tuple[int, int, int] = (8, 16, 32)
 
-#: Task names the module accepts. All four are wired: ``"detect"`` is the dual
-#: detection objective alone, ``"segment"`` adds the WP-087 mask terms, ``"obb"``
-#: swaps the two box terms for the WP-088 rotated ones and adds the angle term,
-#: and ``"keypoints"`` adds the WP-132 residual log-likelihood term and the WP-178 OKS term.
-_TASKS: tuple[str, ...] = ("detect", "segment", "obb", "keypoints")
-
-#: Tasks whose epoch validation metric accumulates rank-local Python lists rather than a
-#: gathering :class:`~torchmetrics.Metric`, and which therefore refuse to run distributed
-#: (:meth:`DetectionLitModule.setup`). The list-based accumulators are documented where
-#: they are declared; this names the consequence in one place so the guard and the
-#: ``docs/TRAINING.md`` single-device note cannot drift from each other.
-_RANK_LOCAL_VAL_TASKS: frozenset[str] = frozenset({"obb", "keypoints"})
-
-
-def _keypoint_oks_sigmas(num_keypoints: int | None) -> tuple[float, ...]:
-    """Pick the per-keypoint OKS sigma vector for a point count (A67, WP-137).
-
-    :data:`~lucid_yolo.eval.coco_eval.COCO_KEYPOINT_OKS_SIGMAS` only when the count
-    matches COCO's own 17-point human schema exactly, and
-    :data:`~lucid_yolo.eval.coco_eval.SYMBOL_KEYPOINT_OKS_SIGMA` (A67's uniform
-    sigma) repeated for every other count — the choice ``scripts/overfit_micro.py``'s
-    synthetic gate makes for its 7-point symbol schema, shared from one place. One
-    function serves both consumers on purpose: the ``val/oks_mAP`` evaluator and the
-    :class:`~lucid_yolo.losses.oks_loss.OKSLoss` training term (WP-178) must score
-    against the **same** tolerances, or the loss would pull towards a target the
-    metric does not measure.
-
-    Args:
-        num_keypoints: The schema's point count, or ``None`` for a module with no
-            point stem (an empty vector).
-
-    Returns:
-        A length-``K`` tuple of sigmas.
-
-    Examples:
-        ```pycon
-        >>> _keypoint_oks_sigmas(3)
-        (0.072, 0.072, 0.072)
-        >>> len(_keypoint_oks_sigmas(17)), _keypoint_oks_sigmas(17)[0]
-        (17, 0.026)
-        >>> _keypoint_oks_sigmas(None)
-        ()
-
-        ```
-    """
-    if num_keypoints == len(COCO_KEYPOINT_OKS_SIGMAS):
-        return COCO_KEYPOINT_OKS_SIGMAS
-    return (SYMBOL_KEYPOINT_OKS_SIGMA,) * (num_keypoints or 0)
-
-
-#: Keypoint objectives a ``"keypoints"`` run may select between, each mapped to the
-#: class that implements it (WP-135). ``"rle"`` is R14's full residual
-#: log-likelihood and the default every existing config, checkpoint and accepted
-#: result was produced with; ``"laplace_nll"`` is R14 Table 7's own flow-free
-#: control, present so WP-125 can state a direction of effect rather than a bare
-#: number. Keyed by plain strings for the reason ``_TASKS`` and
-#: ``ROTATED_IOU_FORMS`` are: the value arrives from YAML. One mapping rather than a
-#: name tuple beside a constructor branch, so the accepted set and the thing each
-#: name builds cannot drift apart.
-_KEYPOINT_LOSSES: dict[str, type[RLELoss] | type[LaplaceNLLLoss]] = {
-    "rle": RLELoss,
-    "laplace_nll": LaplaceNLLLoss,
-}
-
-#: Column count of an ``xyxy`` axis-aligned box.
-_BOX_DIM = 4
-
-#: Column count of a long-edge rotated box ``(cx, cy, w, h, theta)``.
-_RBOX_DIM = 5
-
-#: Coordinate count of a keypoint ``(x, y)``.
-_KEYPOINT_DIM = 2
-
-#: Floor, in input pixels, on the per-axis box extent :func:`normalize_keypoints_to_box`
-#: divides by. One pixel: a box thinner than that carries no pose worth a frame, and the
-#: unclamped division would answer a finite annotation with an infinity.
-_MIN_BOX_EXTENT = 1.0
+#: Task names the module accepts, read off :class:`~lucid_yolo.tasks.Task` in registry
+#: order. All four are wired: ``"detect"`` is the dual detection objective alone,
+#: ``"segment"`` adds the WP-087 mask terms, ``"obb"`` swaps the two box terms for the
+#: WP-088 rotated ones and adds the angle term, and ``"keypoints"`` adds the WP-132
+#: residual log-likelihood term and the WP-178 OKS term.
+_TASKS: tuple[str, ...] = TASK_NAMES
 
 #: Column index of the integral class label within the A9 detection tuple.
 _LABEL_COLUMN = 5
@@ -342,394 +294,34 @@ _LABEL_COLUMN = 5
 _VAL_SEGM_MAX_DET = 100
 
 
-def pad_targets(targets: list[Targets]) -> tuple[Tensor, Tensor, Tensor]:
-    """Pad a ragged batch of per-image targets into dense ground-truth tensors.
-
-    The batch's :class:`~lucid_yolo.data.targets.Targets` each carry their own
-    instance count, so they are padded to the batch maximum ``N_max`` and paired
-    with a boolean mask marking the real (non-padding) rows — the dense form the
-    :class:`~lucid_yolo.losses.dual_loss.DualBranchLoss` assigners consume. An image
-    with no instances contributes an all-``False`` mask row (no positives), and a
-    batch in which *every* image is empty yields ``N_max = 0`` tensors, which the
-    loss handles as its finite no-ground-truth case.
+def _box_predictions(detections: Tensor) -> list[dict[str, Tensor]]:
+    """Keep each image's scored detections, on the host, in the per-image form ``val/mAP`` reads.
 
     Args:
-        targets: Length-``B`` list of per-image targets (the datamodule batch's
-            second element). All tensors must share one device.
+        detections: The ``(B, k, 6)`` decoded A9 batch; a row scoring zero is padding.
 
     Returns:
-        A triple ``(gt_boxes, gt_labels, gt_mask)`` with shapes ``(B, N_max, 4)``
-        float32 ``xyxy`` boxes, ``(B, N_max)`` int64 class ids, and ``(B, N_max)``
-        bool mask. Padding rows are zero boxes / zero labels / ``False`` mask.
+        One ``{"boxes", "scores", "labels"}`` dict per image, holding its kept rows.
 
     Examples:
         ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> a = Targets(boxes=torch.tensor([[0.0, 0.0, 4.0, 4.0]]), labels=torch.tensor([3]))
-        >>> b = Targets.empty()
-        >>> boxes, labels, mask = pad_targets([a, b])
-        >>> boxes.shape, labels.shape, mask.shape
-        (torch.Size([2, 1, 4]), torch.Size([2, 1]), torch.Size([2, 1]))
-        >>> mask.tolist()
-        [[True], [False]]
+        >>> detections = torch.tensor([[[0.0, 0.0, 4.0, 4.0, 0.9, 2.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]])
+        >>> _box_predictions(detections)[0]["labels"]
+        tensor([2])
 
         ```
     """
-    batch_size = len(targets)
-    counts = [int(target.boxes.shape[0]) for target in targets]
-    max_n = max(counts) if counts else 0
-    device = targets[0].boxes.device if targets else torch.device("cpu")
-    gt_boxes = torch.zeros((batch_size, max_n, _BOX_DIM), dtype=torch.float32, device=device)
-    gt_labels = torch.zeros((batch_size, max_n), dtype=torch.int64, device=device)
-    gt_mask = torch.zeros((batch_size, max_n), dtype=torch.bool, device=device)
-    for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
-        if count == 0:
-            continue
-        gt_boxes[index, :count] = target.boxes
-        gt_labels[index, :count] = target.labels
-        gt_mask[index, :count] = True
-    return gt_boxes, gt_labels, gt_mask
-
-
-def pad_rboxes(targets: list[Targets]) -> Tensor:
-    """Pad a ragged batch's rotated boxes into one dense ``(B, N_max, 5)`` tensor (WP-088).
-
-    The rotated companion of :func:`pad_targets`, kept as its own function rather than
-    a fourth element of that tuple: only ``task="obb"`` needs it, and widening a return
-    every caller unpacks would put an oriented concern in the detection path.
-
-    The padding is by the **instance** axis, not by a rotated-box axis of its own. WP-056
-    pins ``rboxes[i]`` to the same object as ``boxes[i]`` and ``labels[i]``, and that
-    pairing is the whole reason the assignment computed on the axis-aligned envelopes may
-    be reused to gather rotated targets. An image whose two axes disagree is therefore a
-    hard error here rather than something to reconcile: whichever way it were resolved,
-    some anchor would be supervised towards another instance's orientation.
-
-    Args:
-        targets: The length-``B`` per-image target list, each carrying one rotated box
-            per instance. All tensors must share one device.
-
-    Returns:
-        ``(B, N_max, 5)`` float32 long-edge rotated boxes on the targets' device, padded
-        with zero rows exactly where :func:`pad_targets` pads with ``False``.
-
-    Raises:
-        ValueError: If any image's rotated-box count differs from its instance count —
-            including the all-important case of *zero* rotated boxes beside real ones,
-            which is what a detection loader hands an oriented run.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> one = Targets(
-        ...     boxes=torch.tensor([[0.0, 0.0, 4.0, 2.0]]),
-        ...     labels=torch.tensor([3]),
-        ...     rboxes=torch.tensor([[2.0, 1.0, 4.0, 2.0, 0.0]]),
-        ... )
-        >>> pad_rboxes([one, Targets.empty()]).shape
-        torch.Size([2, 1, 5])
-        >>> pad_rboxes([Targets(boxes=torch.zeros(1, 4), labels=torch.zeros(1, dtype=torch.int64))])
-        Traceback (most recent call last):
-        ...
-        ValueError: image 0 carries 1 instances but 0 rotated boxes; task='obb' needs one per instance
-
-        ```
-    """
-    counts = [int(target.boxes.shape[0]) for target in targets]
-    for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
-        if int(target.rboxes.shape[0]) != count:
-            raise ValueError(
-                f"image {index} carries {count} instances but {int(target.rboxes.shape[0])} rotated boxes; "
-                f"task='obb' needs one per instance"
-            )
-    max_n = max(counts) if counts else 0
-    device = targets[0].rboxes.device if targets else torch.device("cpu")
-    padded = torch.zeros((len(targets), max_n, _RBOX_DIM), dtype=torch.float32, device=device)
-    for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
-        if count:
-            padded[index, :count] = target.rboxes
-    return padded
-
-
-def pad_keypoints(targets: list[Targets]) -> tuple[Tensor, Tensor]:
-    """Pad a ragged batch's keypoints and visibilities onto the instance axis (WP-132).
-
-    The pose companion of :func:`pad_targets`, and a sibling of :func:`pad_rboxes` in
-    both shape and argument. Like the rotated boxes, keypoints are padded by the
-    **instance** axis rather than by an axis of their own: WP-120 pins
-    ``keypoints[i]`` to the same object as ``boxes[i]`` and ``labels[i]``, and that
-    pairing is the only reason the assignment computed on the boxes may be reused to
-    gather point targets. An image whose two axes disagree is a hard error for the
-    same reason it is one there — whichever way it were reconciled, some anchor would
-    be supervised towards another instance's pose.
-
-    The visibility padding is zeros, which is not merely a filler value: A66 reads
-    ``v == 0`` as "no annotation exists", so
-    :class:`~lucid_yolo.losses.rle_loss.RLELoss` already excludes exactly those
-    points. The padding rows are therefore inert in the loss by the same rule that
-    excludes a genuinely unlabeled point, rather than by a second mechanism that
-    could disagree with it.
-
-    Args:
-        targets: The length-``B`` per-image target list, each carrying one point set
-            per instance. All tensors must share one device.
-
-    Returns:
-        A pair ``(keypoints, visibility)`` of shapes ``(B, N_max, K, 2)`` float32 and
-        ``(B, N_max, K)`` int64, padded with zero coordinates and zero (unlabeled)
-        visibility exactly where :func:`pad_targets` pads with ``False``. ``K`` is
-        the batch's shared point count, and ``0`` for a batch holding no instances
-        at all.
-
-    Raises:
-        ValueError: If any image's keypoint-set count differs from its instance
-            count — including the case of *zero* keypoints beside real instances,
-            which is what a plain detection loader hands a keypoints run — or if two
-            images disagree on ``K``, which no single head could predict for both.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> from lucid_yolo.data.targets import Targets
-        >>> one = Targets(
-        ...     boxes=torch.tensor([[0.0, 0.0, 4.0, 2.0]]),
-        ...     labels=torch.tensor([3]),
-        ...     keypoints=torch.tensor([[[1.0, 1.0], [3.0, 1.0]]]),
-        ...     keypoint_vis=torch.tensor([[2, 1]]),
-        ... )
-        >>> coords, visibility = pad_keypoints([one, Targets.empty()])
-        >>> coords.shape, visibility.shape
-        (torch.Size([2, 1, 2, 2]), torch.Size([2, 1, 2]))
-        >>> visibility.tolist()  # the padded image is unlabeled everywhere (A66)
-        [[[2, 1]], [[0, 0]]]
-        >>> pad_keypoints([Targets(boxes=torch.zeros(1, 4), labels=torch.zeros(1, dtype=torch.int64))])
-        Traceback (most recent call last):
-        ...
-        ValueError: image 0 carries 1 instances but 0 keypoint sets; task='keypoints' needs one per instance
-
-        ```
-    """
-    counts = [int(target.boxes.shape[0]) for target in targets]
-    for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
-        if int(target.keypoints.shape[0]) != count:
-            raise ValueError(
-                f"image {index} carries {count} instances but {int(target.keypoints.shape[0])} keypoint sets; "
-                f"task='keypoints' needs one per instance"
-            )
-    point_counts = {int(target.keypoints.shape[1]) for target in targets if target.keypoints.shape[0]}
-    if len(point_counts) > 1:
-        raise ValueError(f"the batch's images disagree on the keypoint count K: {sorted(point_counts)}")
-    num_points = point_counts.pop() if point_counts else 0
-    max_n = max(counts) if counts else 0
-    device = targets[0].keypoints.device if targets else torch.device("cpu")
-    coords = torch.zeros((len(targets), max_n, num_points, _KEYPOINT_DIM), dtype=torch.float32, device=device)
-    visibility = torch.zeros((len(targets), max_n, num_points), dtype=torch.int64, device=device)
-    for index, (target, count) in enumerate(zip(targets, counts, strict=True)):
-        if count:
-            coords[index, :count] = target.keypoints
-            visibility[index, :count] = target.keypoint_vis
-    return coords, visibility
-
-
-def normalize_keypoints_to_box(points: Tensor, boxes: Tensor) -> Tensor:
-    """Map absolute point pixels into their instance's box frame (A71, WP-132).
-
-    The frame :class:`~lucid_yolo.losses.rle_loss.RLELoss` needs and this project's
-    decode does not produce. R14 predicts ``sigma_hat`` through a sigmoid, so
-    ``sigma_hat`` lies in ``(0, 1)`` by construction (R14 sec. 3.3), and the residual
-    it scales is ``x_bar = (mu_g - mu_hat) / sigma_hat``. A scale bounded above by 1
-    is only expressive in a frame whose errors are ``O(1)``: fed absolute pixels, the
-    *smallest* residual the model can express for a 40 px error is 40, and an early
-    prediction on the far side of a 256 px canvas reaches into the hundreds. R14 never
-    states the frame — it works top-down on a person crop resized to a fixed input, so
-    the crop *is* the normalization and the paper has no occasion to name it. This
-    function supplies the dense-detector equivalent: the assigned ground-truth box
-    plays the part R14's crop plays.
-
-    Measured, not reasoned: run un-normalized, the keypoint term enters at 1300 of a
-    1342 total loss and the flow's coupling layers overflow to non-finite on the
-    second step. See A71 and the ``#wp-132`` log entry.
-
-    Normalization is per axis — ``x`` by the box width, ``y`` by its height — which is
-    exactly what resizing a crop to a fixed input does, rather than the single
-    ``sqrt(area)`` scalar OKS uses. The two agree on a square object and differ only in
-    how an elongated one distributes its tolerance; per-axis is the one that makes the
-    frame an actual crop.
-
-    The translation term cancels: the loss reads ``mu_hat`` and ``mu_gt`` only through
-    their difference, and both are mapped by the same box. It is applied anyway, so the
-    returned values mean what the name says — ``0`` at the box's top-left corner, ``1``
-    at its bottom-right, a point outside the box outside ``[0, 1]`` — rather than being
-    a bare division that happens to be sufficient.
-
-    Args:
-        points: ``(..., K, 2)`` absolute point coordinates in input pixels, as
-            :func:`~lucid_yolo.models.heads.keypoint.decode_keypoints` returns them.
-        boxes: ``(..., 4)`` ``xyxy`` boxes in input pixels, aligned with ``points`` on
-            every leading axis — one box per point set.
-
-    Returns:
-        The points in their box's frame, shaped as given. A box narrower than one pixel
-        on an axis is treated as one pixel wide there: a degenerate box carries no pose
-        to normalize by, and the alternative is a division that returns infinity for a
-        finite annotation.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> points = torch.tensor([[[10.0, 20.0], [30.0, 40.0]]])
-        >>> boxes = torch.tensor([[10.0, 20.0, 30.0, 40.0]])
-        >>> normalize_keypoints_to_box(points, boxes)  # corner to corner
-        tensor([[[0., 0.],
-                 [1., 1.]]])
-
-        ```
-    """
-    origin = boxes[..., :2].unsqueeze(-2)
-    extent = (boxes[..., 2:] - boxes[..., :2]).clamp(min=_MIN_BOX_EXTENT).unsqueeze(-2)
-    return (points - origin) / extent
-
-
-#: A step batch. The datamodule's transfer hook produces the three-element form; the
-#: two-element form is the hand-built feed a direct caller passes to
-#: :meth:`DetectionLitModule.training_step`.
-StepBatch = tuple[Tensor, list["Targets"]] | tuple[Tensor, list["Targets"], list[Tensor] | None]
-
-
-def _host_split(tensors: list[Tensor]) -> tuple[Tensor, ...]:
-    """Move a batch's per-image tensors to the host in one transfer rather than one each.
-
-    Every validation accumulator needs its ground truth on the host. Moving each
-    image's tensor on its own issues one device-to-host transfer per image per
-    field, and what each one carries is a few kilobytes against the accelerator's
-    fixed per-transfer latency -- a batch of 16 with three fields is 48 transfers
-    for a payload that fits in one. Concatenating along the batch axis pays that
-    latency once and splits the result back into the same per-image pieces, with
-    the same values in the same order (WP-163).
-
-    Args:
-        tensors: One tensor per image, agreeing on every dimension after the
-            first. An empty list returns an empty tuple.
-
-    Returns:
-        The same tensors, on the host, in the order given.
-
-    Examples:
-        ```pycon
-        >>> _host_split([torch.tensor([[1.0, 2.0]]), torch.zeros(0, 2)])
-        (tensor([[1., 2.]]), tensor([], size=(0, 2)))
-        >>> _host_split([])
-        ()
-
-        ```
-    """
-    if not tensors:
-        return ()
-    host = torch.cat(tensors).cpu()
-    pieces: list[Tensor] = []
-    start = 0
-    for tensor in tensors:
-        stop = start + int(tensor.shape[0])
-        pieces.append(host[start:stop])
-        start = stop
-    return tuple(pieces)
-
-
-def _split_batch(batch: StepBatch) -> tuple[Tensor, list[Targets], list[Tensor] | None]:
-    """Split a step batch into images, targets and the loader's mask stacks.
-
-    :meth:`~lucid_yolo.ptl.datamodule.DetectionDataModule.on_after_batch_transfer`
-    hands over a third element — the per-image instance masks a segmentation loader
-    rasterised in its workers, or ``None``. A two-element batch is still accepted so
-    that a hand-built ``(images, targets)`` feed (every direct-call test, every
-    script that drives the module without the datamodule) keeps working and simply
-    rasterises in the step, as it always did.
-
-    Args:
-        batch: The ``(images, targets)`` or ``(images, targets, masks)`` step batch.
-
-    Returns:
-        The ``(images, targets, masks)`` triple, with ``masks`` ``None`` when the
-        batch carried none.
-
-    Examples:
-        ```pycon
-        >>> import torch
-        >>> images, targets, masks = _split_batch((torch.zeros(1, 3, 4, 4), []))
-        >>> masks is None
-        True
-
-        ```
-    """
-    images, targets, *rest = batch
-    return images, targets, rest[0] if rest else None
-
-
-@dataclass(frozen=True)
-class _StepContext:
-    """Everything one step computed once and its task-conditional terms may read.
-
-    The three tasks need overlapping but different slices of a step: the mask terms
-    want the prototypes and the ground-truth boxes in pixels, the oriented terms want
-    the raw angles and the anchor grid, and neither wants the other's. Passing them as
-    positional arguments put :meth:`DetectionLitModule._task_extra_loss` at seven
-    required parameters before the oriented path added any, and the eighth would have
-    been a lint failure standing in for a design one — a dispatch point whose signature
-    grows with every task is a dispatch point that will eventually be typed wrongly.
-
-    Attributes:
-        head_out: The dense dual-head output of this step's forward.
-        seg_out: The segmentation forward output, or ``None`` for a task with no
-            mask branches.
-        targets: The batch's ragged per-image targets.
-        gt_boxes: ``(B, N, 4)`` padded ground-truth boxes in input pixels.
-        gt_rboxes: ``(B, N, 5)`` padded rotated ground truths, or ``None`` when the
-            task does not supervise orientation.
-        gt_keypoints: ``(B, N, K, 2)`` padded point ground truths in input pixels,
-            or ``None`` when the task does not supervise pose.
-        gt_keypoint_vis: ``(B, N, K)`` padded COCO visibilities paired with
-            ``gt_keypoints``, or ``None`` alongside it.
-        anchor_points: ``(A, 2)`` anchor centres in input pixels.
-        strides: ``(A,)`` per-anchor level stride.
-        image_size: The batch's ``(height, width)`` in input pixels.
-        masks: The loader's per-image instance masks, or ``None`` to rasterise them
-            in the step.
-    """
-
-    head_out: DualHeadOutput
-    seg_out: SegmentOutput | None
-    targets: list[Targets]
-    gt_boxes: Tensor
-    gt_rboxes: Tensor | None
-    gt_keypoints: Tensor | None
-    gt_keypoint_vis: Tensor | None
-    anchor_points: Tensor
-    strides: Tensor
-    image_size: tuple[int, int]
-    masks: list[Tensor] | None
-
-
-@dataclass(frozen=True)
-class _KeypointPositives:
-    """One branch's assigned positives, gathered once for every pose term to score (WP-178).
-
-    Attributes:
-        predicted: ``(P, K, 2)`` decoded points of the positives, in input pixels.
-        raw_sigma: ``(P, K, 2)`` raw, unactivated per-axis sigma of the positives.
-        annotated: ``(P, K, 2)`` ground-truth points of each positive's assigned
-            instance, in input pixels.
-        frame: ``(P, 4)`` ``xyxy`` box of each positive's assigned instance, in
-            input pixels — the A71 frame for the RLE term, the A75 area for OKS.
-        visibility: ``(P, K)`` int64 visibility of the assigned instance's points.
-    """
-
-    predicted: Tensor
-    raw_sigma: Tensor
-    annotated: Tensor
-    frame: Tensor
-    visibility: Tensor
+    preds = []
+    for image_detections in detections.cpu():
+        kept = image_detections[image_detections[:, SCORE_COLUMN] > 0.0]
+        preds.append(
+            {
+                "boxes": kept[:, :BOX_CORNERS],
+                "scores": kept[:, SCORE_COLUMN],
+                "labels": kept[:, _LABEL_COLUMN].long(),
+            }
+        )
+    return preds
 
 
 def _validate_task_arguments(task: str, num_keypoints: int | None, rotated_iou_form: str, keypoint_loss: str) -> None:
@@ -829,13 +421,6 @@ def _pose_head_breach(head: torch.nn.Module, topology: tuple[tuple[object, ...],
     return _head_topology_breach(head, topology, "pose")
 
 
-#: Tasks whose network replay stays eager under gradient accumulation, with the label its
-#: warning names. WP-193d reports the shared recorder's CUDA accumulation checks failing on
-#: the unmodified baseline; detection is absent because whether it must stay eager too is
-#: open in docs/ESCALATION.md (2026-10-20).
-_ACCUMULATION_EAGER_LABELS: dict[str, str] = {"keypoints": "keypoint", "obb": "oriented", "segment": "segmentation"}
-
-
 def _validate_replay_options(
     task: str, compile_step: bool, capture_network: bool, capture_loss: bool, capture_segment_heads: bool
 ) -> None:
@@ -868,7 +453,7 @@ def _validate_replay_options(
 
 
 def _oriented_helpers() -> tuple[object, ...]:
-    """Read the decode and oriented-loss helpers the native objective calls by global name.
+    """Read the decode, oriented-loss and strategy helpers the native objective calls.
 
     Resolved at call time, so the import-time call that builds :data:`_ORIENTED_HELPERS`
     keeps the originals and every later call sees the current bindings.
@@ -879,6 +464,8 @@ def _oriented_helpers() -> tuple[object, ...]:
         oriented_branch_terms,
         vars(oriented_loss)["square_angle_loss"],
         oriented_loss._no_ground_truth,
+        _STRATEGIES[Task.OBB],
+        type(_STRATEGIES[Task.OBB]).extra_loss,
     )
 
 
@@ -893,6 +480,8 @@ def _oriented_replay_breach(module: DetectionLitModule) -> str | None:
         method = getattr(module, name)
         if getattr(method, "__func__", method) is not expected:
             return "the native oriented objective is overridden"
+    if module._strategy is not _STRATEGIES[Task.OBB]:
+        return "the native oriented objective is overridden"
     if _oriented_helpers() != _ORIENTED_HELPERS:
         return "a native oriented objective helper changed"
     return None if _native_loss(module.loss) else "the native loss or an assignment implementation changed"
@@ -1063,7 +652,7 @@ class DetectionLitModule(LightningModule):
             single-device CUDA automatic optimization.
             Pose records backbone, neck and each prediction stem independently, preserving
             absent point-stem gradients when a batch supplies no positives. Pose training stays eager
-            under gradient accumulation, with a fully frozen backbone and neck, or when
+            with a fully frozen backbone and neck, or when
             the head's topology or class forward changed since construction or a head
             module is hooked, overridden or compiled. The trainable set is fixed per fit
             at the first recording: a fully frozen start, or a later freeze or unfreeze
@@ -1071,14 +660,14 @@ class DetectionLitModule(LightningModule):
             Each pose stem separately retires its recording if its trainable set or mode changes,
             and replacing a head module retires every recording before shared features run.
             Oriented training records the complete network, including both angle stems,
-            and retains the native classification and oriented objective. Accumulation
-            or an overridden objective keeps it eager. Detection, pose and oriented training
+            and retains the native classification and oriented objective. An overridden
+            objective keeps it eager. Detection, pose and oriented training
             stay eager when the LightningModule carries a hook, overrides
             ``forward`` or is compiled. Segmentation records only backbone and neck,
             leaving all predictions independent; ``capture_segment_heads`` can replay
-            those predictions separately. Segmentation also keeps accumulation native,
-            and retires replay when the head topology/dispatch changes, a head hook is
-            registered, or ``forward_segmentation`` is overridden or compiled.
+            those predictions separately. Segmentation retires replay when the head
+            topology/dispatch changes, a head hook is registered, or ``forward_segmentation``
+            is overridden or compiled.
             Assignment, losses, schedules, optimizer, EMA and evaluation stay eager.
             One image signature is recorded per fit; partial batches stay eager and
             changed storage, modes, hooks or precision retire the recording. Warmup
@@ -1106,9 +695,10 @@ class DetectionLitModule(LightningModule):
             ``capture_orthogonalization``, this has setup and retained-workspace costs.
         capture_segment_heads: Record independent CUDA segmentation prediction groups, including first-order backward.
             Defaults to ``False``. Requires ``task="segment"`` and ``compile_step=False``, PyTorch 2.9 or newer, BF16
-            mixed precision and single-device automatic optimization without accumulation. CPU, MPS, FP32, FP16 and
-            validation keep native execution. ``compile_step=True`` is refused rather than ignored, although it leaves
-            the segment objective eager today, so an accepted configuration keeps its meaning once that is compiled.
+            mixed precision and single-device automatic optimization; gradient accumulation replays too. CPU, MPS,
+            FP32, FP16 and validation keep native execution. ``compile_step=True`` is refused rather than ignored,
+            although it leaves the segment objective eager today, so an accepted configuration keeps its meaning once
+            that is compiled.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
@@ -1176,6 +766,7 @@ class DetectionLitModule(LightningModule):
         _validate_task_arguments(task, num_keypoints, rotated_iou_form, keypoint_loss)
         _validate_replay_options(task, compile_step, capture_network, capture_loss, capture_segment_heads)
         self.save_hyperparameters()
+        task = Task(task).value
         self._capture_loss, self._capture_loss_active = capture_loss, False
         self._capture_network, self._capture_network_active = capture_network, False
         self._network_capture, self._loss_capture = _NetworkCapture(), _LossCapture()
@@ -1184,7 +775,7 @@ class DetectionLitModule(LightningModule):
             False,
             _GradientNormCapture(),
         )
-        self._task, self._num_keypoints = task, num_keypoints
+        self._strategy, self._task, self._num_keypoints = _STRATEGIES[Task(task)], task, num_keypoints
         self._compile_step: bool = compile_step
         self._capture_orthogonalization, self._capture_updates = capture_orthogonalization, capture_updates
         #: The detection objective `_shared_step` calls: the bare bound method until
@@ -1287,9 +878,7 @@ class DetectionLitModule(LightningModule):
         #: coordinate frame, different detection cap — but no longer for a third,
         #: silent, arithmetic reason.
         self._val_decoder = TopKDecoder()
-        self._val_map = build_mean_average_precision(
-            backend="faster_coco_eval", box_format="xyxy", rec_thresholds=list(COCO_RECALL_GRID)
-        )
+        self._val_map = self._strategy.build_box_metric()
         self._val_map.warn_on_many_detections = False
 
         #: Epoch mask mAP, for ``"segment"`` only (WP-087). A second metric rather
@@ -1300,44 +889,70 @@ class DetectionLitModule(LightningModule):
         #: mis-bucketing the small/medium/large splits. Split in two, each metric's
         #: inputs are self-consistent. ``None`` for a detection module, whose
         #: validation must not pay for mask machinery it has no branch for.
-        self._val_segm = (
-            build_mean_average_precision(
-                backend="faster_coco_eval", iou_type="segm", rec_thresholds=list(COCO_RECALL_GRID)
-            )
-            if task == "segment"
-            else None
-        )
+        self._val_segm = self._strategy.build_mask_metric()
         if self._val_segm is not None:
             self._val_segm.warn_on_many_detections = False
         #: Whether any batch fed :attr:`_val_segm` this epoch — ``compute`` on an
         #: untouched metric raises, and a loader without mask targets never feeds it.
         self._val_segm_seen = False
 
-        #: Epoch rotated mAP accumulators, for ``"obb"`` only (WP-088). Plain lists
-        #: rather than a :class:`~torchmetrics.Metric`: the WP-063 protocol is not a
-        #: torchmetrics implementation, it fixes four constants that library defaults
-        #: get wrong (A46-A48), and mAP is not a per-batch quantity that can be
-        #: averaged — the whole epoch's ranked detections have to meet at once. Both
-        #: lists hold CPU tensors and are cleared at every epoch end.
-        self._val_rotated_preds: list[dict[str, Tensor]] = []
-        self._val_rotated_targets: list[dict[str, Tensor]] = []
-
-        #: Epoch OKS accumulators, for ``"keypoints"`` only (WP-137). Plain lists
-        #: for the same reason :attr:`_val_rotated_preds` is one and not a
-        #: :class:`~torchmetrics.Metric`: torchmetrics carries no keypoint/OKS
-        #: support at all (confirmed empty grep of its detection module — no
-        #: "keypoint"/"kpt"/"oks" symbol anywhere, WP-137), so there is no
-        #: per-batch running average to update into; :func:`evaluate_keypoints`
-        #: is COCO's single whole-document matching, scored once per epoch.
-        #: ``val/mAP`` stays computed alongside this (unlike ``"obb"``): the
-        #: person-category box is a real, orthogonal branch on a keypoints
-        #: module, the same "additionally" relationship ``val/segm_mAP`` has to
-        #: ``val/mAP`` rather than ``"obb"``'s "instead of" one.
-        self._val_keypoint_preds: list[dict[str, Tensor]] = []
-        self._val_keypoint_targets: list[dict[str, Tensor]] = []
+        #: Whole-epoch metrics gather complete images before applying the existing protocols.
+        #: Dataset-position order matches the sequential validation loader, including score ties.
+        self._val_rotated = _RotatedMAP(dataset_order=True) if task == "obb" else None
+        self._val_keypoints = (
+            _KeypointAP(_keypoint_oks_sigmas(num_keypoints), dataset_order=True) if task == "keypoints" else None
+        )
 
         #: Per-image-size cache of ``(anchor_points, stride_per_anchor)`` on CPU.
         self._anchor_cache: dict[tuple[int, int], tuple[Tensor, Tensor]] = {}
+
+    def save_hyperparameters(
+        self,
+        *args: Any,
+        ignore: Sequence[str] | str | None = None,
+        frame: FrameType | None = None,
+        logger: bool = True,
+    ) -> None:
+        """Record Lightning hyperparameters, with ``task`` in its plain spelling, on every save.
+
+        The plain spelling, even when a :class:`~lucid_yolo.tasks.Task` member was passed:
+        a checkpoint loads under ``torch.load(weights_only=True)``, whose restricted
+        unpickler refuses a ``Task`` in ``hparams["task"]``. Normalizing the constructor's
+        local before the call is not enough, because the save merges every subclass
+        ``__init__`` frame's arguments over this one's, ``**kwargs`` contents included, and
+        correcting the record once after the constructor's own call is not enough either,
+        because a subclass may save again after ``super().__init__`` returns. So every save
+        corrects both records it wrote: ``hparams``, which the checkpoint stores, and the
+        initial snapshot a logger writes. The arguments keep Lightning's meaning; with no
+        ``frame``, the caller's frame is passed on, since Lightning would otherwise inspect
+        this override's. A hyperparameter dict given without ``task`` (LightningCLI's path)
+        stays as given.
+
+        Args:
+            *args: Lightning's positional hyperparameters: argument names, or one dict or namespace.
+            ignore: Argument names Lightning leaves out of the record.
+            frame: The frame whose ``__init__`` arguments are recorded; the caller's when ``None``.
+            logger: Whether the initial snapshot is offered to the logger.
+
+        Examples:
+            ```pycon
+            >>> module = DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=3)
+            >>> module.save_hyperparameters({"task": Task.DETECT}, logger=False)
+            >>> type(module.hparams["task"]) is str
+            True
+
+            ```
+        """
+        if frame is None:
+            # Lightning must inspect the original caller, rather than this wrapper.
+            frame = inspect.currentframe()
+            if frame is not None:
+                frame = frame.f_back
+        super().save_hyperparameters(*args, ignore=ignore, frame=frame, logger=logger)
+        recorded_task = self.hparams.get("task")
+        if isinstance(recorded_task, Task):
+            self.hparams["task"] = recorded_task.value
+            self._hparams_initial = copy.deepcopy(self.hparams)
 
     def _init_segmentation(self, task: str, num_classes: int, capture_segment_heads: bool) -> None:
         """Build segmentation in its existing initialization order and retain its scheduling request."""
@@ -1394,27 +1009,12 @@ class DetectionLitModule(LightningModule):
         and there is nothing to configure on the one backend where the layout pays. A
         module with no trainer attached is left as built.
 
-        ``val/mAP`` and ``val/segm_mAP`` come from :mod:`torchmetrics` metrics, which
-        synchronise across ranks themselves. The oriented and keypoint protocols do not:
-        :attr:`_val_rotated_preds` and :attr:`_val_keypoint_preds` are ordinary Python
-        lists, so on more than one process each rank would score and log its own shard as
-        if it were the whole split. That is not recoverable after the fact — average
-        precision ranks every detection of the split against every other by confidence, so
-        averaging per-rank AP values is a different quantity, not an approximation of the
-        right one. Rather than log a plausible wrong number, these tasks refuse to start
-        distributed; ``"detect"`` and ``"segment"`` are unaffected and stay free to scale.
-
-        Lifting this needs the buffers gathered with image identity (so sampler padding's
-        duplicate images are dropped rather than double-counted) and scored once on one
-        rank — the work is real, so the limit is enforced here instead of assumed.
+        All task metrics gather whole-epoch records across ranks before scoring.
+        Rotated and keypoint metrics also drop sampler padding by dataset identity,
+        retaining the original sequential validation order and scoring protocols.
 
         Args:
-            stage: The Trainer stage being set up (``"fit"``, ``"validate"``, ``"test"`` or
-                ``"predict"``). ``"predict"`` runs no validation protocol and is exempt.
-
-        Raises:
-            RuntimeError: If the task is ``"obb"`` or ``"keypoints"`` and the trainer spans
-                more than one process.
+            stage: The Trainer stage being set up.
 
         Examples:
             ```pycon
@@ -1429,26 +1029,12 @@ class DetectionLitModule(LightningModule):
         on_cuda = self._trainer is not None and isinstance(self._trainer.accelerator, CUDAAccelerator)
         if on_cuda:
             self.to(memory_format=torch.channels_last)
-        self._capture_network_active = (
-            self._capture_network
-            and on_cuda
-            and self._trainer is not None
-            and isinstance(self.trainer.strategy, SingleDeviceStrategy)
-            and self.automatic_optimization
-        )
-        if self._capture_network and not self._capture_network_active and stage == "fit":
-            warnings.warn(
-                "capture_network=True is ignored outside single-device CUDA automatic optimization",
-                UserWarning,
-                stacklevel=2,
-            )
+        self._capture_network_active = self._replay_active(self._capture_network, on_cuda)
+        self._warn_ignored_replay(self._capture_network, self._capture_network_active, "capture_network", stage)
+        self._capture_loss_active = self._replay_active(self._capture_loss, on_cuda)
+        self._warn_ignored_replay(self._capture_loss, self._capture_loss_active, "capture_loss", stage)
         self._capture_gradient_norm_active = (
-            self._capture_gradient_norm
-            and _NORM_CAPTURE_SUPPORTED
-            and on_cuda
-            and self._trainer is not None
-            and isinstance(self.trainer.strategy, SingleDeviceStrategy)
-            and self.automatic_optimization
+            self._replay_active(self._capture_gradient_norm, on_cuda) and _NORM_CAPTURE_SUPPORTED
         )
         if self._capture_gradient_norm and not self._capture_gradient_norm_active and stage == "fit":
             warnings.warn(
@@ -1456,35 +1042,51 @@ class DetectionLitModule(LightningModule):
                 UserWarning,
                 stacklevel=2,
             )
-        self._capture_loss_active = (
-            self._capture_loss
+        if self._compile_step and not self._compile_step_resolved:
+            self._compile_objective(on_cuda)
+
+    def _replay_active(self, requested: bool, on_cuda: bool) -> bool:
+        """Decide whether one opted-in CUDA recording runs for the stage being set up.
+
+        ``capture_network`` and ``capture_loss`` share the condition: single-device CUDA
+        automatic optimization.
+
+        Args:
+            requested: The constructor flag.
+            on_cuda: Whether the attached trainer's accelerator is CUDA.
+
+        Returns:
+            Whether the recording is active.
+        """
+        return (
+            requested
             and on_cuda
             and self._trainer is not None
             and isinstance(self.trainer.strategy, SingleDeviceStrategy)
             and self.automatic_optimization
         )
-        if self._capture_loss and not self._capture_loss_active and stage == "fit":
+
+    @staticmethod
+    def _warn_ignored_replay(requested: bool, active: bool, flag: str, stage: str) -> None:
+        """Warn at ``fit`` that an opted-in recording :meth:`_replay_active` refused will not run.
+
+        :meth:`setup` calls this only after storing the activation, the order it kept while
+        the check was inline, so a filter raising the warning as an error cannot leave a
+        flag still on from an earlier run. ``stacklevel=3`` names the caller of
+        :meth:`setup`, the frame the warning named while it was raised in :meth:`setup`
+        itself.
+
+        Args:
+            requested: The constructor flag.
+            active: What :meth:`_replay_active` decided for it.
+            flag: The flag's name, as the warning spells it.
+            stage: The Trainer stage being set up.
+        """
+        if requested and not active and stage == "fit":
             warnings.warn(
-                "capture_loss=True is ignored outside single-device CUDA automatic optimization",
+                f"{flag}=True is ignored outside single-device CUDA automatic optimization",
                 UserWarning,
-                stacklevel=2,
-            )
-        if self._compile_step and not self._compile_step_resolved:
-            self._compile_objective(on_cuda)
-        if stage == "predict" or self.task not in _RANK_LOCAL_VAL_TASKS:
-            return
-        # Reached only for the two guarded tasks, and Lightning calls `setup` with the
-        # module already attached, so reading the trainer here cannot be the detached case
-        # the `detect`/`segment` early return above keeps free.
-        world_size = self.trainer.world_size
-        if world_size > 1:
-            raise RuntimeError(
-                f"task={self.task!r} validation is single-process only, but the trainer spans "
-                f"{world_size} processes. Its epoch metric accumulates rank-local Python lists "
-                "and never gathers them, so each rank would score its own shard as if it were "
-                "the whole split, and average precision cannot be recovered by averaging "
-                "per-rank values. Re-run with devices=1 (and no distributed strategy), or use "
-                "task='detect'/'segment', whose metrics synchronise across ranks."
+                stacklevel=3,
             )
 
     def configure_callbacks(self) -> list[Callback]:
@@ -1573,7 +1175,7 @@ class DetectionLitModule(LightningModule):
             on_cuda: Whether the attached trainer's accelerator is CUDA.
         """
         self._compile_step_resolved = True
-        if self._task != "detect":
+        if not self._strategy.compile_objective:
             warnings.warn(
                 f"compile_step=True is ignored for task={self._task!r}: only the 'detect' objective is "
                 "compiled (WP-184); the segment, obb and keypoint terms stay eager",
@@ -1641,23 +1243,23 @@ class DetectionLitModule(LightningModule):
         ):
             out = self._loss_capture.run(
                 self.loss,
-                head_out.o2m_cls,
-                o2m_boxes,
-                head_out.o2o_cls,
-                o2o_boxes,
-                anchor_points,
-                gt_boxes,
-                gt_labels,
-                gt_mask,
-                strides,
-                alpha,
+                _LossInputs(
+                    head_out.o2m_cls,
+                    o2m_boxes,
+                    head_out.o2o_cls,
+                    o2o_boxes,
+                    anchor_points,
+                    gt_boxes,
+                    gt_labels,
+                    gt_mask,
+                    strides,
+                    alpha,
+                ),
             )
         else:
             out = self.loss(
-                head_out.o2m_cls,
-                o2m_boxes,
-                head_out.o2o_cls,
-                o2o_boxes,
+                BranchPrediction(head_out.o2m_cls, o2m_boxes),
+                BranchPrediction(head_out.o2o_cls, o2o_boxes),
                 anchor_points,
                 gt_boxes,
                 gt_labels,
@@ -1687,17 +1289,6 @@ class DetectionLitModule(LightningModule):
             and images.is_cuda
         )
 
-    def _retire_accumulated_replay(self) -> None:
-        """Retire this task's network replay under gradient accumulation, which it was validated without.
-
-        Tasks absent from :data:`_ACCUMULATION_EAGER_LABELS`, detection today, keep replaying.
-        ``stacklevel=4`` names the caller of the training route, as a retirement that route
-        decides itself does.
-        """
-        label = _ACCUMULATION_EAGER_LABELS.get(self._task)
-        if label is not None and self.trainer.accumulate_grad_batches != 1:
-            self._network_capture.retire(f"{label} replay requires accumulate_grad_batches=1", stacklevel=4)
-
     def _training_network(self, images: Tensor) -> DualHeadOutput:
         """Run the dual head through the training recording when its contract holds.
 
@@ -1708,12 +1299,7 @@ class DetectionLitModule(LightningModule):
         """
         head_out: DualHeadOutput
         if self._network_replay_eligible(images):
-            self._retire_accumulated_replay()
-            if self._task == "keypoints":
-                self._network_capture.check_stem_owners(self.head)
-                breach = _pose_head_breach(self.head, self._head_topology)
-                if breach is not None:
-                    self._network_capture.retire(breach)
+            self._strategy.check_replay_head(self)
             root_hooks = any(
                 (self._forward_hooks, self._forward_pre_hooks, self._backward_hooks, self._backward_pre_hooks)
             )
@@ -1727,21 +1313,18 @@ class DetectionLitModule(LightningModule):
                     reason = "the LightningModule call is compiled"
                 self._network_capture.retire(reason)
                 head_out = self(images)
-            elif self._task == "keypoints":
-                features = self._network_capture.run_features(images, (self.backbone, self.neck))
-                head_out = (
-                    self(images)
-                    if features is None
-                    else cast("DualHeadOutput", self.head(features, _runner=self._network_capture))
-                )
-            elif self._task == "obb":
-                head_out = self._training_oriented_network(images)
             else:
-                eager = cast("Callable[[Tensor], DualHeadOutput]", self)
-                head_out = self._network_capture.run(images, (self.backbone, self.neck, self.head), eager)
+                head_out = self._strategy.training_network(self, images)
         else:
             head_out = self(images)
         return head_out
+
+    def _check_pose_replay_head(self) -> None:
+        """Check pose owners before root-hook guards, retaining the module's certificate binding."""
+        self._network_capture.check_stem_owners(self.head)
+        breach = _pose_head_breach(self.head, self._head_topology)
+        if breach is not None:
+            self._network_capture.retire(breach)
 
     def _training_oriented_network(self, images: Tensor) -> DualHeadOutput:
         """Record the complete oriented network only while its native consumers stay intact."""
@@ -1916,7 +1499,7 @@ class DetectionLitModule(LightningModule):
 
             ```
         """
-        if self._task != "segment":
+        if not self._strategy.segmentation:
             raise ValueError(f"forward_segmentation requires task='segment'; this module's task is {self._task!r}")
         features = self._segmentation_features(images)
         runner = self._segment_head_capture.runner(self, features)
@@ -1938,7 +1521,6 @@ class DetectionLitModule(LightningModule):
         the one-signature-per-fit lifecycle, as for shared pose features.
         """
         if self._network_replay_eligible(images):
-            self._retire_accumulated_replay()
             breach = _segment_head_breach(self.head) or _head_topology_breach(
                 self.head, self._head_topology, "segmentation"
             )
@@ -2036,7 +1618,7 @@ class DetectionLitModule(LightningModule):
 
             ```
         """
-        if self._task != "segment":
+        if not self._strategy.segmentation:
             raise ValueError(
                 f"forward_segmentation_branch requires task='segment'; this module's task is {self._task!r}"
             )
@@ -2109,31 +1691,31 @@ class DetectionLitModule(LightningModule):
         detections, anchor_indices = self._val_decoder.decode_with_indices(
             head_out.o2o_cls, head_out.o2o_box, anchor_points, strides
         )
-        preds = []
-        for image_detections in detections.cpu():
-            kept = image_detections[image_detections[:, SCORE_COLUMN] > 0.0]
-            preds.append(
-                {
-                    "boxes": kept[:, :BOX_CORNERS],
-                    "scores": kept[:, SCORE_COLUMN],
-                    "labels": kept[:, _LABEL_COLUMN].long(),
-                }
-            )
-        if self.task != "obb":
-            host_boxes = _host_split([t.boxes for t in targets])
-            host_labels = _host_split([t.labels for t in targets])
-            ground_truth = [
-                {"boxes": boxes, "labels": labels} for boxes, labels in zip(host_boxes, host_labels, strict=True)
-            ]
-            self._val_map.update(preds, ground_truth)
+        self._strategy.update_box_validation(self, detections, targets)
         if self._val_segm is not None and seg_out is not None and masks is not None:
             image_size = (int(images.shape[-2]), int(images.shape[-1]))
             self._update_val_segm(seg_out, detections, anchor_indices, targets, masks, image_size)
-        if self._task == "obb":
-            self._update_val_rotated(head_out, targets, anchor_points, strides)
-        if self._task == "keypoints":
-            self._update_val_keypoints(head_out, detections, anchor_indices, targets, anchor_points, strides)
+        self._strategy.update_extra_validation(
+            self, head_out, targets, anchor_points, strides, detections, anchor_indices
+        )
         return loss
+
+    def _update_val_map(self, detections: Tensor, targets: list[Targets]) -> None:
+        """Accumulate one batch's kept boxes and its ground truth, moved to the host, for the epoch ``val/mAP``.
+
+        The host copy of the detections is made here rather than by the caller, so a strategy
+        that keeps no axis-aligned metric never pays for it.
+
+        Args:
+            detections: The ``(B, k, 6)`` decoded A9 batch, reduced by :func:`_box_predictions`.
+            targets: The batch's per-image ground truth, carrying ``boxes`` and ``labels``.
+        """
+        host_boxes = _host_split([t.boxes for t in targets])
+        host_labels = _host_split([t.labels for t in targets])
+        ground_truth = [
+            {"boxes": boxes, "labels": labels} for boxes, labels in zip(host_boxes, host_labels, strict=True)
+        ]
+        self._val_map.update(_box_predictions(detections), ground_truth)
 
     def _update_val_rotated(
         self, head_out: DualHeadOutput, targets: list[Targets], anchor_points: Tensor, strides: Tensor
@@ -2170,14 +1752,16 @@ class DetectionLitModule(LightningModule):
         assert angles is not None  # an "obb" module always builds the angle stems
         rboxes = decode_rboxes(head_out.o2o_box, angles, anchor_points, strides)
         detections = o2o_rotated_topk(head_out.o2o_cls, rboxes, k=MAX_DETECTIONS)
-        self._val_rotated_preds.extend(rotated_detections_to_predictions(detections.detach()))
+        preds = rotated_detections_to_predictions(detections.detach())
         host_rboxes = _host_split([target.rboxes.detach() for target in targets])
         host_labels = _host_split([target.labels.detach() for target in targets])
         host_difficult = _host_split([target.difficult.detach() for target in targets])
-        self._val_rotated_targets.extend(
+        ground_truth = [
             {"rboxes": rboxes, "labels": labels.to(torch.long), "difficult": difficult}
             for rboxes, labels, difficult in zip(host_rboxes, host_labels, host_difficult, strict=True)
-        )
+        ]
+        assert self._val_rotated is not None
+        self._val_rotated.update(preds, ground_truth, self._validation_ids(targets, self._val_rotated))
 
     def _update_val_keypoints(
         self,
@@ -2228,22 +1812,35 @@ class DetectionLitModule(LightningModule):
         host_keypoints = _host_split([target.keypoints.detach() for target in targets])
         host_visibility = _host_split([target.keypoint_vis.detach() for target in targets])
         host_labels = _host_split([target.labels.detach() for target in targets])
+        preds = []
+        ground_truth = []
         for index in range(len(targets)):
             keep = cpu_detections[index, :, SCORE_COLUMN] > 0.0
-            self._val_keypoint_preds.append(
+            preds.append(
                 {
                     "keypoints": gathered_points[index, keep],
                     "scores": cpu_detections[index, keep, SCORE_COLUMN],
                     "labels": cpu_detections[index, keep, _LABEL_COLUMN].long(),
                 }
             )
-            self._val_keypoint_targets.append(
+            ground_truth.append(
                 {
                     "keypoints": host_keypoints[index],
                     "visibility": host_visibility[index],
                     "labels": host_labels[index].to(torch.long),
                 }
             )
+
+        assert self._val_keypoints is not None
+        self._val_keypoints.update(preds, ground_truth, self._validation_ids(targets, self._val_keypoints))
+
+    def _validation_ids(self, targets: list[Targets], metric: _ValidationMetric) -> list[int]:
+        """Read transported identities; direct single-device callers use running positions."""
+        if all(isinstance(target, _ValidationTargets) for target in targets):
+            return [target._image_id for target in targets if isinstance(target, _ValidationTargets)]
+        if self._trainer is not None and self.trainer.world_size > 1:
+            raise RuntimeError("Distributed task validation requires the datamodule's indexed validation targets")
+        return list(range(metric.image_count, metric.image_count + len(targets)))
 
     def _update_val_segm(
         self,
@@ -2356,18 +1953,22 @@ class DetectionLitModule(LightningModule):
         single process it is the identity, so the accepted single-device behaviour
         is unchanged.
         """
-        if self.task != "obb":
-            computed = self._val_map.compute()
-            self.log("val/mAP", computed["map"].to(torch.float32), prog_bar=True)
-            self._val_map.reset()
+        self._strategy.log_box_validation(self)
         if self._val_segm is not None and self._any_rank_saw_masks():
             self.log("val/segm_mAP", self._val_segm.compute()["map"].to(torch.float32), prog_bar=True)
             self._val_segm.reset()
             self._val_segm_seen = False
-        if self._val_rotated_preds:
+        if self._val_rotated is not None and self._any_rank_saw_images(self._val_rotated):
             self._log_rotated_map()
-        if self._val_keypoint_preds:
+        if self._val_keypoints is not None and self._any_rank_saw_images(self._val_keypoints):
             self._log_oks_map()
+
+    def _any_rank_saw_images(self, metric: _ValidationMetric) -> bool:
+        """Make every rank enter compute when any rank has task records."""
+        seen = metric.image_count > 0
+        if self._trainer is None:
+            return seen
+        return bool(self.trainer.strategy.reduce_boolean_decision(seen, all=False))
 
     def _any_rank_saw_masks(self) -> bool:
         """Return whether *any* process fed the segmentation metric this epoch.
@@ -2392,17 +1993,17 @@ class DetectionLitModule(LightningModule):
         this one would improve monotonically for reasons that have nothing to do with
         the model.
         """
-        stats = evaluate_rotated_map(self._val_rotated_preds, self._val_rotated_targets)
+        assert self._val_rotated is not None
+        stats = self._val_rotated.compute()
         self.log("val/rotated_mAP50", torch.tensor(stats["map_50"], dtype=torch.float32), prog_bar=True)
         self.log("val/rotated_mAP", torch.tensor(stats["map"], dtype=torch.float32))
-        self._val_rotated_preds.clear()
-        self._val_rotated_targets.clear()
+        self._val_rotated.reset()
 
     def _log_oks_map(self) -> None:
         """Score the epoch's accumulated keypoints and clear the buffers.
 
         The sigma vector is picked by point count through
-        :func:`_keypoint_oks_sigmas`, not stated at construction — the same rule
+        :func:`_keypoint_oks_sigmas` when the metric is built — the same rule
         the :class:`~lucid_yolo.losses.oks_loss.OKSLoss` training term is built
         with (WP-178), so the metric and the loss agree on every point's
         tolerance. The buffers are cleared unconditionally, the
@@ -2410,11 +2011,10 @@ class DetectionLitModule(LightningModule):
         carried last epoch's detections into this one would improve
         monotonically for reasons that have nothing to do with the model.
         """
-        sigmas = _keypoint_oks_sigmas(self._num_keypoints)
-        stats = evaluate_keypoints(self._val_keypoint_preds, self._val_keypoint_targets, sigmas=sigmas)
+        assert self._val_keypoints is not None
+        stats = self._val_keypoints.compute()
         self.log("val/oks_mAP", torch.tensor(stats["AP_all"], dtype=torch.float32), prog_bar=True)
-        self._val_keypoint_preds.clear()
-        self._val_keypoint_targets.clear()
+        self._val_keypoints.reset()
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         """Return MuSGD, paired with the A8 warmup + linear-decay LR schedule.
@@ -2498,13 +2098,8 @@ class DetectionLitModule(LightningModule):
         gt_boxes = gt_boxes.to(images.device)
         gt_labels = gt_labels.to(images.device)
         gt_mask = gt_mask.to(images.device)
-        gt_rboxes = pad_rboxes(targets).to(images.device) if self._task == "obb" else None
-        gt_keypoints, gt_keypoint_vis = None, None
-        if self._task == "keypoints":
-            gt_keypoints, gt_keypoint_vis = pad_keypoints(targets)
-            gt_keypoints = gt_keypoints.to(images.device)
-            gt_keypoint_vis = gt_keypoint_vis.to(images.device)
-        seg_out = self.forward_segmentation(images) if self._task == "segment" else None
+        gt_rboxes, gt_keypoints, gt_keypoint_vis = self._strategy.pad_extras(targets, images.device)
+        seg_out = self._strategy.segmentation_output(self, images)
         # `_objective` is the detection region `compile_step` may compile (WP-184). Detection
         # always calls it; pose calls it only for training steps `_pose_records_loss` routes to
         # the loss recorder, and there it is always the bare method, since `_compile_objective`
@@ -2513,7 +2108,7 @@ class DetectionLitModule(LightningModule):
         # oriented assignment reads `gt_rboxes`, which the region does not take, and
         # segmentation already ran its network in `forward_segmentation`, which the region
         # would run a second time.
-        if self._task == "detect" or self._pose_records_loss(stage):
+        if self._strategy.uses_objective(self, stage):
             # Pose shares the unrotated detection objective, but its ragged point
             # terms remain outside recording and consume the returned assignments.
             # Its native and validation routes retain their existing call signature.
@@ -2525,10 +2120,8 @@ class DetectionLitModule(LightningModule):
             o2m_boxes = decode_ltrb(head_out.o2m_box, anchor_points, strides)
             o2o_boxes = decode_ltrb(head_out.o2o_box, anchor_points, strides)
             out = self.loss(
-                head_out.o2m_cls,
-                o2m_boxes,
-                head_out.o2o_cls,
-                o2o_boxes,
+                BranchPrediction(head_out.o2m_cls, o2m_boxes),
+                BranchPrediction(head_out.o2o_cls, o2o_boxes),
                 anchor_points,
                 gt_boxes,
                 gt_labels,
@@ -2569,7 +2162,7 @@ class DetectionLitModule(LightningModule):
         Returns:
             ``True`` when the step should call :attr:`_objective`, else ``False``.
         """
-        if self._task != "keypoints" or not self._capture_loss_active or stage != "train":
+        if not self._strategy.pose_loss_capture or not self._capture_loss_active or stage != "train":
             return False
         if _source_signature(self.loss) is not None:
             return True
@@ -2602,19 +2195,7 @@ class DetectionLitModule(LightningModule):
         Returns:
             A scalar tensor on the prediction device.
         """
-        if self._task == "obb":
-            return self._oriented_extra_loss(context, out, stage)
-        if self._task == "keypoints":
-            keypoint_term, oks_term = self._keypoint_terms(context, out)
-            self.log(f"{stage}/keypoint", keypoint_term, batch_size=len(context.targets))
-            self.log(f"{stage}/oks", oks_term, batch_size=len(context.targets))
-            return self._keypoint_gain * keypoint_term + self._oks_gain * oks_term
-        if context.seg_out is None:
-            return torch.zeros_like(out.total)
-        mask_term, semantic_term = self._segment_terms(context, out)
-        self.log(f"{stage}/mask", mask_term, batch_size=len(context.targets))
-        self.log(f"{stage}/semantic", semantic_term, batch_size=len(context.targets))
-        return self._mask_gain * mask_term + self._semantic_gain * semantic_term
+        return self._strategy.extra_loss(self, context, out, stage)
 
     def _oriented_extra_loss(self, context: _StepContext, out: DualLossOutput, stage: str) -> Tensor:
         """Weight and log the three oriented terms, blended by the WP-035 ``alpha``.
@@ -2644,9 +2225,9 @@ class DetectionLitModule(LightningModule):
         assert context.gt_rboxes is not None  # the step pads them for exactly this task
         o2m = self._branch_oriented_terms(head_out.o2m_box, o2m_angle, out.o2m_assign, context)
         o2o = self._branch_oriented_terms(head_out.o2o_box, o2o_angle, out.o2o_assign, context)
-        rbox = alpha * o2m.rbox + (1.0 - alpha) * o2o.rbox
-        rl1 = alpha * o2m.rl1 + (1.0 - alpha) * o2o.rl1
-        angle = alpha * o2m.angle + (1.0 - alpha) * o2o.angle
+        rbox = _blend(alpha, o2m.rbox, o2o.rbox)
+        rl1 = _blend(alpha, o2m.rl1, o2o.rl1)
+        angle = _blend(alpha, o2m.angle, o2o.angle)
         batch_size = len(context.targets)
         self.log(f"{stage}/rbox", rbox, batch_size=batch_size)
         self.log(f"{stage}/rl1", rl1, batch_size=batch_size)
@@ -2754,7 +2335,7 @@ class DetectionLitModule(LightningModule):
             return self._paired_keypoint_terms(context, out)
         o2m_rle, o2m_oks = self._score_branch(o2m_points, o2m_sigma, out.o2m_assign, context)
         o2o_rle, o2o_oks = self._score_branch(o2o_points, o2o_sigma, out.o2o_assign, context)
-        return alpha * o2m_rle + (1.0 - alpha) * o2o_rle, alpha * o2m_oks + (1.0 - alpha) * o2o_oks
+        return _blend(alpha, o2m_rle, o2o_rle), _blend(alpha, o2m_oks, o2o_oks)
 
     def _paired_keypoint_terms(self, context: _StepContext, out: DualLossOutput) -> tuple[Tensor, Tensor]:
         """Score the two existing pose branches with one shared density batch.
@@ -2781,8 +2362,8 @@ class DetectionLitModule(LightningModule):
         left_rle, right_rle = self.rle_loss._forward_pair(*arguments)
         alpha = out.alpha
         return (
-            alpha * left_rle + (1.0 - alpha) * right_rle,
-            alpha * self._oks_on(left) + (1.0 - alpha) * self._oks_on(right),
+            _blend(alpha, left_rle, right_rle),
+            _blend(alpha, self._oks_on(left), self._oks_on(right)),
         )
 
     def _score_branch(
@@ -2987,13 +2568,10 @@ class DetectionLitModule(LightningModule):
         # Densified once and shared by both branches: the ragged per-image stacks are
         # padded to a single (B, N, Hp, Wp) tensor here rather than inside the branch
         # loss, which would rebuild it for the second branch from the same input.
-        instances = max(*(int(image_masks.shape[0]) for image_masks in masks), 1)
-        padded_masks = prototypes.new_zeros((len(masks), instances, *proto_grid))
-        for index, image_masks in enumerate(masks):
-            padded_masks[index, : image_masks.shape[0]] = image_masks
+        padded_masks = _pad_mask_targets(masks, targets, prototypes)
         o2m_mask = self._branch_mask_loss(prototypes, o2m_coeff, out.o2m_assign, padded_masks, grid_boxes)
         o2o_mask = self._branch_mask_loss(prototypes, o2o_coeff, out.o2o_assign, padded_masks, grid_boxes)
-        mask_term = out.alpha * o2m_mask + (1.0 - out.alpha) * o2o_mask
+        mask_term = _blend(out.alpha, o2m_mask, o2o_mask)
         return mask_term, self._semantic_term(seg_out, masks, targets)
 
     @staticmethod

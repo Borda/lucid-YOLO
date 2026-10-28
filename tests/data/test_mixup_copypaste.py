@@ -17,10 +17,9 @@ mixed point presence is rejected rather than silently half-annotated.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 import pytest
 import torch
+from tensors import seeded_generator
 
 from lucid_yolo.data import CopyPaste, Mixup, Targets
 from lucid_yolo.data.mixup import CopyPasteParams, _rasterize_polygon
@@ -29,23 +28,6 @@ from lucid_yolo.data.mixup import CopyPasteParams, _rasterize_polygon
 _SIDE = 8
 #: Number of images each assembly consumes.
 _PAIR = 2
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed every RNG source before each test so generated geometry is deterministic."""
-    torch.manual_seed(0)
-    yield
-
-
-def _generator(seed: int = 1234) -> torch.Generator:
-    """Return a CPU generator seeded to ``seed`` for reproducible sampling.
-
-    Examples:
-        >>> torch.rand(1, generator=_generator()).item()
-        0.028979241847991943
-    """
-    return torch.Generator().manual_seed(seed)
 
 
 def _square_ring(x0: float, y0: float, x1: float, y1: float) -> torch.Tensor:
@@ -117,7 +99,7 @@ class TestMixupKeypoints:
         arrive on the far side with the coordinate it went in with. Both images' scenes are
         genuinely present in the blended pixels, so both point sets remain true.
         """
-        mixup = Mixup(p=1.0, generator=_generator())
+        mixup = Mixup(p=1.0, generator=seeded_generator())
         first = _posed_polygon_source(1, 1.0, [[2.0, 2.0]], [2])
         second = _posed_polygon_source(2, 1.0, [[3.0, 4.0]], [1])
 
@@ -132,7 +114,7 @@ class TestMixupKeypoints:
         Mixup fires on the train path of every task at the scale-aware probability, so the
         point-free case has to stay byte-identical for the frozen goldens.
         """
-        mixup = Mixup(p=1.0, generator=_generator())
+        mixup = Mixup(p=1.0, generator=seeded_generator())
         pair = [(torch.ones(3, _SIDE, _SIDE), _boxes_only(1)), (torch.zeros(3, _SIDE, _SIDE), _boxes_only(1))]
 
         _, out = mixup(pair)
@@ -152,7 +134,7 @@ class TestCopyPasteKeypoints:
         coordinates transfer verbatim. Dropping them would leave the pasted box supervised
         for detection but blank for pose.
         """
-        copy_paste = CopyPaste(p=1.0, generator=_generator())
+        copy_paste = CopyPaste(p=1.0, generator=seeded_generator())
         destination = _posed_polygon_source(9, 1.0, [[2.0, 2.0]], [2])
         source = _posed_polygon_source(5, 1.0, [[3.0, 3.0]], [1])
 
@@ -169,7 +151,7 @@ class TestCopyPasteKeypoints:
         source. Selecting points by anything other than the boxes' own index would pair a
         pasted box with a landmark set belonging to an instance that was never pasted.
         """
-        copy_paste = CopyPaste(p=1.0, max_paste=1, generator=_generator())
+        copy_paste = CopyPaste(p=1.0, max_paste=1, generator=seeded_generator())
         source = Targets(
             boxes=torch.tensor([[1.0, 1.0, 3.0, 3.0], [4.0, 4.0, 6.0, 6.0]]),
             labels=torch.tensor([5, 6]),
@@ -191,7 +173,7 @@ class TestCopyPasteKeypoints:
         Copy-paste needs polygon rings, which is the segmentation path — the one that
         brings no landmarks. That combination is the common case and must stay a no-op.
         """
-        copy_paste = CopyPaste(p=1.0, generator=_generator())
+        copy_paste = CopyPaste(p=1.0, generator=seeded_generator())
         pair = [(torch.zeros(3, _SIDE, _SIDE), Targets.empty()), (torch.ones(3, _SIDE, _SIDE), _polygon_source())]
 
         _, out = copy_paste(pair)
@@ -207,7 +189,7 @@ class TestCopyPasteKeypoints:
         the container cannot represent and no consumer could interpret. Rejecting mirrors
         the rule ``Targets.concat`` already applies to polygons.
         """
-        copy_paste = CopyPaste(p=1.0, generator=_generator())
+        copy_paste = CopyPaste(p=1.0, generator=seeded_generator())
         destination = _polygon_source(label=9)
         source = _posed_polygon_source(5, 1.0, [[3.0, 3.0]], [1])
 
@@ -220,7 +202,7 @@ class TestMixupBlend:
 
     def test_blend_recovers_lam_from_known_pixel(self) -> None:
         """With a=ones, b=zeros the blended pixel equals lam, so lam is recoverable."""
-        mixup = Mixup(p=1.0, generator=_generator())
+        mixup = Mixup(p=1.0, generator=seeded_generator())
         a = (torch.ones(3, _SIDE, _SIDE), Targets.empty())
         b = (torch.zeros(3, _SIDE, _SIDE), Targets.empty())
 
@@ -231,7 +213,7 @@ class TestMixupBlend:
 
     def test_targets_concatenated_with_counts_preserved(self) -> None:
         """Both images' boxes survive the blend: 2 + 3 boxes concatenate to 5."""
-        mixup = Mixup(p=1.0, generator=_generator())
+        mixup = Mixup(p=1.0, generator=seeded_generator())
         a = (torch.ones(3, _SIDE, _SIDE), _boxes_only(2))
         b = (torch.zeros(3, _SIDE, _SIDE), _boxes_only(3))
 
@@ -246,7 +228,7 @@ class TestMixupPassThrough:
 
     def test_p_zero_identity_on_first_pair(self) -> None:
         """p=0 never blends: the first image and targets return unchanged, lam is None."""
-        mixup = Mixup(p=0.0, generator=_generator())
+        mixup = Mixup(p=0.0, generator=seeded_generator())
         a_image = torch.ones(3, _SIDE, _SIDE)
         a = (a_image, _boxes_only(1))
         b = (torch.zeros(3, _SIDE, _SIDE), _boxes_only(1))
@@ -263,7 +245,7 @@ class TestMixupGuards:
 
     def test_mismatched_sizes_raise(self) -> None:
         """A triggered blend of differently sized images raises ValueError."""
-        mixup = Mixup(p=1.0, generator=_generator())
+        mixup = Mixup(p=1.0, generator=seeded_generator())
         a = (torch.ones(3, _SIDE, _SIDE), Targets.empty())
         b = (torch.zeros(3, _SIDE, _SIDE + 1), Targets.empty())
 
@@ -283,7 +265,7 @@ class TestCopyPastePaste:
 
     def test_square_instance_pixels_and_targets_land(self) -> None:
         """A source square overwrites destination pixels and appends one instance."""
-        copy_paste = CopyPaste(p=1.0, generator=_generator())
+        copy_paste = CopyPaste(p=1.0, generator=seeded_generator())
         destination = (torch.zeros(3, _SIDE, _SIDE), Targets.empty())
         source = (torch.ones(3, _SIDE, _SIDE), _polygon_source(label=5))
 
@@ -298,7 +280,7 @@ class TestCopyPastePaste:
 
     def test_pasted_pixel_count_matches_rasterised_mask(self) -> None:
         """The number of overwritten pixels equals the polygon's rasterised area."""
-        copy_paste = CopyPaste(p=1.0, generator=_generator())
+        copy_paste = CopyPaste(p=1.0, generator=seeded_generator())
         destination = (torch.zeros(3, _SIDE, _SIDE), Targets.empty())
         source = (torch.ones(3, _SIDE, _SIDE), _polygon_source())
 
@@ -313,7 +295,7 @@ class TestCopyPasteSkips:
 
     def test_non_polygon_source_instances_skipped(self) -> None:
         """A source with boxes but no polygons pastes nothing even at p=1."""
-        copy_paste = CopyPaste(p=1.0, generator=_generator())
+        copy_paste = CopyPaste(p=1.0, generator=seeded_generator())
         dest_image = torch.zeros(3, _SIDE, _SIDE)
         destination = (dest_image, Targets.empty())
         source = (torch.ones(3, _SIDE, _SIDE), _boxes_only(3))
@@ -326,7 +308,7 @@ class TestCopyPasteSkips:
 
     def test_p_zero_identity(self) -> None:
         """p=0 pastes nothing: the destination image and targets return unchanged."""
-        copy_paste = CopyPaste(p=0.0, generator=_generator())
+        copy_paste = CopyPaste(p=0.0, generator=seeded_generator())
         dest_image = torch.zeros(3, _SIDE, _SIDE)
         destination = (dest_image, Targets.empty())
         source = (torch.ones(3, _SIDE, _SIDE), _polygon_source())

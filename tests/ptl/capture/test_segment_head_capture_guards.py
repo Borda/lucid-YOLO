@@ -9,11 +9,15 @@ boundaries replaced only where needed to reach the decision under test.
 from __future__ import annotations
 
 import contextlib
+import copy
+import warnings
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from pytorch_lightning.accelerators import CUDAAccelerator
+from pytorch_lightning.strategies import SingleDeviceStrategy
 from torch import nn
 
 from lucid_yolo.ptl import DetectionLitModule
@@ -315,8 +319,21 @@ class TestRunnerCertificate:
             assert holder.runner(model, features) is None
         assert holder.disabled == (change == "disabled") and holder.owner is None
 
+    def test_gradient_accumulation_keeps_certificate(self, runtime: tuple) -> None:
+        """A trainer that accumulates gradients certifies like one that steps every batch, and nothing retires.
+
+        Live gradients leave a group's static gradient buffers at forward time, before its replay, so
+        accumulated micro-batches no longer need the native route the holder used to fall back to.
+        """
+        model, holder, features = runtime
+        model._trainer.accumulate_grad_batches = 2
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert holder.runner(model, features) is holder
+        assert not holder.disabled
+
     @pytest.mark.parametrize(
-        "change", ["accumulation", "precision_error", "levels", "replacement", "attributes", "storage", "precision"]
+        "change", ["precision_error", "levels", "replacement", "attributes", "storage", "precision"]
     )
     def test_contract_drift_retires_with_its_reason(
         self, runtime: tuple, change: str, monkeypatch: pytest.MonkeyPatch
@@ -325,10 +342,7 @@ class TestRunnerCertificate:
         model, holder, features = runtime
         if change in ("replacement", "attributes", "storage", "precision"):
             assert holder.runner(model, features) is holder
-        if change == "accumulation":
-            model._trainer.accumulate_grad_batches = 2
-            cause = "accumulation changed"
-        elif change == "precision_error":
+        if change == "precision_error":
             monkeypatch.setattr(
                 capture, "_precision_signature", MagicMock(side_effect=RuntimeError("precision query refused"))
             )
@@ -437,6 +451,87 @@ class TestRecordingLifetime:
         assert torch.equal(torch.get_rng_state(), rng)
         for name, value in stage.named_buffers():
             assert torch.equal(value, snapshots[name]), name
+
+    def test_live_gradient_leaves_storage_at_forward_time(self, dry_recording: MagicMock) -> None:
+        """A live ``.grad`` is copied out when the group replays, before its backward runs.
+
+        The gradient stands in for one adopted from the group's static gradient buffers, which the
+        replayed backward overwrites. Copying it from a backward pre-hook left accumulated gradients
+        wrong on CUDA (WP-206), so the copy is made at forward time: right after ``run`` the parameter
+        already holds a separate tensor of the same values, and the original is never written again.
+        """
+        stage = nn.Linear(2, 1)
+        stage.weight.grad = live = torch.full_like(stage.weight, 5.0)
+        inputs = (torch.ones(1, 2),)
+        adapter = capture._PredictionGroup((stage,), lambda values: (stage(values[0]),))
+        with patch("torch.cuda.current_stream", return_value=SimpleNamespace(cuda_stream=17)):
+            entry = capture._RecordedGroup(adapter, inputs, capture._RecordedSpans([], list(inputs)))
+            output = entry.run(inputs)
+        at_forward = (stage.weight.grad is not live, torch.equal(stage.weight.grad, live))
+        output[0].sum().backward()
+        assert dry_recording.call_count == 1 and at_forward == (True, True)
+        assert torch.equal(live, torch.full_like(live, 5.0))
+        assert torch.equal(stage.weight.grad, torch.full_like(live, 6.0))
+
+    def test_dry_recording_accumulates_like_native_and_drains_on_clear(self, dry_recording: MagicMock) -> None:
+        """Two accumulated micro-batches record once, hold until backward, match native and drain on ``clear``.
+
+        The seam returns the adapter itself, so the holder's own routing, hold, forward-time copy
+        and stream drain all run on CPU. The first micro-batch's gradient object must stay as it was
+        and the accumulated gradients must equal the same micro-batches run natively.
+        """
+        stage = nn.Linear(2, 1)
+        reference = copy.deepcopy(stage)
+        holder = capture._SegmentHeadCapture(True)
+        stream = MagicMock(cuda_stream=17)
+        key = (id(stage), "stem")
+        first, second = (torch.tensor([[1.0, -2.0]]),), (torch.tensor([[3.0, 0.5]]),)
+
+        def native(values: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
+            """Call the stage the way the segmentation stem route does.
+
+            Examples:
+                >>> callable(native)
+                True
+            """
+            return (stage(values[0]),)
+
+        with patch("torch.cuda.current_stream", return_value=stream):
+            output = holder._run(key, (stage,), native, first)
+            held = holder.entries[key].pending_backward
+            output[0].sum().backward()
+            live = stage.weight.grad
+            output = holder._run(key, (stage,), native, second)
+            copied = stage.weight.grad is not live
+            output[0].sum().backward()
+        reference(first[0]).sum().backward()
+        expected_live = reference.weight.grad.clone()
+        reference(second[0]).sum().backward()
+        released = not holder.entries[key].pending_backward
+        holder.clear()
+        assert dry_recording.call_count == 1 and held and copied and released
+        assert torch.equal(live, expected_live)
+        assert torch.equal(stage.weight.grad, reference.weight.grad)
+        assert torch.equal(stage.bias.grad, reference.bias.grad)
+        stream.synchronize.assert_called_once_with()
+        assert holder.entries == {}
+
+    def test_fit_setup_activates_under_gradient_accumulation(self) -> None:
+        """A single-device CUDA fit that accumulates gradients activates head replay and warns nothing.
+
+        Accumulation used to be refused at setup with a warning; the trainer attributes here are the
+        ones setup reads, with every other activation condition met.
+        """
+        holder = capture._SegmentHeadCapture(True)
+        module = _module()
+        module._trainer = SimpleNamespace(
+            accelerator=CUDAAccelerator(),
+            strategy=SingleDeviceStrategy(device=torch.device("cuda")),
+            accumulate_grad_batches=2,
+        )
+        with patch.object(capture.warnings, "warn", side_effect=AssertionError("must not warn")):
+            holder.setup(module, "fit")
+        assert holder.active
 
     def test_backward_preserves_existing_gradient_storage_and_releases_hold(self) -> None:
         """Real CPU autograd invokes the registered hooks; only the recording API is replaced."""

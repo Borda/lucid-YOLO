@@ -10,32 +10,14 @@ functional-core check pytest owns; the hook is the lint gate that runs it.
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
-from types import ModuleType
+
+from script_loader import load_script
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AUDIT_PATH = REPO_ROOT / "scripts" / "lint" / "audit_docs_site.py"
 
 
-def _load_audit() -> ModuleType:
-    """Load ``scripts/lint/audit_docs_site.py`` as an importable module.
-
-    Examples:
-        >>> module = _load_audit()
-        >>> module.__name__
-        'audit_docs_site'
-        >>> callable(module.find_violations)
-        True
-    """
-    spec = importlib.util.spec_from_file_location("audit_docs_site", AUDIT_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-audit = _load_audit()
+audit = load_script("audit_docs_site")
 
 
 def test_every_docs_page_listed_in_nav_flags_orphan_page(tmp_path: Path) -> None:
@@ -80,7 +62,7 @@ class TestPagesDeclaredNotInNav:
 
         assert audit.check_every_docs_page_is_listed_in_the_nav(docs, mkdocs_yml) == []
 
-    def test_still_flags_pages_outside_the_pattern(self, tmp_path: Path) -> None:
+    def test_flags_pages_outside_the_pattern(self, tmp_path: Path) -> None:
         """A page the pattern does not match is still reported when the nav omits it."""
         docs = tmp_path / "docs"
         (docs / "work_packages").mkdir(parents=True)

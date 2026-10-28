@@ -43,7 +43,8 @@ import sys
 import tomllib
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root for path-based entry points
+from scripts._common import REPO_ROOT
 
 #: ``--help`` one-liner. Spelled out rather than sliced off ``__doc__``, which is optional
 #: at runtime under ``python -OO`` and typed as ``str | None``.

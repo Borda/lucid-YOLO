@@ -89,6 +89,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
@@ -113,11 +114,16 @@ from lucid_yolo.predict import (
     predict_oriented,
     predict_segmentation,
 )
+from lucid_yolo.tasks import Task
+from lucid_yolo.validate import require_one_of
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
+    from typing import Any
 
     from torch import Tensor
+
+    from lucid_yolo.ptl.module import DetectionLitModule
 
 __all__ = [
     "DetectionRecord",
@@ -134,15 +140,6 @@ __all__ = [
 #: A detection report carries ``null`` there rather than omitting the key, which would
 #: make "this checkpoint has no masks" and "this report predates masks" the same reading.
 _MASK_FORMAT = "coco-rle"
-
-#: The task whose checkpoints additionally produce masks (WP-090).
-_SEGMENT_TASK = "segment"
-
-#: The task whose checkpoints produce rotated boxes instead of corners (WP-091).
-_OBB_TASK = "obb"
-
-#: The task whose checkpoints additionally produce point sets (WP-152).
-_KEYPOINTS_TASK = "keypoints"
 
 #: Value of a keypoint report's ``keypoints`` key: the layout its ``keypoints`` records
 #: are written in -- one ``[x, y]`` pair per point, in the head's own point order, in
@@ -257,6 +254,58 @@ class SegmentedDetectionRecord(DetectionRecord):
     segmentation: RleMask
 
 
+@dataclass
+class _PredictionReport:
+    """Keep task-specific records, display lines and their report formats together."""
+
+    records: list[DetectionRecord] | list[OrientedDetectionRecord] | list[KeypointDetectionRecord]
+    lines: list[str]
+    mask_format: str | None = None
+    keypoint_format: str | None = None
+    box_format: str | None = None
+
+
+def _predict_detect(
+    module: DetectionLitModule, image: Path, info: dict[str, object], **kwargs: Any
+) -> _PredictionReport:
+    """Convert axis-aligned predictions into their existing CLI report representation."""
+    records = _to_records(predict_image(module, image, **kwargs))
+    return _PredictionReport(records, _detection_lines(records))
+
+
+def _predict_segment(
+    module: DetectionLitModule, image: Path, info: dict[str, object], **kwargs: Any
+) -> _PredictionReport:
+    """Convert masks and boxes into aligned records with the COCO RLE format label."""
+    prediction = predict_segmentation(module, image, **kwargs)
+    records = _to_segmented_records(prediction.detections, prediction.masks)
+    return _PredictionReport(records, _detection_lines(records), mask_format=_MASK_FORMAT)
+
+
+def _predict_obb(module: DetectionLitModule, image: Path, info: dict[str, object], **kwargs: Any) -> _PredictionReport:
+    """Convert oriented boxes into their tuple and corner report representation."""
+    records = _to_oriented_records(predict_oriented(module, image, **kwargs))
+    return _PredictionReport(records, _oriented_lines(records), box_format=_OBB_BOX_FORMAT)
+
+
+def _predict_keypoints(
+    module: DetectionLitModule, image: Path, info: dict[str, object], **kwargs: Any
+) -> _PredictionReport:
+    """Convert point sets and retain the schema size in checkpoint provenance."""
+    prediction = predict_keypoints(module, image, **kwargs)
+    records = _to_keypoint_records(prediction.detections, prediction.keypoints)
+    info["num_keypoints"] = prediction.num_keypoints
+    return _PredictionReport(records, _keypoint_lines(records), keypoint_format=_KEYPOINT_FORMAT)
+
+
+_PREDICT_TASKS: dict[Task, Callable[..., _PredictionReport]] = {
+    Task.DETECT: _predict_detect,
+    Task.SEGMENT: _predict_segment,
+    Task.OBB: _predict_obb,
+    Task.KEYPOINTS: _predict_keypoints,
+}
+
+
 def predict(
     checkpoint: Path,
     image: Path,
@@ -267,7 +316,7 @@ def predict(
     device: str = "auto",
     output: Path | None = None,
 ) -> int:
-    """Detect objects in one image, and segment or orient them when the checkpoint can.
+    """Predict boxes, instance masks, rotated boxes or keypoints for one image.
 
     Which of the four happens is the checkpoint's ``task``, not a flag: a ``segment``
     checkpoint run as a detector would answer plausibly with its mask branch unread, an
@@ -276,7 +325,7 @@ def predict(
 
     Args:
         checkpoint: Lightning ``.ckpt`` to predict with; its task must be ``detect``,
-            ``segment`` or ``obb``.
+            ``segment``, ``obb`` or ``keypoints``.
         image: Image file to run on.
         ema: Predict with the EMA shadow stored in the checkpoint rather than raw
             weights.
@@ -300,7 +349,8 @@ def predict(
         ``0``; a failure here raises rather than returning a code.
 
     Raises:
-        ValueError: If ``device`` names a backend that is not available
+        ValueError: If the checkpoint's ``task`` is unknown, if ``device`` names a backend
+            that is not available
             (:func:`~lucid_yolo.eval.checkpoint.pick_device`), or if ``decoder``,
             ``conf_threshold`` or ``img_size`` is outside its domain — the four entry
             points of :mod:`lucid_yolo.predict` own that check, so this command and a
@@ -316,70 +366,26 @@ def predict(
     """
     module, info = load_eval_module(checkpoint, use_ema=ema)
     task = str(module.task)
+    require_one_of("task", task, tuple(DEFAULT_IMG_SIZE))
     info["task"] = task
     info["decoder"] = decoder
-    resolved_img_size = DEFAULT_IMG_SIZE.get(task, 640) if img_size is None else img_size
+    resolved_img_size = DEFAULT_IMG_SIZE[task] if img_size is None else img_size
     run_on = pick_device(device)
-    records: list[DetectionRecord] | list[OrientedDetectionRecord] | list[KeypointDetectionRecord]
-    box_format: str | None = None
-    if task == _OBB_TASK:
-        rotated = predict_oriented(
-            module,
-            image,
-            img_size=resolved_img_size,
-            decoder=decoder,
-            conf_threshold=conf_threshold,
-            device=run_on,
-        )
-        records = _to_oriented_records(rotated)
-        lines = _oriented_lines(records)
-        mask_format: str | None = None
-        keypoint_format: str | None = None
-        box_format = _OBB_BOX_FORMAT
-    elif task == _KEYPOINTS_TASK:
-        posed = predict_keypoints(
-            module,
-            image,
-            img_size=resolved_img_size,
-            decoder=decoder,
-            conf_threshold=conf_threshold,
-            device=run_on,
-        )
-        records = _to_keypoint_records(posed.detections, posed.keypoints)
-        lines = _keypoint_lines(records)
-        mask_format = None
-        keypoint_format = _KEYPOINT_FORMAT
-        info["num_keypoints"] = posed.num_keypoints
-    elif task == _SEGMENT_TASK:
-        prediction = predict_segmentation(
-            module,
-            image,
-            img_size=resolved_img_size,
-            decoder=decoder,
-            conf_threshold=conf_threshold,
-            device=run_on,
-        )
-        records = _to_segmented_records(prediction.detections, prediction.masks)
-        lines = _detection_lines(records)
-        mask_format = _MASK_FORMAT
-        keypoint_format = None
-    else:
-        # Not an `elif task == "detect"`: an unknown task must be refused, and the refusal
-        # belongs to the library (see `lucid_yolo.predict`), which is where it names the
-        # task the checkpoint actually carries. Restating the test here would give this
-        # command a second opinion about which checkpoints it accepts.
-        detections = predict_image(
-            module,
-            image,
-            img_size=resolved_img_size,
-            decoder=decoder,
-            conf_threshold=conf_threshold,
-            device=run_on,
-        )
-        records = _to_records(detections)
-        lines = _detection_lines(records)
-        mask_format = None
-        keypoint_format = None
+    # require_one_of refuses unknown tasks before dispatch; the library also refuses
+    # incompatible checkpoints and names the task the checkpoint actually carries.
+    prediction = _PREDICT_TASKS[Task(task)](
+        module,
+        image,
+        info,
+        img_size=resolved_img_size,
+        decoder=decoder,
+        conf_threshold=conf_threshold,
+        device=run_on,
+    )
+    records, lines = prediction.records, prediction.lines
+    mask_format = prediction.mask_format
+    keypoint_format = prediction.keypoint_format
+    box_format = prediction.box_format
 
     print(
         f"predict: {image} -> {len(records)} detections, path={decoder}, "

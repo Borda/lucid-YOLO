@@ -35,7 +35,9 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `scripts.lint` resolves under the hook
+from scripts.lint._common import REPO_ROOT, add_repo_root_argument, print_failure
+
 DEFAULT_FIGURES_DIR = REPO_ROOT / "docs" / "figures"
 DEFAULT_REPORT_PATH = REPO_ROOT / "docs" / "REPRODUCTION_REPORT.md"
 
@@ -176,20 +178,12 @@ def main(argv: list[str] | None = None) -> int:
         Process exit code: ``0`` clean, ``1`` when any violation is found.
     """
     parser = argparse.ArgumentParser(description="Audit docs/figures/*.svg captions against the reproduction report.")
-    parser.add_argument(
-        "--repo-root",
-        type=Path,
-        default=REPO_ROOT,
-        help=f"repository root to scan (default: {REPO_ROOT})",
-    )
+    add_repo_root_argument(parser, "repository root to scan")
     args = parser.parse_args(argv)
 
     violations = check_figures_present(args.repo_root) + check_captions_match(args.repo_root)
     if violations:
-        print(f"figure-caption-audit FAILED: {len(violations)} violation(s)")
-        for item in violations:
-            print(f"  - {item}")
-        return 1
+        return print_failure("figure-caption-audit", violations)
     print("figure-caption-audit clean: every figure is present and every caption matches its drawing")
     return 0
 

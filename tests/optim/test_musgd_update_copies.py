@@ -10,23 +10,9 @@ from typing import Any, cast
 
 import pytest
 import torch
-from torch import Tensor
+from tensors import assert_bytes
 
 from lucid_yolo.optim.musgd import MuSGD
-
-
-def assert_bytes(left: Tensor, right: Tensor) -> None:
-    """Compare numerical storage without rounding or hiding signed zero.
-
-    Examples:
-        >>> assert_bytes(torch.tensor([-0.0]), torch.tensor([-0.0]))
-    """
-    assert left.shape == right.shape
-    assert left.dtype == right.dtype
-    assert torch.equal(
-        left.detach().contiguous().reshape(-1).view(torch.uint8),
-        right.detach().contiguous().reshape(-1).view(torch.uint8),
-    )
 
 
 def parameters() -> list[torch.nn.Parameter]:

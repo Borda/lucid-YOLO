@@ -23,13 +23,13 @@ import yaml
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader, Dataset
+from training import tiny_module
 
 from lucid_yolo.cli.train import DetectionCLI, _checkpoint_filename, default_determinism, packaged_config
 from lucid_yolo.data.targets import Targets
 from lucid_yolo.ptl import DetectionDataModule, DetectionLitModule, collate_detection, unpack_batch
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
     from torch import Tensor
@@ -44,13 +44,6 @@ _BATCH_SIZE = 2
 _DATASET_SIZE = 4
 #: Instances per synthetic image.
 _INSTANCES_PER_IMAGE = 2
-
-
-@pytest.fixture(autouse=True)
-def reset_random_seeds() -> Iterator[None]:
-    """Seed torch before each test so the tiny module and dataset are reproducible."""
-    torch.manual_seed(0)
-    yield
 
 
 class _FixedDetectionDataset(Dataset[tuple["Tensor", Targets]]):
@@ -93,16 +86,6 @@ def _train_loader() -> DataLoader[tuple[Tensor, Targets]]:
     )
 
 
-def _tiny_module() -> DetectionLitModule:
-    """Build an n-scale module with a low channel cap for a fast CPU step.
-
-    Examples:
-        >>> _tiny_module().task
-        'detect'
-    """
-    return DetectionLitModule(depth=0.34, width=0.25, max_channels=64, num_classes=_NUM_CLASSES)
-
-
 class TestCheckpointFilename:
     """Unit coverage of the pure :func:`~lucid_yolo.cli.train._checkpoint_filename` helper."""
 
@@ -134,7 +117,7 @@ def test_fit_checkpoint_names_task_and_variant(tmp_path: Path) -> None:
     numbering and the ``epoch=X-step=Y`` suffix are unchanged, only the new
     ``detect_s_`` prefix is added.
     """
-    module = _tiny_module()
+    module = tiny_module(max_channels=64)
     checkpoint = ModelCheckpoint(filename=_checkpoint_filename(module.task, "s"))
     trainer = Trainer(
         max_epochs=1,
