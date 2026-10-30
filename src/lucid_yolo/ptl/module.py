@@ -673,6 +673,11 @@ class DetectionLitModule(LightningModule):
             changed storage, modes, hooks or precision retire the recording. Warmup
             restores buffers and RNG, and the fit callbacks discard recordings on
             completion or failure. Higher-order differentiation is unsupported.
+        capture_updates: Enable MuSGD's optional replay of the existing update preparation,
+            including momentum, followed by a native batched parameter write at the current
+            learning rate. Defaults to ``False``. Uses private gradient storage and live
+            parameters and momentum; unsupported signatures stay native. Like
+            ``capture_orthogonalization``, this has setup and retained-workspace costs.
         capture_loss: Replay the existing detection assignment and loss forward/backward,
             for detection or pose, on single-device CUDA automatic training. Default off:
             recording pays setup and retains a graph pool. Masked target capacity grows
@@ -683,22 +688,22 @@ class DetectionLitModule(LightningModule):
             summation can change rounding. Can combine with ``capture_network``,
             ``capture_orthogonalization`` and ``capture_updates``; it records no optimizer
             update itself, so the optimizer step is whatever those optimizer options select.
-        capture_gradient_norm: Replay PyTorch's L2 gradient-norm reduction on single-device CUDA with torch>=2.9.
-            Default false. Native scaling reads the current clipping limit; one fit-scoped
-            gradient signature is retained and drift retires recording. CPU, older runtimes,
-            custom clipping and unsupported gradient layouts stay native. Extra private CUDA
-            buffers and setup cost may outweigh the gain outside small-batch training.
-        capture_updates: Enable MuSGD's optional replay of the existing update preparation,
-            including momentum, followed by a native batched parameter write at the current
-            learning rate. Defaults to ``False``. Uses private gradient storage and live
-            parameters and momentum; unsupported signatures stay native. Like
-            ``capture_orthogonalization``, this has setup and retained-workspace costs.
         capture_segment_heads: Record independent CUDA segmentation prediction groups, including first-order backward.
             Defaults to ``False``. Requires ``task="segment"`` and ``compile_step=False``, PyTorch 2.9 or newer, BF16
             mixed precision and single-device automatic optimization; gradient accumulation replays too. CPU, MPS,
             FP32, FP16 and validation keep native execution. ``compile_step=True`` is refused rather than ignored,
             although it leaves the segment objective eager today, so an accepted configuration keeps its meaning once
             that is compiled.
+        capture_gradient_norm: Replay PyTorch's L2 gradient-norm reduction on single-device CUDA with torch>=2.9.
+            Default false. Native scaling reads the current clipping limit; one fit-scoped
+            gradient signature is retained and drift retires recording. Value clipping,
+            disabled clipping (limit ``None`` or at most zero), optimizers that unscale inside
+            their own step, customized module/precision-plugin or PyTorch clipping,
+            non-CUDA devices, unsupported torch versions and unsupported gradient layouts
+            keep native clipping. Ordinary ``16-mixed`` GradScaler training can capture after
+            unscaling; unscale-in-step optimizers retain Lightning's mixed-precision clipping
+            rejection. Extra private CUDA buffers and setup cost may outweigh the gain
+            outside small-batch training.
 
     Raises:
         ValueError: If ``task`` is not one of ``"detect"``, ``"segment"``, ``"obb"``,
@@ -1106,11 +1111,21 @@ class DetectionLitModule(LightningModule):
         gradient_clip_val: int | float | None = None,
         gradient_clip_algorithm: str | None = None,
     ) -> None:
-        """Optionally record only the norm reduction; retain native clipping semantics.
+        """Optionally record the norm reduction while retaining native clipping semantics.
 
-        The precision plugin has already unscaled FP16 gradients before this hook.
-        Value clipping, disabled clipping and customized clipping implementations keep
-        the original call, including the plugin's optimizer-unscaling rejection.
+        Ordinary FP16 GradScaler gradients are already unscaled before this hook and
+        can use capture. Optimizers that unscale inside their own step keep the native
+        call, including Lightning's mixed-precision clipping rejection. Value or disabled
+        clipping retires capture once, as does customized module or precision-plugin
+        clipping, with the latter diagnostic naming the plugin type. Plugins inheriting
+        the checked stock clipping methods through their MRO remain eligible.
+
+        Args:
+            optimizer: Optimizer whose gradients are clipped.
+            gradient_clip_val: Clipping limit; ``None`` uses the trainer's setting.
+                Limits at or below zero disable clipping.
+            gradient_clip_algorithm: Clipping algorithm; ``None`` uses the trainer's setting.
+                Algorithms other than ``"norm"`` keep native clipping.
         """
         native = super().configure_gradient_clipping
         if not self._capture_gradient_norm_active or self._gradient_norm_capture.retired:
