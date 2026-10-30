@@ -36,6 +36,10 @@ if TYPE_CHECKING:
 #: First verified BF16 replay runtime; 2.4's path does not meet the exact eager oracle.
 BF16_REPLAY_SUPPORTED = Version(torch.__version__) >= Version("2.9")
 
+#: First verified runtime for native norm-decomposition replay, not an API availability floor.
+#: Independent of the BF16 eager-oracle gate because the replay contracts differ.
+GRADIENT_NORM_REPLAY_SUPPORTED = Version(torch.__version__) >= Version("2.9")
+
 #: The process-wide module hook registries; any entry runs code a recording would not replay.
 _GLOBAL_HOOKS = (
     "_global_forward_hooks",

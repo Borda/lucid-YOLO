@@ -214,6 +214,7 @@ from lucid_yolo.models.heads.obb import decode_rboxes, o2o_rotated_topk
 from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
+from lucid_yolo.ptl._graph_replay import GRADIENT_NORM_REPLAY_SUPPORTED as _NORM_CAPTURE_SUPPORTED
 from lucid_yolo.ptl._padding import (
     _BOX_DIM,
     _KEYPOINT_DIM,
@@ -235,7 +236,6 @@ from lucid_yolo.ptl._task_terms import (
     normalize_keypoints_to_box,
 )
 from lucid_yolo.ptl._validation import _KeypointAP, _RotatedMAP, _ValidationMetric, _ValidationTargets
-from lucid_yolo.ptl.gradient_norm_capture import _SUPPORTED as _NORM_CAPTURE_SUPPORTED
 from lucid_yolo.ptl.gradient_norm_capture import _GradientNormCapture, _GradientNormLifecycle
 from lucid_yolo.ptl.loss_capture import (
     _LossCapture,
@@ -1033,12 +1033,12 @@ class DetectionLitModule(LightningModule):
         self._warn_ignored_replay(self._capture_network, self._capture_network_active, "capture_network", stage)
         self._capture_loss_active = self._replay_active(self._capture_loss, on_cuda)
         self._warn_ignored_replay(self._capture_loss, self._capture_loss_active, "capture_loss", stage)
-        self._capture_gradient_norm_active = (
-            self._replay_active(self._capture_gradient_norm, on_cuda) and _NORM_CAPTURE_SUPPORTED
-        )
-        if self._capture_gradient_norm and not self._capture_gradient_norm_active and stage == "fit":
+        norm_device_eligible = self._replay_active(self._capture_gradient_norm, on_cuda)
+        self._capture_gradient_norm_active = norm_device_eligible and _NORM_CAPTURE_SUPPORTED
+        self._warn_ignored_replay(self._capture_gradient_norm, norm_device_eligible, "capture_gradient_norm", stage)
+        if norm_device_eligible and not _NORM_CAPTURE_SUPPORTED and stage == "fit":
             warnings.warn(
-                "capture_gradient_norm=True requires single-device CUDA automatic optimization and torch>=2.9",
+                f"capture_gradient_norm=True is verified only on torch>=2.9; installed torch is {torch.__version__}",
                 UserWarning,
                 stacklevel=2,
             )
@@ -1113,7 +1113,7 @@ class DetectionLitModule(LightningModule):
         the original call, including the plugin's optimizer-unscaling rejection.
         """
         native = super().configure_gradient_clipping
-        if not self._capture_gradient_norm_active or self._gradient_norm_capture._disabled:
+        if not self._capture_gradient_norm_active or self._gradient_norm_capture.retired:
             native(optimizer, gradient_clip_val, gradient_clip_algorithm)
             return
         trainer_maximum, trainer_algorithm = self.trainer.gradient_clip_val, self.trainer.gradient_clip_algorithm

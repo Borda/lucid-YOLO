@@ -12,7 +12,9 @@ import pytest
 import torch
 from markers import NORM_REPLAY_EXPECTED, requires_cuda, skip_unless_norm_replay
 from pytorch_lightning import Callback, LightningModule, Trainer
+from pytorch_lightning.accelerators import CUDAAccelerator
 from pytorch_lightning.plugins.precision import DoublePrecision, HalfPrecision, MixedPrecision, Precision
+from pytorch_lightning.strategies import SingleDeviceStrategy
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from torch import nn
 from torch.utils._pytree import tree_flatten
@@ -64,7 +66,7 @@ def test_cpu_refusal_is_native_and_retirement_skips_scans() -> None:
     # Isolate the CPU-tensor diagnostic from the installed torch version: `run` checks
     # `_SUPPORTED` before the dense-CUDA-tensor check, and pyproject.toml's floor is
     # torch>=2.4, so a real pre-2.9 install would otherwise retire with the unrelated
-    # "requires torch>=2.9" reason and never reach the message this test asserts.
+    # version-verification reason and never reach the message this test asserts.
     with (
         patch("lucid_yolo.ptl.gradient_norm_capture._SUPPORTED", True),
         pytest.warns(UserWarning, match="ordinary dense.*CUDA"),
@@ -72,11 +74,11 @@ def test_cpu_refusal_is_native_and_retirement_skips_scans() -> None:
         owner.run(first, 2.0, lambda: torch.nn.utils.clip_grad_norm_(first, 2.0))
     torch.nn.utils.clip_grad_norm_(second, 2.0)
     _bits_equal(first, second)
-    assert owner._disabled and owner._graph is None
+    assert owner.retired and owner._graph is None
     with patch("lucid_yolo.ptl.gradient_norm_capture._SUPPORTED", False):
         owner.run(None, 2.0, lambda: None)
     owner.clear()
-    assert not owner._disabled and owner._graph is None and owner._inputs == []
+    assert not owner.retired and owner._graph is None and owner._inputs == []
 
 
 def test_copy_and_fit_boundaries_drop_norm_resources() -> None:
@@ -96,14 +98,19 @@ def test_copy_and_fit_boundaries_drop_norm_resources() -> None:
         assert owner._inputs == [] and owner._signature is None
 
 
-def test_new_option_preserves_default_state_and_cpu_setup() -> None:
+@pytest.mark.parametrize("supported", [False, True])
+def test_new_option_preserves_default_state_and_cpu_setup(supported: bool) -> None:
     """The constructor adds no tensor keys and CPU setup keeps clipping native."""
     plain = DetectionLitModule(0.34, 0.25, 64, 4)
     enabled = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
     assert plain.state_dict().keys() == enabled.state_dict().keys()
     assert not plain.hparams.capture_gradient_norm
-    with pytest.warns(UserWarning, match="single-device CUDA.*torch>=2.9"):
+    with (
+        patch("lucid_yolo.ptl.module._NORM_CAPTURE_SUPPORTED", supported),
+        pytest.warns(UserWarning, match="capture_gradient_norm=True is ignored outside single-device CUDA") as recorded,
+    ):
         enabled.setup("fit")
+    assert len(recorded) == 1 and recorded[0].filename == __file__
     assert not enabled._capture_gradient_norm_active
     assert any(isinstance(callback, _GradientNormLifecycle) for callback in enabled.configure_callbacks())
 
@@ -161,14 +168,14 @@ def test_ineligible_clipping_warns_once_and_keeps_native_gradients(maximum: floa
     with pytest.warns(UserWarning, match="clipping is disabled or not by norm") as recorded:
         module.configure_gradient_clipping(optimizer)
         module.configure_gradient_clipping(optimizer)
-    assert len(recorded) == 1 and module._gradient_norm_capture._disabled
+    assert len(recorded) == 1 and module._gradient_norm_capture.retired
     if algorithm == "value":
         torch.nn.utils.clip_grad_value_(second, maximum)
     _bits_equal(first, second)
 
 
 def test_norm_replay_gate_tracks_torch_2_9() -> None:
-    """Norm replay requires exactly the independently specified torch 2.9 runtime floor."""
+    """Norm replay accepts only the independently specified verified torch 2.9 runtime."""
     assert implementation._SUPPORTED == NORM_REPLAY_EXPECTED
 
 
@@ -357,8 +364,11 @@ def test_older_runtime_keeps_new_option_native(monkeypatch: pytest.MonkeyPatch) 
     """The new flag can be loaded on older runtimes without touching the newer norm API."""
     monkeypatch.setattr("lucid_yolo.ptl.module._NORM_CAPTURE_SUPPORTED", False)
     module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
-    with pytest.warns(UserWarning, match="torch>=2.9"):
+    module._trainer = SimpleNamespace(accelerator=CUDAAccelerator(), strategy=SingleDeviceStrategy(device="cuda"))
+    with pytest.warns(UserWarning, match="verified only on torch>=2.9") as recorded:
         module.setup("fit")
+    assert len(recorded) == 1 and torch.__version__ in str(recorded[0].message)
+    assert recorded[0].filename == __file__
     assert not module._capture_gradient_norm_active
     old = dict(module.hparams)
     old.pop("capture_gradient_norm")
@@ -528,7 +538,7 @@ def test_public_trainer_reuse_ignores_foreign_model_missing_norm_holder() -> Non
         enable_model_summary=False,
         num_sanity_val_steps=0,
     )
-    with pytest.warns(UserWarning, match="single-device CUDA.*torch>=2.9"):
+    with pytest.warns(UserWarning, match="capture_gradient_norm=True is ignored outside single-device CUDA"):
         trainer.fit(Finite(capture_gradient_norm=True), train_dataloaders=loader)
     assert any(isinstance(callback, _GradientNormLifecycle) for callback in trainer.callbacks)
     first_steps = trainer.global_step

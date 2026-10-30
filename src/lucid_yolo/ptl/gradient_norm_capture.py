@@ -12,16 +12,15 @@ import warnings
 from typing import TYPE_CHECKING
 
 import torch
-from packaging.version import Version
 from torch import Tensor
 
+from lucid_yolo.ptl._graph_replay import GRADIENT_NORM_REPLAY_SUPPORTED as _SUPPORTED
 from lucid_yolo.ptl._graph_replay import ReplayLifecycle, drain_device
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
 
-_SUPPORTED = Version(torch.__version__) >= Version("2.9")
 _GET_NORM = getattr(torch.nn.utils, "get_total_norm", None)
 _SCALE = getattr(torch.nn.utils, "clip_grads_with_norm_", None)
 _CLIP = torch.nn.utils.clip_grad_norm_
@@ -68,6 +67,14 @@ class _GradientNormCapture:
         del state
         self.clear()
 
+    @property
+    def retired(self) -> bool:
+        """Report whether this fit's recording was retired and later calls stay eager.
+
+        Callers can skip replay checks until :meth:`clear` resets the holder for a new fit.
+        """
+        return self._disabled
+
     def retire(self, reason: str) -> None:
         """Keep subsequent calls native and issue one actionable diagnostic."""
         if not self._disabled:
@@ -84,7 +91,7 @@ class _GradientNormCapture:
         grads = [grad for parameter in params if (grad := parameter.grad) is not None]
         reason = None
         if not _SUPPORTED:
-            reason = "the norm decomposition requires torch>=2.9"
+            reason = "the norm decomposition is verified only on torch>=2.9"
         elif (
             torch.nn.utils.clip_grad_norm_ is not _CLIP
             or getattr(torch.nn.utils, "get_total_norm", None) is not _GET_NORM
