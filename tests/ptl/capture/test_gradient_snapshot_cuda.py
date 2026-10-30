@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 import torch
-from markers import requires_cuda
+from markers import requires_cuda, skip_unless_native_zeroing
 from pytorch_lightning import Callback, Trainer
+from pytorch_lightning.plugins.precision import MixedPrecision
 from torch.utils.data import DataLoader
 
 from lucid_yolo.data.targets import Targets
@@ -19,11 +21,13 @@ from lucid_yolo.ptl.module import DetectionLitModule
 
 
 @requires_cuda
+@skip_unless_native_zeroing
 @pytest.mark.usefixtures("deterministic_kernels_pinning_cudnn_benchmark")
 @pytest.mark.parametrize(
     "precision",
     [
         "32-true",
+        "16-mixed",
         pytest.param(
             "bf16-mixed",
             marks=pytest.mark.skipif(not BF16_REPLAY_SUPPORTED, reason="BF16 recording requires torch>=2.9"),
@@ -87,11 +91,15 @@ def test_cuda_fit_omits_snapshots_with_identical_state(monkeypatch: pytest.Monke
                     }
                 )
 
+        precision_options: dict[str, Any] = {"precision": precision}
+        if precision == "16-mixed":
+            # Unit scale keeps the short fixture from skipping every update at the default scale.
+            scaler = torch.amp.GradScaler("cuda", init_scale=1.0)
+            precision_options = {"plugins": [MixedPrecision("16-mixed", "cuda", scaler=scaler)]}
         trainer = Trainer(
             accelerator="cuda",
             devices=1,
             max_epochs=1,
-            precision=precision,
             logger=False,
             enable_checkpointing=False,
             enable_progress_bar=False,
@@ -100,6 +108,7 @@ def test_cuda_fit_omits_snapshots_with_identical_state(monkeypatch: pytest.Monke
             gradient_clip_val=10.0,
             callbacks=[_RawGradients(snapshots)],
             deterministic=True,
+            **precision_options,
         )
         scope = nullcontext() if enabled else patch.object(module, "_parameters_cleared_after_forward", return_value=())
         with scope:
