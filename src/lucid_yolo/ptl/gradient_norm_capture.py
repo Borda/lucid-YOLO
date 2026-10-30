@@ -15,7 +15,7 @@ import torch
 from packaging.version import Version
 from torch import Tensor
 
-from lucid_yolo.ptl._graph_replay import ReplayLifecycle
+from lucid_yolo.ptl._graph_replay import ReplayLifecycle, drain_device
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -39,12 +39,22 @@ class _GradientNormCapture:
         self.clear()
 
     def clear(self) -> None:
-        """Release this fit's graph and its private inputs."""
+        """Reset the holder, retaining graph-pool resources until the recorded device drains.
+
+        Reset first so a failing drain leaves an empty holder. Local references keep
+        the graph, inputs and norm alive until draining finishes; without a graph,
+        construction and repeated cleanup never touch the CUDA runtime.
+        """
+        previous = getattr(self, "_graph", None), getattr(self, "_inputs", []), getattr(self, "_norm", None)
+        device = getattr(self, "_device", None)
         self._graph: torch.cuda.CUDAGraph | None = None
         self._inputs: list[Tensor] = []
         self._norm: Tensor | None = None
+        self._device: torch.device | None = None
         self._signature: tuple[object, ...] | None = None
         self._disabled = False
+        if previous[0] is not None:
+            drain_device(device)
 
     def __getstate__(self) -> dict[str, object]:
         """Exclude device resources from copying and checkpoints."""
@@ -132,6 +142,7 @@ class _GradientNormCapture:
                     self.clear()
                     raise
                 self._inputs, self._graph, self._norm, self._signature = inputs, graph, norm, signature
+                self._device = grads[0].device
             torch._foreach_copy_(self._inputs, grads)
             assert self._graph is not None
             self._graph.replay()

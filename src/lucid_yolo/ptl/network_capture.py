@@ -56,7 +56,8 @@ _BF16_REPLAY_SUPPORTED = BF16_REPLAY_SUPPORTED
 #: an instance shadows the class method a recording replays or a certificate fingerprints.
 _DISPATCH = ("forward", "forward_branch", "_keypoints", "_base_predictions")
 _NATIVE_ENUMERATION = {
-    name: getattr(nn.Module, name) for name in ("modules", "parameters", "buffers", "named_parameters", "named_buffers")
+    name: getattr(nn.Module, name)
+    for name in ("modules", "parameters", "buffers", "named_parameters", "named_buffers", "_named_members")
 }
 _NATIVE_NAMED_MODULES = nn.Module.named_modules
 
