@@ -1987,6 +1987,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#lucid_yolo.ptl.DetectionLitModule.configure_gradient_clipping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        configure_gradient_clipping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#lucid_yolo.ptl.DetectionLitModule.on_train_epoch_start" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4898,6 +4909,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#lucid_yolo.ptl.DetectionLitModule.configure_gradient_clipping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        configure_gradient_clipping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#lucid_yolo.ptl.DetectionLitModule.on_train_epoch_start" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6007,6 +6029,26 @@ completion or failure. Higher-order differentiation is unsupported.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
+                <code>capture_updates</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Enable MuSGD's optional replay of the existing update preparation,
+including momentum, followed by a native batched parameter write at the current
+learning rate. Defaults to <code>False</code>. Uses private gradient storage and live
+parameters and momentum; unsupported signatures stay native. Like
+<code>capture_orthogonalization</code>, this has setup and retained-workspace costs.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
                 <code>capture_loss</code>
             </td>
             <td>
@@ -6032,26 +6074,6 @@ update itself, so the optimizer step is whatever those optimizer options select.
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>capture_updates</code>
-            </td>
-            <td>
-                  <code><span title="bool">bool</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Enable MuSGD's optional replay of the existing update preparation,
-including momentum, followed by a native batched parameter write at the current
-learning rate. Defaults to <code>False</code>. Uses private gradient storage and live
-parameters and momentum; unsupported signatures stay native. Like
-<code>capture_orthogonalization</code>, this has setup and retained-workspace costs.</p>
-              </div>
-            </td>
-            <td>
-                  <code>False</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
                 <code>capture_segment_heads</code>
             </td>
             <td>
@@ -6065,6 +6087,31 @@ mixed precision and single-device automatic optimization; gradient accumulation 
 FP32, FP16 and validation keep native execution. <code>compile_step=True</code> is refused rather than ignored,
 although it leaves the segment objective eager today, so an accepted configuration keeps its meaning once
 that is compiled.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>capture_gradient_norm</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Replay PyTorch's L2 gradient-norm reduction on single-device CUDA with torch&gt;=2.9.
+Default false. Native scaling reads the current clipping limit; one fit-scoped
+gradient signature is retained and drift retires recording. Value clipping,
+disabled clipping (limit <code>None</code> or at most zero), optimizers that unscale inside
+their own step, customized module/precision-plugin or PyTorch clipping,
+non-CUDA devices, unsupported torch versions and unsupported gradient layouts
+keep native clipping. Ordinary <code>16-mixed</code> GradScaler training can capture after
+unscaling; unscale-in-step optimizers retain Lightning's mixed-precision clipping
+rejection. Extra private CUDA buffers and setup cost may outweigh the gain
+outside small-batch training.</p>
               </div>
             </td>
             <td>
@@ -6475,6 +6522,97 @@ retaining the original sequential validation order and scoring protocols.</p>
     <div class="doc doc-contents ">
 
         <p>Keep opted-in CUDA recordings scoped to one fit.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="lucid_yolo.ptl.DetectionLitModule.configure_gradient_clipping" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">configure_gradient_clipping</span>
+
+
+<a href="#lucid_yolo.ptl.DetectionLitModule.configure_gradient_clipping" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">configure_gradient_clipping</span><span class="p">(</span><span class="n">optimizer</span><span class="p">:</span> <span class="n">Optimizer</span><span class="p">,</span> <span class="n">gradient_clip_val</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">gradient_clip_algorithm</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Optionally record the norm reduction while retaining native clipping semantics.</p>
+<p>Ordinary FP16 GradScaler gradients are already unscaled before this hook and
+can use capture. Optimizers that unscale inside their own step keep the native
+call, including Lightning's mixed-precision clipping rejection. Value or disabled
+clipping retires capture once, as does customized module or precision-plugin
+clipping, with the latter diagnostic naming the plugin type. Plugins inheriting
+the checked stock clipping methods through their MRO remain eligible.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>optimizer</code>
+            </td>
+            <td>
+                  <code><span title="torch.optim.Optimizer">Optimizer</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optimizer whose gradients are clipped.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>gradient_clip_val</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span> | <span title="float">float</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Clipping limit; <code>None</code> uses the trainer's setting.
+Limits at or below zero disable clipping.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>gradient_clip_algorithm</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Clipping algorithm; <code>None</code> uses the trainer's setting.
+Algorithms other than <code>"norm"</code> keep native clipping.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
 
 
     </div>

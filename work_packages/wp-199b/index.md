@@ -2,7 +2,7 @@
 
 > Engineering log · [Phase 18 — CUDA graph replay and pipeline throughput](https://borda.github.io/lucid-YOLO/engineering/phase-18-cuda-replay-throughput/)
 >
-> 🔗 Depends on [WP-199](https://borda.github.io/lucid-YOLO/work_packages/wp-199/) · Needed by none
+> 🔗 Depends on [WP-199](https://borda.github.io/lucid-YOLO/work_packages/wp-199/) · Needed by [WP-200c](https://borda.github.io/lucid-YOLO/work_packages/wp-200c/)
 >
 > ⬅️ [WP-199](https://borda.github.io/lucid-YOLO/work_packages/wp-199/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-200](https://borda.github.io/lucid-YOLO/work_packages/wp-200/) ➡️
 

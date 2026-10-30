@@ -2,1030 +2,1034 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://borda.github.io/lucid-YOLO/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/ASSUMPTIONS/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/CONTRIBUTING/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/DATASETS/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/DECISIONS/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/ENGINEERING_LOG/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/ESCALATION/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/PROVENANCE/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/REPRODUCTION_REPORT/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/RESEARCH_LOG/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/ROADMAP/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/TRAINING/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/advanced/cuda-performance/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/api/data/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/api/export/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/api/inference/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/api/models/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/api/training/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/agents-rationale/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/cross-cutting/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-00-foundation/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-05-training-loop/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-06-evaluation/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-08-oriented-detection/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-09-inference/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-10-consolidation/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-11-rolling/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-12-keypoints/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-13-contributor-admission/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-14-augmentation-upstreaming/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-15-audit-remediation/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-16-training-throughput/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-17-pose-objective-parity/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-18-cuda-replay-throughput/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/engineering/phase-19-codebase-audit/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/method/how-it-works/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/method/nms-vs-nms-free/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/model_cards/detection/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/model_cards/keypoints/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/model_cards/obb/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/model_cards/segmentation/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/notebooks/demo_detect/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/notebooks/demo_keypoints/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/notebooks/demo_obb/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/notebooks/demo_segment/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/notebooks/development_gates/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/report/consolidated-note/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/report/correction-keypoint-sources/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/report/correction-scoring-engine/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/report/detection/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/report/keypoints/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/report/oriented-detection/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/report/segmentation/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/research/phase-01-data-pipeline/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/research/phase-02-architecture/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/research/phase-03-assignment-and-losses/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/research/phase-04-musgd/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/research/phase-05-training-loop/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/research/phase-06-evaluation/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/research/phase-07-instance-segmentation/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/research/phase-08-oriented-detection/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/research/phase-09-inference/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/research/phase-10-consolidation/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/research/phase-12-keypoints/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-001/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-004/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-005/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-013/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-014/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-022/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-023/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-030/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-033/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-038/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-039/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-040/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-052/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-052b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-054/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-055/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-056/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-057/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-058/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-059/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-060/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-061/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-062/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-063/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-064/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-065/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-066/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-067/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-071/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-073/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-074/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-076/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-079/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-082/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-083/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-084/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-085/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-087/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-087b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-087c/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-087d/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-087e/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-087f/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-088/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-089/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-090/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-090b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-091/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-091b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-091c/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-091d/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-091e/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-093/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-094/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-095/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-096/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-097/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-099/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-099b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-099c/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-099d/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-099e/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-100/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-101/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-102/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-103/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-104/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-105/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-107/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-108/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-109/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-110/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-111/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-112/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-113/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-113b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-114/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-114b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-115/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-115b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-116/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-116b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-117/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-118/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-119/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-120/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-121/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-121b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-122/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-123/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-124/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-125/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-126/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-127/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-128/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-129/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-130/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-130b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-131/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-132/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-133/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-134/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-135/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-136/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-137/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-138/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-139/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-140/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-140b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-141/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-142/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-143/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-144/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-145/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-146/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-147/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-148/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-149/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-150/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-151/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-152/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-152b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-153/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-153b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-153c/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-154/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-154b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-154c/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-155/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-156/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-157/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-158/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-159/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-160/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-161/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-162/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-163/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-164/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-165/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-165b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-166/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-167/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-168/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-169/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-170/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-171/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-172/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-173/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-174/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-175/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-176/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-177/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-178/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-183/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-188/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-189/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-192/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-192b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-192c/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-193/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-193b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-193c/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-193d/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-193e/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-193f/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-193g/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-194/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-195/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-197/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-197b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-197c/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-198/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-199/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-199b/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-200/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
+    </url>
+    <url>
+         <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-200c/</loc>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-201/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-202/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-203/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-204/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-205/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-206/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-207/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-208/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-209/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-210/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-211/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-212/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-213/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-214/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-215/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-216/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-217/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://borda.github.io/lucid-YOLO/work_packages/wp-218/</loc>
-         <lastmod>2026-10-27</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
 </urlset>

@@ -881,6 +881,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#optional-cuda-gradient-norm-recording" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional CUDA gradient-norm recording
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#optional-cuda-detection-and-pose-loss-execution" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4563,6 +4574,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#optional-cuda-gradient-norm-recording" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional CUDA gradient-norm recording
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#optional-cuda-detection-and-pose-loss-execution" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4730,6 +4752,13 @@
 <td><a href="../../work_packages/wp-193g/">WP-193g</a></td>
 </tr>
 <tr>
+<td><code>--model.capture_gradient_norm</code></td>
+<td>all (single CUDA device, norm clipping, torch&gt;=2.9)</td>
+<td><code>false</code></td>
+<td>— (flag-only share unmeasured)</td>
+<td><a href="../../work_packages/wp-200c/">WP-200c</a></td>
+</tr>
+<tr>
 <td><code>--model.capture_loss</code></td>
 <td>detect, keypoints</td>
 <td><code>false</code></td>
@@ -4855,6 +4884,10 @@
 <p>This path requires single-device CUDA automatic optimisation and <code>task: detect</code>, <code>task: keypoints</code>, <code>task: obb</code> or <code>task: segment</code>. BF16 replay requires a final PyTorch 2.9 or newer release; 2.9 pre-release and NGC <code>a0</code> builds are excluded by design. 2.9 is the first verified runtime: older BF16 runs warn and stay eager because the 2.4 comparison did not meet the exact eager oracle. FP32 and FP16 replay of detection, oriented detection and pose shared features are checked on 2.4 as well; pose stem replay has run on 2.9.1 only (<a href="../../work_packages/wp-193f/">WP-193f</a>). CPU, MPS and other strategies warn and stay eager; other tasks or <code>compile_step</code> raise at construction. One image signature is recorded per fit. A partial batch uses eager execution without growing a graph cache. Changes to the recorded stages’ parameter/buffer storage, module modes, hooks or precision retire replay for the rest of that fit. The supplied network must keep its ordinary stage implementations and static Python configuration. Root forward overrides, stage instance-forward overrides and registered hooks use the eager path. Anomaly detection (<code>--trainer.detect_anomaly true</code>) also stays eager so backward NaN checks run normally. A failure while recording raises instead of falling back to eager (RNG state and buffers are restored first), so disable <code>--model.capture_network</code> if recording fails on your model. Higher-order differentiation is not supported.</p>
 <p>Recording warmup restores RNG and BatchNorm buffers before the first real batch. Accumulation or custom optimiser/zero-grad hooks preserve live gradients outside the graph-owned backward buffers before they can be overwritten. AMP uses an uncached autocast scope as the PyTorch API requires. Validation, prediction and public <code>forward</code> calls stay eager. Checkpoints retain the ordinary parameter names and the flag, with no graph state. Each fit records afresh and drops its recording on completion or an exception. CUDA graph pools can increase reserved memory even when peak allocated memory falls; measure both on the intended workload. The measured scope and remaining validation gaps are in <a href="../../work_packages/wp-193c/">WP-193c</a>.</p>
 <p>For segmentation, the same <code>--model.capture_network true</code> option records only backbone and neck. Prediction groups, prototype fusion and both losses keep their existing arithmetic and gradient boundaries. It can combine with <code>--model.capture_segment_heads true</code>, which records the prediction groups separately. Overridden or compiled segmentation forwards stay native. The default remains <code>false</code>; a recording is transient and follows the same fit cleanup and input-signature rules above. See <a href="../../work_packages/wp-193g/">WP-193g</a> for the measured workload and limits.</p>
+<p>Network replay also shares one current membership traversal between its eligibility and storage checks. Certified scalar module metadata is seeded after recording warmup and reused only while module identities, class forwards, live training modes and ordered attribute bindings are unchanged. Live tensor storage, layout, dtype, gradient flags and hook checks remain independent. This host-bookkeeping change applies whenever <code>capture_network</code> replays, independently of <code>capture_gradient_norm</code>, without changing the recorded model arithmetic.</p>
+<h2 id="optional-cuda-gradient-norm-recording">Optional CUDA gradient-norm recording<a class="headerlink" href="#optional-cuda-gradient-norm-recording" title="Permanent link">&para;</a></h2>
+<p><code>--model.capture_gradient_norm true</code> records PyTorch's global L2 gradient-norm reduction on single-device CUDA automatic optimisation with torch 2.9 or newer. The default is <code>false</code>. It is independent of network/loss/update replay and uses the trainer's existing norm clipping configuration, such as <code>--trainer.gradient_clip_val 10</code>. Gradient scaling stays in PyTorch's native call and reads the current limit on each step. Disabled clipping (a limit of <code>None</code> or at most zero) and value clipping retire recording once with the reason "clipping is disabled or not by norm" and keep the native call. Ordinary <code>16-mixed</code> GradScaler training can capture the reduction after unscaling; optimizers that unscale inside their own step (<code>_step_supports_amp_scaling</code>, such as fused optimizers) keep the native call, including Lightning's clipping rejection under mixed precision. One gradient shape/stride/dtype/device and stream signature is retained per fit. Offset views and other incompatible gradients or changed public clipping implementations retire recording for that fit. Precision plugins are matched through their type's MRO against stock <code>Precision</code>/<code>MixedPrecision</code> clipping methods, with each method checked by identity: subclasses inheriting those methods remain eligible; customized module or precision-plugin clipping retires capture with a reason naming the plugin type and keeps the native call. CPU, MPS and unsupported runtimes warn and stay native; the torch gate says the norm decomposition is "verified only on torch&gt;=2.9". Fit completion, failure and copying release the transient recording, which adds no model tensor keys to checkpoints.</p>
+<p>Setup and private CUDA buffers have a cost. The 9.55% complete-fit reduction in <a href="../../work_packages/wp-200c/">WP-200c</a> covers the whole patch on a pre-integration revision (nano pose/640/BF16, batch 4, L4, five complete pairs), including the network-replay bookkeeping change above. The flag-only share is unmeasured, and the integrated tree was not re-measured. Long-run accuracy remains unverified.</p>
 <h2 id="optional-cuda-detection-and-pose-loss-execution">Optional CUDA detection and pose loss execution<a class="headerlink" href="#optional-cuda-detection-and-pose-loss-execution" title="Permanent link">&para;</a></h2>
 <p><code>--model.capture_loss true</code> replays the existing detection assignment and loss forward/backward with fresh predictions, targets and the current alpha tensor. Default <code>false</code>: capture costs setup time and retains CUDA workspace, so short or compute-bound runs may not benefit. It accepts <code>task: detect</code> or <code>task: keypoints</code>, and requires single-device CUDA automatic optimisation and <code>compile_step: false</code>. It can combine with <code>capture_network</code>, <code>capture_orthogonalization</code> and <code>capture_updates</code>; <code>capture_loss</code> itself records no optimizer update, so the optimizer step is whatever those two optimizer options select (the existing eager path when both are off).</p>
 <p>For pose, the unrotated detection objective uses that recorder while point gathers and OKS stay native. During training, the built-in RLE densities can score both branches in one batch, retaining separate visible-point means and branch weights. That batching is gated on the option being active for the fit, not on the recorder: it continues after the recorder retires and on steps whose detection loss takes its native call, such as a customized criterion or BF16 on torch older than 2.9. This reduces dispatch but can change matrix-kernel selection and parameter-gradient summation rounding: pose execution retains the mathematical objective, but training is not byte-identical. Hooked, overridden or compiled densities, altered pose scoring and validation use their original calls. Branches with different input dtypes/devices or tensor subclasses keep separate density calls. Laplace-only pose keeps native point scoring. See <a href="../../work_packages/wp-199b/">WP-199b</a> for the measured scope and unverified accuracy checks.</p>
