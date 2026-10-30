@@ -19,7 +19,8 @@ from pytorch_lightning.trainer.states import RunningStage
 
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.ptl._graph_replay import _gradients_cleared_after_forward, copy_out_live_gradients
-from lucid_yolo.ptl.module import DetectionLitModule, _native_update_step
+from lucid_yolo.ptl._native_closure import _native_update_step
+from lucid_yolo.ptl.module import DetectionLitModule
 
 
 @pytest.fixture
