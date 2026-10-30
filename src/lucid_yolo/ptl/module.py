@@ -179,6 +179,7 @@ from pytorch_lightning import Callback, LightningModule
 from pytorch_lightning.accelerators import CUDAAccelerator
 from pytorch_lightning.core.optimizer import LightningOptimizer
 from pytorch_lightning.strategies import SingleDeviceStrategy
+from pytorch_lightning.utilities import rank_zero_info
 from torch import Tensor
 
 from lucid_yolo.assign import make_anchor_points
@@ -784,7 +785,13 @@ class DetectionLitModule(LightningModule):
         self.save_hyperparameters()
         task = Task(task).value
         self._capture_loss, self._capture_loss_active = capture_loss, False
-        self._capture_network, self._capture_network_active = capture_network, False
+        #: The last of the three is whether this fit's first training step already logged the
+        #: snapshot-skip verdict; :meth:`setup` re-arms it for the next ``fit``.
+        self._capture_network, self._capture_network_active, self._native_closure_reported = (
+            capture_network,
+            False,
+            False,
+        )
         self._network_capture, self._loss_capture = _NetworkCapture(), _LossCapture()
         self._capture_gradient_norm, self._capture_gradient_norm_active, self._gradient_norm_capture = (
             capture_gradient_norm,
@@ -1031,6 +1038,9 @@ class DetectionLitModule(LightningModule):
         Rotated and keypoint metrics also drop sampler padding by dataset identity,
         retaining the original sequential validation order and scoring protocols.
 
+        Setting up ``"fit"`` also re-arms the once-per-fit gradient-snapshot-skip verdict that
+        :meth:`_report_native_closure` logs at the first training step.
+
         Args:
             stage: The Trainer stage being set up.
 
@@ -1048,6 +1058,8 @@ class DetectionLitModule(LightningModule):
         if on_cuda:
             self.to(memory_format=torch.channels_last)
         self._capture_network_active = self._replay_active(self._capture_network, on_cuda)
+        if stage == "fit":
+            self._native_closure_reported = False
         self._warn_ignored_replay(self._capture_network, self._capture_network_active, "capture_network", stage)
         self._capture_loss_active = self._replay_active(self._capture_loss, on_cuda)
         self._warn_ignored_replay(self._capture_loss, self._capture_loss_active, "capture_loss", stage)
@@ -1719,9 +1731,18 @@ class DetectionLitModule(LightningModule):
         the original snapshots. Lightning minors beyond the inspected 2.4-2.6
         contract also retain them. This hook only filters on the replay flag
         and the closure's shape; the certificate, evaluated as the forward
-        starts, decides.
+        starts, decides. The first step of a fit logs the verdict once, at
+        rank-zero info level: active, or the first check that failed.
         """
-        if not self._capture_network_active or not _native_closure_shape(optimizer_closure):
+        if not self._capture_network_active:
+            super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
+            return
+        if not _native_closure_shape(optimizer_closure):
+            # A closure of another shape is refused by the zeroing check before the step
+            # function is read, so the closure itself stands in for it in the diagnosis.
+            self._report_native_closure(
+                self._native_closure_refusal(optimizer_closure, cast("Any", optimizer_closure), optimizer)
+            )
             super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
             return
         native_closure = cast("Any", optimizer_closure)
@@ -1756,9 +1777,35 @@ class DetectionLitModule(LightningModule):
         groups name exactly which parameters that operation clears.
         """
         trainer = self._trainer
-        if trainer is None or self._native_closure_refusal(closure, step_fn, optimizer) is not None:
+        refusal = self._native_closure_refusal(closure, step_fn, optimizer)
+        self._report_native_closure(refusal)
+        if trainer is None or refusal is not None:
             return ()
         return _cleared_parameters(trainer)
+
+    def _report_native_closure(self, refusal: _Refusal | None) -> None:
+        """Log, once per fit, whether the snapshot-skip fast path is active and, if not, the first check that failed.
+
+        The first training step of a fit reports; later steps stay silent even when
+        the certificate flips, so the hot path pays one flag read. The line is
+        emitted only for a detection module with network replay active, the one
+        configuration the fast path can serve, and carries the refusing predicate's
+        constant token from :func:`~lucid_yolo.ptl._native_closure._first_refusal`
+        rather than a string built each step. :meth:`setup` re-arms it per ``fit``.
+
+        Args:
+            refusal: What :meth:`_native_closure_refusal` decided for this step.
+        """
+        if self._native_closure_reported or not self._capture_network_active or self._task != "detect":
+            return
+        self._native_closure_reported = True
+        if refusal is None:
+            rank_zero_info(
+                "DetectionLitModule: gradient-snapshot skip active; forward-time copies of the "
+                "gradients the native closure clears are omitted."
+            )
+        else:
+            rank_zero_info(f"DetectionLitModule: gradient-snapshot skip inactive; first failed check: {refusal.value}.")
 
     def _native_closure_refusal(
         self,

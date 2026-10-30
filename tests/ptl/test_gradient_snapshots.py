@@ -8,7 +8,7 @@ import types
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from contextlib import nullcontext
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -61,6 +61,13 @@ def certify(native) -> Callable[[], tuple[torch.Tensor, ...]]:
     return lambda: module._parameters_cleared_after_forward(
         closure, closure._step_fn, trainer.strategy._lightning_optimizers[0]
     )
+
+
+@pytest.fixture
+def reported() -> Iterator[MagicMock]:
+    """Stand in for the rank-zero info logger, patched where the module looks it up."""
+    with patch("lucid_yolo.ptl.module.rank_zero_info") as log:
+        yield log
 
 
 def test_native_closure_names_live_optimizer_parameters(native, certify) -> None:
@@ -440,6 +447,130 @@ def test_refusal_names_first_failed_predicate(native, change: str, refusal: _Ref
         trainer.optimizers[0].zero_grad = lambda: None
     wrapper = trainer.strategy._lightning_optimizers[0]
     assert module._native_closure_refusal(closure, closure._step_fn, wrapper) == refusal
+
+
+def test_active_snapshot_skip_logs_once_per_fit(certify, reported: MagicMock) -> None:
+    """Many native steps of one fit log the active verdict once, at the first.
+
+    The certificate is evaluated at every step's forward; the line must not repeat per step, or a
+    long fit would flood the log with a fact that did not change.
+    """
+    for _ in range(3):
+        assert certify()
+    reported.assert_called_once()
+    assert "skip active" in reported.call_args.args[0]
+
+
+def test_certificate_flip_after_first_step_stays_silent(native, certify, reported: MagicMock) -> None:
+    """A later step that falls back does not add a second line to the fit.
+
+    The first step reported active; accumulation changing afterwards still keeps the original
+    snapshots, but the one-line-per-fit contract holds and the hot path formats nothing.
+    """
+    _, trainer, _ = native
+    assert certify()
+    trainer.accumulate_grad_batches = 2
+    assert certify() == ()
+    reported.assert_called_once()
+    assert "skip active" in reported.call_args.args[0]
+
+
+@pytest.mark.parametrize(
+    ("break_certificate", "refusal"),
+    [
+        pytest.param(
+            lambda module, trainer, closure: setattr(trainer, "accumulate_grad_batches", 2),
+            _Refusal.TRAINER_CONTRACT,
+            id="trainer-contract",
+        ),
+        pytest.param(
+            lambda module, trainer, closure: setattr(closure, "_zero_grad_fn", None),
+            _Refusal.ZEROING_CLOSURE,
+            id="zeroing-closure",
+        ),
+        pytest.param(
+            lambda module, trainer, closure: setattr(trainer.optimizers[0], "zero_grad", lambda: None),
+            _Refusal.OPTIMIZER,
+            id="optimizer",
+        ),
+        pytest.param(
+            lambda module, trainer, closure: (
+                setattr(trainer, "accumulate_grad_batches", 2),
+                setattr(trainer.optimizers[0], "zero_grad", lambda: None),
+            ),
+            _Refusal.TRAINER_CONTRACT,
+            id="first-of-two",
+        ),
+    ],
+)
+def test_refused_snapshot_skip_logs_first_failed_check(
+    native, certify, reported: MagicMock, break_certificate: Callable[..., None], refusal: _Refusal
+) -> None:
+    """A refused certificate logs the constant token of the first predicate that failed.
+
+    The last case breaks two predicates; only the one evaluated first is named, so a user fixing
+    the report sees the next refusal on the following run instead of a misleading list.
+    """
+    break_certificate(*native)
+    assert certify() == ()
+    reported.assert_called_once()
+    assert reported.call_args.args[0].endswith(f"skip inactive; first failed check: {refusal.value}.")
+
+
+@pytest.mark.parametrize("stage", ["fit", "validate"])
+@pytest.mark.filterwarnings("ignore:capture_network=True is ignored")
+def test_setup_rearms_snapshot_skip_log_for_fit_only(native, certify, reported: MagicMock, stage: str) -> None:
+    """Setting up ``fit`` again starts a new report; another stage leaves the fit's report spent.
+
+    ``setup`` clears the CPU fixture's activation, as it would on any non-CUDA run, so the
+    activation the fixture stands in for is restored before the next step.
+    """
+    module, _, _ = native
+    assert certify()
+    module.setup(stage)
+    module._capture_network_active = True
+    assert certify()
+    assert reported.call_count == (2 if stage == "fit" else 1)
+
+
+@pytest.mark.parametrize(
+    "silence",
+    [
+        pytest.param(lambda module: setattr(module, "_capture_network_active", False), id="capture-off"),
+        pytest.param(lambda module: setattr(module, "_task", "keypoints"), id="non-detect-task"),
+    ],
+)
+def test_inapplicable_snapshot_skip_logs_nothing(
+    native, certify, reported: MagicMock, silence: Callable[[DetectionLitModule], None]
+) -> None:
+    """A module the fast path cannot serve never logs a verdict about it.
+
+    Network replay off, or a task other than detection, means the certificate has nothing to report
+    and a line would only suggest a fast path the run never had.
+    """
+    module, _, _ = native
+    silence(module)
+    assert certify() == ()
+    reported.assert_not_called()
+
+
+def test_foreign_closure_logs_zeroing_check_once(native, reported: MagicMock) -> None:
+    """A closure whose own ``closure`` method was replaced is reported by the pre-filter.
+
+    The shape check sits in ``optimizer_step`` before the certificate runs, so it must report on
+    its own; the zeroing-closure predicate owns this shape and is the first that fails here.
+    """
+    module, trainer, _ = native
+    parameter = torch.nn.Parameter(torch.zeros(3))
+    optimizer = MuSGD([parameter], 0.01)
+    trainer.optimizers = [optimizer]
+    step = lambda: ClosureResult.from_training_step_output(torch.tensor(1.0), normalize=1)  # noqa: E731
+    closure = Closure(step_fn=step, backward_fn=None, zero_grad_fn=optimizer.zero_grad)
+    closure.closure = types.MethodType(lambda self, *args, **kwargs: self._step_fn(), closure)
+    module.optimizer_step(0, 0, optimizer, closure)
+    module.optimizer_step(0, 1, optimizer, closure)
+    reported.assert_called_once()
+    assert reported.call_args.args[0].endswith(f"first failed check: {_Refusal.ZEROING_CLOSURE.value}.")
 
 
 def test_delegating_callback_keeps_snapshots(native, certify) -> None:
