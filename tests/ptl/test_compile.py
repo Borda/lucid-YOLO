@@ -21,6 +21,7 @@ config flag, so nothing here leaks into the rest of the suite.
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
@@ -301,6 +302,59 @@ class TestSetupDecidesOnce:
         assert all(
             getattr(tensor, "_dynamo_dynamic_indices", None) == {0, 1} for tensor in (gt_boxes, gt_labels, gt_mask)
         )
+
+
+class TestFusedAssignmentUnderCompile:
+    """``fused_assignment`` is reported at ``fit`` exactly when the compiled objective leaves it inert."""
+
+    def test_compiled_fit_warns_once(self) -> None:
+        """CUDA plus ``detect`` installs the wrapper, so the inert fusion request is reported once.
+
+        The mocked CUDA accelerator is what makes ``setup`` compile on CPU. A ``validate`` setup
+        after the fit keeps the same wrapper; repeating the warning there would report one
+        configuration twice.
+        """
+        module = _module(compile_step=True, fused_assignment=True)
+        module._trainer = _cuda_trainer()
+
+        with pytest.warns(UserWarning, match="fused_assignment=True is ignored with compile_step=True") as record:
+            module.setup("fit")
+            module.setup("validate")
+
+        assert module._objective_compiled
+        assert sum("fused_assignment=True" in str(item.message) for item in record) == 1
+
+    @pytest.mark.parametrize(
+        ("compile_step", "fused_assignment"),
+        [pytest.param(False, True, id="eager_fused"), pytest.param(True, False, id="compiled_native")],
+    )
+    def test_cuda_fit_without_inert_fusion_raises_no_warning(self, compile_step: bool, fused_assignment: bool) -> None:
+        """An eager objective keeps the fusion request, and a compiled one without it has nothing to report.
+
+        Both run the CUDA ``fit`` setup under an error filter, so any warning, the new one
+        included, fails the test.
+        """
+        module = _module(compile_step=compile_step, fused_assignment=fused_assignment)
+        module._trainer = _cuda_trainer()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            module.setup("fit")
+
+        assert module._objective_compiled is compile_step
+
+    def test_refused_compile_reports_only_refusal(self) -> None:
+        """Off CUDA the objective stays eager, so the fusion request still applies and is not reported.
+
+        Only the existing compile refusal is raised: the new warning follows whether the
+        wrapper was installed, not whether ``compile_step`` was requested.
+        """
+        module = _module(compile_step=True, fused_assignment=True)
+
+        with pytest.warns(UserWarning, match="ignored off CUDA") as record:
+            module.setup("fit")
+
+        assert not any("fused_assignment" in str(item.message) for item in record)
 
 
 class TestCompiledStepOverChangingShapes:

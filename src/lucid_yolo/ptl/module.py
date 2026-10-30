@@ -615,7 +615,9 @@ class DetectionLitModule(LightningModule):
             against ``(24, 1)`` has its reading before it moves the gain.
         fused_assignment: Opt into CUDA target-assignment fusion. It retains the
             current objectives and native CPU/MPS, compiler and unsupported-layout paths.
-            Default ``False`` avoids compilation cost on short or small workloads.
+            Default ``False`` avoids compilation cost on short or small workloads. Where
+            ``compile_step=True`` is honoured, the compiled objective assigns natively and
+            :meth:`setup` warns once per ``fit``.
         compile_step: Whether to :func:`torch.compile` the detection objective —
             forward, both decodes, assignment and the dual loss as **one** Inductor
             region (WP-184, D24). Defaults to ``False``. Honoured on a CUDA
@@ -759,6 +761,7 @@ class DetectionLitModule(LightningModule):
         self._network_capture, self._loss_capture = _NetworkCapture(), _LossCapture()
         self._strategy, self._task, self._num_keypoints = _STRATEGIES[Task(task)], task, num_keypoints
         self._compile_step: bool = compile_step
+        self._fused_assignment: bool = fused_assignment
         self._capture_orthogonalization, self._capture_updates = capture_orthogonalization, capture_updates
         #: The detection objective `_shared_step` calls: the bare bound method until
         #: `setup` swaps in its `torch.compile` wrapper (WP-184), and the bare method
@@ -1018,6 +1021,7 @@ class DetectionLitModule(LightningModule):
         self._warn_ignored_replay(self._capture_loss, self._capture_loss_active, "capture_loss", stage)
         if self._compile_step and not self._compile_step_resolved:
             self._compile_objective(on_cuda)
+        self._warn_compiled_fused_assignment(self._fused_assignment, self._objective_compiled, stage)
 
     def _replay_active(self, requested: bool, on_cuda: bool) -> bool:
         """Decide whether one opted-in CUDA recording runs for the stage being set up.
@@ -1059,6 +1063,29 @@ class DetectionLitModule(LightningModule):
         if requested and not active and stage == "fit":
             warnings.warn(
                 f"{flag}=True is ignored outside single-device CUDA automatic optimization",
+                UserWarning,
+                stacklevel=3,
+            )
+
+    @staticmethod
+    def _warn_compiled_fused_assignment(requested: bool, compiled: bool, stage: str) -> None:
+        """Warn at ``fit`` that ``fused_assignment`` cannot reach a compiled detection objective.
+
+        Under :func:`torch.compile` the assigner skips its CUDA scope
+        (:meth:`~lucid_yolo.assign.tal.TaskAlignedAssigner._assign`), so the request stays inert
+        exactly when :meth:`_compile_objective` installed the wrapper; an objective left eager
+        keeps the request, and no warning is raised for it. ``stacklevel=3`` names the caller
+        of :meth:`setup`, as :meth:`_warn_ignored_replay` does.
+
+        Args:
+            requested: The constructor's ``fused_assignment`` flag.
+            compiled: Whether the detection objective is the compiled wrapper.
+            stage: The Trainer stage being set up.
+        """
+        if requested and compiled and stage == "fit":
+            warnings.warn(
+                "fused_assignment=True is ignored with compile_step=True: the compiled detection "
+                "objective keeps target assignment on its native tensor schedule",
                 UserWarning,
                 stacklevel=3,
             )
