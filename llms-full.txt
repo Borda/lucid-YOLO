@@ -440,6 +440,14 @@ A tier that cannot overfit a handful of images will not converge on the full set
 
 The keypoint floor looks low beside the other three and is not measuring less. Its slice is the only one not drawn from the geometric shapes — `task: keypoints` needs a keypoint-bearing family, so it draws a 7-point synthetic symbol schema, and OKS at that schema's uniform sigma is a cliff on objects a few dozen pixels across: feeding the ground truth back as the prediction scores exactly 1.0, and displacing every point by 3 px scores 0.269. The floor was set from that measured slope rather than guessed.
 
+### Fused CUDA assignment
+
+`--model.fused_assignment true` batches the existing dense assignment expressions into optional CUDA passes. The default is `false`. Install `pip install -e '.[cuda-assignment]'` on Linux x86-64 to supply Triton 3.x and its launcher build helper. This option is independent of the network and loss recording options; native PyTorch still computes IoU powers and rotated sine/cosine, and the existing top-k, one-to-one filter and target normalization remain unchanged.
+
+The fused route accepts NVIDIA SM80 or newer, float32 boxes and float32/FP16/BF16 scores with the existing score exponent of one. Unsupported devices, tensor subclasses, layouts, compiler tracing and reduction capacities retain the native expressions. Runtime indices, relative strides and launch grids must fit the compiler and CUDA bounds; wider layouts stay native. Conflict reductions above 512 ground truths remain native. A first compilation/launch failure warns once and disables that kernel family for the process; failures after a verified launch raise. An unseen kernel signature stays native inside CUDA graph capture until an eager call has prepared it. No input/output tensors, graph pools or model state are cached by this backend.
+
+The measured workload and limits are in [WP-200b](https://borda.github.io/lucid-YOLO/work_packages/wp-200b/). The benefit depends on batch size and target density; check complete training time before enabling it for another workload. Compilation and setup can dominate a short fit.
+
 <!-- source: https://borda.github.io/lucid-YOLO/DATASETS/ -->
 
 # 🗂️ Provisioning the datasets
@@ -985,6 +993,7 @@ The `R1–R20` row is a genuine collapse and stays one. Those twenty were transc
 | 2026-10-17 | R44 | Optional compiler for the existing colour expressions in [WP-198](https://borda.github.io/lucid-YOLO/work_packages/wp-198/); own CUDA profiles, launch-shape measurements and public-pixel comparisons select the fusion. |
 | 2026-10-17 | R40 | The existing runtime's [persistent DataLoader iterator](https://github.com/pytorch/pytorch/blob/v2.9.1/torch/utils/data/dataloader.py#L481-L494) is read diagnostically for [WP-198](https://borda.github.io/lucid-YOLO/work_packages/wp-198/); the same reset is scheduled earlier, with local RNG/worker and end-to-end evidence. No framework implementation copied. |
 | 2026-10-18 | R42 | Update-preparation scheduling for [WP-197c](https://borda.github.io/lucid-YOLO/work_packages/wp-197c/), based on this repository's optimizer and our L4 traces; stable buffers, warmup rollback and non-nested capture use the existing API contract. No external optimizer or detector implementation consulted. |
+| 2026-10-21 | R40, R44 | [WP-200b](https://borda.github.io/lucid-YOLO/work_packages/wp-200b/) schedules this repository's existing dense assignment expressions. Own CUDA traces and public-data measurements identify the cost; native PyTorch power/trig and R44’s [elementwise assembly API](https://triton-lang.org/main/python-api/generated/triton.language.inline_asm_elementwise.html) retain the rounding boundaries. Its explicit round-to-nearest division preserves subnormals after compiler intrinsics failed our CUDA boundary checks. The runtime's [NVIDIA Y-grid bound](https://github.com/pytorch/pytorch/blob/v2.9.1/torch/_inductor/runtime/runtime_utils.py#L101-L102) limits eligible launches. No external detector implementation or method default consulted. |
 | 2026-10-21 | R42, R45 | The existing dependency's public norm decomposition and CUDA graph lifetime for [WP-200c](https://borda.github.io/lucid-YOLO/work_packages/wp-200c/). The native reduction and scaling calls are retained; current repository code and our own L4 profiles determine the metadata optimization. No external detector or optimizer implementation consulted. |
 
 <!-- source: https://borda.github.io/lucid-YOLO/ASSUMPTIONS/ -->

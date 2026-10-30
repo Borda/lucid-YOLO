@@ -882,6 +882,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="🔌 Before any of them: the wiring gate">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fused-cuda-assignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fused CUDA assignment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -4625,6 +4642,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="🔌 Before any of them: the wiring gate">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fused-cuda-assignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fused CUDA assignment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -4835,6 +4869,10 @@
 </code></pre></div>
 <p>A tier that cannot overfit a handful of images will not converge on the full set, and finding that out after the first epoch of a fifty-epoch run costs the run. The four commands, and the shapes regression beside them, run as they are in the <a href="../notebooks/development_gates/">development gates notebook</a>.</p>
 <p>The keypoint floor looks low beside the other three and is not measuring less. Its slice is the only one not drawn from the geometric shapes — <code>task: keypoints</code> needs a keypoint-bearing family, so it draws a 7-point synthetic symbol schema, and OKS at that schema's uniform sigma is a cliff on objects a few dozen pixels across: feeding the ground truth back as the prediction scores exactly 1.0, and displacing every point by 3 px scores 0.269. The floor was set from that measured slope rather than guessed.</p>
+<h3 id="fused-cuda-assignment">Fused CUDA assignment<a class="headerlink" href="#fused-cuda-assignment" title="Permanent link">&para;</a></h3>
+<p><code>--model.fused_assignment true</code> batches the existing dense assignment expressions into optional CUDA passes. The default is <code>false</code>. Install <code>pip install -e '.[cuda-assignment]'</code> on Linux x86-64 to supply Triton 3.x and its launcher build helper. This option is independent of the network and loss recording options; native PyTorch still computes IoU powers and rotated sine/cosine, and the existing top-k, one-to-one filter and target normalization remain unchanged.</p>
+<p>The fused route accepts NVIDIA SM80 or newer, float32 boxes and float32/FP16/BF16 scores with the existing score exponent of one. Unsupported devices, tensor subclasses, layouts, compiler tracing and reduction capacities retain the native expressions. Runtime indices, relative strides and launch grids must fit the compiler and CUDA bounds; wider layouts stay native. Conflict reductions above 512 ground truths remain native. A first compilation/launch failure warns once and disables that kernel family for the process; failures after a verified launch raise. An unseen kernel signature stays native inside CUDA graph capture until an eager call has prepared it. No input/output tensors, graph pools or model state are cached by this backend.</p>
+<p>The measured workload and limits are in <a href="../work_packages/wp-200b/">WP-200b</a>. The benefit depends on batch size and target density; check complete training time before enabling it for another workload. Compilation and setup can dominate a short fit.</p>
 
 
 

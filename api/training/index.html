@@ -5935,6 +5935,26 @@ against <code>(24, 1)</code> has its reading before it moves the gain.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
+                <code>fused_assignment</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Opt into CUDA target-assignment fusion. It retains the
+current objectives and native CPU/MPS, compiler and unsupported-layout paths.
+Default <code>False</code> avoids compilation cost on short or small workloads. Where
+<code>compile_step=True</code> is honoured, the compiled objective assigns natively and
+:meth:<code>setup</code> warns once per <code>fit</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
                 <code>compile_step</code>
             </td>
             <td>
@@ -10022,6 +10042,23 @@ smallest stride, <code>8.0</code> at 640 input).</p>
             </td>
             <td>
                   <code>16.0</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>fused_assignment</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Request the optional CUDA assignment passes on both branches.
+Default <code>False</code> keeps the existing schedule.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
             </td>
           </tr>
       </tbody>

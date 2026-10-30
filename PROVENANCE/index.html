@@ -5076,6 +5076,11 @@
 </tr>
 <tr>
 <td>2026-10-21</td>
+<td>R40, R44</td>
+<td><a href="../work_packages/wp-200b/">WP-200b</a> schedules this repository's existing dense assignment expressions. Own CUDA traces and public-data measurements identify the cost; native PyTorch power/trig and R44’s <a href="https://triton-lang.org/main/python-api/generated/triton.language.inline_asm_elementwise.html">elementwise assembly API</a> retain the rounding boundaries. Its explicit round-to-nearest division preserves subnormals after compiler intrinsics failed our CUDA boundary checks. The runtime's <a href="https://github.com/pytorch/pytorch/blob/v2.9.1/torch/_inductor/runtime/runtime_utils.py#L101-L102">NVIDIA Y-grid bound</a> limits eligible launches. No external detector implementation or method default consulted.</td>
+</tr>
+<tr>
+<td>2026-10-21</td>
 <td>R42, R45</td>
 <td>The existing dependency's public norm decomposition and CUDA graph lifetime for <a href="../work_packages/wp-200c/">WP-200c</a>. The native reduction and scaling calls are retained; current repository code and our own L4 profiles determine the metadata optimization. No external detector or optimizer implementation consulted.</td>
 </tr>
