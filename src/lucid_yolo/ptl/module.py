@@ -171,6 +171,7 @@ import contextlib
 import copy
 import inspect
 import warnings
+from types import FunctionType
 from typing import TYPE_CHECKING, Any, cast
 
 import torch
@@ -221,8 +222,10 @@ from lucid_yolo.ptl._native_closure import (
     _NATIVE_CONFIGURE_CLIPPING,
     _NATIVE_MODULE_CLIPPING,
     _NATIVE_PRECISION_CLIPPING,
+    _cleared_parameters,
+    _first_refusal,
     _native_closure_shape,
-    _runtime_cleared_parameters,
+    _Refusal,
 )
 from lucid_yolo.ptl._padding import (
     _BOX_DIM,
@@ -1714,13 +1717,11 @@ class DetectionLitModule(LightningModule):
         observers, strategies, precision plugins, optimizer wrappers and a
         closure whose own ``closure`` method was replaced on the instance keep
         the original snapshots. Lightning minors beyond the inspected 2.4-2.6
-        contract also retain them.
+        contract also retain them. This hook only filters on the replay flag
+        and the closure's shape; the certificate, evaluated as the forward
+        starts, decides.
         """
-        if (
-            not self._capture_network_active
-            or self._task != "detect"
-            or not _native_closure_shape(self._trainer, optimizer, optimizer_closure)
-        ):
+        if not self._capture_network_active or not _native_closure_shape(optimizer_closure):
             super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
             return
         native_closure = cast("Any", optimizer_closure)
@@ -1729,7 +1730,7 @@ class DetectionLitModule(LightningModule):
 
         def forward() -> Any:
             nonlocal consumed
-            clearing = () if consumed else self._parameters_cleared_after_forward(optimizer_closure, step)
+            clearing = () if consumed else self._parameters_cleared_after_forward(optimizer_closure, step, optimizer)
             consumed = True
             scope = _gradients_cleared_after_forward(clearing) if clearing else contextlib.nullcontext()
             with scope:
@@ -1742,7 +1743,10 @@ class DetectionLitModule(LightningModule):
             native_closure._step_fn = step
 
     def _parameters_cleared_after_forward(
-        self, closure: Callable[[], Any] | None, step_fn: Callable[[], Any]
+        self,
+        closure: Callable[[], Any] | None,
+        step_fn: Callable[[], Any],
+        optimizer: Optimizer | LightningOptimizer,
     ) -> tuple[Tensor, ...]:
         """Keep snapshots unless the native closure drops them without an observer.
 
@@ -1750,6 +1754,24 @@ class DetectionLitModule(LightningModule):
         With no accumulation or customized zeroing, copying these old gradients
         only creates tensors the next operation discards. The live optimizer
         groups name exactly which parameters that operation clears.
+        """
+        trainer = self._trainer
+        if trainer is None or self._native_closure_refusal(closure, step_fn, optimizer) is not None:
+            return ()
+        return _cleared_parameters(trainer)
+
+    def _native_closure_refusal(
+        self,
+        closure: Callable[[], Any] | None,
+        step_fn: Callable[[], Any],
+        optimizer: Optimizer | LightningOptimizer,
+    ) -> _Refusal | None:
+        """Name the first certificate predicate this step fails, or ``None`` when all hold.
+
+        The module's own task, methods, objective and hooks are checked here,
+        beside the class they are bound to; the trainer contract, forward
+        observers, zeroing closure and optimizer are checked by
+        :func:`~lucid_yolo.ptl._native_closure._first_refusal`.
         """
         if (
             not self._capture_network_active
@@ -1759,13 +1781,20 @@ class DetectionLitModule(LightningModule):
             or not self.automatic_optimization
             or not _native_loss(self.loss)
             or getattr(self._objective, "__func__", None) is not _NATIVE_DETECT_OBJECTIVE
-            or any(getattr(type(self), name) is not native or name in vars(self) for name, native in _ZEROING_METHODS)
+            or any(
+                vars(DetectionLitModule).get(name) is not member or name in vars(self)
+                for name, member in _NATIVE_MODULE_WINDOW_METHODS
+            )
+            or any(
+                getattr(type(self), name) is not native or name in vars(self)
+                for name, native in _NATIVE_INHERITED_WINDOW_HOOKS
+            )
             or self._forward_hooks
             or self._forward_pre_hooks
             or self._backward_hooks
         ):
-            return ()
-        return _runtime_cleared_parameters(self._trainer, self, closure, step_fn)
+            return _Refusal.MODULE
+        return _first_refusal(self._trainer, self, closure, step_fn, optimizer)
 
     def validation_step(self, batch: StepBatch, batch_idx: int) -> Tensor:
         """Run one validation step: shared forward and loss, plus the mAP update.
@@ -2836,16 +2865,17 @@ _EAGER_POSE_SCORING = tuple(
     for name in ("_score_branch", "_rle_on", "_oks_on", "_gather_keypoint_positives")
 )
 
-_ZEROING_METHODS = (
-    ("training_step", DetectionLitModule.training_step),
-    ("optimizer_step", DetectionLitModule.optimizer_step),
-    ("optimizer_zero_grad", LightningModule.optimizer_zero_grad),
-    ("on_before_zero_grad", LightningModule.on_before_zero_grad),
-    ("forward", DetectionLitModule.forward),
-    ("_shared_step", DetectionLitModule._shared_step),
-    ("_training_network", DetectionLitModule._training_network),
-    ("_task_extra_loss", DetectionLitModule._task_extra_loss),
-    ("_log_loss", DetectionLitModule._log_loss),
-    ("log", LightningModule.log),
+#: Module code that can run between the forward-time gradient copy-out and zeroing, or that
+#: routes the closure: every function, static method, class method and property the class
+#: defines, read from its own dictionary so a new helper is covered without being listed. The
+#: native closure certificate compares each entry, and refuses an instance shadow of its name.
+_NATIVE_MODULE_WINDOW_METHODS = tuple(
+    (name, member)
+    for name, member in vars(DetectionLitModule).items()
+    if isinstance(member, (FunctionType, staticmethod, classmethod, property))
+)
+#: The Lightning hooks the same window reaches through inheritance, compared on the class.
+_NATIVE_INHERITED_WINDOW_HOOKS = tuple(
+    (name, getattr(LightningModule, name)) for name in ("optimizer_zero_grad", "on_before_zero_grad", "log")
 )
 _NATIVE_DETECT_OBJECTIVE = DetectionLitModule._detect_objective
