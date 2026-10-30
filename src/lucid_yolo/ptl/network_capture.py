@@ -256,6 +256,10 @@ def _members(owner: nn.Module) -> _Members:
     return modules, tuple(parameters.values()), tuple(buffers.values())
 
 
+#: Training mode's position in each module entry returned by `_module_signature`.
+_MODULE_TRAINING_INDEX = 2
+
+
 def _module_signature(modules: tuple[nn.Module, ...]) -> tuple[object, ...]:
     """Read the scalar attributes and class dispatch fixed by a recording."""
     return tuple(
@@ -293,7 +297,7 @@ class _ModuleMetadata:
         self.bindings = tuple(dict(vars(module)) for module in modules)
         self.names = tuple(tuple(saved) for saved in self.bindings)
         self.forwards = tuple(type(module).forward for module in modules)
-        self.training = tuple(cast("tuple[object, ...]", entry)[2] for entry in signature)
+        self.training = tuple(cast("tuple[object, ...]", entry)[_MODULE_TRAINING_INDEX] for entry in signature)
 
     def read(self, modules: tuple[nn.Module, ...]) -> tuple[object, ...]:
         """Return certified metadata, or perform the unchanged full attribute read."""

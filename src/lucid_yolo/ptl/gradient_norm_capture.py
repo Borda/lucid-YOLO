@@ -13,13 +13,13 @@ from typing import TYPE_CHECKING
 
 import torch
 from packaging.version import Version
-from pytorch_lightning import Callback
 from torch import Tensor
+
+from lucid_yolo.ptl._graph_replay import ReplayLifecycle
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from pytorch_lightning import LightningModule, Trainer
 
 _SUPPORTED = Version(torch.__version__) >= Version("2.9")
 _GET_NORM = getattr(torch.nn.utils, "get_total_norm", None)
@@ -49,6 +49,9 @@ class _GradientNormCapture:
     def __getstate__(self) -> dict[str, object]:
         """Exclude device resources from copying and checkpoints."""
         return {}
+
+    def start_batch(self) -> None:
+        """Keep the reduction reusable; it owns no pending backward holds."""
 
     def __setstate__(self, state: dict[str, object]) -> None:
         """Restore an owner that may record in a new fit."""
@@ -109,7 +112,7 @@ class _GradientNormCapture:
             eager()
             return
         assert _GET_NORM is not None and _SCALE is not None
-        with torch.no_grad():
+        with torch.no_grad(), torch.cuda.device(grads[0].device):
             if self._graph is None:
                 inputs = [grad.detach().clone() for grad in grads]
                 stream = torch.cuda.Stream(device=grads[0].device)  # type: ignore[no-untyped-call]
@@ -123,7 +126,7 @@ class _GradientNormCapture:
                     torch.cuda.current_stream(grads[0].device).wait_stream(stream)
                 graph = torch.cuda.CUDAGraph()
                 try:
-                    with torch.cuda.graph(graph):
+                    with torch.cuda.graph(graph, stream=stream):
                         norm = _GET_NORM(inputs)
                 except Exception:
                     self.clear()
@@ -136,27 +139,7 @@ class _GradientNormCapture:
             _SCALE(params, maximum, self._norm)
 
 
-class _GradientNormLifecycle(Callback):
+class _GradientNormLifecycle(ReplayLifecycle):
     """Clear gradient-norm recording at each successful or failed fit boundary."""
 
-    @staticmethod
-    def _clear(module: LightningModule) -> None:
-        """Clear this model's owner, or ignore a callback retained for another model."""
-        owner = getattr(module, "_gradient_norm_capture", None)
-        if isinstance(owner, _GradientNormCapture):
-            owner.clear()
-
-    def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Start a new bounded recording lifetime."""
-        del trainer
-        self._clear(pl_module)
-
-    def on_fit_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Release successful-fit resources."""
-        del trainer
-        self._clear(pl_module)
-
-    def on_exception(self, trainer: Trainer, pl_module: LightningModule, exception: BaseException) -> None:
-        """Release resources when a fit fails after recording."""
-        del trainer, exception
-        self._clear(pl_module)
+    attribute, holder_type, flag = "_gradient_norm_capture", _GradientNormCapture, "capture_gradient_norm"

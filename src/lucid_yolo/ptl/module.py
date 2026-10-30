@@ -1129,10 +1129,14 @@ class DetectionLitModule(LightningModule):
         maximum = trainer_maximum if gradient_clip_val is None else gradient_clip_val
         algorithm = trainer_algorithm if gradient_clip_algorithm is None else gradient_clip_algorithm
         if maximum is None or maximum <= 0 or (algorithm is not None and algorithm != "norm"):
+            self._gradient_norm_capture.retire("clipping is disabled or not by norm")
             native(optimizer, gradient_clip_val, gradient_clip_algorithm)
             return
         plugin = self.trainer.precision_plugin
-        methods = _NATIVE_PRECISION_CLIPPING.get(type(plugin))
+        methods = next(
+            (_NATIVE_PRECISION_CLIPPING[kind] for kind in type(plugin).__mro__ if kind in _NATIVE_PRECISION_CLIPPING),
+            None,
+        )
         if (
             LightningModule.configure_gradient_clipping is not _NATIVE_CONFIGURE_CLIPPING
             or type(self).clip_gradients is not _NATIVE_MODULE_CLIPPING
@@ -1142,7 +1146,9 @@ class DetectionLitModule(LightningModule):
                 getattr(type(plugin), name) is not method or name in vars(plugin) for name, method in methods.items()
             )
         ):
-            self._gradient_norm_capture.retire("the module or precision plugin has customized clipping")
+            self._gradient_norm_capture.retire(
+                f"the module or precision plugin ({type(plugin).__name__}) has customized clipping"
+            )
             native(optimizer, gradient_clip_val, gradient_clip_algorithm)
             return
         if getattr(optimizer, "_step_supports_amp_scaling", False):

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import warnings
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -11,7 +12,7 @@ import pytest
 import torch
 from markers import NORM_REPLAY_EXPECTED, requires_cuda, skip_unless_norm_replay
 from pytorch_lightning import Callback, LightningModule, Trainer
-from pytorch_lightning.plugins.precision import MixedPrecision, Precision
+from pytorch_lightning.plugins.precision import DoublePrecision, HalfPrecision, MixedPrecision, Precision
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from torch import nn
 from torch.utils._pytree import tree_flatten
@@ -105,6 +106,65 @@ def test_new_option_preserves_default_state_and_cpu_setup() -> None:
         enabled.setup("fit")
     assert not enabled._capture_gradient_norm_active
     assert any(isinstance(callback, _GradientNormLifecycle) for callback in enabled.configure_callbacks())
+
+
+def test_failed_norm_cleanup_preserves_trainer_exception() -> None:
+    """A cleanup error cannot replace the fit failure, even when warnings are errors."""
+    module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
+    lifecycle = _GradientNormLifecycle()
+    with patch.object(module._gradient_norm_capture, "clear", side_effect=RuntimeError("cleanup failure")):
+        with pytest.warns(UserWarning, match="capture_gradient_norm=True could not drain.*cleanup failure"):
+            lifecycle.on_exception(None, module, RuntimeError("fit failure"))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            lifecycle.on_exception(None, module, RuntimeError("fit failure"))
+
+
+@pytest.mark.parametrize(
+    "plugin",
+    [
+        pytest.param(HalfPrecision("16-true"), id="half"),
+        pytest.param(HalfPrecision("bf16-true"), id="bfloat"),
+        pytest.param(DoublePrecision(), id="double"),
+    ],
+)
+def test_inherited_stock_clipping_reaches_norm_holder(plugin: Precision) -> None:
+    """Stock precision subclasses reach the holder's real CPU refusal and native scaling."""
+    module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
+    module._trainer = SimpleNamespace(precision_plugin=plugin, gradient_clip_val=2.0, gradient_clip_algorithm=None)
+    module._capture_gradient_norm_active = True
+    first, second = _parameters("cpu", torch.float32), _parameters("cpu", torch.float32)
+    optimizer = torch.optim.SGD(first, lr=0.1)
+    with patch.object(implementation, "_SUPPORTED", True), pytest.warns(UserWarning, match="ordinary dense.*CUDA"):
+        module.configure_gradient_clipping(optimizer)
+    torch.nn.utils.clip_grad_norm_(second, 2.0)
+    _bits_equal(first, second)
+
+
+@pytest.mark.parametrize(
+    ("maximum", "algorithm"),
+    [
+        pytest.param(None, "norm", id="unset"),
+        pytest.param(0.0, "norm", id="zero"),
+        pytest.param(2.0, "value", id="value"),
+    ],
+)
+def test_ineligible_clipping_warns_once_and_keeps_native_gradients(maximum: float | None, algorithm: str) -> None:
+    """Disabled or value clipping retires once per fit while preserving the native result."""
+    module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
+    module._trainer = SimpleNamespace(
+        precision_plugin=Precision(), gradient_clip_val=maximum, gradient_clip_algorithm=algorithm
+    )
+    module._capture_gradient_norm_active = True
+    first, second = _parameters("cpu", torch.float32), _parameters("cpu", torch.float32)
+    optimizer = torch.optim.SGD(first, lr=0.1)
+    with pytest.warns(UserWarning, match="clipping is disabled or not by norm") as recorded:
+        module.configure_gradient_clipping(optimizer)
+        module.configure_gradient_clipping(optimizer)
+    assert len(recorded) == 1 and module._gradient_norm_capture._disabled
+    if algorithm == "value":
+        torch.nn.utils.clip_grad_value_(second, maximum)
+    _bits_equal(first, second)
 
 
 def test_norm_replay_gate_tracks_torch_2_9() -> None:
