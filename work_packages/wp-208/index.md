@@ -2,7 +2,7 @@
 
 > Engineering log · [Phase 19 — Codebase audit remediation](https://borda.github.io/lucid-YOLO/engineering/phase-19-codebase-audit/)
 >
-> 🔗 Depends on [WP-207](https://borda.github.io/lucid-YOLO/work_packages/wp-207/), [WP-209](https://borda.github.io/lucid-YOLO/work_packages/wp-209/) · Needed by [WP-210](https://borda.github.io/lucid-YOLO/work_packages/wp-210/)
+> 🔗 Depends on [WP-207](https://borda.github.io/lucid-YOLO/work_packages/wp-207/), [WP-209](https://borda.github.io/lucid-YOLO/work_packages/wp-209/) · Needed by [WP-193h](https://borda.github.io/lucid-YOLO/work_packages/wp-193h/), [WP-210](https://borda.github.io/lucid-YOLO/work_packages/wp-210/)
 >
 > ⬅️ [WP-207](https://borda.github.io/lucid-YOLO/work_packages/wp-207/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-209](https://borda.github.io/lucid-YOLO/work_packages/wp-209/) ➡️
 

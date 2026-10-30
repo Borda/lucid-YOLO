@@ -4,7 +4,7 @@
 >
 > 🔗 Depends on [WP-193](https://borda.github.io/lucid-YOLO/work_packages/wp-193/) · Needed by [WP-195](https://borda.github.io/lucid-YOLO/work_packages/wp-195/)
 >
-> ⬅️ [WP-193g](https://borda.github.io/lucid-YOLO/work_packages/wp-193g/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-195](https://borda.github.io/lucid-YOLO/work_packages/wp-195/) ➡️
+> ⬅️ [WP-193h](https://borda.github.io/lucid-YOLO/work_packages/wp-193h/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-195](https://borda.github.io/lucid-YOLO/work_packages/wp-195/) ➡️
 
 
 ## WP-194 — static checks leave pytest, test names lose their filler words

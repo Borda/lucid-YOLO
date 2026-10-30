@@ -2064,6 +2064,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#lucid_yolo.ptl.DetectionLitModule.optimizer_step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        optimizer_step
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#lucid_yolo.ptl.DetectionLitModule.validation_step" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4986,6 +4997,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#lucid_yolo.ptl.DetectionLitModule.optimizer_step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        optimizer_step
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#lucid_yolo.ptl.DetectionLitModule.validation_step" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6485,6 +6507,8 @@ module with no trainer attached is left as built.</p>
 <p>All task metrics gather whole-epoch records across ranks before scoring.
 Rotated and keypoint metrics also drop sampler padding by dataset identity,
 retaining the original sequential validation order and scoring protocols.</p>
+<p>Setting up <code>"fit"</code> also re-arms the once-per-fit gradient-snapshot-skip verdict that
+:meth:<code>_report_native_closure</code> logs at the first training step.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -7329,6 +7353,38 @@ two-element <code>(images, list[Targets])</code> form rasterises in the step.</p
           </tr>
       </tbody>
     </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="lucid_yolo.ptl.DetectionLitModule.optimizer_step" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">optimizer_step</span>
+
+
+<a href="#lucid_yolo.ptl.DetectionLitModule.optimizer_step" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">optimizer_step</span><span class="p">(</span><span class="n">epoch</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">batch_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">:</span> <span class="n">Optimizer</span> <span class="o">|</span> <span class="n">LightningOptimizer</span><span class="p">,</span> <span class="n">optimizer_closure</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[],</span> <span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Omit snapshots that the native closure clears before backward.</p>
+<p>Only detection network replay with accumulation one and the native
+pass-through profiler qualifies. The native forward runs inside the
+permission; zeroing, backward and subsequent
+callbacks run outside it. Restoring the closure in <code>finally</code> keeps a
+failed or reused closure from retaining the wrapper. Custom zeroing,
+observers, strategies, precision plugins, optimizer wrappers and a
+closure whose own <code>closure</code> method was replaced on the instance keep
+the original snapshots. Lightning minors beyond the inspected 2.4-2.6
+contract also retain them. This hook only filters on the replay flag
+and the closure's shape; the certificate, evaluated as the forward
+starts, decides. The first step of a fit logs the verdict once, at
+rank-zero info level: active, or the first check that failed.</p>
 
 
     </div>

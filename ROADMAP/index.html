@@ -6976,6 +6976,14 @@
 <td>🔄</td>
 </tr>
 <tr>
+<td>193h</td>
+<td><code>perf(ptl): omit gradients cleared by the native closure</code> [DATA][GPU]</td>
+<td>Detection network replay omits live-gradient snapshots only inside a certified native Lightning forward whose optimizer clears those same parameters before backward. Accumulation, observers and customized contracts retain snapshots; arithmetic and defaults stay unchanged · <a href="../work_packages/wp-193h/#wp-193h">log</a></td>
+<td>Focused CPU/CUDA route and byte-parity regressions; repeated public-COCO complete fits; full gate, aggregate coverage and accelerator goldens remain unverified</td>
+<td>208</td>
+<td>🔄</td>
+</tr>
+<tr>
 <td>194</td>
 <td><code>refine(tests): static checks to hooks, plain test names</code></td>
 <td>File-content tests leave pytest: the <code>_viz</code>/matplotlib import boundary becomes ruff <code>TID251</code>, the top-k and packaged-recipe text pins the <code>content-pins</code> hook, and live-tree "hook passes" copies are dropped. Test names lose <code>a an the its their is are does that</code> · <a href="../work_packages/wp-194/#wp-194">log</a></td>

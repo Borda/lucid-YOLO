@@ -4810,12 +4810,12 @@
 <tr>
 <td>R40</td>
 <td>PyTorch 2.9.1, github.com/pytorch/pytorch, BSD-3-Clause</td>
-<td>Existing runtime dependency, consulted diagnostically for the CPU and CUDA division kernels in <a href="../work_packages/wp-197/">WP-197</a>. The CUDA <a href="https://github.com/pytorch/pytorch/blob/v2.9.1/aten/src/ATen/native/cuda/BinaryDivTrueKernel.cu#L35-L53">host-scalar branch</a> uses a reciprocal multiply; a device-tensor divisor retains division. Licence verified from that revision’s <code>LICENSE</code>; no framework code copied.</td>
+<td>Existing runtime dependency, consulted diagnostically for the CPU and CUDA division kernels in <a href="../work_packages/wp-197/">WP-197</a>. The CUDA <a href="https://github.com/pytorch/pytorch/blob/v2.9.1/aten/src/ATen/native/cuda/BinaryDivTrueKernel.cu#L35-L53">host-scalar branch</a> uses a reciprocal multiply; a device-tensor divisor retains division. Licence verified from that revision’s <code>LICENSE</code>; no framework code copied. <a href="../work_packages/wp-193h/">WP-193h</a> also inspects the native optimizer profiler and LambdaLR wrapper identities in the installed PyTorch 2.9.1 runtime.</td>
 </tr>
 <tr>
 <td>R41</td>
 <td>Lightning 2.6.6, github.com/Lightning-AI/pytorch-lightning, Apache-2.0</td>
-<td>Existing runtime dependency, consulted diagnostically for precision input conversion and batch transfer ordering in <a href="../work_packages/wp-197/">WP-197</a>. The precision guard follows that ordering. Apache-2.0 verified from the installed wheel’s <code>licenses/LICENSE</code>; no framework code copied.</td>
+<td>Existing runtime dependency, consulted diagnostically for precision input conversion and batch transfer ordering in <a href="../work_packages/wp-197/">WP-197</a>. The precision guard follows that ordering. Native automatic-optimization forward/zeroing/backward order, precision closure dispatch and profiler/zero-gradient observers are also inspected for <a href="../work_packages/wp-193h/">WP-193h</a>, across the inspected Lightning 2.6.6 and 2.4.0 runtimes and <a href="https://github.com/Lightning-AI/pytorch-lightning/blob/2.5.0/src/lightning/pytorch/loops/optimization/automatic.py">2.5.0 source</a>. Apache-2.0 verified from the installed wheel’s <code>licenses/LICENSE</code>; no framework code copied.</td>
 </tr>
 <tr>
 <td>R42</td>
@@ -4865,7 +4865,7 @@
 <tr>
 <td>R43</td>
 <td>PyTorch <code>torch.cuda.make_graphed_callables</code>, <a href="https://docs.pytorch.org/docs/2.4/generated/torch.cuda.make_graphed_callables.html">2.4 API documentation</a>, <a href="https://github.com/pytorch/pytorch/blob/v2.4.0/LICENSE">v2.4.0 LICENSE</a>, BSD-3-Clause</td>
-<td>General-purpose forward/backward CUDA replay API and its tensor-only, first-order, hook and uncached-AMP constraints. Licence verified 2026-10-16 from that exact tag. The implementation calls the existing dependency API; no detection code is copied.</td>
+<td>General-purpose forward/backward CUDA replay API and its tensor-only, first-order, hook and uncached-AMP constraints. Licence verified 2026-10-16 from that exact tag. The implementation calls the existing dependency API. No detection code is copied.</td>
 </tr>
 </tbody>
 </table>
@@ -5083,6 +5083,11 @@
 <td>2026-10-21</td>
 <td>R42, R45</td>
 <td>The existing dependency's public norm decomposition and CUDA graph lifetime for <a href="../work_packages/wp-200c/">WP-200c</a>. The native reduction and scaling calls are retained; current repository code and our own L4 profiles determine the metadata optimization. No external detector or optimizer implementation consulted.</td>
+</tr>
+<tr>
+<td>2026-10-29</td>
+<td>R40, R41</td>
+<td>Native Lightning closure/precision/profiler observer ordering (R41) and PyTorch 2.9.1 optimizer wrapper identities (R40) for <a href="../work_packages/wp-193h/">WP-193h</a>; dependency contracts only, no framework implementation copied.</td>
 </tr>
 </tbody>
 </table>

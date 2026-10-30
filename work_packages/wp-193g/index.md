@@ -4,7 +4,7 @@
 >
 > 🔗 Depends on [WP-193d](https://borda.github.io/lucid-YOLO/work_packages/wp-193d/), [WP-193e](https://borda.github.io/lucid-YOLO/work_packages/wp-193e/) · Needed by none
 >
-> ⬅️ [WP-193f](https://borda.github.io/lucid-YOLO/work_packages/wp-193f/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-194](https://borda.github.io/lucid-YOLO/work_packages/wp-194/) ➡️
+> ⬅️ [WP-193f](https://borda.github.io/lucid-YOLO/work_packages/wp-193f/) · [Roadmap](https://borda.github.io/lucid-YOLO/ROADMAP/) · [WP-193h](https://borda.github.io/lucid-YOLO/work_packages/wp-193h/) ➡️
 
 
 ## WP-193g — replay common features without joining prediction gradients
