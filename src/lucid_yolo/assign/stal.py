@@ -259,6 +259,7 @@ class SmallTargetAssigner(TaskAlignedAssigner):
             defaults to ``False`` and leaves unsupported inputs native.
 
     Raises:
+        TypeError: If ``fused_assignment`` is not a ``bool`` (raised by the base assigner).
         ValueError: If ``topk``, ``alpha``, ``beta`` or ``eps`` falls outside the base
             assigner's range, or if ``s_min`` or ``s_ref`` takes a value that disables
             or inverts the surrogate inflation (see :func:`_check_surrogate_sizes`).

@@ -303,15 +303,16 @@ class TaskAlignedAssigner:
             (A2 default ``1.0``). Must be finite and ``>= 0``.
         beta: Exponent on the IoU in ``t = s**alpha * u**beta`` (A2 default
             ``6.0``). Must be finite and ``>= 0``.
-        fused_assignment: Opt into the optional CUDA passes for dense assignment.
-            Default ``False`` retains the native tensor schedule on every device.
         eps: Small constant guarding the IoU union division; must be finite and
             ``> 0``. It does **not** guard the target-normalization denominator:
             that quantity is ``s * u_max**6``, which an absolute floor swamps at
             small overlap (see :meth:`_build_result`), so the denominator is
             floored at the dtype's smallest normal instead.
+        fused_assignment: Opt into the optional CUDA passes for dense assignment.
+            Default ``False`` retains the native tensor schedule on every device.
 
     Raises:
+        TypeError: If ``fused_assignment`` is not a ``bool``.
         ValueError: If ``topk`` is below 1, or if any of ``alpha``, ``beta`` and
             ``eps`` takes a value that disables the safeguard it exists to be
             (see :func:`_check_hyperparameters`).
