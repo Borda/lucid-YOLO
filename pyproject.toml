@@ -85,10 +85,14 @@ dependencies = [
   "fuse-augmentations @ git+https://github.com/Borda/fuse-augmentations@a5a276addf38e2dfd80ecaf287b2328445e545a6",
 ]
 
-# The CUDA colour restore can use this compiler, while CPU, MPS and an install
-# without the extra retain the native tensor path. Torch's CUDA wheel already
-# selects its compatible Triton; the range permits that selection.
 [project.optional-dependencies]
+# The fused target assignment (`fused_assignment=True`) can use this compiler, while
+# CPU, MPS and an install without the extra retain the native tensor path. The pins
+# match `cuda-hsv` below, for the same reasons.
+cuda-assignment = [
+  "triton>=3.0,<4; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "setuptools>=68; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
 # `lucid-export` and `lucid_yolo.export.export_graph` write the file through
 # `torch.onnx.export(..., dynamo=False)`, torch's TorchScript exporter, which imports
 # `onnx` to finalise the model proto even though nothing in this package imports it:
@@ -98,6 +102,9 @@ dependencies = [
 # Apache-2.0 and already in the audited dev environment; `onnxruntime` is not needed to
 # write a file and stays dev-only, where the parity gate runs the exported graph.
 export = ["onnx>=1.17"]
+# The CUDA colour restore can use this compiler, while CPU, MPS and an install
+# without the extra retain the native tensor path. Torch's CUDA wheel already
+# selects its compatible Triton; the range permits that selection.
 cuda-hsv = [
   "triton>=3.0,<4; sys_platform == 'linux' and platform_machine == 'x86_64'",
   # Triton 3.0 imports its build helper at runtime; use this project's build floor.
