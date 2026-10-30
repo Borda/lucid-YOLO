@@ -331,6 +331,8 @@ class TestReplayBackwardHold:
         weight.grad = alias
         holder = _NetworkCapture()
         holder._network = network
+        # The recorder keeps the parameter membership alongside its graphed module.
+        holder._recorded_parameters = tuple(network.parameters())
         holder._copy_out_live_gradients()
         output = network.backbone(torch.ones(1, 3))
         holder._await_backward((output,))
@@ -459,7 +461,7 @@ class TestDryRecordingCycle:
             >>> callable(TestDryRecordingCycle._eligible)
             True
         """
-        monkeypatch.setattr("lucid_yolo.ptl.network_capture._ineligibility", lambda network: None)
+        monkeypatch.setattr("lucid_yolo.ptl.network_capture._ineligibility", lambda network, members=None: None)
 
     @pytest.mark.usefixtures("_eligible")
     def test_accumulated_microbatches_record_once_and_match_eager(self, dry_recording: MagicMock) -> None:

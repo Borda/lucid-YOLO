@@ -16,12 +16,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 from capture_access import loss_objective, network_capture
-from markers import requires_cuda
+from markers import fused_cuda_backend_expected, requires_cuda, skip_unless_bf16_replay
 from pytorch_lightning import Callback, Trainer, seed_everything
 from pytorch_lightning.plugins.precision import MixedPrecision
 from torch.utils.data import DataLoader
 
-from lucid_yolo.assign import stal, tal
+from lucid_yolo.assign import _cuda, stal, tal
 from lucid_yolo.assign.tal import TaskAlignedAssigner
 from lucid_yolo.cli.train import DetectionCLI, packaged_config
 from lucid_yolo.data.targets import Targets
@@ -33,6 +33,16 @@ from lucid_yolo.ptl.loss_capture import _BF16_SUPPORTED, _LossCapture, _LossCapt
 from lucid_yolo.ptl.module import DetectionLitModule
 
 pytestmark = pytest.mark.usefixtures("deterministic_kernels")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_backend_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give each test its own fused-launch decisions and restore the process-wide state afterwards.
+
+    The backend keeps verified and unavailable families for the whole process, so a test that
+    reads them would otherwise inherit what an earlier test on the same worker launched.
+    """
+    monkeypatch.setattr(_cuda, "_STATE", _cuda._BackendState())
 
 
 def _inputs(
@@ -106,6 +116,35 @@ def _bits(left: torch.Tensor, right: torch.Tensor) -> None:
         left.detach().contiguous().reshape(-1).view(torch.uint8),
         right.detach().contiguous().reshape(-1).view(torch.uint8),
     )
+
+
+#: The families a non-rotated assignment can launch.
+_FUSED_FAMILIES = frozenset({"metric", "conflicts"})
+
+
+def _verified_families() -> set[str]:
+    """Name the assignment families that completed a first fused launch in this test.
+
+    Examples:
+        >>> sorted(_verified_families() - {"metric", "inside", "conflicts"})
+        []
+    """
+    return {kind for kind, _ in _cuda._STATE.verified}
+
+
+def _expected_families(
+    fused_assignment: bool, families: frozenset[str] = frozenset({"metric", "conflicts"})
+) -> set[str]:
+    """Name the families a non-rotated run may launch, from the host alone.
+
+    A request on a host the fused backend cannot serve (below SM 8, ROCm, no host compiler,
+    no Triton) keeps every assignment native, so nothing is expected to launch there.
+
+    Examples:
+        >>> _expected_families(False)
+        set()
+    """
+    return set(families) if fused_assignment and fused_cuda_backend_expected() else set()
 
 
 def _same(left: DualLossOutput, right: DualLossOutput) -> None:
@@ -484,16 +523,19 @@ def test_fit_boundaries_reset_holder(hook: str) -> None:
         pytest.param(torch.float16, id="float16"),
     ],
 )
-def test_variable_target_capacity_matches_native_bits_and_gradients(dtype: torch.dtype) -> None:
+@pytest.mark.parametrize("fused_assignment", [False, True])
+def test_variable_target_capacity_matches_native_bits_and_gradients(dtype: torch.dtype, fused_assignment: bool) -> None:
     """Growth, shrinkage and empty targets keep each branch's real assignment unchanged."""
-    holder, source = _LossCapture(), DualBranchLoss()
+    holder, source = _LossCapture(), DualBranchLoss(fused_assignment=fused_assignment)
     for count in (3, 1, 0, 7, 2, 0, 9, 1):
         inputs = _inputs(count, dtype=dtype)
         reference = tuple(value.detach().clone().requires_grad_(value.requires_grad) for value in inputs)
         with torch.autocast("cuda", enabled=dtype != torch.float32, dtype=dtype, cache_enabled=False):
-            expected = _native(source, reference)
+            expected = _native(DualBranchLoss(), reference)
             actual = holder.run(source, _LossInputs(*inputs))
         assert loss_objective(holder) is not None
+        assert _verified_families() >= _expected_families(fused_assignment, frozenset({"conflicts"}))
+        assert _verified_families() <= _expected_families(fused_assignment)
         _same(expected, actual)
         expected.total.backward()
         actual.total.backward()
@@ -673,7 +715,17 @@ def test_settings_and_implementations_changed_before_capture_stay_observable() -
 
 
 @requires_cuda
-def test_public_fit_records_loss_and_releases_owner() -> None:
+@pytest.mark.parametrize("fused_assignment", [False, True])
+@pytest.mark.parametrize(
+    ("precision", "required"),
+    [
+        pytest.param("32-true", _FUSED_FAMILIES, id="float32"),
+        pytest.param("bf16-mixed", frozenset({"conflicts"}), id="bf16-mixed", marks=skip_unless_bf16_replay),
+    ],
+)
+def test_public_fit_records_loss_and_releases_owner(
+    fused_assignment: bool, precision: str, required: frozenset[str]
+) -> None:
     """A real automatic Trainer activates replay and clears it after fit completion."""
     seen: list[int] = []
 
@@ -692,7 +744,9 @@ def test_public_fit_records_loss_and_releases_owner() -> None:
         for _ in range(3)
     ]
     loader = DataLoader(batches, batch_size=None)
-    model = DetectionLitModule(0.5, 0.25, 64, 3, capture_loss=True, warmup_epochs=0.0)
+    model = DetectionLitModule(
+        0.5, 0.25, 64, 3, capture_loss=True, fused_assignment=fused_assignment, warmup_epochs=0.0
+    )
     trainer = Trainer(
         accelerator="cuda",
         devices=1,
@@ -703,10 +757,13 @@ def test_public_fit_records_loss_and_releases_owner() -> None:
         enable_model_summary=False,
         limit_val_batches=0,
         num_sanity_val_steps=0,
+        precision=precision,
         callbacks=[Probe()],
     )
     trainer.fit(model, train_dataloaders=loader)
     assert len(seen) == 3 and all(capacity >= 1 for capacity in seen)
+    assert _verified_families() <= _expected_families(fused_assignment)
+    assert _verified_families() >= _expected_families(fused_assignment, required)
     assert loss_objective(model._loss_capture) is None and model._loss_capture._workspace is None
 
 

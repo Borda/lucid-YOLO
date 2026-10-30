@@ -49,7 +49,10 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
+from lucid_yolo.assign._cuda import _assignment_scope, _cuda_conflicts, _cuda_inside, _cuda_metric
 from lucid_yolo.data.rotated_geom import points_in_rboxes
+
+_NATIVE_POINTS_IN_RBOXES = points_in_rboxes
 
 __all__ = ["AssignResult", "TaskAlignedAssigner"]
 
@@ -120,6 +123,9 @@ def _box_iou_cross(gt_boxes: Tensor, pred_boxes: Tensor, eps: float) -> Tensor:
     return intersection / (union + eps)
 
 
+_NATIVE_BOX_IOU = _box_iou_cross
+
+
 def _rotated_inside(anchor_points: Tensor, gt_rboxes: Tensor) -> Tensor:
     """Point-in-rotated-rect containment for every GT and anchor; ``(B, N, A)``.
 
@@ -147,6 +153,10 @@ def _rotated_inside(anchor_points: Tensor, gt_rboxes: Tensor) -> Tensor:
 
         ```
     """
+    if points_in_rboxes is _NATIVE_POINTS_IN_RBOXES:
+        fused = _cuda_inside(anchor_points, gt_rboxes)
+        if fused is not None:
+            return fused
     per_image = [points_in_rboxes(anchor_points, rboxes) for rboxes in gt_rboxes]  # each (A, N)
     return torch.stack(per_image).transpose(1, 2)  # (B, A, N) -> (B, N, A)
 
@@ -298,8 +308,11 @@ class TaskAlignedAssigner:
             that quantity is ``s * u_max**6``, which an absolute floor swamps at
             small overlap (see :meth:`_build_result`), so the denominator is
             floored at the dtype's smallest normal instead.
+        fused_assignment: Opt into the optional CUDA passes for dense assignment.
+            Default ``False`` retains the native tensor schedule on every device.
 
     Raises:
+        TypeError: If ``fused_assignment`` is not a ``bool``.
         ValueError: If ``topk`` is below 1, or if any of ``alpha``, ``beta`` and
             ``eps`` takes a value that disables the safeguard it exists to be
             (see :func:`_check_hyperparameters`).
@@ -321,7 +334,18 @@ class TaskAlignedAssigner:
         ```
     """
 
-    def __init__(self, topk: int, alpha: float = 1.0, beta: float = 6.0, eps: float = 1e-9) -> None:
+    def __init__(
+        self,
+        topk: int,
+        alpha: float = 1.0,
+        beta: float = 6.0,
+        eps: float = 1e-9,
+        *,
+        fused_assignment: bool = False,
+    ) -> None:
+        if type(fused_assignment) is not bool:
+            raise TypeError("fused_assignment must be bool")
+        self.fused_assignment = fused_assignment
         if topk < 1:
             raise ValueError(f"topk must be >= 1, got {topk}")
         _check_hyperparameters(alpha, beta, eps)
@@ -417,6 +441,25 @@ class TaskAlignedAssigner:
         *,
         check_labels: bool = True,
     ) -> AssignResult:
+        """Scope this assigner's CUDA request without exposing context state to the compiler."""
+        arguments = pred_scores, pred_boxes, anchor_points, gt_boxes, gt_labels, gt_mask, gt_rboxes
+        if torch.compiler.is_compiling():
+            return self._assign_impl(*arguments, check_labels=check_labels)
+        with _assignment_scope(self.fused_assignment):
+            return self._assign_impl(*arguments, check_labels=check_labels)
+
+    def _assign_impl(
+        self,
+        pred_scores: Tensor,
+        pred_boxes: Tensor,
+        anchor_points: Tensor,
+        gt_boxes: Tensor,
+        gt_labels: Tensor,
+        gt_mask: Tensor,
+        gt_rboxes: Tensor | None = None,
+        *,
+        check_labels: bool = True,
+    ) -> AssignResult:
         """Run the unchanged pipeline after the caller has selected its validation boundary.
 
         Only the CUDA loss recorder disables ``check_labels``: it validates both
@@ -495,6 +538,12 @@ class TaskAlignedAssigner:
         ``t`` is zeroed outside the candidate set so it can feed top-k directly;
         the raw (unmasked) IoU is returned for the target normalization.
         """
+        if _box_iou_cross is _NATIVE_BOX_IOU:
+            fused = _cuda_metric(
+                pred_scores, pred_boxes, gt_boxes, gt_labels, candidate_mask, self.alpha, self.beta, self.eps
+            )
+            if fused is not None:
+                return fused
         num_anchors = pred_scores.shape[1]
         iou = _box_iou_cross(gt_boxes, pred_boxes, self.eps)  # (B, N, A)
         scores = pred_scores.permute(0, 2, 1)  # (B, C, A)
@@ -546,6 +595,9 @@ class TaskAlignedAssigner:
         ``contested`` is all-``False`` and ``torch.where`` returns ``mask_pos``
         untouched — so the skip was only ever an optimization, and a negative one.
         """
+        fused = _cuda_conflicts(mask_pos, align_metric)
+        if fused is not None:
+            return fused
         selected_per_anchor = mask_pos.sum(dim=1)  # (B, A)
         num_gt = mask_pos.shape[1]
         contested = (selected_per_anchor > 1).unsqueeze(1)  # (B, 1, A)

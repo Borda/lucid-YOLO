@@ -406,7 +406,7 @@ def test_compile_step_on_cpu_trainer_warns_once_and_stays_eager(monkeypatch: pyt
     assert torch.equal(total, expected)
 
 
-@pytest.mark.parametrize("flag", ["capture_network", "capture_loss"])
+@pytest.mark.parametrize("flag", ["capture_network", "capture_loss", "capture_gradient_norm"])
 def test_ignored_capture_warning_names_setup_caller(flag: str) -> None:
     """An opted-in recording ``setup`` cannot activate warns at the line that called ``setup``.
 
@@ -423,7 +423,7 @@ def test_ignored_capture_warning_names_setup_caller(flag: str) -> None:
     assert [warning.filename for warning in record] == [__file__]
 
 
-@pytest.mark.parametrize("flag", ["capture_network", "capture_loss"])
+@pytest.mark.parametrize("flag", ["capture_network", "capture_loss", "capture_gradient_norm"])
 def test_ignored_capture_clears_activation_before_warning(flag: str) -> None:
     """A recording ``setup`` refuses is switched off even when its warning is raised as an error.
 

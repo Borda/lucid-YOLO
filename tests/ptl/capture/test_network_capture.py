@@ -25,7 +25,7 @@ import torch
 from capture_access import network_capture
 from markers import requires_cuda
 from pytorch_lightning import Callback, Trainer
-from pytorch_lightning.accelerators import CUDAAccelerator
+from pytorch_lightning.accelerators import CUDAAccelerator, MPSAccelerator
 from pytorch_lightning.plugins.precision import MixedPrecision
 from pytorch_lightning.strategies import DDPStrategy, SingleDeviceStrategy
 from torch.utils.data import DataLoader
@@ -223,6 +223,84 @@ def test_retirement_warns_once_and_later_calls_stay_eager() -> None:
     assert eager.call_count == 2
 
 
+def test_captured_signature_reflects_bindings_after_warmup_not_before() -> None:
+    """A scalar flipped during warmup must certify what warmup actually left behind.
+
+    CUDA graph capture runs the network through its own warmup iterations before freezing
+    the replay, so a scalar module attribute mutated there (a "first call" flip, for one) is
+    part of what gets recorded. `_run` retains the original recording stamp to detect drift. Seeding `_ModuleMetadata`
+    from that stamp while retaining post-warmup bindings instead of a fresh matching
+    scalar snapshot would certify bindings the recording never actually saw,
+    and every later call matching the metadata's own (post-warmup) bindings would then return
+    that stale value forever, masking the real drift.
+    """
+
+    class _FirstCallFlips(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.lin = torch.nn.Linear(2, 2)
+            self.flag = False
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            out: torch.Tensor = self.lin(x)
+            return out + (3.0 if self.flag else 0.0)
+
+    network = _FirstCallFlips()
+    with torch.no_grad():
+        network.lin.weight.fill_(1.0)
+        network.lin.bias.fill_(0.0)
+    images = torch.ones(1, 2) * 7.5
+
+    members = capture_module._members(network)
+    eligibility_time_state = capture_module._network_signature(network, members, None)
+    recorded_output = network(images)
+
+    network.flag = True  # the mutation a warmup iteration can leave behind
+    warmup_output = network(images)
+    assert not torch.equal(recorded_output, warmup_output)
+
+    certified = capture_module._module_signature(members[0])
+    assert certified != eligibility_time_state[0]
+
+    stale_metadata = capture_module._ModuleMetadata(members[0], eligibility_time_state[0])
+    fixed_metadata = capture_module._ModuleMetadata(members[0], certified)
+
+    # Nothing else changes before this read: both metadata objects see identical live bindings.
+    stale_read = capture_module._network_signature(network, members, stale_metadata)[0]
+    fixed_read = capture_module._network_signature(network, members, fixed_metadata)[0]
+    assert stale_read == eligibility_time_state[0]  # the bug: certifies a value warmup never saw
+    assert fixed_read == certified  # the fix: certifies what warmup actually left behind
+    assert fixed_read != stale_read
+    assert torch.equal(network(images), warmup_output)
+
+
+def test_run_seeds_metadata_after_warmup_and_retires_scalar_drift(
+    dry_recording: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Warmup's scalar bindings must be compared against the original recording stamp on CPU."""
+    model = _module()
+    model.head.warmup_generation = 0
+    holder = _NetworkCapture()
+    images = torch.ones(2, 3, 64, 64)
+    monkeypatch.setattr(capture_module, "_ineligibility", lambda network, members=None: None)
+
+    def warmup(network: torch.nn.Module, samples: object, device: torch.device) -> torch.nn.Module:
+        """Leave changed scalar state behind at the recording boundary."""
+        del samples, device
+        model.head.warmup_generation = 1
+        return network
+
+    dry_recording.side_effect = warmup
+    _run(holder, model, images).o2m_cls.sum().backward()
+    assert holder._network is not None and holder._metadata is not None
+    assert dry_recording.call_count == 1
+    with pytest.warns(UserWarning, match="scalar module attribute"):
+        actual = _run(holder, model, images)
+    assert holder._disabled and holder._network is None and holder._metadata is None
+    assert dry_recording.call_count == 1
+    assert torch.equal(actual.o2m_cls, model(images).o2m_cls)
+
+
 def test_cpu_images_bypass_recording_when_capture_is_active() -> None:
     """A step on CPU images never enters the recorder even when the module believes capture is active."""
     model = _module(capture_network=True)
@@ -244,22 +322,47 @@ def test_cpu_images_bypass_recording_when_capture_is_active() -> None:
 
 
 @pytest.mark.parametrize(
-    ("strategy", "automatic_optimization"),
+    ("accelerator", "strategy", "automatic_optimization", "eligible"),
     [
-        pytest.param(DDPStrategy, True, id="distributed-strategy"),
-        pytest.param(lambda: SingleDeviceStrategy(device="cuda"), False, id="manual-optimization"),
+        pytest.param(CUDAAccelerator, DDPStrategy, True, False, id="distributed-strategy"),
+        pytest.param(CUDAAccelerator, SingleDeviceStrategy, False, False, id="manual-optimization"),
+        pytest.param(MPSAccelerator, SingleDeviceStrategy, True, False, id="mps"),
+        pytest.param(CUDAAccelerator, SingleDeviceStrategy, True, True, id="single-device-cuda"),
     ],
 )
-def test_setup_ignores_capture_outside_single_device_automatic_optimization(
-    strategy: Callable[[], object], automatic_optimization: bool
+@pytest.mark.parametrize("flag", ["capture_network", "capture_loss", "capture_gradient_norm"])
+@pytest.mark.parametrize("stage", ["fit", "validate"])
+@pytest.mark.parametrize("supported", [False, True])
+def test_setup_gates_capture_and_warns_at_fit(
+    accelerator: Callable[[], object],
+    strategy: Callable[[], object],
+    automatic_optimization: bool,
+    eligible: bool,
+    flag: str,
+    stage: str,
+    supported: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Asking for capture under DDP or manual optimization warns and leaves the module eager."""
-    model = _module(capture_network=True)
+    """Device eligibility and norm's torch gate produce separate fit-only diagnostics."""
+    monkeypatch.setattr("lucid_yolo.ptl.module._NORM_CAPTURE_SUPPORTED", supported)
+    model = _module(**{flag: True})
     model.automatic_optimization = automatic_optimization
-    model._trainer = MagicMock(spec=Trainer, accelerator=CUDAAccelerator(), strategy=strategy())
-    with pytest.warns(UserWarning, match="single-device CUDA"):
-        model.setup("fit")
-    assert not model._capture_network_active
+    model._trainer = MagicMock(spec=Trainer, accelerator=accelerator(), strategy=strategy())
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        model.setup(stage)
+    norm_requested = flag == "capture_gradient_norm"
+    assert getattr(model, f"_{flag}_active") is (eligible and (supported or not norm_requested))
+    expected = []
+    if stage == "fit":
+        if not eligible:
+            expected.append(f"{flag}=True is ignored outside single-device CUDA automatic optimization")
+        elif norm_requested and not supported:
+            expected.append(
+                f"capture_gradient_norm=True is verified only on torch>=2.9; installed torch is {torch.__version__}"
+            )
+    assert [str(warning.message) for warning in recorded] == expected
+    assert all(warning.filename == __file__ for warning in recorded)
 
 
 def test_setup_activates_capture_on_single_device_cuda_automatic_optimization() -> None:

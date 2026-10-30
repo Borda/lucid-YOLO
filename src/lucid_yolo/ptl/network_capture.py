@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import sys
 import warnings
+from operator import is_
 from typing import TYPE_CHECKING, TypeVar, cast
 
 import torch
@@ -46,6 +47,7 @@ from lucid_yolo.ptl._graph_replay import precision_signature as _precision_signa
 
 _Output = TypeVar("_Output")
 _Features = tuple[Tensor, Tensor, Tensor]
+_Members = tuple[tuple[nn.Module, ...], tuple[Tensor, ...], tuple[Tensor, ...]]
 
 #: First verified BF16 replay runtime, bound here so a patch of this module reaches the gate below.
 _BF16_REPLAY_SUPPORTED = BF16_REPLAY_SUPPORTED
@@ -53,6 +55,11 @@ _BF16_REPLAY_SUPPORTED = BF16_REPLAY_SUPPORTED
 #: Method names through which a module's call reaches its arithmetic; the same name set on
 #: an instance shadows the class method a recording replays or a certificate fingerprints.
 _DISPATCH = ("forward", "forward_branch", "_keypoints", "_base_predictions")
+_NATIVE_ENUMERATION = {
+    name: getattr(nn.Module, name)
+    for name in ("modules", "parameters", "buffers", "named_parameters", "named_buffers", "_named_members")
+}
+_NATIVE_NAMED_MODULES = nn.Module.named_modules
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -209,26 +216,118 @@ def _module_breach(
     members = tuple(modules)
     if any(module_hook_breach(module) for module in members):
         return "carries a forward or backward hook"
-    overridden = next(
-        (name for name in dispatch for module in members if module is not exclude and name in vars(module)), None
-    )
-    if overridden is not None:
+    if any(module is not exclude and not vars(module).keys().isdisjoint(dispatch) for module in members):
+        overridden = next(
+            name for name in dispatch for module in members if module is not exclude and name in vars(module)
+        )
         return f"overrides {overridden} on its instance"
     if any(getattr(module, "_compiled_call_impl", None) is not None for module in members):
         return "is compiled"
     return None
 
 
-def _ineligibility(network: nn.Module) -> str | None:
+def _members(owner: nn.Module) -> _Members:
+    """Enumerate current modules and both tensor registries in one traversal.
+
+    The direct registries retain ``named_parameters`` and ``named_buffers`` preorder
+    and identity deduplication. This is shared work within one check, never a cached
+    topology: replacement, aliases and registration order are read on every call.
+    """
+    if any(
+        getattr(type(owner), name) is not method or name in vars(owner) for name, method in _NATIVE_ENUMERATION.items()
+    ):
+        return tuple(owner.modules()), tuple(owner.parameters()), tuple(owner.buffers())
+    pending = [owner]
+    visited: set[nn.Module] = set()
+    ordered: list[nn.Module] = []
+    while pending:
+        module = pending.pop()
+        if module in visited:
+            continue
+        if type(module).named_modules is not _NATIVE_NAMED_MODULES or "named_modules" in vars(module):
+            modules = tuple(owner.modules())
+            break
+        visited.add(module)
+        ordered.append(module)
+        pending.extend(child for child in reversed(module._modules.values()) if child is not None)
+    else:
+        modules = tuple(ordered)
+    parameters = {id(value): value for module in modules for value in module._parameters.values() if value is not None}
+    buffers = {id(value): value for module in modules for value in module._buffers.values() if value is not None}
+    return modules, tuple(parameters.values()), tuple(buffers.values())
+
+
+#: Training mode's position in each module entry returned by `_module_signature`.
+_MODULE_TRAINING_INDEX = 2
+
+
+def _module_signature(modules: tuple[nn.Module, ...]) -> tuple[object, ...]:
+    """Read the scalar attributes and class dispatch fixed by a recording."""
+    return tuple(
+        (
+            id(module),
+            id(type(module).forward),
+            module.training,
+            tuple(
+                (name, value)
+                for name, value in vars(module).items()
+                if value is None
+                or isinstance(value, (bool, int, float, str))
+                or (isinstance(value, tuple) and all(isinstance(part, (bool, int, float, str)) for part in value))
+            ),
+        )
+        for module in modules
+    )
+
+
+class _ModuleMetadata:
+    """Reuse scalar metadata only while every binding and class forward is unchanged.
+
+    Stored objects stay alive. Identity comparisons never call tensor equality, and
+    unchanged dictionary identities alone certify nothing: keys, their order and every
+    value are reread. The public training mode is read too: a descriptor can change it
+    without rebinding an instance scalar. Hooks, live registration and tensor storage remain independent
+    checks. A miss computes the original signature, including equal-value replacements.
+    Recording pairs post-warmup bindings with a fresh scalar snapshot while the owner
+    keeps its original drift stamp; warmup side effects must still retire the graph.
+    """
+
+    def __init__(self, modules: tuple[nn.Module, ...], signature: tuple[object, ...]) -> None:
+        self.modules = modules
+        self.signature = signature
+        self.bindings = tuple(dict(vars(module)) for module in modules)
+        self.names = tuple(tuple(saved) for saved in self.bindings)
+        self.forwards = tuple(type(module).forward for module in modules)
+        self.training = tuple(cast("tuple[object, ...]", entry)[_MODULE_TRAINING_INDEX] for entry in signature)
+
+    def read(self, modules: tuple[nn.Module, ...]) -> tuple[object, ...]:
+        """Return certified metadata, or perform the unchanged full attribute read."""
+        if len(modules) != len(self.modules) or not all(map(is_, modules, self.modules)):
+            return _module_signature(modules)
+        for module, saved, names, forward, training in zip(
+            modules, self.bindings, self.names, self.forwards, self.training, strict=True
+        ):
+            current = vars(module)
+            if (
+                type(module).forward is not forward
+                or module.training is not training
+                or tuple(current) != names
+                or not all(map(is_, current.values(), saved.values()))
+            ):
+                return _module_signature(modules)
+        return self.signature
+
+
+def _ineligibility(network: nn.Module, members: _Members | None = None) -> str | None:
     """Name the first property of the stages a recording could not keep honouring, if any."""
     if global_hook_breach():
         return "a global module hook is registered"
-    modules = tuple(network.modules())
+    if members is None:
+        members = tuple(network.modules()), tuple(network.parameters()), tuple(network.buffers())
+    modules, params, buffers = members
     breach = _module_breach(modules, exclude=network)
     if breach is not None:
         return f"a recorded stage module {breach}"
-    params = tuple(network.parameters())
-    buffers = tuple(network.buffers())
     tensors = params + buffers
     checks: tuple[tuple[str, Callable[[], bool]], ...] = (
         (
@@ -258,26 +357,16 @@ def _ineligibility(network: nn.Module) -> str | None:
     return next((reason for reason, breached in checks if breached()), None)
 
 
-def _network_signature(network: nn.Module) -> tuple[object, ...]:
-    """Fingerprint the storage, modes and scalar attributes a recording will keep reading."""
-    tensors = tuple(network.parameters()) + tuple(network.buffers())
-    modules = tuple(network.modules())
+def _network_signature(
+    network: nn.Module, members: _Members | None = None, metadata: _ModuleMetadata | None = None
+) -> tuple[object, ...]:
+    """Fingerprint live storage and reuse attribute inspection only with an identity proof."""
+    if members is None:
+        members = tuple(network.modules()), tuple(network.parameters()), tuple(network.buffers())
+    modules, parameters, buffers = members
+    tensors = parameters + buffers
     return (
-        tuple(
-            (
-                id(module),
-                id(type(module).forward),
-                module.training,
-                tuple(
-                    (name, value)
-                    for name, value in vars(module).items()
-                    if value is None
-                    or isinstance(value, (bool, int, float, str))
-                    or (isinstance(value, tuple) and all(isinstance(part, (bool, int, float, str)) for part in value))
-                ),
-            )
-            for module in modules
-        ),
+        _module_signature(modules) if metadata is None else metadata.read(modules),
         tensor_signature(tensors),
     )
 
@@ -332,6 +421,8 @@ class _NetworkCapture:
         self._stem_owners: tuple[int, ...] | None = None
         self._stem_names: dict[int, str] = {}
         self._network: nn.Module | None = None
+        self._metadata: _ModuleMetadata | None = None
+        self._recorded_parameters: tuple[Tensor, ...] = ()
         self._device: torch.device | None = None
         self._input: tuple[object, ...] | None = None
         self._state: tuple[object, ...] | None = None
@@ -547,8 +638,11 @@ class _NetworkCapture:
             return eager(images)
         owners = tuple(id(stage) for stage in stages)
         network = self._network if self._network is not None else build()
-        reason = _input_breach(images, precision, allow_input_grad=allow_input_grad) or _ineligibility(network)
-        state = _network_signature(network) if reason is None else None
+        reason = _input_breach(images, precision, allow_input_grad=allow_input_grad)
+        members = _members(network) if reason is None else None
+        if reason is None:
+            reason = _ineligibility(network, members)
+        state = _network_signature(network, members, self._metadata) if reason is None else None
         if state is not None:
             reason = self._drift(state, owners, precision)
         if reason is not None:
@@ -565,6 +659,9 @@ class _NetworkCapture:
                 # Looked up through the module: the one seam a CPU test replaces for both holders.
                 graphed = _graph_replay.record_graphed(network, (sample,), images.device)
                 self._network, self._input, self._state, self._owners = graphed, signature, state, owners
+                assert members is not None and state is not None
+                self._metadata = _ModuleMetadata(members[0], _module_signature(members[0]))
+                self._recorded_parameters = members[1]
                 self._device = images.device
             self._copy_out_live_gradients()
             outputs = cast("tuple[Tensor, ...]", self._network(images))
@@ -604,7 +701,7 @@ class _NetworkCapture:
         network = self._network
         if network is None:
             return
-        copy_out_live_gradients(network.parameters())
+        copy_out_live_gradients(self._recorded_parameters)
 
     def _backward_replayed(self, grad_inputs: object, grad_outputs: object) -> None:
         """Release the hold once a replayed backward has consumed the static activations."""

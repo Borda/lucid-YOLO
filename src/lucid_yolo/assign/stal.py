@@ -255,8 +255,11 @@ class SmallTargetAssigner(TaskAlignedAssigner):
             stride, ``16.0`` at 640 input); finite, ``> 0``, and ``>= s_min``. The
             strict ``s_ref > s_min`` of the stride recipe is documented but not
             enforced; the non-strict bound is (see :func:`_check_surrogate_sizes`).
+        fused_assignment: Opt into the base assigner's optional CUDA schedule;
+            defaults to ``False`` and leaves unsupported inputs native.
 
     Raises:
+        TypeError: If ``fused_assignment`` is not a ``bool`` (raised by the base assigner).
         ValueError: If ``topk``, ``alpha``, ``beta`` or ``eps`` falls outside the base
             assigner's range, or if ``s_min`` or ``s_ref`` takes a value that disables
             or inverts the surrogate inflation (see :func:`_check_surrogate_sizes`).
@@ -287,8 +290,10 @@ class SmallTargetAssigner(TaskAlignedAssigner):
         eps: float = 1e-9,
         s_min: float = 8.0,
         s_ref: float = 16.0,
+        *,
+        fused_assignment: bool = False,
     ) -> None:
-        super().__init__(topk, alpha, beta, eps)
+        super().__init__(topk, alpha, beta, eps, fused_assignment=fused_assignment)
         _check_surrogate_sizes(s_min, s_ref)
         self.s_min = s_min
         self.s_ref = s_ref

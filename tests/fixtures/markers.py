@@ -16,6 +16,10 @@ that needs them and are stacked next to this one.
 
 from __future__ import annotations
 
+import importlib.metadata
+import os
+import shutil
+from functools import cache
 from typing import TypeVar
 
 import pytest
@@ -56,6 +60,43 @@ requires_cuda = MarkSet(
     (pytest.mark.gpu, pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")),
 )
 
+
+@cache
+def fused_cuda_backend_expected() -> bool:
+    """Say whether this host should launch the fused CUDA assignment kernels.
+
+    The optional backend needs an NVIDIA device of compute capability 8 or newer, a host C compiler
+    (``CC`` when set, else ``gcc`` or ``clang``) and Triton 3.x. The answer is derived from the
+    runtime and the environment alone, without reading the backend's own state, so a backend that
+    wrongly declines on an eligible host fails the test that expects a launch instead of
+    quietly redefining the expectation.
+
+    Examples:
+        >>> isinstance(fused_cuda_backend_expected(), bool)
+        True
+    """
+    if not torch.cuda.is_available() or torch.version.hip is not None:
+        return False
+    if torch.cuda.get_device_capability()[0] < 8:
+        return False
+    compiler = os.environ.get("CC")
+    if not (shutil.which(compiler) if compiler else shutil.which("gcc") or shutil.which("clang")):
+        return False
+    try:
+        triton = Version(importlib.metadata.version("triton"))
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    return Version("3.0") <= triton < Version("4")
+
+
+#: A test that needs the fused CUDA assignment backend: ``gpu`` plus a skip on a host that cannot launch it.
+requires_fused_cuda = MarkSet(
+    (
+        pytest.mark.gpu,
+        pytest.mark.skipif(not fused_cuda_backend_expected(), reason="the NVIDIA CUDA/Triton backend is unavailable"),
+    ),
+)
+
 #: A test that needs any accelerator the project supports (CUDA or MPS).
 requires_accelerator = MarkSet(
     (
@@ -75,4 +116,13 @@ BF16_REPLAY_EXPECTED = Version(torch.__version__) >= Version("2.9")
 #: Skips a case that records BF16 replay on a runtime older than torch 2.9.
 skip_unless_bf16_replay = pytest.mark.skipif(
     not BF16_REPLAY_EXPECTED, reason="BF16 replay requires the verified torch 2.9 runtime"
+)
+
+#: Independent expectation for the norm decomposition's torch 2.9 runtime gate.
+#: ``test_norm_replay_gate_tracks_torch_2_9`` detects changes to the production threshold.
+NORM_REPLAY_EXPECTED = Version(torch.__version__) >= Version("2.9")
+
+#: Skips norm recordings on supported runtimes without the verified decomposition.
+skip_unless_norm_replay = pytest.mark.skipif(
+    not NORM_REPLAY_EXPECTED, reason="gradient-norm replay requires torch>=2.9"
 )

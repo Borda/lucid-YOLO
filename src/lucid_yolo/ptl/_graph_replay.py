@@ -37,6 +37,10 @@ if TYPE_CHECKING:
 #: First verified BF16 replay runtime; 2.4's path does not meet the exact eager oracle.
 BF16_REPLAY_SUPPORTED = Version(torch.__version__) >= Version("2.9")
 
+#: First verified runtime for native norm-decomposition replay, not an API availability floor.
+#: Independent of the BF16 eager-oracle gate because the replay contracts differ.
+GRADIENT_NORM_REPLAY_SUPPORTED = Version(torch.__version__) >= Version("2.9")
+
 _CLEARING_GRADIENTS: ContextVar[frozenset[int]] = ContextVar("clearing_gradients", default=frozenset())
 
 

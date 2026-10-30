@@ -21,6 +21,7 @@ config flag, so nothing here leaks into the rest of the suite.
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
@@ -57,7 +58,7 @@ def isolate_dynamo() -> Iterator[None]:
     torch._dynamo.reset()
 
 
-def _module(compile_step: bool = False) -> DetectionLitModule:
+def _module(compile_step: bool = False, fused_assignment: bool = False) -> DetectionLitModule:
     """Build an n-scale detection module with a low channel cap.
 
     Examples:
@@ -67,7 +68,12 @@ def _module(compile_step: bool = False) -> DetectionLitModule:
         True
     """
     return DetectionLitModule(
-        depth=0.34, width=0.25, max_channels=256, num_classes=_NUM_CLASSES, compile_step=compile_step
+        depth=0.34,
+        width=0.25,
+        max_channels=256,
+        num_classes=_NUM_CLASSES,
+        compile_step=compile_step,
+        fused_assignment=fused_assignment,
     )
 
 
@@ -127,10 +133,13 @@ class TestDetectObjectiveTracesAsOneGraph:
 
     @pytest.mark.parametrize("capture_scalar_outputs", [True, False])
     @pytest.mark.parametrize("counts", [pytest.param((2, 1), id="with_gts"), pytest.param((0, 0), id="zero_gts")])
-    def test_zero_graph_breaks(self, counts: tuple[int, int], capture_scalar_outputs: bool) -> None:
+    @pytest.mark.parametrize("fused_assignment", [False, True])
+    def test_zero_graph_breaks(
+        self, counts: tuple[int, int], capture_scalar_outputs: bool, fused_assignment: bool
+    ) -> None:
         """One graph, no breaks — with the flag as ``setup`` sets it and without it."""
         torch._dynamo.config.capture_scalar_outputs = capture_scalar_outputs
-        module = _module()
+        module = _module(fused_assignment=fused_assignment)
         inputs = _region_inputs(module, counts)
 
         explanation = torch._dynamo.explain(module._detect_objective)(*inputs)
@@ -293,6 +302,59 @@ class TestSetupDecidesOnce:
         assert all(
             getattr(tensor, "_dynamo_dynamic_indices", None) == {0, 1} for tensor in (gt_boxes, gt_labels, gt_mask)
         )
+
+
+class TestFusedAssignmentUnderCompile:
+    """``fused_assignment`` is reported at ``fit`` exactly when the compiled objective leaves it inert."""
+
+    def test_compiled_fit_warns_once(self) -> None:
+        """CUDA plus ``detect`` installs the wrapper, so the inert fusion request is reported once.
+
+        The mocked CUDA accelerator is what makes ``setup`` compile on CPU. A ``validate`` setup
+        after the fit keeps the same wrapper; repeating the warning there would report one
+        configuration twice.
+        """
+        module = _module(compile_step=True, fused_assignment=True)
+        module._trainer = _cuda_trainer()
+
+        with pytest.warns(UserWarning, match="fused_assignment=True is ignored with compile_step=True") as record:
+            module.setup("fit")
+            module.setup("validate")
+
+        assert module._objective_compiled
+        assert sum("fused_assignment=True" in str(item.message) for item in record) == 1
+
+    @pytest.mark.parametrize(
+        ("compile_step", "fused_assignment"),
+        [pytest.param(False, True, id="eager_fused"), pytest.param(True, False, id="compiled_native")],
+    )
+    def test_cuda_fit_without_inert_fusion_raises_no_warning(self, compile_step: bool, fused_assignment: bool) -> None:
+        """An eager objective keeps the fusion request, and a compiled one without it has nothing to report.
+
+        Both run the CUDA ``fit`` setup under an error filter, so any warning, the new one
+        included, fails the test.
+        """
+        module = _module(compile_step=compile_step, fused_assignment=fused_assignment)
+        module._trainer = _cuda_trainer()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            module.setup("fit")
+
+        assert module._objective_compiled is compile_step
+
+    def test_refused_compile_reports_only_refusal(self) -> None:
+        """Off CUDA the objective stays eager, so the fusion request still applies and is not reported.
+
+        Only the existing compile refusal is raised: the new warning follows whether the
+        wrapper was installed, not whether ``compile_step`` was requested.
+        """
+        module = _module(compile_step=True, fused_assignment=True)
+
+        with pytest.warns(UserWarning, match="ignored off CUDA") as record:
+            module.setup("fit")
+
+        assert not any("fused_assignment" in str(item.message) for item in record)
 
 
 class TestCompiledStepOverChangingShapes:

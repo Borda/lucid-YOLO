@@ -18,7 +18,7 @@ from typing import NamedTuple, cast
 import torch
 from torch import Tensor, nn
 
-from lucid_yolo.assign import stal, tal
+from lucid_yolo.assign import _cuda, stal, tal
 from lucid_yolo.assign.one_to_one import UniqueAssigner
 from lucid_yolo.assign.stal import SmallTargetAssigner
 from lucid_yolo.assign.tal import AssignResult, _check_labels
@@ -61,6 +61,7 @@ def _functions(source: DualBranchLoss) -> tuple[object, ...]:
         (
             "__call__",
             "_assign",
+            "_assign_impl",
             "_candidate_mask",
             "_alignment_metric",
             "_select_topk",
@@ -72,6 +73,7 @@ def _functions(source: DualBranchLoss) -> tuple[object, ...]:
         (
             "__call__",
             "_assign",
+            "_assign_impl",
             "_candidate_mask",
             "_alignment_metric",
             "_select_topk",
@@ -101,6 +103,17 @@ def _functions(source: DualBranchLoss) -> tuple[object, ...]:
         *methods,
         *delegated,
         tal._box_iou_cross,
+        vars(tal)["_assignment_scope"],
+        vars(tal)["_cuda_metric"],
+        vars(tal)["_cuda_conflicts"],
+        _cuda._requested,
+        _cuda._supported,
+        _cuda._indexable,
+        _cuda._dense_rows,
+        _cuda._run,
+        _cuda._host_compiler_available,
+        _cuda._device_supported,
+        _cuda._kernels,
         stal.surrogate_boxes,
         vars(detection_loss)["ciou_loss"],
     )
@@ -109,11 +122,28 @@ def _functions(source: DualBranchLoss) -> tuple[object, ...]:
 _EXPECTED = _functions(DualBranchLoss())
 
 
+def _native_kernels(source: DualBranchLoss) -> bool:
+    """Tell whether the device passes a fused recording may launch are the ones their module defined.
+
+    The passes load on the first eligible CUDA launch, after :data:`_EXPECTED` was taken, so
+    their baseline is the binding their own module recorded rather than an import-time
+    reading here. A loss requesting no fusion never loads them, and a host without them has
+    nothing to certify.
+    """
+    if not any(assigner.fused_assignment for assigner in (source.o2m_assigner, source.o2o_assigner)):
+        return True
+    kernels = _cuda._kernels()
+    return kernels is None or all(
+        getattr(kernels, name, None) is function for name, function in kernels._PASSES.items()
+    )
+
+
 def _native_loss(source: DualBranchLoss) -> bool:
     """Tell whether the built-in loss objects and the implementations they call are unchanged.
 
-    Only identity is judged: exact component types and the callables :func:`_functions`
-    reads. Scalar settings are not, so a caller whose loss runs outside any recording can
+    Only identity is judged: exact component types, the callables :func:`_functions`
+    reads and, for a fused request, the device passes :func:`_native_kernels` checks.
+    Scalar settings are not, so a caller whose loss runs outside any recording can
     rely on this without inheriting the workspace limits :func:`_source_signature` adds.
     """
     if type(source) is not DualBranchLoss:
@@ -123,6 +153,7 @@ def _native_loss(source: DualBranchLoss) -> bool:
         tuple(type(obj) for obj in objects)
         == (DualBranchLoss, SmallTargetAssigner, UniqueAssigner, DetectionBranchLoss, DetectionBranchLoss)
         and _functions(source) == _EXPECTED
+        and _native_kernels(source)
     )
 
 
@@ -134,6 +165,9 @@ def _source_signature(source: DualBranchLoss) -> tuple[object, ...] | None:
     fields = ("topk", "alpha", "beta", "eps", "s_min", "s_ref")
     settings = tuple(getattr(assigner, name) for assigner in objects[1:3] for name in fields)
     settings += tuple(getattr(branch, name) for branch in objects[3:] for name in ("box_gain", "cls_gain", "l1_gain"))
+    switches = tuple(assigner.fused_assignment for assigner in objects[1:3])
+    if any(type(value) is not bool for value in switches):
+        return None
     if any(type(value) not in (int, float) for value in settings):
         return None
     # Padding must keep zero-overlap IoUs finite in float32. A constructor-valid
@@ -148,7 +182,7 @@ def _source_signature(source: DualBranchLoss) -> tuple[object, ...] | None:
         for assigner in (source.o2m_assigner, source.o2o_assigner)
     ):
         return None
-    return tuple(id(obj) for obj in objects), tuple((type(value), value) for value in settings)
+    return tuple(id(obj) for obj in objects), tuple((type(value), value) for value in settings), switches
 
 
 class _LossObjective(nn.Module):
