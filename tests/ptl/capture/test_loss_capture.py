@@ -712,7 +712,7 @@ def test_public_fit_records_loss_and_releases_owner(fused_assignment: bool) -> N
     )
     trainer.fit(model, train_dataloaders=loader)
     assert len(seen) == 3 and all(capacity >= 1 for capacity in seen)
-    if fused_assignment and _cuda._AVAILABLE:
+    if fused_assignment and _cuda._kernels() is not None:
         assert {kind for kind, _ in _cuda._STATE.verified} == {"metric", "conflicts"}
     assert loss_objective(model._loss_capture) is None and model._loss_capture._workspace is None
 

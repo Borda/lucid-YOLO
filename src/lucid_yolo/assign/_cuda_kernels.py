@@ -6,6 +6,7 @@ TAL's choices. Native PyTorch still supplies the IoU power and rotated sine/cosi
 whose library implementations must not be approximated by the compiler.
 """
 
+from types import MappingProxyType
 from typing import Any  # noqa: F401 -- mypy reads the DSL type comments.
 
 from packaging.version import Version
@@ -134,3 +135,18 @@ if _AVAILABLE:
         many = tl.sum(m.to(tl.int32), 0) > 1
         out = m & ((~many[None, :]) | (n[:, None] == best[None, :]))
         tl.store(OUTPUT + x, out, ok)
+
+    #: Every pass as this module bound it, so a later rebinding of one of these global
+    #: names stays visible to a caller certifying which device code a recording launches.
+    _PASSES = MappingProxyType(
+        {
+            "_divide": _divide,
+            "_maximum": _maximum,
+            "_minimum": _minimum,
+            "_iou_pass": _iou_pass,
+            "_metric_pass": _metric_pass,
+            "_inside_pass": _inside_pass,
+            "_first_maximum": _first_maximum,
+            "_conflicts_pass": _conflicts_pass,
+        }
+    )

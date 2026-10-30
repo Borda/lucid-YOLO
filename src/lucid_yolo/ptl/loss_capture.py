@@ -113,19 +113,7 @@ def _functions(source: DualBranchLoss) -> tuple[object, ...]:
         _cuda._run,
         _cuda._host_compiler_available,
         _cuda._device_supported,
-        *(
-            getattr(getattr(_cuda, "kernels", None), name, None)
-            for name in (
-                "_iou_pass",
-                "_metric_pass",
-                "_divide",
-                "_maximum",
-                "_minimum",
-                "_inside_pass",
-                "_first_maximum",
-                "_conflicts_pass",
-            )
-        ),
+        _cuda._kernels,
         stal.surrogate_boxes,
         vars(detection_loss)["ciou_loss"],
     )
@@ -134,11 +122,28 @@ def _functions(source: DualBranchLoss) -> tuple[object, ...]:
 _EXPECTED = _functions(DualBranchLoss())
 
 
+def _native_kernels(source: DualBranchLoss) -> bool:
+    """Tell whether the device passes a fused recording may launch are the ones their module defined.
+
+    The passes load on the first eligible CUDA launch, after :data:`_EXPECTED` was taken, so
+    their baseline is the binding their own module recorded rather than an import-time
+    reading here. A loss requesting no fusion never loads them, and a host without them has
+    nothing to certify.
+    """
+    if not any(assigner.fused_assignment for assigner in (source.o2m_assigner, source.o2o_assigner)):
+        return True
+    kernels = _cuda._kernels()
+    return kernels is None or all(
+        getattr(kernels, name, None) is function for name, function in kernels._PASSES.items()
+    )
+
+
 def _native_loss(source: DualBranchLoss) -> bool:
     """Tell whether the built-in loss objects and the implementations they call are unchanged.
 
-    Only identity is judged: exact component types and the callables :func:`_functions`
-    reads. Scalar settings are not, so a caller whose loss runs outside any recording can
+    Only identity is judged: exact component types, the callables :func:`_functions`
+    reads and, for a fused request, the device passes :func:`_native_kernels` checks.
+    Scalar settings are not, so a caller whose loss runs outside any recording can
     rely on this without inheriting the workspace limits :func:`_source_signature` adds.
     """
     if type(source) is not DualBranchLoss:
@@ -148,6 +153,7 @@ def _native_loss(source: DualBranchLoss) -> bool:
         tuple(type(obj) for obj in objects)
         == (DualBranchLoss, SmallTargetAssigner, UniqueAssigner, DetectionBranchLoss, DetectionBranchLoss)
         and _functions(source) == _EXPECTED
+        and _native_kernels(source)
     )
 
 

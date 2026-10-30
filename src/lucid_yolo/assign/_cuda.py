@@ -3,12 +3,15 @@
 
 The opt-in scope belongs to one assignment, including nested calls and failures.
 Outputs own ordinary PyTorch storage; only compiled-signature metadata survives a
-call. First launches finish before becoming capture-ready. A first toolchain failure
-warns once and keeps that family native; errors after a verified launch propagate.
+call. The device passes and their compiler load on the first launch every cheap gate
+admits, never on import. First launches finish before becoming capture-ready. A first
+launch's toolchain failure warns once and keeps that family native; out-of-memory,
+completion-fence errors and errors after a verified launch propagate.
 """
 
 from __future__ import annotations
 
+import importlib
 import math
 import os
 import shutil
@@ -18,18 +21,14 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import cache, lru_cache
+from types import ModuleType
 from typing import TypeVar
 
 import torch
 from torch import Tensor
 
-try:
-    from lucid_yolo.assign import _cuda_kernels as kernels
-except ImportError:
-    _AVAILABLE = False
-else:
-    _AVAILABLE = kernels._AVAILABLE
-
+#: The optional device passes, imported only by :func:`_kernels`.
+_KERNELS_MODULE = "lucid_yolo.assign._cuda_kernels"
 _Result = TypeVar("_Result")
 _ENABLED: ContextVar[bool] = ContextVar("lucid_cuda_assignment", default=False)
 #: Launches are measured over the public-data shapes, rather than tuned per target count.
@@ -99,6 +98,30 @@ def _device_supported(device: torch.device) -> bool:
     return torch.cuda.get_device_capability(device)[0] >= 8
 
 
+@cache
+def _kernels() -> ModuleType | None:
+    """Load the optional device passes once, for the first launch every cheap gate admitted.
+
+    An absent compiler, or one outside the supported range, keeps assignment native
+    without a warning, as an install without the extra expects. Any other failure while
+    loading is a broken toolchain: it warns once and the passes stay unavailable for
+    the rest of the process.
+    """
+    try:
+        module = importlib.import_module(_KERNELS_MODULE)
+    except ImportError:
+        return None
+    except Exception as error:
+        warnings.warn(
+            f"fused CUDA assignment cannot load its device passes ({type(error).__name__}: {error}); "
+            "assignment keeps the native path for the rest of the process",
+            UserWarning,
+            stacklevel=2,
+        )
+        return None
+    return module if module._AVAILABLE else None
+
+
 def _indexable(value: Tensor) -> bool:
     """Keep the kernel's runtime index ABI and every relative strided offset in range."""
     strides = value.stride()
@@ -110,8 +133,12 @@ def _indexable(value: Tensor) -> bool:
 
 
 def _supported(kind: str, values: tuple[Tensor, ...]) -> bool:
-    """Keep tensor subclasses, other devices/layouts and unavailable toolchains native."""
-    if not _AVAILABLE or any(type(value) is not Tensor for value in values):
+    """Keep tensor subclasses, other devices/layouts and unavailable toolchains native.
+
+    The device passes load last, so a CPU, MPS, ROCm or pre-Ampere call never imports
+    the optional compiler.
+    """
+    if any(type(value) is not Tensor for value in values):
         return False
     first = values[0]
     if (kind, first.device) in _STATE.unavailable:
@@ -131,6 +158,7 @@ def _supported(kind: str, values: tuple[Tensor, ...]) -> bool:
         and torch.cuda.current_device() == first.device.index
         and _host_compiler_available()
         and _device_supported(first.device)
+        and _kernels() is not None
     )
 
 
@@ -142,6 +170,10 @@ def _run(
     A previously unseen specialization stays native inside capture: its compilation
     belongs to an earlier eager warmup. The same runtime-size kernel can serve many
     target counts, so those counts are deliberately absent from its readiness key.
+
+    Only a failing first launch keeps its family native. Out-of-memory is the
+    workload's condition rather than the toolchain's, and a failing completion fence
+    reports a device error a native rerun cannot clear, so both propagate unlatched.
     """
     family = kind, device
     key = kind, device, *signature
@@ -152,8 +184,8 @@ def _run(
         return None
     try:
         result = produce()
-        if key not in _STATE.ready:
-            torch.cuda.synchronize(device)
+    except torch.cuda.OutOfMemoryError:
+        raise
     except Exception as error:
         if family in _STATE.verified:
             raise
@@ -165,6 +197,8 @@ def _run(
             stacklevel=3,
         )
         return None
+    if key not in _STATE.ready:
+        torch.cuda.synchronize(device)
     _STATE.ready.add(key)
     _STATE.verified.add(family)
     return result
@@ -208,6 +242,8 @@ def _cuda_metric(
     signature = anchors, classes, scores.dtype, scores.stride()
 
     def produce() -> tuple[Tensor, Tensor]:
+        kernels = _kernels()
+        assert kernels is not None  # admitted by _supported
         shape = batch, count, anchors
         iou = torch.empty(shape, device=gt.device, dtype=torch.float32)
         metric = torch.empty_like(iou)
@@ -256,6 +292,8 @@ def _cuda_inside(points: Tensor, boxes: Tensor) -> Tensor | None:
     anchors = points.shape[0]
 
     def produce() -> Tensor:
+        kernels = _kernels()
+        assert kernels is not None  # admitted by _supported
         result = torch.empty((batch, count, anchors), dtype=torch.bool, device=boxes.device)
         theta = boxes[..., 4]
         cosine, sine = torch.cos(theta).contiguous(), torch.sin(theta).contiguous()
@@ -300,6 +338,8 @@ def _cuda_conflicts(mask: Tensor, metric: Tensor) -> Tensor | None:
     padded = 1 << (count - 1).bit_length()
 
     def produce() -> Tensor:
+        kernels = _kernels()
+        assert kernels is not None  # admitted by _dense_rows
         result = torch.empty_like(mask)
         kernels._conflicts_pass[(batch, (anchors + _ANCHOR_BLOCK - 1) // _ANCHOR_BLOCK)](
             mask,

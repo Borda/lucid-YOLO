@@ -24,7 +24,7 @@ from lucid_yolo.ptl.module import DetectionLitModule
 
 CUDA = pytest.mark.skipif(
     not torch.cuda.is_available()
-    or not _cuda._AVAILABLE
+    or _cuda._kernels() is None
     or torch.version.hip is not None
     or not _cuda._host_compiler_available()
     or torch.cuda.get_device_capability()[0] < 8,
@@ -152,7 +152,7 @@ def test_new_pipeline_implementation_is_certified(monkeypatch: pytest.MonkeyPatc
     assert _source_signature(source) is None
 
 
-@pytest.mark.parametrize("failure", ["produce", "fence"])
+@pytest.mark.parametrize("failure", ["produce"])
 def test_first_launch_failure_warns_once_and_stays_native(monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
     """A partially prepared result is never published and a disabled family skips later work."""
     monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", lambda: False)
@@ -359,10 +359,10 @@ def test_replaced_backend_helper_invalidates_recording(monkeypatch: pytest.Monke
 @pytest.mark.parametrize("kernel", ["_iou_pass", "_divide"])
 def test_replaced_device_kernel_invalidates_recording(monkeypatch: pytest.MonkeyPatch, kernel: str) -> None:
     """Kernel identity, rather than only its Python launcher, belongs to the certificate."""
-    if not _cuda._AVAILABLE:
+    if _cuda._kernels() is None:
         pytest.skip("optional compiler unavailable")
     assert _source_signature(DualBranchLoss(fused_assignment=True)) is not None
-    monkeypatch.setattr(_cuda.kernels, kernel, Mock())
+    monkeypatch.setattr(_cuda._kernels(), kernel, Mock())
     assert _source_signature(DualBranchLoss(fused_assignment=True)) is None
 
 
@@ -403,7 +403,7 @@ import torch
 from lucid_yolo.assign import _cuda
 from lucid_yolo.assign.tal import TaskAlignedAssigner
 from lucid_yolo.ptl.module import DetectionLitModule
-assert not _cuda._AVAILABLE
+assert _cuda._kernels() is None
 import lucid_yolo.assign._cuda_kernels as optional_kernels
 assert not optional_kernels._AVAILABLE
 boxes = torch.tensor([[[0., 0., 2., 2.]]])
