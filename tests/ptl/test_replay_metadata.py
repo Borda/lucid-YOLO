@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from markers import requires_cuda
 from torch import nn
 
 from lucid_yolo.ptl.network_capture import (
@@ -242,8 +243,7 @@ def test_scalar_binding_removal_and_key_order_are_not_reused() -> None:
     assert _network_signature(network, _members(network), metadata) == _network_signature(network)
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+@requires_cuda
 def test_real_stem_owner_reuses_metadata_then_retires_on_mode_change() -> None:
     """An actual recording uses the certificate and releases it on a changed module mode."""
     stage = nn.Linear(3, 5, device="cuda")
@@ -296,9 +296,8 @@ def test_descriptor_training_mode_is_read_independently_of_attribute_bindings() 
     assert actual == _network_signature(network) and actual != before
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-def test_real_stem_retires_when_eval_changes_a_training_descriptor() -> None:
+@requires_cuda
+def test_real_stem_retires_when_eval_changes_training_descriptor() -> None:
     """The actual recorded owner must stop replaying its training branch after selective eval."""
     layer = _DescriptorModeLinear(3, 5, device="cuda")
     with torch.no_grad():
@@ -316,8 +315,7 @@ def test_real_stem_retires_when_eval_changes_a_training_descriptor() -> None:
     assert torch.equal(actual, torch.full((2, 5), 6.0, device="cuda"))
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+@requires_cuda
 def test_warmup_scalar_drift_retires_against_original_recording_stamp() -> None:
     """Caching a post-record binding must not hide the scalar drift the original guard observes."""
 

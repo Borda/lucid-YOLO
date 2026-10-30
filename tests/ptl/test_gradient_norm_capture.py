@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from markers import NORM_REPLAY_EXPECTED, requires_cuda, skip_unless_norm_replay
 from pytorch_lightning import Callback, LightningModule, Trainer
 from pytorch_lightning.plugins.precision import MixedPrecision, Precision
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
@@ -106,8 +107,62 @@ def test_new_option_preserves_default_state_and_cpu_setup() -> None:
     assert any(isinstance(callback, _GradientNormLifecycle) for callback in enabled.configure_callbacks())
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_norm_replay_gate_tracks_torch_2_9() -> None:
+    """Norm replay requires exactly the independently specified torch 2.9 runtime floor."""
+    assert implementation._SUPPORTED == NORM_REPLAY_EXPECTED
+
+
+@requires_cuda
+@skip_unless_norm_replay
+@pytest.mark.parametrize("nonfinite", ["nan", "inf", "-inf"])
+def test_cuda_nonfinite_norm_replay_matches_native(nonfinite: str) -> None:
+    """Replaying fresh non-finite gradients preserves native NaN and infinity scaling semantics."""
+    first, second = _parameters("cuda", torch.float32), _parameters("cuda", torch.float32)
+    owner = _GradientNormCapture()
+    owner.run(first, 2.0, lambda: pytest.fail("initial call stayed native"))
+    graph = owner._graph
+    assert graph is not None
+    for params in (first, second):
+        for index, parameter in enumerate(params):
+            parameter.grad = torch.full_like(parameter, index + 1.0)
+        params[0].grad[0, 0] = float(nonfinite)
+    owner.run(first, 2.0, lambda: pytest.fail("non-finite call stayed native"))
+    torch.nn.utils.clip_grad_norm_(second, 2.0)
+    torch.cuda.synchronize()
+    for actual, expected in zip(first, second, strict=True):
+        torch.testing.assert_close(actual.grad, expected.grad, rtol=0, atol=0, equal_nan=True)
+    assert torch.isnan(first[0].grad).any()
+    assert owner._graph is graph and not owner._disabled
+
+
+@requires_cuda
+@skip_unless_norm_replay
+def test_cuda_clipping_hook_tracks_trainer_limit_changes() -> None:
+    """Changing Trainer's clipping limit between hooks reuses the norm graph with current native scaling."""
+    module = DetectionLitModule(0.34, 0.25, 64, 4, capture_gradient_norm=True)
+    module._trainer = SimpleNamespace(precision_plugin=Precision(), gradient_clip_val=2.0, gradient_clip_algorithm=None)
+    module._capture_gradient_norm_active = True
+    first, second = _parameters("cuda", torch.float32), _parameters("cuda", torch.float32)
+    optimizer = torch.optim.SGD(first, lr=0.1)
+    graph = None
+    for limit in (2.0, 200.0, 0.5):
+        for params in (first, second):
+            for index, parameter in enumerate(params):
+                parameter.grad = torch.full_like(parameter, index + 1.0)
+        module.trainer.gradient_clip_val = limit
+        with patch.object(module._gradient_norm_capture, "retire", side_effect=AssertionError("unexpected retirement")):
+            module.configure_gradient_clipping(optimizer)
+        torch.nn.utils.clip_grad_norm_(second, limit)
+        torch.cuda.synchronize()
+        _bits_equal(first, second)
+        assert module._gradient_norm_capture._graph is not None
+        if graph is not None:
+            assert module._gradient_norm_capture._graph is graph
+        graph = module._gradient_norm_capture._graph
+
+
+@requires_cuda
+@skip_unless_norm_replay
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16, torch.float64])
 def test_cuda_norm_replay_and_changing_limits_are_byte_exact(dtype: torch.dtype) -> None:
     """The recorded route really runs; limits and fresh gradient storage remain live."""
@@ -133,8 +188,8 @@ def test_cuda_norm_replay_and_changing_limits_are_byte_exact(dtype: torch.dtype)
     assert owner._graph is None and owner._inputs == []
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+@requires_cuda
+@skip_unless_norm_replay
 def test_cuda_aliases_and_duplicate_parameters_keep_native_scaling() -> None:
     """Only the read-only reduction is captured, so native repeated alias writes remain observable."""
     first, second = _parameters("cuda", torch.float32), _parameters("cuda", torch.float32)
@@ -149,9 +204,11 @@ def test_cuda_aliases_and_duplicate_parameters_keep_native_scaling() -> None:
     assert owner._graph is not None
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-@pytest.mark.parametrize("mutation", ["shape", "dtype", "none", "stream", "strided", "offset"])
+@requires_cuda
+@skip_unless_norm_replay
+@pytest.mark.parametrize(
+    "mutation", ["shape", "dtype", "none", "stream", "strided", "offset", "autocast", "autocast_dtype", "determinism"]
+)
 def test_cuda_drift_retires_real_owner_and_keeps_native(mutation: str) -> None:
     """Incompatible calls release a live recording and keep all subsequent calls native."""
     first = _parameters("cuda", torch.float32)
@@ -170,8 +227,20 @@ def test_cuda_drift_retires_real_owner_and_keeps_native(mutation: str) -> None:
         first[0].grad = torch.ones(16, device="cuda")[1:].reshape(3, 5)
     torch.cuda.synchronize()
     context = torch.cuda.stream(torch.cuda.Stream()) if mutation == "stream" else torch.no_grad()
-    with context, pytest.warns(UserWarning, match="capture_gradient_norm=True stays eager"):
-        owner.run(first, 3.0, lambda: torch.nn.utils.clip_grad_norm_(first, 3.0))
+    if mutation == "autocast":
+        context = torch.autocast("cuda")
+    elif mutation == "autocast_dtype":
+        dtype = torch.float16 if torch.get_autocast_dtype("cuda") == torch.bfloat16 else torch.bfloat16
+        context = torch.autocast("cuda", dtype=dtype, enabled=False)
+    enabled = torch.are_deterministic_algorithms_enabled()
+    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    try:
+        if mutation == "determinism":
+            torch.use_deterministic_algorithms(not enabled)
+        with context, pytest.warns(UserWarning, match="capture_gradient_norm=True stays eager"):
+            owner.run(first, 3.0, lambda: torch.nn.utils.clip_grad_norm_(first, 3.0))
+    finally:
+        torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
     torch.cuda.synchronize()
     assert owner._disabled and owner._graph is None and owner._inputs == []
     owner.run(None, 3.0, lambda: None)
@@ -250,8 +319,8 @@ class _OverflowTrainingModule(DetectionLitModule):
         return loss * float("inf") if batch_idx == 0 else loss
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+@requires_cuda
+@skip_unless_norm_replay
 @pytest.mark.parametrize("accumulation", [1, 2])
 def test_fp16_fit_unscales_before_norm_replay_and_recovers_from_overflow(accumulation: int) -> None:
     """Actual Lightning clipping, AMP skip/recovery and fit cleanup preserve every state byte."""
@@ -320,8 +389,8 @@ def test_fp16_fit_unscales_before_norm_replay_and_recovers_from_overflow(accumul
         torch.backends.cudnn.benchmark, torch.backends.cudnn.deterministic = benchmark, deterministic
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+@requires_cuda
+@skip_unless_norm_replay
 @pytest.mark.parametrize("failure", ["warmup", "capture"])
 def test_failed_recording_orders_private_reads_and_leaves_live_gradients_untouched(
     failure: str, monkeypatch: pytest.MonkeyPatch
@@ -360,7 +429,7 @@ def test_failed_recording_orders_private_reads_and_leaves_live_gradients_untouch
         assert torch.equal(parameter.grad.view(torch.uint8), expected.view(torch.uint8))
 
 
-def test_public_trainer_reuse_ignores_a_foreign_models_missing_norm_holder() -> None:
+def test_public_trainer_reuse_ignores_foreign_model_missing_norm_holder() -> None:
     """A model-contributed callback survives Trainer reuse and must not mask a later fit's exception."""
 
     class Finite(_OverflowTrainingModule):

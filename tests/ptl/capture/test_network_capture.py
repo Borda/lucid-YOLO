@@ -274,6 +274,33 @@ def test_captured_signature_reflects_bindings_after_warmup_not_before() -> None:
     assert torch.equal(network(images), warmup_output)
 
 
+def test_run_seeds_metadata_after_warmup_and_retires_scalar_drift(
+    dry_recording: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Warmup's scalar bindings must be compared against the original recording stamp on CPU."""
+    model = _module()
+    model.head.warmup_generation = 0
+    holder = _NetworkCapture()
+    images = torch.ones(2, 3, 64, 64)
+    monkeypatch.setattr(capture_module, "_ineligibility", lambda network, members=None: None)
+
+    def warmup(network: torch.nn.Module, samples: object, device: torch.device) -> torch.nn.Module:
+        """Leave changed scalar state behind at the recording boundary."""
+        del samples, device
+        model.head.warmup_generation = 1
+        return network
+
+    dry_recording.side_effect = warmup
+    _run(holder, model, images).o2m_cls.sum().backward()
+    assert holder._network is not None and holder._metadata is not None
+    assert dry_recording.call_count == 1
+    with pytest.warns(UserWarning, match="scalar module attribute"):
+        actual = _run(holder, model, images)
+    assert holder._disabled and holder._network is None and holder._metadata is None
+    assert dry_recording.call_count == 1
+    assert torch.equal(actual.o2m_cls, model(images).o2m_cls)
+
+
 def test_cpu_images_bypass_recording_when_capture_is_active() -> None:
     """A step on CPU images never enters the recorder even when the module believes capture is active."""
     model = _module(capture_network=True)
