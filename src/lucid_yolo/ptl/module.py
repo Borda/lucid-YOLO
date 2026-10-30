@@ -167,16 +167,19 @@ Provenance: R1 sec. 3.2, R1 Eq. 2-3, R1 Tables S2/S5. Assumptions: A8.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import inspect
 import warnings
+from types import FunctionType
 from typing import TYPE_CHECKING, Any, cast
 
 import torch
 from pytorch_lightning import Callback, LightningModule
 from pytorch_lightning.accelerators import CUDAAccelerator
-from pytorch_lightning.plugins.precision import MixedPrecision, Precision
+from pytorch_lightning.core.optimizer import LightningOptimizer
 from pytorch_lightning.strategies import SingleDeviceStrategy
+from pytorch_lightning.utilities import rank_zero_info
 from torch import Tensor
 
 from lucid_yolo.assign import make_anchor_points
@@ -215,6 +218,16 @@ from lucid_yolo.models.heads.proto import assemble_masks
 from lucid_yolo.optim.musgd import MuSGD
 from lucid_yolo.optim.schedule import warmup_decay_factor
 from lucid_yolo.ptl._graph_replay import GRADIENT_NORM_REPLAY_SUPPORTED as _NORM_CAPTURE_SUPPORTED
+from lucid_yolo.ptl._graph_replay import _gradients_cleared_after_forward
+from lucid_yolo.ptl._native_closure import (
+    _NATIVE_CONFIGURE_CLIPPING,
+    _NATIVE_MODULE_CLIPPING,
+    _NATIVE_PRECISION_CLIPPING,
+    _cleared_parameters,
+    _first_refusal,
+    _native_closure_shape,
+    _Refusal,
+)
 from lucid_yolo.ptl._padding import (
     _BOX_DIM,
     _KEYPOINT_DIM,
@@ -266,13 +279,6 @@ if TYPE_CHECKING:
     from lucid_yolo.data.targets import Targets
 
 __all__ = ["DetectionLitModule", "pad_keypoints", "pad_rboxes", "pad_targets"]
-
-_NATIVE_MODULE_CLIPPING = LightningModule.clip_gradients
-_NATIVE_CONFIGURE_CLIPPING = LightningModule.configure_gradient_clipping
-_NATIVE_PRECISION_CLIPPING = {
-    kind: {name: getattr(kind, name) for name in ("clip_gradients", "clip_grad_by_norm", "main_params")}
-    for kind in (Precision, MixedPrecision)
-}
 
 #: Feature-level input-pixel strides of the P3/P4/P5 detection head (8, 16, 32).
 _STRIDES: tuple[int, int, int] = (8, 16, 32)
@@ -779,7 +785,13 @@ class DetectionLitModule(LightningModule):
         self.save_hyperparameters()
         task = Task(task).value
         self._capture_loss, self._capture_loss_active = capture_loss, False
-        self._capture_network, self._capture_network_active = capture_network, False
+        #: The last of the three is whether this fit's first training step already logged the
+        #: snapshot-skip verdict; :meth:`setup` re-arms it for the next ``fit``.
+        self._capture_network, self._capture_network_active, self._native_closure_reported = (
+            capture_network,
+            False,
+            False,
+        )
         self._network_capture, self._loss_capture = _NetworkCapture(), _LossCapture()
         self._capture_gradient_norm, self._capture_gradient_norm_active, self._gradient_norm_capture = (
             capture_gradient_norm,
@@ -1026,6 +1038,9 @@ class DetectionLitModule(LightningModule):
         Rotated and keypoint metrics also drop sampler padding by dataset identity,
         retaining the original sequential validation order and scoring protocols.
 
+        Setting up ``"fit"`` also re-arms the once-per-fit gradient-snapshot-skip verdict that
+        :meth:`_report_native_closure` logs at the first training step.
+
         Args:
             stage: The Trainer stage being set up.
 
@@ -1043,6 +1058,8 @@ class DetectionLitModule(LightningModule):
         if on_cuda:
             self.to(memory_format=torch.channels_last)
         self._capture_network_active = self._replay_active(self._capture_network, on_cuda)
+        if stage == "fit":
+            self._native_closure_reported = False
         self._warn_ignored_replay(self._capture_network, self._capture_network_active, "capture_network", stage)
         self._capture_loss_active = self._replay_active(self._capture_loss, on_cuda)
         self._warn_ignored_replay(self._capture_loss, self._capture_loss_active, "capture_loss", stage)
@@ -1694,6 +1711,137 @@ class DetectionLitModule(LightningModule):
         """
         loss, _, _ = self._shared_step(batch, "train")
         return loss
+
+    def optimizer_step(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: Optimizer | LightningOptimizer,
+        optimizer_closure: Callable[[], Any] | None = None,
+    ) -> None:
+        """Omit snapshots that the native closure clears before backward.
+
+        Only detection network replay with accumulation one and the native
+        pass-through profiler qualifies. The native forward runs inside the
+        permission; zeroing, backward and subsequent
+        callbacks run outside it. Restoring the closure in ``finally`` keeps a
+        failed or reused closure from retaining the wrapper. Custom zeroing,
+        observers, strategies, precision plugins, optimizer wrappers and a
+        closure whose own ``closure`` method was replaced on the instance keep
+        the original snapshots. Lightning minors beyond the inspected 2.4-2.6
+        contract also retain them. This hook only filters on the replay flag
+        and the closure's shape; the certificate, evaluated as the forward
+        starts, decides. The first step of a fit logs the verdict once, at
+        rank-zero info level: active, or the first check that failed.
+        """
+        if not self._capture_network_active:
+            super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
+            return
+        if not _native_closure_shape(optimizer_closure):
+            # A closure of another shape is refused by the zeroing check before the step
+            # function is read, so the closure itself stands in for it in the diagnosis.
+            self._report_native_closure(
+                self._native_closure_refusal(optimizer_closure, cast("Any", optimizer_closure), optimizer)
+            )
+            super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
+            return
+        native_closure = cast("Any", optimizer_closure)
+        step = native_closure._step_fn
+        consumed = False
+
+        def forward() -> Any:
+            nonlocal consumed
+            clearing = () if consumed else self._parameters_cleared_after_forward(optimizer_closure, step, optimizer)
+            consumed = True
+            scope = _gradients_cleared_after_forward(clearing) if clearing else contextlib.nullcontext()
+            with scope:
+                return step()
+
+        native_closure._step_fn = forward
+        try:
+            super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
+        finally:
+            native_closure._step_fn = step
+
+    def _parameters_cleared_after_forward(
+        self,
+        closure: Callable[[], Any] | None,
+        step_fn: Callable[[], Any],
+        optimizer: Optimizer | LightningOptimizer,
+    ) -> tuple[Tensor, ...]:
+        """Keep snapshots unless the native closure drops them without an observer.
+
+        Lightning's automatic closure runs forward, zero-grad, then backward.
+        With no accumulation or customized zeroing, copying these old gradients
+        only creates tensors the next operation discards. The live optimizer
+        groups name exactly which parameters that operation clears.
+        """
+        trainer = self._trainer
+        refusal = self._native_closure_refusal(closure, step_fn, optimizer)
+        self._report_native_closure(refusal)
+        if trainer is None or refusal is not None:
+            return ()
+        return _cleared_parameters(trainer)
+
+    def _report_native_closure(self, refusal: _Refusal | None) -> None:
+        """Log, once per fit, whether the snapshot-skip fast path is active and, if not, the first check that failed.
+
+        The first training step of a fit reports; later steps stay silent even when
+        the certificate flips, so the hot path pays one flag read. The line is
+        emitted only for a detection module with network replay active, the one
+        configuration the fast path can serve, and carries the refusing predicate's
+        constant token from :func:`~lucid_yolo.ptl._native_closure._first_refusal`
+        rather than a string built each step. :meth:`setup` re-arms it per ``fit``.
+
+        Args:
+            refusal: What :meth:`_native_closure_refusal` decided for this step.
+        """
+        if self._native_closure_reported or not self._capture_network_active or self._task != "detect":
+            return
+        self._native_closure_reported = True
+        if refusal is None:
+            rank_zero_info(
+                "DetectionLitModule: gradient-snapshot skip active; forward-time copies of the "
+                "gradients the native closure clears are omitted."
+            )
+        else:
+            rank_zero_info(f"DetectionLitModule: gradient-snapshot skip inactive; first failed check: {refusal.value}.")
+
+    def _native_closure_refusal(
+        self,
+        closure: Callable[[], Any] | None,
+        step_fn: Callable[[], Any],
+        optimizer: Optimizer | LightningOptimizer,
+    ) -> _Refusal | None:
+        """Name the first certificate predicate this step fails, or ``None`` when all hold.
+
+        The module's own task, methods, objective and hooks are checked here,
+        beside the class they are bound to; the trainer contract, forward
+        observers, zeroing closure and optimizer are checked by
+        :func:`~lucid_yolo.ptl._native_closure._first_refusal`.
+        """
+        if (
+            not self._capture_network_active
+            or self._task != "detect"
+            or self._strategy is not _STRATEGIES[Task.DETECT]
+            or type(self) is not DetectionLitModule
+            or not self.automatic_optimization
+            or not _native_loss(self.loss)
+            or getattr(self._objective, "__func__", None) is not _NATIVE_DETECT_OBJECTIVE
+            or any(
+                vars(DetectionLitModule).get(name) is not member or name in vars(self)
+                for name, member in _NATIVE_MODULE_WINDOW_METHODS
+            )
+            or any(
+                getattr(type(self), name) is not native or name in vars(self)
+                for name, native in _NATIVE_INHERITED_WINDOW_HOOKS
+            )
+            or self._forward_hooks
+            or self._forward_pre_hooks
+            or self._backward_hooks
+        ):
+            return _Refusal.MODULE
+        return _first_refusal(self._trainer, self, closure, step_fn, optimizer)
 
     def validation_step(self, batch: StepBatch, batch_idx: int) -> Tensor:
         """Run one validation step: shared forward and loss, plus the mAP update.
@@ -2763,3 +2911,18 @@ _EAGER_POSE_SCORING = tuple(
     (name, getattr(DetectionLitModule, name))
     for name in ("_score_branch", "_rle_on", "_oks_on", "_gather_keypoint_positives")
 )
+
+#: Module code that can run between the forward-time gradient copy-out and zeroing, or that
+#: routes the closure: every function, static method, class method and property the class
+#: defines, read from its own dictionary so a new helper is covered without being listed. The
+#: native closure certificate compares each entry, and refuses an instance shadow of its name.
+_NATIVE_MODULE_WINDOW_METHODS = tuple(
+    (name, member)
+    for name, member in vars(DetectionLitModule).items()
+    if isinstance(member, (FunctionType, staticmethod, classmethod, property))
+)
+#: The Lightning hooks the same window reaches through inheritance, compared on the class.
+_NATIVE_INHERITED_WINDOW_HOOKS = tuple(
+    (name, getattr(LightningModule, name)) for name in ("optimizer_zero_grad", "on_before_zero_grad", "log")
+)
+_NATIVE_DETECT_OBJECTIVE = DetectionLitModule._detect_objective

@@ -26,6 +26,8 @@
 
 --8<-- "work_packages/wp-193g.md:engineering"
 
+--8<-- "work_packages/wp-193h.md:engineering"
+
 --8<-- "work_packages/wp-194.md:engineering"
 
 --8<-- "work_packages/wp-195.md:engineering"

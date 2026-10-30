@@ -26,6 +26,8 @@ import pytest
 import torch
 from packaging.version import Version
 
+from lucid_yolo.ptl._native_closure import _ZEROING_RUNTIME_SUPPORTED
+
 _T = TypeVar("_T")
 
 
@@ -106,6 +108,14 @@ requires_accelerator = MarkSet(
             reason="requires an accelerator (CUDA or MPS)",
         ),
     ),
+)
+
+#: Skips a case that expects the snapshot-skip fast path on a Lightning minor outside the inspected 2.4-2.6 contract.
+#: Lightning stays uncapped, so a newer minor makes the certificate refuse every step; the fallback
+#: itself is covered by ``test_unsupported_lightning_minor_keeps_snapshots`` on every runtime.
+skip_unless_native_zeroing = pytest.mark.skipif(
+    not _ZEROING_RUNTIME_SUPPORTED,
+    reason="the snapshot-skip fast path is certified only for Lightning 2.4-2.6; this runtime always falls back",
 )
 
 #: Whether this runtime's torch is new enough to record BF16 replay (torch 2.9, the first verified release).
